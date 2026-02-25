@@ -10,6 +10,8 @@ clap.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 walkdir.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
 sl-api = { path = "../sl-api" }
 sl-core = { path = "../sl-core" }
 sl-runtime = { path = "../sl-runtime" }

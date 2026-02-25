@@ -1,9 +1,21 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
+use crossterm::ExecutableCommand;
+use ratatui::backend::CrosstermBackend;
+use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
+use ratatui::{Frame, Terminal};
 use serde::{Deserialize, Serialize};
 use sl_api::{
     create_engine_from_xml, resume_engine_from_xml, CreateEngineFromXmlOptions,
@@ -115,6 +127,63 @@ struct BoundaryResult {
     input_default_text: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+enum TuiBoundary {
+    Choices {
+        prompt: Option<String>,
+        items: Vec<(usize, String)>,
+        selected: usize,
+    },
+    Input {
+        prompt: String,
+        default_text: String,
+    },
+    End,
+}
+
+#[derive(Debug)]
+struct TuiUiState {
+    logs: Vec<String>,
+    input: String,
+    status: String,
+    boundary: TuiBoundary,
+}
+
+enum TuiCommandAction {
+    NotHandled,
+    Continue,
+    RefreshBoundary,
+    Quit,
+}
+
+struct TuiTerminal {
+    terminal: Terminal<CrosstermBackend<io::Stdout>>,
+}
+
+impl TuiTerminal {
+    fn new() -> Result<Self, ScriptLangError> {
+        enable_raw_mode().map_err(|error| ScriptLangError::new("TUI_IO", error.to_string()))?;
+        io::stdout()
+            .execute(EnterAlternateScreen)
+            .map_err(|error| ScriptLangError::new("TUI_IO", error.to_string()))?;
+        let backend = CrosstermBackend::new(io::stdout());
+        let terminal = Terminal::new(backend)
+            .map_err(|error| ScriptLangError::new("TUI_IO", error.to_string()))?;
+        Ok(Self { terminal })
+    }
+
+    fn terminal_mut(&mut self) -> &mut Terminal<CrosstermBackend<io::Stdout>> {
+        &mut self.terminal
+    }
+}
+
+impl Drop for TuiTerminal {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = io::stdout().execute(LeaveAlternateScreen);
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
     let exit_code = match run(cli) {
@@ -155,6 +224,19 @@ fn run_tui(args: TuiArgs) -> Result<i32, ScriptLangError> {
         compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
     })?;
 
+    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        return run_tui_line_mode(&state_file, &scenario, &entry_script, &mut engine);
+    }
+
+    run_tui_ratatui_mode(&state_file, &scenario, &entry_script, &mut engine)
+}
+
+fn run_tui_line_mode(
+    state_file: &str,
+    scenario: &LoadedScenario,
+    entry_script: &str,
+    engine: &mut sl_runtime::ScriptLangEngine,
+) -> Result<i32, ScriptLangError> {
     println!("ScriptLang TUI");
     println!("commands: :help :save :load :restart :quit");
 
@@ -174,8 +256,19 @@ fn run_tui(args: TuiArgs) -> Result<i32, ScriptLangError> {
                 }
                 loop {
                     let raw = prompt_input("> ")?;
-                    if handle_tui_command(raw.as_str(), &state_file, &scenario, &entry_script, &mut engine)? {
-                        continue;
+                    let mut emit = |line: String| println!("{}", line);
+                    match handle_tui_command(
+                        raw.as_str(),
+                        state_file,
+                        scenario,
+                        entry_script,
+                        engine,
+                        &mut emit,
+                    )? {
+                        TuiCommandAction::Continue => continue,
+                        TuiCommandAction::RefreshBoundary => break,
+                        TuiCommandAction::Quit => return Ok(0),
+                        TuiCommandAction::NotHandled => {}
                     }
                     let choice = raw.parse::<usize>().map_err(|_| {
                         ScriptLangError::new(
@@ -196,8 +289,19 @@ fn run_tui(args: TuiArgs) -> Result<i32, ScriptLangError> {
                 println!("(default: {})", default_text);
                 loop {
                     let raw = prompt_input("> ")?;
-                    if handle_tui_command(raw.as_str(), &state_file, &scenario, &entry_script, &mut engine)? {
-                        continue;
+                    let mut emit = |line: String| println!("{}", line);
+                    match handle_tui_command(
+                        raw.as_str(),
+                        state_file,
+                        scenario,
+                        entry_script,
+                        engine,
+                        &mut emit,
+                    )? {
+                        TuiCommandAction::Continue => continue,
+                        TuiCommandAction::RefreshBoundary => break,
+                        TuiCommandAction::Quit => return Ok(0),
+                        TuiCommandAction::NotHandled => {}
                     }
                     engine.submit_input(&raw)?;
                     break;
@@ -212,17 +316,303 @@ fn run_tui(args: TuiArgs) -> Result<i32, ScriptLangError> {
     }
 }
 
+fn run_tui_ratatui_mode(
+    state_file: &str,
+    scenario: &LoadedScenario,
+    entry_script: &str,
+    engine: &mut sl_runtime::ScriptLangEngine,
+) -> Result<i32, ScriptLangError> {
+    let mut terminal = TuiTerminal::new()?;
+    let mut ui = TuiUiState {
+        logs: vec![
+            "ScriptLang TUI".to_string(),
+            "commands: :help :save :load :restart :quit".to_string(),
+            "Use Up/Down to select choice, Enter to submit.".to_string(),
+        ],
+        input: String::new(),
+        status: String::new(),
+        boundary: TuiBoundary::End,
+    };
+
+    refresh_tui_boundary(engine, &mut ui)?;
+    loop {
+        terminal
+            .terminal_mut()
+            .draw(|frame| render_tui(frame, &ui))
+            .map_err(|error| ScriptLangError::new("TUI_IO", error.to_string()))?;
+
+        if !event::poll(Duration::from_millis(100))
+            .map_err(|error| ScriptLangError::new("TUI_IO", error.to_string()))?
+        {
+            continue;
+        }
+
+        let evt =
+            event::read().map_err(|error| ScriptLangError::new("TUI_IO", error.to_string()))?;
+        if let Event::Key(key) = evt {
+            if key.kind != KeyEventKind::Press {
+                continue;
+            }
+            let should_quit =
+                handle_tui_key(key, state_file, scenario, entry_script, engine, &mut ui)?;
+            if should_quit {
+                break;
+            }
+        }
+    }
+    Ok(0)
+}
+
+fn handle_tui_key(
+    key: KeyEvent,
+    state_file: &str,
+    scenario: &LoadedScenario,
+    entry_script: &str,
+    engine: &mut sl_runtime::ScriptLangEngine,
+    ui: &mut TuiUiState,
+) -> Result<bool, ScriptLangError> {
+    match key.code {
+        KeyCode::Up => {
+            if ui.input.is_empty() {
+                if let TuiBoundary::Choices {
+                    selected, items, ..
+                } = &mut ui.boundary
+                {
+                    if !items.is_empty() {
+                        *selected = selected.saturating_sub(1);
+                    }
+                }
+            }
+        }
+        KeyCode::Down => {
+            if ui.input.is_empty() {
+                if let TuiBoundary::Choices {
+                    selected, items, ..
+                } = &mut ui.boundary
+                {
+                    if !items.is_empty() {
+                        let last = items.len().saturating_sub(1);
+                        *selected = (*selected + 1).min(last);
+                    }
+                }
+            }
+        }
+        KeyCode::Backspace => {
+            ui.input.pop();
+        }
+        KeyCode::Esc => {
+            ui.input.clear();
+            ui.status.clear();
+        }
+        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(true),
+        KeyCode::Char(ch) => {
+            if !key.modifiers.contains(KeyModifiers::CONTROL) {
+                ui.input.push(ch);
+            }
+        }
+        KeyCode::Enter => {
+            let submitted = std::mem::take(&mut ui.input);
+            if submitted.starts_with(':') {
+                let mut emit = |line: String| tui_push_log(ui, line);
+                match handle_tui_command(
+                    submitted.as_str(),
+                    state_file,
+                    scenario,
+                    entry_script,
+                    engine,
+                    &mut emit,
+                )? {
+                    TuiCommandAction::Continue => {
+                        ui.status = "Command executed.".to_string();
+                    }
+                    TuiCommandAction::RefreshBoundary => {
+                        refresh_tui_boundary(engine, ui)?;
+                        ui.status = "State refreshed.".to_string();
+                    }
+                    TuiCommandAction::Quit => return Ok(true),
+                    TuiCommandAction::NotHandled => {
+                        ui.status = format!("Unknown command: {}", submitted);
+                    }
+                }
+                return Ok(false);
+            }
+
+            match &mut ui.boundary {
+                TuiBoundary::Choices {
+                    items, selected, ..
+                } => {
+                    let choice = if submitted.trim().is_empty() {
+                        items.get(*selected).map(|item| item.0).ok_or_else(|| {
+                            ScriptLangError::new("TUI_CHOICE_PARSE", "No choices available")
+                        })?
+                    } else {
+                        submitted.trim().parse::<usize>().map_err(|_| {
+                            ScriptLangError::new(
+                                "TUI_CHOICE_PARSE",
+                                format!("Invalid choice index: {}", submitted),
+                            )
+                        })?
+                    };
+                    engine.choose(choice)?;
+                    refresh_tui_boundary(engine, ui)?;
+                }
+                TuiBoundary::Input { .. } => {
+                    engine.submit_input(submitted.trim_end_matches(&['\r', '\n'][..]))?;
+                    refresh_tui_boundary(engine, ui)?;
+                }
+                TuiBoundary::End => return Ok(true),
+            }
+        }
+        _ => {}
+    }
+    Ok(false)
+}
+
+fn refresh_tui_boundary(
+    engine: &mut sl_runtime::ScriptLangEngine,
+    ui: &mut TuiUiState,
+) -> Result<(), ScriptLangError> {
+    let boundary = run_to_boundary(engine)?;
+    for text in boundary.texts {
+        tui_push_log(ui, text);
+    }
+
+    ui.boundary = match boundary.event {
+        BoundaryEvent::Choices => TuiBoundary::Choices {
+            prompt: boundary.choice_prompt_text,
+            items: boundary.choices,
+            selected: 0,
+        },
+        BoundaryEvent::Input => TuiBoundary::Input {
+            prompt: boundary.input_prompt_text.unwrap_or_default(),
+            default_text: boundary.input_default_text.unwrap_or_default(),
+        },
+        BoundaryEvent::End => {
+            tui_push_log(ui, "[END]".to_string());
+            TuiBoundary::End
+        }
+    };
+    Ok(())
+}
+
+fn tui_push_log(ui: &mut TuiUiState, line: String) {
+    ui.logs.push(line);
+    const MAX_LOG_LINES: usize = 200;
+    if ui.logs.len() > MAX_LOG_LINES {
+        let excess = ui.logs.len() - MAX_LOG_LINES;
+        ui.logs.drain(0..excess);
+    }
+}
+
+fn render_tui(frame: &mut Frame<'_>, ui: &TuiUiState) {
+    let layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(8),
+            Constraint::Length(3),
+            Constraint::Length(2),
+        ])
+        .split(frame.area());
+
+    let header = Paragraph::new("ScriptLang TUI  |  :help :save :load :restart :quit")
+        .style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
+        .block(Block::default().borders(Borders::ALL).title("Header"));
+    frame.render_widget(header, layout[0]);
+
+    let body = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(66), Constraint::Percentage(34)])
+        .split(layout[1]);
+
+    let logs = Paragraph::new(ui.logs.join("\n"))
+        .wrap(Wrap { trim: false })
+        .block(Block::default().borders(Borders::ALL).title("Story"));
+    frame.render_widget(logs, body[0]);
+
+    match &ui.boundary {
+        TuiBoundary::Choices {
+            prompt,
+            items,
+            selected,
+        } => {
+            let mut lines: Vec<ListItem<'_>> = Vec::new();
+            if let Some(text) = prompt {
+                lines.push(ListItem::new(Line::from(Span::styled(
+                    text,
+                    Style::default().fg(Color::Yellow),
+                ))));
+                lines.push(ListItem::new(""));
+            }
+            for (idx, (index, text)) in items.iter().enumerate() {
+                let style = if idx == *selected {
+                    Style::default().fg(Color::Black).bg(Color::Green)
+                } else {
+                    Style::default()
+                };
+                lines.push(ListItem::new(Line::from(vec![
+                    Span::styled(format!("[{}] ", index), style.add_modifier(Modifier::BOLD)),
+                    Span::styled(text, style),
+                ])));
+            }
+            let list =
+                List::new(lines).block(Block::default().borders(Borders::ALL).title("Choices"));
+            frame.render_widget(list, body[1]);
+        }
+        TuiBoundary::Input {
+            prompt,
+            default_text,
+        } => {
+            let panel = Paragraph::new(vec![
+                Line::from(Span::styled(
+                    prompt,
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(format!("default: {}", default_text)),
+            ])
+            .wrap(Wrap { trim: false })
+            .block(Block::default().borders(Borders::ALL).title("Input"));
+            frame.render_widget(panel, body[1]);
+        }
+        TuiBoundary::End => {
+            let panel = Paragraph::new("Reached [END]. Press Enter or Ctrl+C to exit.")
+                .block(Block::default().borders(Borders::ALL).title("Status"));
+            frame.render_widget(panel, body[1]);
+        }
+    }
+
+    let input = Paragraph::new(ui.input.as_str()).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title("Input / Command"),
+    );
+    frame.render_widget(input, layout[2]);
+
+    let status = Paragraph::new(ui.status.as_str())
+        .style(Style::default().fg(Color::LightBlue))
+        .block(Block::default().borders(Borders::ALL).title("Feedback"));
+    frame.render_widget(status, layout[3]);
+}
+
 fn handle_tui_command(
     raw: &str,
     state_file: &str,
     scenario: &LoadedScenario,
     entry_script: &str,
     engine: &mut sl_runtime::ScriptLangEngine,
-) -> Result<bool, ScriptLangError> {
+    emit: &mut dyn FnMut(String),
+) -> Result<TuiCommandAction, ScriptLangError> {
     match raw {
         ":help" => {
-            println!("commands: :help :save :load :restart :quit");
-            Ok(true)
+            emit("commands: :help :save :load :restart :quit".to_string());
+            Ok(TuiCommandAction::Continue)
         }
         ":save" => {
             let snapshot = engine.snapshot()?;
@@ -233,8 +623,8 @@ fn handle_tui_command(
                 snapshot,
             };
             save_player_state(Path::new(state_file), &state)?;
-            println!("saved: {}", state_file);
-            Ok(true)
+            emit(format!("saved: {}", state_file));
+            Ok(TuiCommandAction::Continue)
         }
         ":load" => {
             let state = load_player_state(Path::new(state_file))?;
@@ -246,8 +636,8 @@ fn handle_tui_command(
                 compiler_version: Some(state.compiler_version),
             })?;
             *engine = resumed;
-            println!("loaded: {}", state_file);
-            Ok(true)
+            emit(format!("loaded: {}", state_file));
+            Ok(TuiCommandAction::RefreshBoundary)
         }
         ":restart" => {
             let mut restarted = create_engine_from_xml(CreateEngineFromXmlOptions {
@@ -259,14 +649,14 @@ fn handle_tui_command(
                 compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
             })?;
             std::mem::swap(engine, &mut restarted);
-            println!("restarted");
-            Ok(true)
+            emit("restarted".to_string());
+            Ok(TuiCommandAction::RefreshBoundary)
         }
         ":quit" => {
-            println!("bye");
-            std::process::exit(0);
+            emit("bye".to_string());
+            Ok(TuiCommandAction::Quit)
         }
-        _ => Ok(false),
+        _ => Ok(TuiCommandAction::NotHandled),
     }
 }
 
@@ -705,7 +1095,10 @@ mod tests {
     fn read_scripts_xml_from_dir_filters_supported_extensions() {
         let root = temp_path("scripts-dir");
         fs::create_dir_all(&root).expect("root should be created");
-        write_file(&root.join("main.script.xml"), "<script name=\"main\"></script>");
+        write_file(
+            &root.join("main.script.xml"),
+            "<script name=\"main\"></script>",
+        );
         write_file(&root.join("defs.defs.xml"), "<defs name=\"d\"></defs>");
         write_file(&root.join("data.json"), "{\"ok\":true}");
         write_file(&root.join("skip.txt"), "ignored");

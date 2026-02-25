@@ -156,7 +156,10 @@ fn agent_start_missing_dir_returns_error_envelope() {
         "--state-out",
         "/tmp/none.json",
     ]);
-    assert!(!output.status.success(), "start should fail for missing dir");
+    assert!(
+        !output.status.success(),
+        "start should fail for missing dir"
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("RESULT:ERROR"));
     assert!(stdout.contains("ERROR_CODE:CLI_SOURCE_NOT_FOUND"));
@@ -185,7 +188,10 @@ fn agent_choose_with_invalid_index_returns_error() {
         "--state-out",
         "/tmp/unreachable.json",
     ]);
-    assert!(!choose.status.success(), "choose with invalid index should fail");
+    assert!(
+        !choose.status.success(),
+        "choose with invalid index should fail"
+    );
     let stdout = String::from_utf8_lossy(&choose.stdout);
     assert!(stdout.contains("RESULT:ERROR"));
     assert!(stdout.contains("ERROR_CODE:ENGINE_CHOICE_INDEX"));

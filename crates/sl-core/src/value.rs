@@ -148,14 +148,20 @@ mod tests {
             }),
             SlValue::Bool(false)
         );
-        assert_eq!(default_value_from_type(&unknown), SlValue::String(String::new()));
+        assert_eq!(
+            default_value_from_type(&unknown),
+            SlValue::String(String::new())
+        );
 
         let array_type = ScriptType::Array {
             element_type: Box::new(ScriptType::Primitive {
                 name: "number".to_string(),
             }),
         };
-        assert_eq!(default_value_from_type(&array_type), SlValue::Array(Vec::new()));
+        assert_eq!(
+            default_value_from_type(&array_type),
+            SlValue::Array(Vec::new())
+        );
 
         let map_type = ScriptType::Map {
             key_type: "string".to_string(),
@@ -202,7 +208,10 @@ mod tests {
             name: "number".to_string(),
         };
         assert!(is_type_compatible(&SlValue::Number(1.0), &number_type));
-        assert!(!is_type_compatible(&SlValue::String("1".to_string()), &number_type));
+        assert!(!is_type_compatible(
+            &SlValue::String("1".to_string()),
+            &number_type
+        ));
 
         let array_type = ScriptType::Array {
             element_type: Box::new(ScriptType::Primitive {
@@ -217,7 +226,10 @@ mod tests {
             &SlValue::Array(vec![SlValue::Number(1.0), SlValue::String("x".to_string())]),
             &array_type
         ));
-        assert!(!is_type_compatible(&SlValue::String("x".to_string()), &array_type));
+        assert!(!is_type_compatible(
+            &SlValue::String("x".to_string()),
+            &array_type
+        ));
 
         let map_type = ScriptType::Map {
             key_type: "string".to_string(),

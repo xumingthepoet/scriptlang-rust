@@ -2183,7 +2183,11 @@ mod tests {
     fn helper_functions_cover_paths_values_and_rng() {
         assert_eq!(
             parse_ref_path(" player . hp . current "),
-            vec!["player".to_string(), "hp".to_string(), "current".to_string()]
+            vec![
+                "player".to_string(),
+                "hp".to_string(),
+                "current".to_string()
+            ]
         );
         assert!(parse_ref_path(" . ").is_empty());
 
@@ -2295,7 +2299,9 @@ mod tests {
 "#,
         )]));
         input_type.start("main", None).expect("start");
-        let error = input_type.next().expect_err("input on non-string should fail");
+        let error = input_type
+            .next()
+            .expect_err("input on non-string should fail");
         assert_eq!(error.code, "ENGINE_INPUT_VAR_TYPE");
 
         let mut if_non_bool = engine_from_sources(map(&[(
@@ -2327,7 +2333,9 @@ mod tests {
         })
         .expect("engine should build");
         host_unsupported.start("main", None).expect("start");
-        let error = host_unsupported.next().expect_err("host functions unsupported");
+        let error = host_unsupported
+            .next()
+            .expect_err("host functions unsupported");
         assert_eq!(error.code, "ENGINE_HOST_FUNCTION_UNSUPPORTED");
     }
 
@@ -2404,7 +2412,9 @@ mod tests {
             r#"<script name="main"><text>${missing.value}</text></script>"#,
         )]));
         bad_ref_read.start("main", None).expect("start");
-        let error = bad_ref_read.next().expect_err("missing ref path should fail");
+        let error = bad_ref_read
+            .next()
+            .expect_err("missing ref path should fail");
         assert!(
             error.code == "ENGINE_VAR_READ"
                 || error.code == "ENGINE_REF_PATH_READ"
