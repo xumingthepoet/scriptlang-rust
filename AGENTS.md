@@ -33,11 +33,18 @@
 2. 优先复用 `examples/scripts-rhai` 补充或回归场景。
 3. 提交前运行 `make gate`。
 4. 只要 `make gate` 通过，可直接提交，无需再次询问。
+5. 单元测试必须参考子项目结构组织，按源代码文件一对一建立测试防守。
+6. 同一文件内，函数测试顺序必须与源代码中的函数定义顺序一致。
 
 ## 质量门禁
+- `cargo fmt --all -- --check`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo test --all-targets --all-features`
+- `cargo llvm-cov --workspace --all-features --summary-only --fail-under-lines 100`
 - `make gate`
 
 ## 完成定义（DoD）
 - 变更位于正确分层，未破坏 crate 边界。
-- 相关示例/测试已覆盖新增或修复行为。
+- 相关示例/测试已覆盖新增或修复行为，且满足文件级一对一防守。
+- 覆盖率必须达到 `100%`，否则不得通过门禁。
 - `make gate` 通过。
