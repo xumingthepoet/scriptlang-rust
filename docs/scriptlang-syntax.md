@@ -139,4 +139,4 @@
 ## 10. 参考
 
 - Rust workspace 示例：`examples/scripts-rhai/`
-- TypeScript 参考语法手册：`script-lang/docs/product-specs/syntax-manual.md`
+- TypeScript 参考语法手册：[xumingthepoet/scriptlang/docs/product-specs/syntax-manual.md](https://github.com/xumingthepoet/scriptlang/blob/main/docs/product-specs/syntax-manual.md)
