@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 use regex::Regex;
 use roxmltree::{Document, Node, NodeType};
@@ -30,13 +31,19 @@ pub struct XmlTextNode {
 }
 
 pub fn parse_include_directives(source: &str) -> Vec<String> {
-    let regex = Regex::new(r"(?m)^\s*<!--\s*include:\s*(.+?)\s*-->\s*$")
-        .expect("include regex must compile");
-    regex
+    include_directive_regex()
         .captures_iter(source)
         .filter_map(|caps| caps.get(1).map(|m| m.as_str().trim().to_string()))
         .filter(|value| !value.is_empty())
         .collect()
+}
+
+fn include_directive_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"(?m)^\s*<!--\s*include:\s*(.+?)\s*-->\s*$")
+            .expect("include regex must compile")
+    })
 }
 
 pub fn parse_xml_document(source: &str) -> Result<XmlDocument, ScriptLangError> {

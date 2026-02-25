@@ -51,7 +51,10 @@ impl ScriptLangEngine {
         })?;
 
         let caller_group_id = self.frames[caller_index].group_id.clone();
-        let (_, caller_group) = self.lookup_group(&caller_group_id)?;
+        let caller_group_len = {
+            let (_, caller_group) = self.lookup_group(&caller_group_id)?;
+            caller_group.nodes.len()
+        };
 
         let Some(target) = self.scripts.get(target_script).cloned() else {
             return Err(ScriptLangError::new(
@@ -99,7 +102,7 @@ impl ScriptLangEngine {
 
         let caller = self.frames[caller_index].clone();
         let is_tail_at_root = caller.script_root
-            && caller.node_index == caller_group.nodes.len().saturating_sub(1)
+            && caller.node_index == caller_group_len.saturating_sub(1)
             && caller.return_continuation.is_some();
 
         if is_tail_at_root && !ref_bindings.is_empty() {

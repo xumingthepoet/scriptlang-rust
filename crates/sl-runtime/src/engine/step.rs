@@ -12,22 +12,158 @@ impl ScriptLangEngine {
         while guard < 10_000 {
             guard += 1;
 
-            let Some(top_frame) = self.frames.last().cloned() else {
+            let Some((top_frame_id, top_group_id, top_node_index)) = self
+                .frames
+                .last()
+                .map(|frame| (frame.frame_id, frame.group_id.clone(), frame.node_index))
+            else {
                 self.ended = true;
                 return Ok(EngineOutput::End);
             };
 
-            let (script_name, group) = self.lookup_group(&top_frame.group_id)?;
-
-            if top_frame.node_index >= group.nodes.len() {
-                self.finish_frame(top_frame.frame_id)?;
-                continue;
+            enum PlannedNode {
+                FinishFrame {
+                    frame_id: u64,
+                },
+                Text {
+                    script_name: String,
+                    value: String,
+                    once: bool,
+                    id: String,
+                },
+                Code {
+                    code: String,
+                },
+                Var {
+                    declaration: sl_core::VarDeclaration,
+                },
+                If {
+                    when_expr: String,
+                    then_group_id: String,
+                    else_group_id: Option<String>,
+                },
+                While {
+                    when_expr: String,
+                    body_group_id: String,
+                },
+                Choice {
+                    script_name: String,
+                    id: String,
+                    options: Vec<sl_core::ChoiceOption>,
+                    prompt_text: String,
+                },
+                Input {
+                    id: String,
+                    target_var: String,
+                    prompt_text: String,
+                },
+                Call {
+                    target_script: String,
+                    args: Vec<sl_core::CallArgument>,
+                },
+                Return {
+                    target_script: Option<String>,
+                    args: Vec<sl_core::CallArgument>,
+                },
+                Break,
+                Continue {
+                    target: ContinueTarget,
+                },
             }
 
-            let node = group.nodes[top_frame.node_index].clone();
-            match node {
-                ScriptNode::Text {
-                    value, once, id, ..
+            let planned_node = {
+                let (script_name, group) = self.lookup_group(&top_group_id)?;
+                if top_node_index >= group.nodes.len() {
+                    PlannedNode::FinishFrame {
+                        frame_id: top_frame_id,
+                    }
+                } else {
+                    match &group.nodes[top_node_index] {
+                        ScriptNode::Text {
+                            value, once, id, ..
+                        } => PlannedNode::Text {
+                            script_name: script_name.to_string(),
+                            value: value.clone(),
+                            once: *once,
+                            id: id.clone(),
+                        },
+                        ScriptNode::Code { code, .. } => PlannedNode::Code { code: code.clone() },
+                        ScriptNode::Var { declaration, .. } => PlannedNode::Var {
+                            declaration: declaration.clone(),
+                        },
+                        ScriptNode::If {
+                            when_expr,
+                            then_group_id,
+                            else_group_id,
+                            ..
+                        } => PlannedNode::If {
+                            when_expr: when_expr.clone(),
+                            then_group_id: then_group_id.clone(),
+                            else_group_id: else_group_id.clone(),
+                        },
+                        ScriptNode::While {
+                            when_expr,
+                            body_group_id,
+                            ..
+                        } => PlannedNode::While {
+                            when_expr: when_expr.clone(),
+                            body_group_id: body_group_id.clone(),
+                        },
+                        ScriptNode::Choice {
+                            id,
+                            options,
+                            prompt_text,
+                            ..
+                        } => PlannedNode::Choice {
+                            script_name: script_name.to_string(),
+                            id: id.clone(),
+                            options: options.clone(),
+                            prompt_text: prompt_text.clone(),
+                        },
+                        ScriptNode::Input {
+                            id,
+                            target_var,
+                            prompt_text,
+                            ..
+                        } => PlannedNode::Input {
+                            id: id.clone(),
+                            target_var: target_var.clone(),
+                            prompt_text: prompt_text.clone(),
+                        },
+                        ScriptNode::Call {
+                            target_script,
+                            args,
+                            ..
+                        } => PlannedNode::Call {
+                            target_script: target_script.clone(),
+                            args: args.clone(),
+                        },
+                        ScriptNode::Return {
+                            target_script,
+                            args,
+                            ..
+                        } => PlannedNode::Return {
+                            target_script: target_script.clone(),
+                            args: args.clone(),
+                        },
+                        ScriptNode::Break { .. } => PlannedNode::Break,
+                        ScriptNode::Continue { target, .. } => PlannedNode::Continue {
+                            target: target.clone(),
+                        },
+                    }
+                }
+            };
+
+            match planned_node {
+                PlannedNode::FinishFrame { frame_id } => {
+                    self.finish_frame(frame_id)?;
+                    continue;
+                }
+                PlannedNode::Text {
+                    script_name,
+                    value,
+                    once,
+                    id,
                 } => {
                     if once && self.has_once_state(&script_name, &format!("text:{}", id)) {
                         self.bump_top_node_index(1)?;
@@ -43,19 +179,18 @@ impl ScriptLangEngine {
 
                     return Ok(EngineOutput::Text { text: rendered });
                 }
-                ScriptNode::Code { code, .. } => {
+                PlannedNode::Code { code } => {
                     self.run_code(&code)?;
                     self.bump_top_node_index(1)?;
                 }
-                ScriptNode::Var { declaration, .. } => {
+                PlannedNode::Var { declaration } => {
                     self.execute_var_declaration(&declaration)?;
                     self.bump_top_node_index(1)?;
                 }
-                ScriptNode::If {
+                PlannedNode::If {
                     when_expr,
                     then_group_id,
                     else_group_id,
-                    ..
                 } => {
                     let condition = self.eval_boolean(&when_expr)?;
                     self.bump_top_node_index(1)?;
@@ -67,10 +202,9 @@ impl ScriptLangEngine {
                         self.push_group_frame(&else_group_id, CompletionKind::ResumeAfterChild)?;
                     }
                 }
-                ScriptNode::While {
+                PlannedNode::While {
                     when_expr,
                     body_group_id,
-                    ..
                 } => {
                     let condition = self.eval_boolean(&when_expr)?;
                     if condition {
@@ -79,11 +213,11 @@ impl ScriptLangEngine {
                         self.bump_top_node_index(1)?;
                     }
                 }
-                ScriptNode::Choice {
+                PlannedNode::Choice {
+                    script_name,
                     id,
                     options,
                     prompt_text,
-                    ..
                 } => {
                     let visible_regular = options
                         .iter()
@@ -134,11 +268,10 @@ impl ScriptLangEngine {
                     self.waiting_choice = true;
                     return Ok(EngineOutput::Choices { items, prompt_text });
                 }
-                ScriptNode::Input {
+                PlannedNode::Input {
                     id,
                     target_var,
                     prompt_text,
-                    ..
                 } => {
                     let current = self.read_path(&target_var)?;
                     let SlValue::String(default_text) = current else {
@@ -162,24 +295,22 @@ impl ScriptLangEngine {
                         default_text,
                     });
                 }
-                ScriptNode::Call {
+                PlannedNode::Call {
                     target_script,
                     args,
-                    ..
                 } => {
                     self.execute_call(&target_script, &args)?;
                 }
-                ScriptNode::Return {
+                PlannedNode::Return {
                     target_script,
                     args,
-                    ..
                 } => {
                     self.execute_return(target_script, &args)?;
                 }
-                ScriptNode::Break { .. } => {
+                PlannedNode::Break => {
                     self.execute_break()?;
                 }
-                ScriptNode::Continue { target, .. } => match target {
+                PlannedNode::Continue { target } => match target {
                     ContinueTarget::While => self.execute_continue_while()?,
                     ContinueTarget::Choice => self.execute_continue_choice()?,
                 },

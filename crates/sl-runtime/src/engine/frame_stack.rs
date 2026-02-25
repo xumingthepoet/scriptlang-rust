@@ -6,6 +6,7 @@ impl ScriptLangEngine {
         self.ended = false;
         self.frame_counter = 1;
         self.rng_state = self.initial_random_seed;
+        *self.shared_rng_state.borrow_mut() = self.initial_random_seed;
     }
 
     fn boundary_output(&self, boundary: &PendingBoundary) -> EngineOutput {
@@ -53,7 +54,7 @@ impl ScriptLangEngine {
     fn lookup_group(
         &self,
         group_id: &str,
-    ) -> Result<(String, sl_core::ImplicitGroup), ScriptLangError> {
+    ) -> Result<(&str, &sl_core::ImplicitGroup), ScriptLangError> {
         let lookup = self.group_lookup.get(group_id).ok_or_else(|| {
             ScriptLangError::new(
                 "ENGINE_GROUP_NOT_FOUND",
@@ -75,7 +76,7 @@ impl ScriptLangEngine {
             )
         })?;
 
-        Ok((lookup.script_name.clone(), group.clone()))
+        Ok((&lookup.script_name, group))
     }
 
     fn push_root_frame(

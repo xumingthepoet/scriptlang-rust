@@ -94,6 +94,7 @@ impl ScriptLangEngine {
 
         self.reset();
         self.rng_state = snapshot.rng_state;
+        *self.shared_rng_state.borrow_mut() = snapshot.rng_state;
 
         self.once_state_by_script = snapshot
             .once_state_by_script
@@ -136,14 +137,17 @@ impl ScriptLangEngine {
             })?
             .clone();
 
-        let (script_name, group) = self.lookup_group(&top.group_id)?;
-        let node = group
-            .nodes
-            .get(top.node_index)
-            .ok_or_else(|| {
-                ScriptLangError::new("SNAPSHOT_PENDING_BOUNDARY", "Pending node index invalid.")
-            })?
-            .clone();
+        let (script_name, node) = {
+            let (script_name, group) = self.lookup_group(&top.group_id)?;
+            let node = group
+                .nodes
+                .get(top.node_index)
+                .ok_or_else(|| {
+                    ScriptLangError::new("SNAPSHOT_PENDING_BOUNDARY", "Pending node index invalid.")
+                })?
+                .clone();
+            (script_name.to_string(), node)
+        };
 
         self.pending_boundary = Some(match snapshot.pending_boundary {
             PendingBoundaryV3::Choice {

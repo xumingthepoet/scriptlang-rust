@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use regex::Regex;
 use rhai::{
@@ -101,7 +101,10 @@ pub struct ScriptLangEngine {
     global_json: BTreeMap<String, SlValue>,
     visible_json_by_script: HashMap<String, BTreeSet<String>>,
     visible_function_symbols_by_script: HashMap<String, BTreeMap<String, String>>,
+    defs_prelude_by_script: HashMap<String, String>,
     initial_random_seed: u32,
+    rhai_engine: Engine,
+    shared_rng_state: Rc<RefCell<u32>>,
 
     frames: Vec<RuntimeFrame>,
     pending_boundary: Option<PendingBoundary>,
@@ -182,6 +185,25 @@ impl ScriptLangEngine {
         }
 
         let initial_random_seed = options.random_seed.unwrap_or(1);
+        let shared_rng_state = Rc::new(RefCell::new(initial_random_seed));
+        let mut rhai_engine = Engine::new();
+        rhai_engine.set_strict_variables(true);
+        let rng_for_builtin = Rc::clone(&shared_rng_state);
+        rhai_engine.register_fn(
+            "random",
+            move |bound: INT| -> Result<INT, Box<EvalAltResult>> {
+                if bound <= 0 {
+                    return Err(Box::new(EvalAltResult::ErrorRuntime(
+                        Dynamic::from("random(n) expects positive integer n."),
+                        Position::NONE,
+                    )));
+                }
+
+                let mut state = rng_for_builtin.borrow_mut();
+                let value = next_random_bounded(&mut state, bound as u32);
+                Ok(value as INT)
+            },
+        );
 
         Ok(Self {
             scripts: options.scripts,
@@ -193,7 +215,10 @@ impl ScriptLangEngine {
             global_json: options.global_json,
             visible_json_by_script,
             visible_function_symbols_by_script,
+            defs_prelude_by_script: HashMap::new(),
             initial_random_seed,
+            rhai_engine,
+            shared_rng_state,
             frames: Vec::new(),
             pending_boundary: None,
             waiting_choice: false,

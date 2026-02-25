@@ -24,9 +24,7 @@ fn parse_type_expr(raw: &str, span: &SourceSpan) -> Result<ParsedTypeExpr, Scrip
         return Ok(ParsedTypeExpr::Map(Box::new(value_type)));
     }
 
-    let custom_regex = Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
-        .expect("type regex must compile");
-    if custom_regex.is_match(source) {
+    if type_name_regex().is_match(source) {
         return Ok(ParsedTypeExpr::Custom(source.to_string()));
     }
 
@@ -35,6 +33,14 @@ fn parse_type_expr(raw: &str, span: &SourceSpan) -> Result<ParsedTypeExpr, Scrip
         format!("Unsupported type syntax: \"{}\".", raw),
         span.clone(),
     ))
+}
+
+fn type_name_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
+            .expect("type regex must compile")
+    })
 }
 
 fn parse_args(raw: Option<String>) -> Result<Vec<CallArgument>, ScriptLangError> {

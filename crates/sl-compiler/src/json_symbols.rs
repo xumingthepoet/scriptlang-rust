@@ -240,8 +240,7 @@ fn collect_visible_function_roots(
 }
 
 fn extract_text_interpolations(template: &str) -> Vec<String> {
-    let interpolation_regex = Regex::new(r"\$\{([^{}]+)\}").expect("template regex must compile");
-    interpolation_regex
+    text_interpolation_regex()
         .captures_iter(template)
         .filter_map(|caps| caps.get(1).map(|entry| entry.as_str().trim().to_string()))
         .filter(|expr| !expr.is_empty())
@@ -250,13 +249,25 @@ fn extract_text_interpolations(template: &str) -> Vec<String> {
 
 fn extract_local_bindings(source: &str) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
-    let re = Regex::new(r"\b(?:let|const)\s+([$A-Za-z_][$0-9A-Za-z_]*)").expect("local bind regex");
-    for caps in re.captures_iter(source) {
+    for caps in local_binding_regex().captures_iter(source) {
         if let Some(name) = caps.get(1) {
             out.insert(name.as_str().to_string());
         }
     }
     out
+}
+
+fn text_interpolation_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r"\$\{([^{}]+)\}").expect("template regex must compile"))
+}
+
+fn local_binding_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"\b(?:let|const)\s+([$A-Za-z_][$0-9A-Za-z_]*)")
+            .expect("local bind regex")
+    })
 }
 
 fn ensure_no_hidden_json_symbol(

@@ -1,3 +1,8 @@
+fn text_interpolation_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r"\$\{([^{}]+)\}").expect("template regex must compile"))
+}
+
 impl ScriptLangEngine {
     fn create_script_root_scope(
         &self,
@@ -46,10 +51,9 @@ impl ScriptLangEngine {
     }
 
     fn render_text(&mut self, template: &str) -> Result<String, ScriptLangError> {
-        let regex = Regex::new(r"\$\{([^{}]+)\}").expect("template regex must compile");
         let mut output = String::new();
         let mut last_index = 0usize;
-        for captures in regex.captures_iter(template) {
+        for captures in text_interpolation_regex().captures_iter(template) {
             let full = captures
                 .get(0)
                 .expect("capture group 0 must exist for each regex capture");
@@ -128,43 +132,25 @@ impl ScriptLangEngine {
             scope.push_dynamic(name, slvalue_to_dynamic(value)?);
         }
 
-        let mut engine = Engine::new();
-        engine.set_strict_variables(true);
-
-        let rng_state = Rc::new(RefCell::new(self.rng_state));
-        let rng_state_clone = Rc::clone(&rng_state);
-        engine.register_fn(
-            "random",
-            move |bound: INT| -> Result<INT, Box<EvalAltResult>> {
-                if bound <= 0 {
-                    return Err(Box::new(EvalAltResult::ErrorRuntime(
-                        Dynamic::from("random(n) expects positive integer n."),
-                        Position::NONE,
-                    )));
+        let source = {
+            let prelude = self.get_or_build_defs_prelude(&script_name, &function_symbol_map)?;
+            let rewritten_script = rewrite_function_calls(script, &function_symbol_map)?;
+            if is_expression {
+                if prelude.is_empty() {
+                    format!("({})", rewritten_script)
+                } else {
+                    format!("{}\n({})", prelude, rewritten_script)
                 }
-
-                let mut state = rng_state_clone.borrow_mut();
-                let value = next_random_bounded(&mut state, bound as u32);
-                Ok(value as INT)
-            },
-        );
-
-        let prelude = self.build_defs_prelude(&script_name, &function_symbol_map)?;
-        let rewritten_script = rewrite_function_calls(script, &function_symbol_map)?;
-        let source = if is_expression {
-            if prelude.is_empty() {
-                format!("({})", rewritten_script)
+            } else if prelude.is_empty() {
+                rewritten_script
             } else {
-                format!("{}\n({})", prelude, rewritten_script)
+                format!("{}\n{}", prelude, rewritten_script)
             }
-        } else if prelude.is_empty() {
-            rewritten_script
-        } else {
-            format!("{}\n{}", prelude, rewritten_script)
         };
 
+        *self.shared_rng_state.borrow_mut() = self.rng_state;
         let run_result = if is_expression {
-            engine
+            self.rhai_engine
                 .eval_with_scope::<Dynamic>(&mut scope, &source)
                 .map_err(|error| {
                     ScriptLangError::new(
@@ -174,7 +160,7 @@ impl ScriptLangEngine {
                 })
                 .and_then(dynamic_to_slvalue)
         } else {
-            engine
+            self.rhai_engine
                 .run_with_scope(&mut scope, &source)
                 .map_err(|error| {
                     ScriptLangError::new(
@@ -185,7 +171,7 @@ impl ScriptLangEngine {
                 .map(|_| SlValue::Bool(true))
         };
 
-        self.rng_state = *rng_state.borrow();
+        self.rng_state = *self.shared_rng_state.borrow();
 
         for (name, before) in global_snapshot {
             let after_dynamic = scope
@@ -214,6 +200,23 @@ impl ScriptLangEngine {
         run_result
     }
 
+    fn get_or_build_defs_prelude(
+        &mut self,
+        script_name: &str,
+        function_symbol_map: &BTreeMap<String, String>,
+    ) -> Result<&str, ScriptLangError> {
+        if !self.defs_prelude_by_script.contains_key(script_name) {
+            let prelude = self.build_defs_prelude(script_name, function_symbol_map)?;
+            self.defs_prelude_by_script
+                .insert(script_name.to_string(), prelude);
+        }
+        Ok(self
+            .defs_prelude_by_script
+            .get(script_name)
+            .map(String::as_str)
+            .expect("defs prelude should be cached"))
+    }
+
     fn build_defs_prelude(
         &self,
         script_name: &str,
@@ -225,8 +228,7 @@ impl ScriptLangEngine {
         let visible_json = self
             .visible_json_by_script
             .get(script_name)
-            .cloned()
-            .unwrap_or_default();
+            .expect("script visibility should exist for registered script");
 
         let mut out = String::new();
         for (name, decl) in &script.visible_functions {
@@ -249,7 +251,7 @@ impl ScriptLangEngine {
             );
             out.push_str(") {\n");
 
-            for json_symbol in &visible_json {
+            for json_symbol in visible_json {
                 if let Some(value) = self.global_json.get(json_symbol) {
                     out.push_str(&format!(
                         "let {} = {};\n",

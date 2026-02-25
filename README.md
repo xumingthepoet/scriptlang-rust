@@ -30,6 +30,12 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 
 This split keeps crate boundaries unchanged and enforces one-way internal dependencies.
 
+## Runtime/Compiler Performance Notes
+- `sl-runtime` reuses a single internal `rhai::Engine` instance and keeps `random` builtin state in shared runtime storage, avoiding per-eval engine re-construction.
+- defs prelude generation is cached per script in runtime, so repeated expression/code evaluation does not rebuild identical prelude text.
+- parser/compiler/runtime regex usage for stable patterns is lazily initialized once via static caches.
+- `sl-compiler` memoizes per-script reachable include closures during project compilation to avoid repeated DFS work.
+
 ## Commands
 - `cargo qk`: `cargo check --workspace --all-targets --all-features`
 - `cargo qa`: `cargo fmt --all -- --check`

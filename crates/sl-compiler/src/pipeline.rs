@@ -15,6 +15,7 @@ pub fn compile_project_bundle_from_xml_map(
     let all_json_symbols = global_json.keys().cloned().collect::<BTreeSet<_>>();
 
     let mut scripts = BTreeMap::new();
+    let mut reachable_cache = HashMap::new();
 
     for (file_path, source) in &sources {
         if !matches!(source.kind, SourceKind::ScriptXml) {
@@ -37,9 +38,11 @@ pub fn compile_project_bundle_from_xml_map(
             ));
         }
 
-        let reachable = collect_reachable_files(file_path, &sources);
-        let (visible_types, visible_functions) = resolve_visible_defs(&reachable, &defs_by_path)?;
-        let visible_json_symbols = collect_visible_json_symbols(&reachable, &sources)?;
+        let reachable = reachable_cache
+            .entry(file_path.clone())
+            .or_insert_with(|| collect_reachable_files(file_path, &sources));
+        let (visible_types, visible_functions) = resolve_visible_defs(reachable, &defs_by_path)?;
+        let visible_json_symbols = collect_visible_json_symbols(reachable, &sources)?;
 
         let ir = compile_script(
             file_path,

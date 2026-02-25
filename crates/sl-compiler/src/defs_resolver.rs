@@ -123,9 +123,7 @@ fn parse_json_global_symbol(file_path: &str) -> Result<String, ScriptLangError> 
         ));
     };
 
-    let symbol_regex =
-        Regex::new(r"^[$A-Za-z_][$0-9A-Za-z_]*$").expect("json symbol regex must compile");
-    if !symbol_regex.is_match(stem) {
+    if !json_symbol_regex().is_match(stem) {
         return Err(ScriptLangError::new(
             "JSON_SYMBOL_INVALID",
             format!("JSON basename \"{}\" is not a valid identifier.", stem),
@@ -134,6 +132,13 @@ fn parse_json_global_symbol(file_path: &str) -> Result<String, ScriptLangError> 
 
     assert_name_not_reserved(stem, "json symbol", SourceSpan::synthetic())?;
     Ok(stem.to_string())
+}
+
+fn json_symbol_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"^[$A-Za-z_][$0-9A-Za-z_]*$").expect("json symbol regex must compile")
+    })
 }
 
 fn resolve_visible_defs(
