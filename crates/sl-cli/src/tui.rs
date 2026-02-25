@@ -651,7 +651,7 @@ mod rich {
 
 #[cfg(not(coverage))]
 fn should_force_line_mode() -> bool {
-    std::env::var_os("RUST_TEST_THREADS").is_some()
+    cfg!(test) || std::env::var_os("RUST_TEST_THREADS").is_some()
 }
 
 #[cfg(not(coverage))]

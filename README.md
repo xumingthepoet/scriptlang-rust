@@ -53,7 +53,7 @@ cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/06-snapshot-flow
 - `s` save snapshot, `l` load snapshot, `r` restart, `h` help, `q`/`Esc` quit
 
 When stdin/stdout is not a TTY (for example, piped in tests), it automatically falls back to the previous line-based interactive mode.
-When running under Rust test harness (`RUST_TEST_THREADS` is present), it also forces line mode to avoid entering full-screen TUI in tests.
+When running under Rust test harness (unit-test build or `RUST_TEST_THREADS` is present), it also forces line mode to avoid entering full-screen TUI in tests.
 Fallback line mode supports command input:
 - `:help`
 - `:save`
