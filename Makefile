@@ -13,6 +13,6 @@ test:
 	cargo qt
 
 coverage:
-	cargo llvm-cov --workspace --all-features --summary-only --fail-under-lines 100
+	cargo llvm-cov --workspace --all-features --summary-only --fail-under-lines 100 --show-missing-lines 
 
 gate: check fmt lint test coverage

@@ -1794,6 +1794,8 @@ fn next_random_bounded(state: &mut u32, bound: u32) -> u32 {
 mod tests {
     use super::*;
     use sl_compiler::compile_project_bundle_from_xml_map;
+    use std::fs;
+    use std::path::{Path, PathBuf};
 
     fn map(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
         entries
@@ -1812,6 +1814,57 @@ mod tests {
             compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
         })
         .expect("engine should build")
+    }
+
+    fn read_sources_recursive(
+        root: &Path,
+        current: &Path,
+        out: &mut BTreeMap<String, String>,
+    ) -> Result<(), std::io::Error> {
+        for entry in fs::read_dir(current)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                read_sources_recursive(root, &path, out)?;
+                continue;
+            }
+            let relative = path
+                .strip_prefix(root)
+                .expect("path should be under root")
+                .to_string_lossy()
+                .replace('\\', "/");
+            out.insert(relative, fs::read_to_string(path)?);
+        }
+        Ok(())
+    }
+
+    fn sources_from_example_dir(name: &str) -> BTreeMap<String, String> {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("examples")
+            .join("scripts-rhai")
+            .join(name);
+        let mut files = BTreeMap::new();
+        read_sources_recursive(&root, &root, &mut files).expect("example should load");
+        files
+    }
+
+    fn drive_engine_to_end(engine: &mut ScriptLangEngine) {
+        for _ in 0..5_000usize {
+            match engine.next().expect("next should pass") {
+                EngineOutput::Text { .. } => {}
+                EngineOutput::Choices { items, .. } => {
+                    let index = items.first().map(|item| item.index).unwrap_or(0);
+                    engine.choose(index).expect("choose should pass");
+                }
+                EngineOutput::Input { .. } => {
+                    engine.submit_input("").expect("input should pass");
+                }
+                EngineOutput::End => return,
+            }
+        }
+        panic!("engine should end within bounded steps");
     }
 
     #[test]
@@ -1863,5 +1916,683 @@ mod tests {
         resumed.choose(0).expect("choose");
         let next = resumed.next().expect("next");
         assert!(matches!(next, EngineOutput::Text { .. }));
+    }
+
+    #[test]
+    fn drives_all_examples_to_end() {
+        let examples_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("examples")
+            .join("scripts-rhai");
+        let mut dirs = fs::read_dir(&examples_root)
+            .expect("examples should exist")
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .collect::<Vec<_>>();
+        dirs.sort();
+
+        for dir in dirs {
+            let mut files = BTreeMap::new();
+            read_sources_recursive(&dir, &dir, &mut files).expect("load sources");
+            let mut engine = engine_from_sources(files);
+            engine.start("main", None).expect("start main");
+            drive_engine_to_end(&mut engine);
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestRegistry {
+        names: Vec<String>,
+    }
+
+    impl HostFunctionRegistry for TestRegistry {
+        fn call(&self, _name: &str, _args: &[SlValue]) -> Result<SlValue, ScriptLangError> {
+            Ok(SlValue::Bool(true))
+        }
+
+        fn names(&self) -> &[String] {
+            &self.names
+        }
+    }
+
+    #[test]
+    fn new_rejects_reserved_host_function_name_random() {
+        let files = map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]);
+        let compiled = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        let error = match ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_json: compiled.global_json,
+            host_functions: Some(Arc::new(TestRegistry {
+                names: vec!["random".to_string()],
+            })),
+            random_seed: Some(1),
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        }) {
+            Ok(_) => panic!("reserved random name should fail"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, "ENGINE_HOST_FUNCTION_RESERVED");
+    }
+
+    #[test]
+    fn new_rejects_host_function_conflicting_with_defs_function() {
+        let files = map(&[
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="main"><text>Hello</text></script>
+"#,
+            ),
+            (
+                "shared.defs.xml",
+                r#"
+<defs name="shared">
+  <function name="addWithGameBonus" args="number:a1,number:a2" return="number:out">
+    out = a1 + a2;
+  </function>
+</defs>
+"#,
+            ),
+        ]);
+        let compiled = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        let error = match ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_json: compiled.global_json,
+            host_functions: Some(Arc::new(TestRegistry {
+                names: vec!["addWithGameBonus".to_string()],
+            })),
+            random_seed: Some(1),
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        }) {
+            Ok(_) => panic!("conflicting defs function should fail"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, "ENGINE_HOST_FUNCTION_CONFLICT");
+    }
+
+    #[test]
+    fn start_returns_error_for_missing_script() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]));
+        let error = engine
+            .start("missing", None)
+            .expect_err("unknown entry should fail");
+        assert_eq!(error.code, "ENGINE_SCRIPT_NOT_FOUND");
+    }
+
+    #[test]
+    fn choose_and_input_validate_pending_boundary_state() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        let choose_error = engine.choose(0).expect_err("no pending choice");
+        assert_eq!(choose_error.code, "ENGINE_NO_PENDING_CHOICE");
+        let input_error = engine.submit_input("x").expect_err("no pending input");
+        assert_eq!(input_error.code, "ENGINE_NO_PENDING_INPUT");
+    }
+
+    #[test]
+    fn choose_rejects_out_of_range_index() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A"><text>A</text></option>
+  </choice>
+</script>
+"#,
+        )]));
+        engine.start("main", None).expect("start");
+        let first = engine.next().expect("next");
+        assert!(matches!(first, EngineOutput::Choices { .. }));
+        let error = engine.choose(9).expect_err("index out of range");
+        assert_eq!(error.code, "ENGINE_CHOICE_INDEX");
+    }
+
+    #[test]
+    fn submit_input_uses_default_value_for_blank_input() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <var name="heroName" type="string" value="&quot;Traveler&quot;"/>
+  <input var="heroName" text="Name your hero"/>
+  <text>Hello ${heroName}</text>
+</script>
+"#,
+        )]));
+        engine.start("main", None).expect("start");
+        let first = engine.next().expect("next");
+        assert!(matches!(first, EngineOutput::Input { .. }));
+        engine.submit_input("   ").expect("submit input");
+        let second = engine.next().expect("next");
+        let EngineOutput::Text { text } = second else {
+            panic!("expected text");
+        };
+        assert_eq!(text, "Hello Traveler");
+    }
+
+    #[test]
+    fn snapshot_requires_pending_boundary() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]));
+        engine.start("main", None).expect("start");
+        let error = engine.snapshot().expect_err("snapshot should fail");
+        assert_eq!(error.code, "SNAPSHOT_NOT_ALLOWED");
+    }
+
+    #[test]
+    fn resume_validates_schema_and_compiler_version() {
+        let sources = map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A"><text>A</text></option>
+  </choice>
+</script>
+"#,
+        )]);
+
+        let mut base = engine_from_sources(sources.clone());
+        base.start("main", None).expect("start");
+        let first = base.next().expect("next");
+        assert!(matches!(first, EngineOutput::Choices { .. }));
+        let snapshot = base.snapshot().expect("snapshot");
+
+        let mut schema_mismatch = engine_from_sources(sources.clone());
+        let mut bad_schema = snapshot.clone();
+        bad_schema.schema_version = "snapshot.bad".to_string();
+        let error = schema_mismatch
+            .resume(bad_schema)
+            .expect_err("schema mismatch should fail");
+        assert_eq!(error.code, "SNAPSHOT_SCHEMA");
+
+        let mut compiler_mismatch = engine_from_sources(sources);
+        let mut bad_compiler = snapshot;
+        bad_compiler.compiler_version = "player.bad".to_string();
+        let error = compiler_mismatch
+            .resume(bad_compiler)
+            .expect_err("compiler mismatch should fail");
+        assert_eq!(error.code, "SNAPSHOT_COMPILER_VERSION");
+    }
+
+    #[test]
+    fn resume_rejects_pending_boundary_node_mismatch() {
+        let sources = map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A"><text>A</text></option>
+  </choice>
+</script>
+"#,
+        )]);
+        let mut engine = engine_from_sources(sources.clone());
+        engine.start("main", None).expect("start");
+        let first = engine.next().expect("next");
+        assert!(matches!(first, EngineOutput::Choices { .. }));
+        let mut snapshot = engine.snapshot().expect("snapshot");
+        let PendingBoundaryV3::Choice { node_id, .. } = &mut snapshot.pending_boundary else {
+            panic!("expected choice boundary");
+        };
+        *node_id = "invalid-node-id".to_string();
+
+        let mut resumed = engine_from_sources(sources);
+        let error = resumed
+            .resume(snapshot)
+            .expect_err("pending choice node mismatch");
+        assert_eq!(error.code, "SNAPSHOT_PENDING_BOUNDARY");
+    }
+
+    #[test]
+    fn global_json_is_readonly_during_code_execution() {
+        let mut engine = engine_from_sources(map(&[
+            ("game.json", r#"{ "bonus": 10 }"#),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: game.json -->
+<script name="main">
+  <code>game.bonus = 11;</code>
+</script>
+"#,
+            ),
+        ]));
+        engine.start("main", None).expect("start");
+        let error = engine.next().expect_err("global mutation should fail");
+        assert_eq!(error.code, "ENGINE_GLOBAL_READONLY");
+    }
+
+    #[test]
+    fn helper_functions_cover_paths_values_and_rng() {
+        assert_eq!(
+            parse_ref_path(" player . hp . current "),
+            vec!["player".to_string(), "hp".to_string(), "current".to_string()]
+        );
+        assert!(parse_ref_path(" . ").is_empty());
+
+        let mut root = SlValue::Map(BTreeMap::from([(
+            "player".to_string(),
+            SlValue::Map(BTreeMap::from([("hp".to_string(), SlValue::Number(10.0))])),
+        )]));
+        assign_nested_path(
+            &mut root,
+            &["player".to_string(), "hp".to_string()],
+            SlValue::Number(9.0),
+        )
+        .expect("assign nested should pass");
+        assert_eq!(
+            root,
+            SlValue::Map(BTreeMap::from([(
+                "player".to_string(),
+                SlValue::Map(BTreeMap::from([("hp".to_string(), SlValue::Number(9.0))]))
+            )]))
+        );
+
+        let mut replacement = SlValue::String("old".to_string());
+        assign_nested_path(&mut replacement, &[], SlValue::String("new".to_string()))
+            .expect("empty path should replace root");
+        assert_eq!(replacement, SlValue::String("new".to_string()));
+
+        let mut not_map = SlValue::Number(1.0);
+        let error = assign_nested_path(&mut not_map, &["x".to_string()], SlValue::Number(2.0))
+            .expect_err("non-map should fail");
+        assert_eq!(error, "target is not an object/map");
+
+        let mut missing = SlValue::Map(BTreeMap::new());
+        let error = assign_nested_path(
+            &mut missing,
+            &["unknown".to_string(), "v".to_string()],
+            SlValue::Number(2.0),
+        )
+        .expect_err("missing key should fail");
+        assert!(error.contains("missing key"));
+
+        assert_eq!(slvalue_to_text(&SlValue::Number(3.0)), "3");
+        assert_eq!(slvalue_to_text(&SlValue::Number(3.5)), "3.5");
+        assert_eq!(slvalue_to_text(&SlValue::Bool(true)), "true");
+
+        let value = SlValue::Map(BTreeMap::from([
+            ("a".to_string(), SlValue::Number(1.0)),
+            (
+                "b".to_string(),
+                SlValue::Array(vec![SlValue::Bool(false), SlValue::String("x".to_string())]),
+            ),
+        ]));
+        let dynamic = slvalue_to_dynamic(&value).expect("to dynamic");
+        let roundtrip = dynamic_to_slvalue(dynamic).expect("from dynamic");
+        assert_eq!(roundtrip, value);
+
+        let unsupported = dynamic_to_slvalue(Dynamic::UNIT).expect_err("unsupported type");
+        assert_eq!(unsupported.code, "ENGINE_VALUE_UNSUPPORTED");
+
+        let literal = slvalue_to_rhai_literal(&SlValue::Map(BTreeMap::from([(
+            "name".to_string(),
+            SlValue::String("A\"B".to_string()),
+        )])));
+        assert_eq!(literal, "#{name: \"A\\\"B\"}");
+
+        let mut state = 1u32;
+        let a = next_random_u32(&mut state);
+        let b = next_random_u32(&mut state);
+        assert_ne!(a, b);
+        let bounded = next_random_bounded(&mut state, 7);
+        assert!(bounded < 7);
+    }
+
+    #[test]
+    fn public_state_accessors_and_empty_registry_are_covered() {
+        let registry = EmptyHostFunctionRegistry::default();
+        assert!(registry.names().is_empty());
+        let call_error = registry
+            .call("noop", &[])
+            .expect_err("empty registry call should fail");
+        assert_eq!(call_error.code, "ENGINE_HOST_FUNCTION_MISSING");
+
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A"><text>A</text></option>
+  </choice>
+</script>
+"#,
+        )]));
+        assert_eq!(engine.compiler_version(), DEFAULT_COMPILER_VERSION);
+        assert!(!engine.waiting_choice());
+        engine.start("main", None).expect("start");
+        let next = engine.next().expect("next");
+        assert!(matches!(next, EngineOutput::Choices { .. }));
+        assert!(engine.waiting_choice());
+    }
+
+    #[test]
+    fn runtime_errors_cover_input_boolean_random_and_host_unsupported() {
+        let mut input_type = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <var name="hp" type="number" value="1"/>
+  <input var="hp" text="bad"/>
+</script>
+"#,
+        )]));
+        input_type.start("main", None).expect("start");
+        let error = input_type.next().expect_err("input on non-string should fail");
+        assert_eq!(error.code, "ENGINE_INPUT_VAR_TYPE");
+
+        let mut if_non_bool = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><if when="1"><text>A</text></if></script>"#,
+        )]));
+        if_non_bool.start("main", None).expect("start");
+        let error = if_non_bool.next().expect_err("non-boolean if should fail");
+        assert_eq!(error.code, "ENGINE_BOOLEAN_EXPECTED");
+
+        let mut random_bad = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><var name="x" type="number" value="random(0)"/></script>"#,
+        )]));
+        random_bad.start("main", None).expect("start");
+        let error = random_bad.next().expect_err("random(0) should fail");
+        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
+
+        let files = sources_from_example_dir("01-text-code");
+        let compiled = compile_project_bundle_from_xml_map(&files).expect("compile");
+        let mut host_unsupported = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_json: compiled.global_json,
+            host_functions: Some(Arc::new(TestRegistry {
+                names: vec!["ext_fn".to_string()],
+            })),
+            random_seed: Some(1),
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        })
+        .expect("engine should build");
+        host_unsupported.start("main", None).expect("start");
+        let error = host_unsupported.next().expect_err("host functions unsupported");
+        assert_eq!(error.code, "ENGINE_HOST_FUNCTION_UNSUPPORTED");
+    }
+
+    #[test]
+    fn runtime_errors_cover_call_argument_and_return_target_paths() {
+        let mut call_missing_target = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><call script="missing"/></script>"#,
+        )]));
+        call_missing_target.start("main", None).expect("start");
+        let error = call_missing_target
+            .next()
+            .expect_err("missing call target should fail");
+        assert_eq!(error.code, "ENGINE_CALL_TARGET");
+
+        let mut call_arg_mismatch = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+<!-- include: callee.script.xml -->
+<script name="main">
+  <var name="hp" type="number" value="1"/>
+  <call script="callee" args="hp"/>
+</script>
+"#,
+            ),
+            (
+                "callee.script.xml",
+                r#"<script name="callee" args="ref:number:x"><return/></script>"#,
+            ),
+        ]));
+        call_arg_mismatch.start("main", None).expect("start");
+        let error = call_arg_mismatch
+            .next()
+            .expect_err("ref mismatch should fail");
+        assert_eq!(error.code, "ENGINE_CALL_REF_MISMATCH");
+
+        let mut return_target_missing = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><return script="missing"/></script>"#,
+        )]));
+        return_target_missing.start("main", None).expect("start");
+        let error = return_target_missing
+            .next()
+            .expect_err("missing return target should fail");
+        assert_eq!(error.code, "ENGINE_RETURN_TARGET");
+    }
+
+    #[test]
+    fn runtime_errors_cover_var_and_ref_path_failures() {
+        let mut duplicate_var = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <var name="x" type="number" value="1"/>
+  <var name="x" type="number" value="2"/>
+</script>
+"#,
+        )]));
+        duplicate_var.start("main", None).expect("start");
+        let error = duplicate_var.next().expect_err("duplicate var should fail");
+        assert_eq!(error.code, "ENGINE_VAR_DUPLICATE");
+
+        let mut bad_type = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><var name="x" type="number" value="&quot;str&quot;"/></script>"#,
+        )]));
+        bad_type.start("main", None).expect("start");
+        let error = bad_type.next().expect_err("type mismatch should fail");
+        assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
+
+        let mut bad_ref_read = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>${missing.value}</text></script>"#,
+        )]));
+        bad_ref_read.start("main", None).expect("start");
+        let error = bad_ref_read.next().expect_err("missing ref path should fail");
+        assert!(
+            error.code == "ENGINE_VAR_READ"
+                || error.code == "ENGINE_REF_PATH_READ"
+                || error.code == "ENGINE_EVAL_ERROR"
+        );
+
+        let mut bad_ref_write = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <var name="x" type="number" value="1"/>
+  <code>x.value = 1;</code>
+</script>
+"#,
+        )]));
+        bad_ref_write.start("main", None).expect("start");
+        let error = bad_ref_write.next().expect_err("write path should fail");
+        assert!(error.code == "ENGINE_REF_PATH_WRITE" || error.code == "ENGINE_EVAL_ERROR");
+    }
+
+    #[test]
+    fn runtime_errors_cover_break_continue_and_return_args() {
+        let mut source = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A"><text>A</text></option>
+  </choice>
+</script>
+"#,
+        )]));
+        source.start("main", None).expect("start");
+        let _ = source.next().expect("choice");
+        let mut snapshot = source.snapshot().expect("snapshot");
+        if let Some(frame) = snapshot.runtime_frames.last_mut() {
+            frame.group_id = "missing-group".to_string();
+        }
+        let mut resumed = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A"><text>A</text></option>
+  </choice>
+</script>
+"#,
+        )]));
+        let error = resumed
+            .resume(snapshot)
+            .expect_err("missing group in snapshot should fail");
+        assert_eq!(error.code, "ENGINE_GROUP_NOT_FOUND");
+
+        let mut return_arg_unknown = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"<script name="main"><return script="next" args="1,2"/></script>"#,
+            ),
+            (
+                "next.script.xml",
+                r#"<script name="next" args="number:x"><text>${x}</text></script>"#,
+            ),
+        ]));
+        return_arg_unknown.start("main", None).expect("start");
+        let error = return_arg_unknown
+            .next()
+            .expect_err("extra return arg should fail");
+        assert_eq!(error.code, "ENGINE_RETURN_ARG_UNKNOWN");
+    }
+
+    #[test]
+    fn runtime_errors_cover_snapshot_shape_mismatches() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A"><text>A</text></option>
+  </choice>
+</script>
+"#,
+        )]));
+        engine.start("main", None).expect("start");
+        let _ = engine.next().expect("choice");
+        let mut snapshot = engine.snapshot().expect("snapshot");
+
+        snapshot.runtime_frames.clear();
+        let error = engine
+            .resume(snapshot.clone())
+            .expect_err("empty runtime frames should fail");
+        assert_eq!(error.code, "SNAPSHOT_EMPTY");
+
+        let mut fresh = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A"><text>A</text></option>
+  </choice>
+</script>
+"#,
+        )]));
+        fresh.start("main", None).expect("start fresh");
+        let _ = fresh.next().expect("choice fresh");
+        let mut bad_index = fresh.snapshot().expect("snapshot again");
+        if let Some(frame) = bad_index.runtime_frames.last_mut() {
+            frame.node_index = 9999;
+        }
+        let error = fresh
+            .resume(bad_index)
+            .expect_err("invalid pending node index should fail");
+        assert_eq!(error.code, "SNAPSHOT_PENDING_BOUNDARY");
+    }
+
+    #[test]
+    fn internal_state_error_paths_are_covered() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A"><text>A</text></option>
+  </choice>
+</script>
+"#,
+        )]));
+
+        engine.start("main", None).expect("start");
+        let first = engine.next().expect("choice");
+        let EngineOutput::Choices { items, prompt_text } = first else {
+            panic!("expected choices");
+        };
+        let frame_id = engine.frames.last().expect("frame").frame_id;
+        engine.pending_boundary = Some(PendingBoundary::Choice {
+            frame_id,
+            node_id: "x".to_string(),
+            options: items.clone(),
+            prompt_text: prompt_text.clone(),
+        });
+        let again = engine.next().expect("pending boundary should echo");
+        assert!(matches!(again, EngineOutput::Choices { .. }));
+
+        engine.pending_boundary = None;
+        engine.ended = true;
+        let end = engine.next().expect("ended should return end");
+        assert!(matches!(end, EngineOutput::End));
+
+        engine.pending_boundary = Some(PendingBoundary::Choice {
+            frame_id: 999_999,
+            node_id: "x".to_string(),
+            options: items.clone(),
+            prompt_text,
+        });
+        let error = engine.choose(0).expect_err("missing frame should fail");
+        assert_eq!(error.code, "ENGINE_CHOICE_FRAME_MISSING");
+
+        engine.pending_boundary = Some(PendingBoundary::Input {
+            frame_id: 999_999,
+            node_id: "x".to_string(),
+            target_var: "name".to_string(),
+            prompt_text: "p".to_string(),
+            default_text: "d".to_string(),
+        });
+        let error = engine
+            .submit_input("abc")
+            .expect_err("missing input frame should fail");
+        assert_eq!(error.code, "ENGINE_INPUT_FRAME_MISSING");
+
+        let mut helper_engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]));
+        let err = helper_engine.top_frame_id().expect_err("no frame");
+        assert_eq!(err.code, "ENGINE_NO_FRAME");
+        let err = helper_engine
+            .bump_top_node_index(1)
+            .expect_err("no frame for bump");
+        assert_eq!(err.code, "ENGINE_NO_FRAME");
+
+        let err = helper_engine
+            .push_group_frame("missing-group", CompletionKind::ResumeAfterChild)
+            .expect_err("missing group");
+        assert_eq!(err.code, "ENGINE_GROUP_NOT_FOUND");
+
+        assert!(helper_engine.finish_frame(123).is_ok());
+        let err = helper_engine
+            .find_current_root_frame_index()
+            .expect_err("no root frame");
+        assert_eq!(err.code, "ENGINE_ROOT_FRAME");
     }
 }

@@ -30,3 +30,26 @@ impl ScriptLangError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_builds_error_without_span() {
+        let error = ScriptLangError::new("E_CODE", "message");
+        assert_eq!(error.code, "E_CODE");
+        assert_eq!(error.message, "message");
+        assert!(error.span.is_none());
+        assert_eq!(format!("{}", error), "E_CODE: message");
+    }
+
+    #[test]
+    fn with_span_builds_error_with_span() {
+        let span = SourceSpan::synthetic();
+        let error = ScriptLangError::with_span("E_SPAN", "has-span", span.clone());
+        assert_eq!(error.code, "E_SPAN");
+        assert_eq!(error.message, "has-span");
+        assert_eq!(error.span, Some(span));
+    }
+}

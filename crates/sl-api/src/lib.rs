@@ -107,3 +107,117 @@ fn resolve_entry_script(
         "Expected script with name=\"main\" as default entry.",
     ))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sl_core::EngineOutput;
+
+    fn map(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
+        entries
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn compile_scripts_from_xml_map_compiles_single_script() {
+        let scripts = map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]);
+        let compiled = compile_scripts_from_xml_map(&scripts).expect("compile should pass");
+        assert!(compiled.contains_key("main"));
+    }
+
+    #[test]
+    fn compile_project_from_xml_map_uses_default_main_entry() {
+        let scripts = map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]);
+        let project = compile_project_from_xml_map(&scripts, None).expect("compile should pass");
+        assert_eq!(project.entry_script, "main");
+        assert!(project.scripts.contains_key("main"));
+    }
+
+    #[test]
+    fn compile_project_from_xml_map_returns_error_for_missing_explicit_entry() {
+        let scripts = map(&[(
+            "foo.script.xml",
+            r#"<script name="foo"><text>Hello</text></script>"#,
+        )]);
+        let error = compile_project_from_xml_map(&scripts, Some("missing".to_string()))
+            .expect_err("missing entry should fail");
+        assert_eq!(error.code, "API_ENTRY_SCRIPT_NOT_FOUND");
+    }
+
+    #[test]
+    fn compile_project_from_xml_map_returns_error_without_main_when_entry_missing() {
+        let scripts = map(&[(
+            "foo.script.xml",
+            r#"<script name="foo"><text>Hello</text></script>"#,
+        )]);
+        let error =
+            compile_project_from_xml_map(&scripts, None).expect_err("default main should fail");
+        assert_eq!(error.code, "API_ENTRY_MAIN_NOT_FOUND");
+    }
+
+    #[test]
+    fn create_engine_from_xml_starts_engine() {
+        let scripts = map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]);
+        let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
+            scripts_xml: scripts,
+            entry_script: None,
+            entry_args: None,
+            host_functions: None,
+            random_seed: Some(7),
+            compiler_version: Some("player.v1".to_string()),
+        })
+        .expect("engine should build");
+
+        let first = engine.next().expect("next should succeed");
+        assert!(matches!(first, EngineOutput::Text { .. }));
+    }
+
+    #[test]
+    fn resume_engine_from_xml_resumes_from_snapshot() {
+        let scripts = map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A"><text>A</text></option>
+  </choice>
+</script>
+"#,
+        )]);
+
+        let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
+            scripts_xml: scripts.clone(),
+            entry_script: None,
+            entry_args: None,
+            host_functions: None,
+            random_seed: Some(1),
+            compiler_version: Some("player.v1".to_string()),
+        })
+        .expect("engine should build");
+        let first = engine.next().expect("next should succeed");
+        assert!(matches!(first, EngineOutput::Choices { .. }));
+        let snapshot = engine.snapshot().expect("snapshot should succeed");
+
+        let mut resumed = resume_engine_from_xml(ResumeEngineFromXmlOptions {
+            scripts_xml: scripts,
+            snapshot,
+            host_functions: None,
+            compiler_version: Some("player.v1".to_string()),
+        })
+        .expect("resume should succeed");
+        resumed.choose(0).expect("choose should succeed");
+        let next = resumed.next().expect("next should succeed");
+        assert!(matches!(next, EngineOutput::Text { .. }));
+    }
+}

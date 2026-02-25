@@ -45,7 +45,7 @@ pub fn parse_xml_document(source: &str) -> Result<XmlDocument, ScriptLangError> 
 
     let Some(root) = document.root().children().find(|node| node.is_element()) else {
         return Err(ScriptLangError::new(
-            "XML_EMPTY_ROOT",
+            "XML_PARSE_ERROR",
             "XML document must contain a root element.",
         ));
     };
@@ -99,5 +99,85 @@ fn node_span(document: &Document<'_>, start: usize, end: usize) -> SourceSpan {
             line: end_pos.row as usize,
             column: end_pos.col as usize,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_include_directives_extracts_non_empty_paths() {
+        let source = r#"
+<!-- include: a.script.xml -->
+<!-- include:   nested/b.script.xml   -->
+<!-- include:    -->
+<script name="main"></script>
+"#;
+
+        let includes = parse_include_directives(source);
+        assert_eq!(
+            includes,
+            vec!["a.script.xml".to_string(), "nested/b.script.xml".to_string()]
+        );
+    }
+
+    #[test]
+    fn parse_xml_document_builds_tree_with_attributes_and_text() {
+        let source = r#"<script name="main"><text id="t1">Hello</text></script>"#;
+        let document = parse_xml_document(source).expect("xml should parse");
+        assert_eq!(document.root.name, "script");
+        assert_eq!(document.root.attributes.get("name"), Some(&"main".to_string()));
+        assert_eq!(document.root.children.len(), 1);
+
+        assert!(matches!(document.root.children[0], XmlNode::Element(_)));
+        let text_node = match &document.root.children[0] {
+            XmlNode::Element(node) => node,
+            XmlNode::Text(_) => unreachable!("already asserted element"),
+        };
+        assert_eq!(text_node.name, "text");
+        assert_eq!(text_node.attributes.get("id"), Some(&"t1".to_string()));
+
+        assert!(matches!(text_node.children[0], XmlNode::Text(_)));
+        let text_value = match &text_node.children[0] {
+            XmlNode::Text(value) => value,
+            XmlNode::Element(_) => unreachable!("already asserted text"),
+        };
+        assert_eq!(text_value.value, "Hello");
+        assert!(text_value.location.start.line >= 1);
+        assert!(document.root.location.end.column >= document.root.location.start.column);
+    }
+
+    #[test]
+    fn parse_xml_document_handles_comment_and_empty_text_nodes() {
+        let source = r#"<script name="main"><text><!--c-->A</text><text></text></script>"#;
+        let document = parse_xml_document(source).expect("xml should parse");
+        assert_eq!(document.root.children.len(), 2);
+    }
+
+    #[test]
+    fn parse_xml_document_handles_empty_cdata_node() {
+        let source = r#"<script name="main"><text><![CDATA[]]></text></script>"#;
+        let document = parse_xml_document(source).expect("xml should parse");
+        assert_eq!(document.root.children.len(), 1);
+    }
+
+    #[test]
+    fn parse_xml_document_returns_parse_error_for_invalid_xml() {
+        let error = parse_xml_document("<script>").expect_err("invalid xml should fail");
+        assert_eq!(error.code, "XML_PARSE_ERROR");
+    }
+
+    #[test]
+    fn parse_xml_document_returns_parse_error_when_root_element_is_missing() {
+        let error = parse_xml_document("<?xml version=\"1.0\"?><!---->")
+            .expect_err("missing root element should fail");
+        assert_eq!(error.code, "XML_PARSE_ERROR");
+    }
+
+    #[test]
+    fn parse_xml_document_can_return_empty_root_for_element_less_document() {
+        let parsed = parse_xml_document("<?xml version=\"1.0\"?><?pi test?>");
+        assert!(parsed.is_err());
     }
 }

@@ -1843,6 +1843,8 @@ pub fn default_values_from_script_params(params: &[ScriptParam]) -> BTreeMap<Str
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::path::{Path, PathBuf};
 
     fn map(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
         entries
@@ -1896,5 +1898,502 @@ mod tests {
             .nodes
             .iter()
             .any(|node| matches!(node, ScriptNode::While { .. })));
+    }
+
+    fn read_sources_recursive(
+        root: &Path,
+        current: &Path,
+        out: &mut BTreeMap<String, String>,
+    ) -> Result<(), std::io::Error> {
+        for entry in fs::read_dir(current)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                read_sources_recursive(root, &path, out)?;
+                continue;
+            }
+            let relative = path
+                .strip_prefix(root)
+                .expect("path should be under root")
+                .to_string_lossy()
+                .replace('\\', "/");
+            let text = fs::read_to_string(&path)?;
+            out.insert(relative, text);
+        }
+        Ok(())
+    }
+
+    fn sources_from_example_dir(name: &str) -> BTreeMap<String, String> {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let root = manifest_dir
+            .join("..")
+            .join("..")
+            .join("examples")
+            .join("scripts-rhai")
+            .join(name);
+        let mut out = BTreeMap::new();
+        read_sources_recursive(&root, &root, &mut out).expect("example sources should read");
+        out
+    }
+
+    #[test]
+    fn compile_bundle_supports_all_example_scenarios() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let examples_root = manifest_dir
+            .join("..")
+            .join("..")
+            .join("examples")
+            .join("scripts-rhai");
+
+        let mut dirs = fs::read_dir(&examples_root)
+            .expect("examples root should exist")
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .collect::<Vec<_>>();
+        dirs.sort();
+
+        assert!(!dirs.is_empty(), "examples should not be empty");
+
+        for directory in dirs {
+            let mut files = BTreeMap::new();
+            read_sources_recursive(&directory, &directory, &mut files)
+                .expect("read sources should pass");
+            let compiled =
+                compile_project_bundle_from_xml_map(&files).expect("example should compile");
+            assert!(
+                !compiled.scripts.is_empty(),
+                "compiled scripts should not be empty for {}",
+                directory.display()
+            );
+        }
+    }
+
+    #[test]
+    fn compile_scripts_from_xml_map_returns_script_only_bundle() {
+        let files = sources_from_example_dir("15-entry-override-recursive");
+        let scripts = compile_project_scripts_from_xml_map(&files).expect("compile should pass");
+        assert!(scripts.contains_key("main"));
+        assert!(scripts.contains_key("alt"));
+    }
+
+    #[test]
+    fn compile_bundle_rejects_unsupported_source_extension() {
+        let files = BTreeMap::from([("x.txt".to_string(), "bad".to_string())]);
+        let error = compile_project_bundle_from_xml_map(&files)
+            .expect_err("unsupported extension should fail");
+        assert_eq!(error.code, "SOURCE_KIND_UNSUPPORTED");
+    }
+
+    #[test]
+    fn compile_bundle_rejects_missing_include_and_cycle() {
+        let missing_include = map(&[(
+            "main.script.xml",
+            r#"
+<!-- include: missing.script.xml -->
+<script name="main"></script>
+"#,
+        )]);
+        let missing = compile_project_bundle_from_xml_map(&missing_include)
+            .expect_err("missing include should fail");
+        assert_eq!(missing.code, "INCLUDE_NOT_FOUND");
+
+        let cycle = map(&[
+            (
+                "a.script.xml",
+                r#"
+<!-- include: b.script.xml -->
+<script name="a"></script>
+"#,
+            ),
+            (
+                "b.script.xml",
+                r#"
+<!-- include: a.script.xml -->
+<script name="b"></script>
+"#,
+            ),
+        ]);
+        let cycle_error =
+            compile_project_bundle_from_xml_map(&cycle).expect_err("include cycle should fail");
+        assert_eq!(cycle_error.code, "INCLUDE_CYCLE");
+    }
+
+    #[test]
+    fn compile_bundle_rejects_invalid_root_and_duplicate_script_names() {
+        let invalid_root = map(&[("main.script.xml", "<defs name=\"x\"></defs>")]);
+        let root_error =
+            compile_project_bundle_from_xml_map(&invalid_root).expect_err("invalid root");
+        assert_eq!(root_error.code, "XML_ROOT_INVALID");
+
+        let duplicate_script_name = map(&[
+            ("a.script.xml", "<script name=\"main\"></script>"),
+            ("b.script.xml", "<script name=\"main\"></script>"),
+        ]);
+        let duplicate_error = compile_project_bundle_from_xml_map(&duplicate_script_name)
+            .expect_err("duplicate script names should fail");
+        assert_eq!(duplicate_error.code, "SCRIPT_NAME_DUPLICATE");
+    }
+
+    #[test]
+    fn default_values_from_script_params_respects_declared_types() {
+        let params = vec![
+            ScriptParam {
+                name: "hp".to_string(),
+                r#type: ScriptType::Primitive {
+                    name: "number".to_string(),
+                },
+                is_ref: false,
+                location: SourceSpan::synthetic(),
+            },
+            ScriptParam {
+                name: "name".to_string(),
+                r#type: ScriptType::Primitive {
+                    name: "string".to_string(),
+                },
+                is_ref: false,
+                location: SourceSpan::synthetic(),
+            },
+        ];
+        let defaults = default_values_from_script_params(&params);
+        assert_eq!(defaults.get("hp"), Some(&SlValue::Number(0.0)));
+        assert_eq!(defaults.get("name"), Some(&SlValue::String(String::new())));
+    }
+
+    fn xml_text(value: &str) -> XmlNode {
+        XmlNode::Text(XmlTextNode {
+            value: value.to_string(),
+            location: SourceSpan::synthetic(),
+        })
+    }
+
+    fn xml_element(name: &str, attrs: &[(&str, &str)], children: Vec<XmlNode>) -> XmlElementNode {
+        XmlElementNode {
+            name: name.to_string(),
+            attributes: attrs
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                .collect(),
+            children,
+            location: SourceSpan::synthetic(),
+        }
+    }
+
+    #[test]
+    fn source_kind_and_path_helpers_cover_common_cases() {
+        assert!(matches!(
+            detect_source_kind("a.script.xml"),
+            Some(SourceKind::ScriptXml)
+        ));
+        assert!(matches!(
+            detect_source_kind("a.defs.xml"),
+            Some(SourceKind::DefsXml)
+        ));
+        assert!(matches!(detect_source_kind("a.json"), Some(SourceKind::Json)));
+        assert!(detect_source_kind("a.txt").is_none());
+
+        assert_eq!(
+            resolve_include_path("nested/main.script.xml", "../shared.defs.xml"),
+            "shared.defs.xml"
+        );
+        assert_eq!(
+            normalize_virtual_path("./a/./b/../c\\d.script.xml"),
+            "a/c/d.script.xml"
+        );
+        assert_eq!(stable_base("a*b?c"), "a_b_c");
+    }
+
+    #[test]
+    fn parse_json_symbol_and_global_collection_errors_are_reported() {
+        assert_eq!(
+            parse_json_global_symbol("game.json").expect("symbol"),
+            "game"
+        );
+        let invalid = parse_json_global_symbol("bad-name.json").expect_err("invalid");
+        assert_eq!(invalid.code, "JSON_SYMBOL_INVALID");
+
+        let reserved = parse_json_global_symbol("__sl_reserved.json").expect_err("reserved");
+        assert_eq!(reserved.code, "NAME_RESERVED_PREFIX");
+
+        let duplicate = compile_project_bundle_from_xml_map(&map(&[
+            ("a/x.json", r#"{"v":1}"#),
+            ("b/x.json", r#"{"v":2}"#),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: a/x.json -->
+<!-- include: b/x.json -->
+<script name="main"><text>x</text></script>
+"#,
+            ),
+        ]))
+        .expect_err("duplicate symbol should fail");
+        assert_eq!(duplicate.code, "JSON_SYMBOL_DUPLICATE");
+    }
+
+    #[test]
+    fn parse_type_and_call_argument_helpers_cover_valid_and_invalid_inputs() {
+        let span = SourceSpan::synthetic();
+        assert!(matches!(
+            parse_type_expr("number", &span).expect("primitive"),
+            ParsedTypeExpr::Primitive(_)
+        ));
+        assert!(matches!(
+            parse_type_expr("number[]", &span).expect("array"),
+            ParsedTypeExpr::Array(_)
+        ));
+        assert!(matches!(
+            parse_type_expr("Map<string,number>", &span).expect("map"),
+            ParsedTypeExpr::Map(_)
+        ));
+        assert!(matches!(
+            parse_type_expr("CustomType", &span).expect("custom"),
+            ParsedTypeExpr::Custom(_)
+        ));
+        let invalid_type = parse_type_expr("Map<number,string>", &span).expect_err("invalid");
+        assert_eq!(invalid_type.code, "TYPE_PARSE_ERROR");
+
+        let args = parse_args(Some("1, ref:hp, a + 1".to_string())).expect("args");
+        assert_eq!(args.len(), 3);
+        assert!(args[1].is_ref);
+
+        let bad_args = parse_args(Some("ref:   ".to_string())).expect_err("bad args");
+        assert_eq!(bad_args.code, "CALL_ARGS_PARSE_ERROR");
+    }
+
+    #[test]
+    fn parse_script_args_and_function_decl_helpers_cover_error_paths() {
+        let mut visible_types = BTreeMap::new();
+        visible_types.insert(
+            "Custom".to_string(),
+            ScriptType::Object {
+                type_name: "Custom".to_string(),
+                fields: BTreeMap::new(),
+            },
+        );
+        let root_ok = xml_element("script", &[("args", "number:a,ref:Custom:b")], Vec::new());
+        let parsed = parse_script_args(&root_ok, &visible_types).expect("args parse");
+        assert_eq!(parsed.len(), 2);
+        assert!(parsed[1].is_ref);
+
+        let root_bad = xml_element("script", &[("args", "number")], Vec::new());
+        let error = parse_script_args(&root_bad, &visible_types).expect_err("bad args");
+        assert_eq!(error.code, "SCRIPT_ARGS_PARSE_ERROR");
+
+        let root_dup = xml_element("script", &[("args", "number:a,number:a")], Vec::new());
+        let error = parse_script_args(&root_dup, &visible_types).expect_err("duplicate args");
+        assert_eq!(error.code, "SCRIPT_ARGS_DUPLICATE");
+
+        let fn_node = xml_element(
+            "function",
+            &[("name", "f"), ("args", "ref:number:a"), ("return", "number:r")],
+            vec![xml_text("r = a;")],
+        );
+        let error = parse_function_declaration_node(&fn_node).expect_err("ref arg unsupported");
+        assert_eq!(error.code, "XML_FUNCTION_ARGS_REF_UNSUPPORTED");
+
+        let fn_bad_return = xml_element(
+            "function",
+            &[("name", "f"), ("args", "number:a"), ("return", "ref:number:r")],
+            vec![xml_text("r = a;")],
+        );
+        let error = parse_function_declaration_node(&fn_bad_return)
+            .expect_err("ref return unsupported");
+        assert_eq!(error.code, "XML_FUNCTION_RETURN_REF_UNSUPPORTED");
+    }
+
+    #[test]
+    fn inline_bool_and_attr_helpers_cover_errors() {
+        let node = xml_element("text", &[("value", "x")], vec![xml_text("ignored")]);
+        let error = parse_inline_required(&node).expect_err("value attr forbidden");
+        assert_eq!(error.code, "XML_ATTR_NOT_ALLOWED");
+
+        let empty = xml_element("text", &[], vec![xml_text("   ")]);
+        let error = parse_inline_required(&empty).expect_err("empty inline forbidden");
+        assert_eq!(error.code, "XML_EMPTY_NODE_CONTENT");
+
+        let with_child = xml_element(
+            "function",
+            &[],
+            vec![XmlNode::Element(xml_element("x", &[], Vec::new()))],
+        );
+        let error = parse_inline_required_no_element_children(&with_child)
+            .expect_err("child element forbidden");
+        assert_eq!(error.code, "XML_FUNCTION_CHILD_NODE_INVALID");
+
+        let bool_node = xml_element("text", &[("once", "maybe")], vec![xml_text("x")]);
+        let error = parse_bool_attr(&bool_node, "once", false).expect_err("invalid bool attr");
+        assert_eq!(error.code, "XML_ATTR_BOOL_INVALID");
+
+        let miss_attr = get_required_non_empty_attr(&xml_element("x", &[], vec![]), "name")
+            .expect_err("missing attr");
+        assert_eq!(miss_attr.code, "XML_MISSING_ATTR");
+        let empty_attr =
+            get_required_non_empty_attr(&xml_element("x", &[("name", " ")], vec![]), "name")
+                .expect_err("empty attr");
+        assert_eq!(empty_attr.code, "XML_EMPTY_ATTR");
+
+        assert!(has_any_child_content(&xml_element("x", &[], vec![xml_text(" t ")])));
+        assert!(split_by_top_level_comma("a, f(1,2), Map<string,number>, #{a:1,b:2}").len() >= 4);
+    }
+
+    #[test]
+    fn defs_and_type_resolution_helpers_cover_duplicate_and_recursive_errors() {
+        let bad_defs = map(&[("x.defs.xml", "<script name=\"x\"></script>")]);
+        let error = compile_project_bundle_from_xml_map(&bad_defs).expect_err("bad defs root");
+        assert_eq!(error.code, "XML_ROOT_INVALID");
+
+        let duplicate_types = map(&[
+            (
+                "a.defs.xml",
+                r#"<defs name="a"><type name="T"><field name="v" type="number"/></type></defs>"#,
+            ),
+            (
+                "b.defs.xml",
+                r#"<defs name="b"><type name="T"><field name="v" type="number"/></type></defs>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: a.defs.xml -->
+<!-- include: b.defs.xml -->
+<script name="main"><var name="v" type="T"/></script>
+"#,
+            ),
+        ]);
+        let error = compile_project_bundle_from_xml_map(&duplicate_types)
+            .expect_err("duplicate type declarations should fail");
+        assert_eq!(error.code, "TYPE_DECL_DUPLICATE");
+
+        let recursive = map(&[
+            (
+                "x.defs.xml",
+                r#"<defs name="x"><type name="A"><field name="b" type="B"/></type><type name="B"><field name="a" type="A"/></type></defs>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: x.defs.xml -->
+<script name="main"><var name="v" type="A"/></script>
+"#,
+            ),
+        ]);
+        let error = compile_project_bundle_from_xml_map(&recursive)
+            .expect_err("recursive type declarations should fail");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
+
+    #[test]
+    fn compile_group_reports_script_structure_errors() {
+        let visible_types = BTreeMap::new();
+        let local_var_types = BTreeMap::new();
+
+        let bad_once = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element(
+                "code",
+                &[("once", "true")],
+                vec![xml_text("x = 1;")],
+            ))],
+        );
+        let mut builder = GroupBuilder::new("main.script.xml");
+        let group_id = builder.next_group_id();
+        let error = compile_group(
+            &group_id,
+            None,
+            &bad_once,
+            &mut builder,
+            &visible_types,
+            &local_var_types,
+            0,
+            false,
+        )
+        .expect_err("once on code should fail");
+        assert_eq!(error.code, "XML_ATTR_NOT_ALLOWED");
+
+        let bad_break = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element("break", &[], Vec::new()))],
+        );
+        let mut builder = GroupBuilder::new("main.script.xml");
+        let group_id = builder.next_group_id();
+        let error = compile_group(
+            &group_id,
+            None,
+            &bad_break,
+            &mut builder,
+            &visible_types,
+            &local_var_types,
+            0,
+            false,
+        )
+        .expect_err("break outside while should fail");
+        assert_eq!(error.code, "XML_BREAK_OUTSIDE_WHILE");
+
+        let bad_continue = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element("continue", &[], Vec::new()))],
+        );
+        let mut builder = GroupBuilder::new("main.script.xml");
+        let group_id = builder.next_group_id();
+        let error = compile_group(
+            &group_id,
+            None,
+            &bad_continue,
+            &mut builder,
+            &visible_types,
+            &local_var_types,
+            0,
+            false,
+        )
+        .expect_err("continue outside while/option should fail");
+        assert_eq!(error.code, "XML_CONTINUE_OUTSIDE_WHILE_OR_OPTION");
+
+        let bad_return = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element(
+                "return",
+                &[("args", "1")],
+                Vec::new(),
+            ))],
+        );
+        let mut builder = GroupBuilder::new("main.script.xml");
+        let group_id = builder.next_group_id();
+        let error = compile_group(
+            &group_id,
+            None,
+            &bad_return,
+            &mut builder,
+            &visible_types,
+            &local_var_types,
+            0,
+            false,
+        )
+        .expect_err("return args without script should fail");
+        assert_eq!(error.code, "XML_RETURN_ARGS_REQUIRE_SCRIPT");
+
+        let bad_node = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element("unknown", &[], Vec::new()))],
+        );
+        let mut builder = GroupBuilder::new("main.script.xml");
+        let group_id = builder.next_group_id();
+        let error = compile_group(
+            &group_id,
+            None,
+            &bad_node,
+            &mut builder,
+            &visible_types,
+            &local_var_types,
+            0,
+            false,
+        )
+        .expect_err("unknown node should fail");
+        assert_eq!(error.code, "XML_NODE_UNSUPPORTED");
     }
 }

@@ -2,6 +2,9 @@
 
 Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded script engine.
 
+## Documentation
+- [ScriptLang syntax rules](docs/scriptlang-syntax.md)
+
 ## Workspace Crates
 - `crates/sl-core`: shared types, values, errors, snapshot/player schemas.
 - `crates/sl-parser`: XML parser + include directive extraction.

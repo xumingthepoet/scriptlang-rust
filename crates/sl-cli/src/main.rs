@@ -9,7 +9,7 @@ use sl_api::{
     create_engine_from_xml, resume_engine_from_xml, CreateEngineFromXmlOptions,
     ResumeEngineFromXmlOptions,
 };
-use sl_core::{EngineOutput, ScriptLangError, SlValue, SnapshotV3};
+use sl_core::{EngineOutput, ScriptLangError, SnapshotV3};
 use sl_runtime::DEFAULT_COMPILER_VERSION;
 use walkdir::WalkDir;
 
@@ -174,13 +174,7 @@ fn run_tui(args: TuiArgs) -> Result<i32, ScriptLangError> {
                 }
                 loop {
                     let raw = prompt_input("> ")?;
-                    if handle_tui_command(
-                        raw.as_str(),
-                        &state_file,
-                        &scenario,
-                        &entry_script,
-                        &mut engine,
-                    )? {
+                    if handle_tui_command(raw.as_str(), &state_file, &scenario, &entry_script, &mut engine)? {
                         continue;
                     }
                     let choice = raw.parse::<usize>().map_err(|_| {
@@ -202,13 +196,7 @@ fn run_tui(args: TuiArgs) -> Result<i32, ScriptLangError> {
                 println!("(default: {})", default_text);
                 loop {
                     let raw = prompt_input("> ")?;
-                    if handle_tui_command(
-                        raw.as_str(),
-                        &state_file,
-                        &scenario,
-                        &entry_script,
-                        &mut engine,
-                    )? {
+                    if handle_tui_command(raw.as_str(), &state_file, &scenario, &entry_script, &mut engine)? {
                         continue;
                     }
                     engine.submit_input(&raw)?;
@@ -575,9 +563,7 @@ fn read_scripts_xml_from_dir(
         }
 
         let path = entry.path();
-        let Some(path_str) = path.to_str() else {
-            continue;
-        };
+        let path_str = path.to_string_lossy();
 
         if !(path_str.ends_with(".script.xml")
             || path_str.ends_with(".defs.xml")
@@ -649,5 +635,170 @@ fn load_player_state(path: &Path) -> Result<PlayerStateV3, ScriptLangError> {
     Ok(state)
 }
 
-#[allow(dead_code)]
-fn _silence_unused(_value: SlValue) {}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_path(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be monotonic")
+            .as_nanos();
+        std::env::temp_dir().join(format!("scriptlang-rs-{}-{}", name, nanos))
+    }
+
+    fn write_file(path: &Path, content: &str) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("parent should be created");
+        }
+        fs::write(path, content).expect("file should be written");
+    }
+
+    fn example_scripts_dir(example: &str) -> String {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("examples")
+            .join("scripts-rhai")
+            .join(example)
+            .to_string_lossy()
+            .to_string()
+    }
+
+    #[test]
+    fn load_source_by_ref_validates_ref_prefix() {
+        let error = load_source_by_ref("unknown:main").expect_err("invalid ref should fail");
+        assert_eq!(error.code, "CLI_SOURCE_REF_INVALID");
+    }
+
+    #[test]
+    fn resolve_scripts_dir_validates_existence_and_directory() {
+        let missing = temp_path("missing-dir");
+        let missing_err = resolve_scripts_dir(missing.to_string_lossy().as_ref())
+            .expect_err("missing path should fail");
+        assert_eq!(missing_err.code, "CLI_SOURCE_NOT_FOUND");
+
+        let file_path = temp_path("plain-file");
+        write_file(&file_path, "x");
+        let file_err = resolve_scripts_dir(file_path.to_string_lossy().as_ref())
+            .expect_err("file path should fail");
+        assert_eq!(file_err.code, "CLI_SOURCE_NOT_DIR");
+
+        let cwd = std::env::current_dir().expect("cwd");
+        let relative_root = temp_path("relative-scripts-dir");
+        fs::create_dir_all(&relative_root).expect("root");
+        let relative_child = relative_root.join("child");
+        fs::create_dir_all(&relative_child).expect("child");
+        write_file(
+            &relative_child.join("main.script.xml"),
+            "<script name=\"main\"></script>",
+        );
+
+        std::env::set_current_dir(&relative_root).expect("switch cwd");
+        let resolved = resolve_scripts_dir("child").expect("relative dir should resolve");
+        assert!(resolved.ends_with("child"));
+        std::env::set_current_dir(cwd).expect("restore cwd");
+    }
+
+    #[test]
+    fn read_scripts_xml_from_dir_filters_supported_extensions() {
+        let root = temp_path("scripts-dir");
+        fs::create_dir_all(&root).expect("root should be created");
+        write_file(&root.join("main.script.xml"), "<script name=\"main\"></script>");
+        write_file(&root.join("defs.defs.xml"), "<defs name=\"d\"></defs>");
+        write_file(&root.join("data.json"), "{\"ok\":true}");
+        write_file(&root.join("skip.txt"), "ignored");
+
+        let scripts = read_scripts_xml_from_dir(&root).expect("scan should pass");
+        assert_eq!(scripts.len(), 3);
+        assert!(scripts.contains_key("main.script.xml"));
+        assert!(scripts.contains_key("defs.defs.xml"));
+        assert!(scripts.contains_key("data.json"));
+    }
+
+    #[test]
+    fn read_scripts_xml_from_dir_errors_when_no_source_files() {
+        let root = temp_path("empty-scripts-dir");
+        fs::create_dir_all(&root).expect("root should be created");
+        write_file(&root.join("readme.txt"), "not source");
+
+        let error =
+            read_scripts_xml_from_dir(&root).expect_err("empty source set should return error");
+        assert_eq!(error.code, "CLI_SOURCE_EMPTY");
+    }
+
+    #[test]
+    fn save_and_load_player_state_roundtrip_and_schema_validation() {
+        let state_path = temp_path("player-state.json");
+        let state = PlayerStateV3 {
+            schema_version: PLAYER_STATE_SCHEMA.to_string(),
+            scenario_id: "scripts-dir:/tmp/demo".to_string(),
+            compiler_version: DEFAULT_COMPILER_VERSION.to_string(),
+            snapshot: SnapshotV3 {
+                schema_version: "snapshot.v3".to_string(),
+                compiler_version: DEFAULT_COMPILER_VERSION.to_string(),
+                runtime_frames: Vec::new(),
+                rng_state: 1,
+                pending_boundary: sl_core::PendingBoundaryV3::Choice {
+                    node_id: "n1".to_string(),
+                    items: Vec::new(),
+                    prompt_text: None,
+                },
+                once_state_by_script: BTreeMap::new(),
+            },
+        };
+        save_player_state(&state_path, &state).expect("save should pass");
+        let loaded = load_player_state(&state_path).expect("load should pass");
+        assert_eq!(loaded.schema_version, PLAYER_STATE_SCHEMA);
+        assert_eq!(loaded.scenario_id, state.scenario_id);
+
+        let bad_path = temp_path("bad-player-state.json");
+        let mut bad_json: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&state_path).expect("read state"))
+                .expect("state json should parse");
+        bad_json["schemaVersion"] = serde_json::Value::String("player-state.bad".to_string());
+        write_file(
+            &bad_path,
+            &serde_json::to_string(&bad_json).expect("json should serialize"),
+        );
+        let error = load_player_state(&bad_path).expect_err("bad schema should fail");
+        assert_eq!(error.code, "CLI_STATE_SCHEMA");
+
+        let not_found = temp_path("missing-player-state.json");
+        let error = load_player_state(&not_found).expect_err("missing file should fail");
+        assert_eq!(error.code, "CLI_STATE_NOT_FOUND");
+    }
+
+    #[test]
+    fn run_to_boundary_and_load_source_helpers_work_with_examples() {
+        let scripts_dir = example_scripts_dir("06-snapshot-flow");
+        let loaded =
+            load_source_by_scripts_dir(&scripts_dir, "main").expect("source should be loaded");
+        assert!(loaded.id.starts_with("scripts-dir:"));
+        assert_eq!(loaded.entry_script, "main");
+
+        let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
+            scripts_xml: loaded.scripts_xml.clone(),
+            entry_script: Some(loaded.entry_script.clone()),
+            entry_args: None,
+            host_functions: None,
+            random_seed: Some(1),
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        })
+        .expect("engine should build");
+
+        let boundary = run_to_boundary(&mut engine).expect("boundary should be emitted");
+        assert!(matches!(boundary.event, BoundaryEvent::Choices));
+        assert!(!boundary.choices.is_empty());
+
+        let loaded_by_ref = load_source_by_ref(&loaded.id).expect("load by ref should pass");
+        assert_eq!(loaded_by_ref.entry_script, "main");
+    }
+
+    #[test]
+    fn emit_error_returns_non_zero_exit_code() {
+        let code = emit_error(ScriptLangError::new("ERR", "failed"));
+        assert_eq!(code, 1);
+    }
+}
