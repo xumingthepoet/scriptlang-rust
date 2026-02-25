@@ -32,6 +32,7 @@
 1. 先确认修改落在哪一层（parser/compiler/runtime/api/cli），避免跨层耦合。
 2. 优先复用 `examples/scripts-rhai` 补充或回归场景。
 3. 提交前运行 `make gate`。
+4. 只要 `make gate` 通过，可直接提交，无需再次询问。
 
 ## 质量门禁
 - `make gate`
