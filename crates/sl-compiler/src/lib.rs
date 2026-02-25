@@ -163,9 +163,10 @@ pub fn compile_project_bundle_from_xml_map(
             continue;
         }
 
-        let Some(script_root) = &source.xml_root else {
-            continue;
-        };
+        let script_root = source
+            .xml_root
+            .as_ref()
+            .expect("script/defs sources should always carry parsed xml root");
 
         if script_root.name != "script" {
             return Err(ScriptLangError::with_span(
@@ -272,9 +273,10 @@ fn detect_source_kind(path: &str) -> Option<SourceKind> {
 }
 
 fn resolve_include_path(current_path: &str, include: &str) -> String {
-    let parent = Path::new(current_path)
-        .parent()
-        .unwrap_or_else(|| Path::new(""));
+    let parent = match Path::new(current_path).parent() {
+        Some(parent) => parent,
+        None => Path::new(""),
+    };
     let joined = if include.starts_with('/') {
         PathBuf::from(include)
     } else {
@@ -342,10 +344,11 @@ fn validate_include_graph(sources: &BTreeMap<String, SourceFile>) -> Result<(), 
         states.insert(node.to_string(), State::Visiting);
         stack.push(node.to_string());
 
-        if let Some(source) = sources.get(node) {
-            for include in &source.includes {
-                dfs(include, sources, states, stack)?;
-            }
+        let source = sources
+            .get(node)
+            .expect("include graph nodes should exist after validation");
+        for include in &source.includes {
+            dfs(include, sources, states, stack)?;
         }
 
         stack.pop();
@@ -392,9 +395,10 @@ fn parse_defs_files(
             continue;
         }
 
-        let Some(root) = &source.xml_root else {
-            continue;
-        };
+        let root = source
+            .xml_root
+            .as_ref()
+            .expect("defs sources should always carry parsed xml root");
 
         if root.name != "defs" {
             return Err(ScriptLangError::with_span(
@@ -452,10 +456,10 @@ fn collect_global_json(
                 format!("Duplicate JSON symbol \"{}\".", symbol),
             ));
         }
-        let value = source
-            .json_value
-            .clone()
-            .ok_or_else(|| ScriptLangError::new("JSON_MISSING_VALUE", "Missing JSON value."))?;
+        let value = source.json_value.clone().ok_or(ScriptLangError::new(
+            "JSON_MISSING_VALUE",
+            "Missing JSON value.",
+        ))?;
         out.insert(symbol, value);
     }
 
@@ -572,11 +576,8 @@ fn resolve_visible_defs(
                 });
             }
 
-            let return_type = resolve_type_expr(
-                &decl.return_binding.type_expr,
-                &resolved_types,
-                &decl.return_binding.location,
-            )?;
+            let rb = &decl.return_binding;
+            let return_type = resolve_type_expr(&rb.type_expr, &resolved_types, &rb.location)?;
 
             functions.insert(
                 decl.name.clone(),
@@ -662,33 +663,40 @@ fn resolve_type_expr_with_lookup(
 ) -> Result<ScriptType, ScriptLangError> {
     match expr {
         ParsedTypeExpr::Primitive(name) => Ok(ScriptType::Primitive { name: name.clone() }),
-        ParsedTypeExpr::Array(element_type) => Ok(ScriptType::Array {
-            element_type: Box::new(resolve_type_expr_with_lookup(
+        ParsedTypeExpr::Array(element_type) => {
+            let resolved_element = resolve_type_expr_with_lookup(
                 element_type,
                 type_decls_map,
                 resolved,
                 visiting,
                 span,
-            )?),
-        }),
-        ParsedTypeExpr::Map(value_type) => Ok(ScriptType::Map {
-            key_type: "string".to_string(),
-            value_type: Box::new(resolve_type_expr_with_lookup(
+            )?;
+            Ok(ScriptType::Array {
+                element_type: Box::new(resolved_element),
+            })
+        }
+        ParsedTypeExpr::Map(value_type) => {
+            let resolved_value = resolve_type_expr_with_lookup(
                 value_type,
                 type_decls_map,
                 resolved,
                 visiting,
                 span,
-            )?),
-        }),
+            )?;
+            Ok(ScriptType::Map {
+                key_type: "string".to_string(),
+                value_type: Box::new(resolved_value),
+            })
+        }
         ParsedTypeExpr::Custom(name) => {
-            resolve_named_type(name, type_decls_map, resolved, visiting).map_err(|_| {
-                ScriptLangError::with_span(
+            match resolve_named_type(name, type_decls_map, resolved, visiting) {
+                Ok(value) => Ok(value),
+                Err(_) => Err(ScriptLangError::with_span(
                     "TYPE_UNKNOWN",
                     format!("Unknown custom type \"{}\".", name),
                     span.clone(),
-                )
-            })
+                )),
+            }
         }
     }
 }
@@ -707,13 +715,14 @@ fn resolve_type_expr(
             key_type: "string".to_string(),
             value_type: Box::new(resolve_type_expr(value_type, resolved_types, span)?),
         }),
-        ParsedTypeExpr::Custom(name) => resolved_types.get(name).cloned().ok_or_else(|| {
-            ScriptLangError::with_span(
+        ParsedTypeExpr::Custom(name) => match resolved_types.get(name).cloned() {
+            Some(value) => Ok(value),
+            None => Err(ScriptLangError::with_span(
                 "TYPE_UNKNOWN",
                 format!("Unknown custom type \"{}\".", name),
                 span.clone(),
-            )
-        }),
+            )),
+        },
     }
 }
 
@@ -743,10 +752,8 @@ fn parse_type_declaration_node(node: &XmlElementNode) -> Result<ParsedTypeDecl, 
             ));
         }
 
-        let field_type = parse_type_expr(
-            &get_required_non_empty_attr(child, "type")?,
-            &child.location,
-        )?;
+        let field_type_raw = get_required_non_empty_attr(child, "type")?;
+        let field_type = parse_type_expr(&field_type_raw, &child.location)?;
         fields.push(ParsedTypeFieldDecl {
             name: field_name,
             type_expr: field_type,
@@ -853,6 +860,21 @@ fn compile_group(
     let mut local_var_types = visible_var_types.clone();
     let mut nodes = Vec::new();
 
+    macro_rules! compile_child_group {
+        ($child_group_id:expr, $child_container:expr, $child_while_depth:expr, $allow_continue:expr) => {
+            compile_group(
+                $child_group_id,
+                Some(group_id),
+                $child_container,
+                builder,
+                visible_types,
+                &local_var_types,
+                $child_while_depth,
+                $allow_continue,
+            )
+        };
+    }
+
     builder.groups.insert(
         group_id.to_string(),
         ImplicitGroup {
@@ -913,28 +935,10 @@ fn compile_group(
                     location: child.location.clone(),
                 };
 
-                compile_group(
-                    &then_group_id,
-                    Some(group_id),
-                    &then_container,
-                    builder,
-                    visible_types,
-                    &local_var_types,
-                    while_depth,
-                    false,
-                )?;
+                compile_child_group!(&then_group_id, &then_container, while_depth, false)?;
 
                 if let Some(else_child) = else_node {
-                    compile_group(
-                        &else_group_id,
-                        Some(group_id),
-                        else_child,
-                        builder,
-                        visible_types,
-                        &local_var_types,
-                        while_depth,
-                        false,
-                    )?;
+                    compile_child_group!(&else_group_id, else_child, while_depth, false)?;
                 } else {
                     builder.groups.insert(
                         else_group_id.clone(),
@@ -957,16 +961,7 @@ fn compile_group(
             }
             "while" => {
                 let body_group_id = builder.next_group_id();
-                compile_group(
-                    &body_group_id,
-                    Some(group_id),
-                    child,
-                    builder,
-                    visible_types,
-                    &local_var_types,
-                    while_depth + 1,
-                    false,
-                )?;
+                compile_child_group!(&body_group_id, child, while_depth + 1, false)?;
                 ScriptNode::While {
                     id: builder.next_node_id("while"),
                     when_expr: get_required_non_empty_attr(child, "when")?,
@@ -1003,16 +998,7 @@ fn compile_group(
                     }
 
                     let option_group_id = builder.next_group_id();
-                    compile_group(
-                        &option_group_id,
-                        Some(group_id),
-                        option,
-                        builder,
-                        visible_types,
-                        &local_var_types,
-                        while_depth,
-                        true,
-                    )?;
+                    compile_child_group!(&option_group_id, option, while_depth, true)?;
 
                     options.push(ChoiceOption {
                         id: builder.next_choice_id(),
@@ -1167,10 +1153,12 @@ fn compile_group(
             }
         };
 
-        if let Some(group) = builder.groups.get_mut(group_id) {
-            if group.entry_node_id.is_none() {
-                group.entry_node_id = Some(node_id(&node).to_string());
-            }
+        let group = builder
+            .groups
+            .get_mut(group_id)
+            .expect("group should exist when compiling nodes");
+        if group.entry_node_id.is_none() {
+            group.entry_node_id = Some(node_id(&node).to_string());
         }
 
         nodes.push(node);
@@ -1261,13 +1249,6 @@ fn parse_script_args(
 
         let type_raw = normalized[..separator].trim();
         let name = normalized[separator + 1..].trim();
-        if name.is_empty() {
-            return Err(ScriptLangError::with_span(
-                "SCRIPT_ARGS_PARSE_ERROR",
-                format!("Invalid script args segment: \"{}\".", segment),
-                root.location.clone(),
-            ));
-        }
 
         assert_name_not_reserved(name, "script arg", root.location.clone())?;
         if !names.insert(name.to_string()) {
@@ -1395,18 +1376,16 @@ fn parse_type_expr(raw: &str, span: &SourceSpan) -> Result<ParsedTypeExpr, Scrip
     }
 
     if let Some(stripped) = source.strip_suffix("[]") {
-        return Ok(ParsedTypeExpr::Array(Box::new(parse_type_expr(
-            stripped, span,
-        )?)));
+        let element_type = parse_type_expr(stripped, span)?;
+        return Ok(ParsedTypeExpr::Array(Box::new(element_type)));
     }
 
-    if let Some(inner) = source.strip_prefix("Map<string,") {
-        if let Some(value) = inner.strip_suffix('>') {
-            return Ok(ParsedTypeExpr::Map(Box::new(parse_type_expr(
-                value.trim(),
-                span,
-            )?)));
-        }
+    if let Some(value) = source
+        .strip_prefix("Map<string,")
+        .and_then(|inner| inner.strip_suffix('>'))
+    {
+        let value_type = parse_type_expr(value.trim(), span)?;
+        return Ok(ParsedTypeExpr::Map(Box::new(value_type)));
     }
 
     let custom_regex = Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").expect("type regex must compile");
@@ -1610,10 +1589,14 @@ fn element_children(node: &XmlElementNode) -> impl Iterator<Item = &XmlElementNo
 }
 
 fn has_any_child_content(node: &XmlElementNode) -> bool {
-    node.children.iter().any(|entry| match entry {
-        XmlNode::Element(_) => true,
-        XmlNode::Text(text) => !text.value.trim().is_empty(),
-    })
+    for entry in &node.children {
+        match entry {
+            XmlNode::Element(_) => return true,
+            XmlNode::Text(text) if !text.value.trim().is_empty() => return true,
+            XmlNode::Text(_) => {}
+        }
+    }
+    false
 }
 
 fn get_optional_attr(node: &XmlElementNode, name: &str) -> Option<String> {
@@ -1834,10 +1817,11 @@ fn slvalue_from_json(value: JsonValue) -> SlValue {
 }
 
 pub fn default_values_from_script_params(params: &[ScriptParam]) -> BTreeMap<String, SlValue> {
-    params
-        .iter()
-        .map(|param| (param.name.clone(), default_value_from_type(&param.r#type)))
-        .collect()
+    let mut defaults = BTreeMap::new();
+    for param in params {
+        defaults.insert(param.name.clone(), default_value_from_type(&param.r#type));
+    }
+    defaults
 }
 
 #[cfg(test)]
@@ -1961,11 +1945,7 @@ mod tests {
                 .expect("read sources should pass");
             let compiled =
                 compile_project_bundle_from_xml_map(&files).expect("example should compile");
-            assert!(
-                !compiled.scripts.is_empty(),
-                "compiled scripts should not be empty for {}",
-                directory.display()
-            );
+            assert!(!compiled.scripts.is_empty());
         }
     }
 
@@ -2100,6 +2080,10 @@ mod tests {
             "shared.defs.xml"
         );
         assert_eq!(
+            resolve_include_path("/", "shared/main.script.xml"),
+            "shared/main.script.xml"
+        );
+        assert_eq!(
             normalize_virtual_path("./a/./b/../c\\d.script.xml"),
             "a/c/d.script.xml"
         );
@@ -2132,6 +2116,18 @@ mod tests {
         ]))
         .expect_err("duplicate symbol should fail");
         assert_eq!(duplicate.code, "JSON_SYMBOL_DUPLICATE");
+
+        let missing_sources = BTreeMap::from([(
+            "broken.json".to_string(),
+            SourceFile {
+                kind: SourceKind::Json,
+                includes: Vec::new(),
+                xml_root: None,
+                json_value: None,
+            },
+        )]);
+        let missing = collect_global_json(&missing_sources).expect_err("missing value");
+        assert_eq!(missing.code, "JSON_MISSING_VALUE");
     }
 
     #[test]
@@ -2214,6 +2210,214 @@ mod tests {
     }
 
     #[test]
+    fn resolve_visible_defs_builds_function_signatures() {
+        let span = SourceSpan::synthetic();
+        let defs = DefsDeclarations {
+            type_decls: vec![ParsedTypeDecl {
+                name: "Obj".to_string(),
+                fields: vec![ParsedTypeFieldDecl {
+                    name: "value".to_string(),
+                    type_expr: ParsedTypeExpr::Primitive("number".to_string()),
+                    location: span.clone(),
+                }],
+                location: span.clone(),
+            }],
+            function_decls: vec![ParsedFunctionDecl {
+                name: "make".to_string(),
+                params: vec![ParsedFunctionParamDecl {
+                    name: "seed".to_string(),
+                    type_expr: ParsedTypeExpr::Primitive("number".to_string()),
+                    location: span.clone(),
+                }],
+                return_binding: ParsedFunctionParamDecl {
+                    name: "ret".to_string(),
+                    type_expr: ParsedTypeExpr::Custom("Obj".to_string()),
+                    location: span.clone(),
+                },
+                code: "ret = #{value: seed};".to_string(),
+                location: span.clone(),
+            }],
+        };
+
+        let reachable = BTreeSet::from(["shared.defs.xml".to_string()]);
+        let defs_by_path = BTreeMap::from([("shared.defs.xml".to_string(), defs)]);
+
+        let (types, functions) =
+            resolve_visible_defs(&reachable, &defs_by_path).expect("defs should resolve");
+        assert!(types.contains_key("Obj"));
+        let function = functions.get("make").expect("function should exist");
+        assert_eq!(function.params.len(), 1);
+        assert!(matches!(
+            function.return_binding.r#type,
+            ScriptType::Object { .. }
+        ));
+    }
+
+    #[test]
+    fn type_resolution_helpers_cover_nested_array_and_map_paths() {
+        let span = SourceSpan::synthetic();
+        let mut resolved = BTreeMap::new();
+        let mut visiting = HashSet::new();
+        let type_map = BTreeMap::from([(
+            "Obj".to_string(),
+            ParsedTypeDecl {
+                name: "Obj".to_string(),
+                fields: vec![ParsedTypeFieldDecl {
+                    name: "n".to_string(),
+                    type_expr: ParsedTypeExpr::Primitive("number".to_string()),
+                    location: span.clone(),
+                }],
+                location: span.clone(),
+            },
+        )]);
+
+        let array = resolve_type_expr_with_lookup(
+            &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Custom("Obj".to_string()))),
+            &type_map,
+            &mut resolved,
+            &mut visiting,
+            &span,
+        )
+        .expect("array custom type should resolve");
+        assert!(matches!(array, ScriptType::Array { .. }));
+
+        let map = resolve_type_expr_with_lookup(
+            &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Custom("Obj".to_string()))),
+            &type_map,
+            &mut resolved,
+            &mut visiting,
+            &span,
+        )
+        .expect("map custom type should resolve");
+        assert!(matches!(map, ScriptType::Map { .. }));
+
+        let array_err = resolve_type_expr_with_lookup(
+            &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Custom("Missing".to_string()))),
+            &type_map,
+            &mut resolved,
+            &mut visiting,
+            &span,
+        )
+        .expect_err("unknown array element type should fail");
+        assert_eq!(array_err.code, "TYPE_UNKNOWN");
+
+        let map_err = resolve_type_expr_with_lookup(
+            &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Custom("Missing".to_string()))),
+            &type_map,
+            &mut resolved,
+            &mut visiting,
+            &span,
+        )
+        .expect_err("unknown map value type should fail");
+        assert_eq!(map_err.code, "TYPE_UNKNOWN");
+
+        let nested = parse_type_expr("Map<string,number[]>", &span).expect("type should parse");
+        assert!(matches!(nested, ParsedTypeExpr::Map(_)));
+
+        let type_node = xml_element(
+            "type",
+            &[("name", "Bag")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("name", "values"), ("type", "Map<string,number[]>")],
+                Vec::new(),
+            ))],
+        );
+        let parsed = parse_type_declaration_node(&type_node).expect("type node should parse");
+        assert_eq!(parsed.fields.len(), 1);
+    }
+
+    #[test]
+    fn parse_function_return_and_type_expr_success_paths_are_covered() {
+        let function_node = xml_element(
+            "function",
+            &[("name", "f"), ("return", "number:out")],
+            vec![xml_text("out = 1;")],
+        );
+        let parsed_return = parse_function_return(&function_node).expect("return should parse");
+        assert_eq!(parsed_return.name, "out");
+
+        let span = SourceSpan::synthetic();
+        assert!(matches!(
+            parse_type_expr("number[]", &span).expect("array should parse"),
+            ParsedTypeExpr::Array(_)
+        ));
+        assert!(matches!(
+            parse_type_expr("Map<string,number>", &span).expect("map should parse"),
+            ParsedTypeExpr::Map(_)
+        ));
+    }
+
+    #[test]
+    fn compile_group_recurses_for_if_while_and_choice_children() {
+        let mut builder = GroupBuilder::new("recursive.script.xml");
+        let root_group = builder.next_group_id();
+        let container = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![
+                XmlNode::Element(xml_element(
+                    "if",
+                    &[("when", "true")],
+                    vec![
+                        XmlNode::Element(xml_element("text", &[], vec![xml_text("A")])),
+                        XmlNode::Element(xml_element(
+                            "else",
+                            &[],
+                            vec![XmlNode::Element(xml_element(
+                                "text",
+                                &[],
+                                vec![xml_text("B")],
+                            ))],
+                        )),
+                    ],
+                )),
+                XmlNode::Element(xml_element(
+                    "while",
+                    &[("when", "false")],
+                    vec![XmlNode::Element(xml_element(
+                        "text",
+                        &[],
+                        vec![xml_text("W")],
+                    ))],
+                )),
+                XmlNode::Element(xml_element(
+                    "choice",
+                    &[("text", "Pick")],
+                    vec![XmlNode::Element(xml_element(
+                        "option",
+                        &[("text", "O")],
+                        vec![XmlNode::Element(xml_element(
+                            "text",
+                            &[],
+                            vec![xml_text("X")],
+                        ))],
+                    ))],
+                )),
+            ],
+        );
+
+        compile_group(
+            &root_group,
+            None,
+            &container,
+            &mut builder,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            0,
+            false,
+        )
+        .expect("group should compile");
+
+        let group = builder
+            .groups
+            .get(&root_group)
+            .expect("root group should exist");
+        assert!(group.entry_node_id.is_some());
+        assert_eq!(group.nodes.len(), 3);
+    }
+
+    #[test]
     fn inline_bool_and_attr_helpers_cover_errors() {
         let node = xml_element("text", &[("value", "x")], vec![xml_text("ignored")]);
         let error = parse_inline_required(&node).expect_err("value attr forbidden");
@@ -2248,6 +2452,11 @@ mod tests {
             "x",
             &[],
             vec![xml_text(" t ")]
+        )));
+        assert!(!has_any_child_content(&xml_element(
+            "x",
+            &[],
+            vec![xml_text("   ")]
         )));
         assert!(split_by_top_level_comma("a, f(1,2), Map<string,number>, #{a:1,b:2}").len() >= 4);
     }
@@ -2614,10 +2823,453 @@ mod tests {
         ];
 
         for (name, files, expected_code) in cases {
-            match compile_project_bundle_from_xml_map(&files) {
-                Ok(_) => panic!("{} should fail but succeeded", name),
-                Err(error) => assert_eq!(error.code, expected_code, "case: {}", name),
-            }
+            let result = compile_project_bundle_from_xml_map(&files);
+            assert!(result.is_err(), "case should fail: {}", name);
+            let error = result.expect_err("error should exist");
+            assert_eq!(error.code, expected_code, "case: {}", name);
         }
+    }
+
+    #[test]
+    fn compiler_private_helpers_cover_remaining_paths() {
+        assert_eq!(
+            resolve_include_path("scripts/main.script.xml", "/shared.defs.xml"),
+            "shared.defs.xml"
+        );
+        let reachable = collect_reachable_files("missing.script.xml", &BTreeMap::new());
+        assert!(reachable.contains("missing.script.xml"));
+
+        let visible_empty = collect_visible_json_symbols(
+            &BTreeSet::from(["missing.json".to_string()]),
+            &BTreeMap::new(),
+        )
+        .expect("missing reachable entries should be skipped");
+        assert!(visible_empty.is_empty());
+
+        let mut sources = BTreeMap::new();
+        sources.insert(
+            "a/x.json".to_string(),
+            SourceFile {
+                kind: SourceKind::Json,
+                includes: Vec::new(),
+                xml_root: None,
+                json_value: Some(SlValue::Number(1.0)),
+            },
+        );
+        sources.insert(
+            "b/x.json".to_string(),
+            SourceFile {
+                kind: SourceKind::Json,
+                includes: Vec::new(),
+                xml_root: None,
+                json_value: Some(SlValue::Number(2.0)),
+            },
+        );
+        let duplicate_visible = collect_visible_json_symbols(
+            &BTreeSet::from(["a/x.json".to_string(), "b/x.json".to_string()]),
+            &sources,
+        )
+        .expect_err("duplicate visible json symbol should fail");
+        assert_eq!(duplicate_visible.code, "JSON_SYMBOL_DUPLICATE");
+
+        let invalid_file_name = parse_json_global_symbol("/").expect_err("invalid file name");
+        assert_eq!(invalid_file_name.code, "JSON_SYMBOL_INVALID");
+
+        let span = SourceSpan::synthetic();
+        let field = ParsedTypeFieldDecl {
+            name: "v".to_string(),
+            type_expr: ParsedTypeExpr::Primitive("number".to_string()),
+            location: span.clone(),
+        };
+        let mut type_map = BTreeMap::from([(
+            "A".to_string(),
+            ParsedTypeDecl {
+                name: "A".to_string(),
+                fields: vec![field.clone()],
+                location: span.clone(),
+            },
+        )]);
+        let mut resolved = BTreeMap::new();
+        let mut visiting = HashSet::new();
+        let _ = resolve_named_type("A", &type_map, &mut resolved, &mut visiting).expect("resolve");
+        let _ = resolve_named_type("A", &type_map, &mut resolved, &mut visiting)
+            .expect("resolved cache should be used");
+
+        let unknown = resolve_named_type(
+            "Missing",
+            &type_map,
+            &mut BTreeMap::new(),
+            &mut HashSet::new(),
+        )
+        .expect_err("unknown type should fail");
+        assert_eq!(unknown.code, "TYPE_UNKNOWN");
+
+        type_map.insert(
+            "Dup".to_string(),
+            ParsedTypeDecl {
+                name: "Dup".to_string(),
+                fields: vec![field.clone(), field],
+                location: span.clone(),
+            },
+        );
+        let duplicate_field =
+            resolve_named_type("Dup", &type_map, &mut BTreeMap::new(), &mut HashSet::new())
+                .expect_err("duplicate type field should fail");
+        assert_eq!(duplicate_field.code, "TYPE_FIELD_DUPLICATE");
+
+        let mut resolved_for_lookup = BTreeMap::new();
+        let mut visiting_for_lookup = HashSet::new();
+        let array_ty = resolve_type_expr_with_lookup(
+            &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Primitive("number".to_string()))),
+            &BTreeMap::new(),
+            &mut resolved_for_lookup,
+            &mut visiting_for_lookup,
+            &span,
+        )
+        .expect("array lookup should resolve");
+        assert!(matches!(array_ty, ScriptType::Array { .. }));
+        let map_ty = resolve_type_expr_with_lookup(
+            &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Primitive("string".to_string()))),
+            &BTreeMap::new(),
+            &mut resolved_for_lookup,
+            &mut visiting_for_lookup,
+            &span,
+        )
+        .expect("map lookup should resolve");
+        assert!(matches!(map_ty, ScriptType::Map { .. }));
+
+        let array = resolve_type_expr(
+            &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Primitive("number".to_string()))),
+            &BTreeMap::new(),
+            &span,
+        )
+        .expect("array should resolve");
+        assert!(matches!(array, ScriptType::Array { .. }));
+        let map_resolved = resolve_type_expr(
+            &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Primitive("number".to_string()))),
+            &BTreeMap::new(),
+            &span,
+        )
+        .expect("map should resolve");
+        assert!(matches!(map_resolved, ScriptType::Map { .. }));
+
+        let non_script_root = xml_element("defs", &[("name", "x")], Vec::new());
+        let compile_root_error = compile_script(
+            "x.script.xml",
+            &non_script_root,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+        )
+        .expect_err("compile_script should require script root");
+        assert_eq!(compile_root_error.code, "XML_ROOT_INVALID");
+
+        let rich_script = map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <if when="true">
+    <text>A</text>
+    <else><text>B</text></else>
+  </if>
+  <while when="false">
+    <text>W</text>
+  </while>
+  <choice text="Pick">
+    <option text="O"><text>X</text></option>
+  </choice>
+</script>
+"#,
+        )]);
+        let compiled =
+            compile_project_bundle_from_xml_map(&rich_script).expect("compile should pass");
+        let main = compiled.scripts.get("main").expect("main script");
+        let root_group = main.groups.get(&main.root_group_id).expect("root group");
+        assert!(root_group
+            .nodes
+            .iter()
+            .any(|node| matches!(node, ScriptNode::While { .. })));
+        assert!(root_group
+            .nodes
+            .iter()
+            .any(|node| matches!(node, ScriptNode::Input { .. })
+                || matches!(node, ScriptNode::Call { .. })
+                || matches!(node, ScriptNode::If { .. })));
+
+        let defs_resolution = map(&[
+            (
+                "shared.defs.xml",
+                r#"
+<defs name="shared">
+  <type name="Obj">
+    <field name="values" type="Map&lt;string,number[]&gt;"/>
+  </type>
+  <function name="build" return="Obj:r">
+    r = #{values: #{a: [1]}};
+  </function>
+</defs>
+"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="main">
+  <var name="x" type="Obj"/>
+</script>
+"#,
+            ),
+        ]);
+        let _ = compile_project_bundle_from_xml_map(&defs_resolution)
+            .expect("defs return/field type resolution should pass");
+
+        let mut builder_ok = GroupBuilder::new("manual.script.xml");
+        let root_ok = builder_ok.next_group_id();
+        let complex_container = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![
+                XmlNode::Element(xml_element(
+                    "if",
+                    &[("when", "true")],
+                    vec![
+                        XmlNode::Element(xml_element("text", &[], vec![xml_text("A")])),
+                        XmlNode::Element(xml_element(
+                            "else",
+                            &[],
+                            vec![XmlNode::Element(xml_element(
+                                "text",
+                                &[],
+                                vec![xml_text("B")],
+                            ))],
+                        )),
+                    ],
+                )),
+                XmlNode::Element(xml_element(
+                    "while",
+                    &[("when", "false")],
+                    vec![XmlNode::Element(xml_element(
+                        "text",
+                        &[],
+                        vec![xml_text("W")],
+                    ))],
+                )),
+                XmlNode::Element(xml_element(
+                    "choice",
+                    &[("text", "Pick")],
+                    vec![XmlNode::Element(xml_element(
+                        "option",
+                        &[("text", "O")],
+                        vec![XmlNode::Element(xml_element(
+                            "text",
+                            &[],
+                            vec![xml_text("X")],
+                        ))],
+                    ))],
+                )),
+            ],
+        );
+        compile_group(
+            &root_ok,
+            None,
+            &complex_container,
+            &mut builder_ok,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            0,
+            false,
+        )
+        .expect("manual complex compile_group should pass");
+
+        let mut loop_builder = GroupBuilder::new("loop.script.xml");
+        let loop_group = loop_builder.next_group_id();
+        let loop_error = compile_group(
+            &loop_group,
+            None,
+            &xml_element(
+                "script",
+                &[("name", "main")],
+                vec![XmlNode::Element(xml_element(
+                    "loop",
+                    &[("times", "2")],
+                    vec![XmlNode::Element(xml_element(
+                        "text",
+                        &[],
+                        vec![xml_text("x")],
+                    ))],
+                ))],
+            ),
+            &mut loop_builder,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            0,
+            false,
+        )
+        .expect_err("loop should have been expanded");
+        assert_eq!(loop_error.code, "XML_LOOP_INTERNAL");
+
+        let while_node = ScriptNode::While {
+            id: "w1".to_string(),
+            when_expr: "true".to_string(),
+            body_group_id: "g".to_string(),
+            location: SourceSpan::synthetic(),
+        };
+        let while_id = node_id(&while_node);
+        assert_eq!(while_id, "w1");
+        let input_node = ScriptNode::Input {
+            id: "i1".to_string(),
+            target_var: "name".to_string(),
+            prompt_text: "p".to_string(),
+            location: SourceSpan::synthetic(),
+        };
+        let input_id = node_id(&input_node);
+        assert_eq!(input_id, "i1");
+        let call_node = ScriptNode::Call {
+            id: "c1".to_string(),
+            target_script: "main".to_string(),
+            args: Vec::new(),
+            location: SourceSpan::synthetic(),
+        };
+        let call_id = node_id(&call_node);
+        assert_eq!(call_id, "c1");
+
+        let empty_args = parse_script_args(
+            &xml_element("script", &[("args", "   ")], Vec::new()),
+            &BTreeMap::new(),
+        )
+        .expect("empty script args should be accepted");
+        assert!(empty_args.is_empty());
+        let args_with_empty_segment = parse_script_args(
+            &xml_element("script", &[("args", "number:a,,number:b")], Vec::new()),
+            &BTreeMap::new(),
+        )
+        .expect("empty arg segment should be ignored");
+        assert_eq!(args_with_empty_segment.len(), 2);
+        let args_bad_start = parse_script_args(
+            &xml_element("script", &[("args", ":a")], Vec::new()),
+            &BTreeMap::new(),
+        )
+        .expect_err("bad args should fail");
+        assert_eq!(args_bad_start.code, "SCRIPT_ARGS_PARSE_ERROR");
+        let args_bad_end = parse_script_args(
+            &xml_element("script", &[("args", "number:")], Vec::new()),
+            &BTreeMap::new(),
+        )
+        .expect_err("bad args should fail");
+        assert_eq!(args_bad_end.code, "SCRIPT_ARGS_PARSE_ERROR");
+        let args_empty_name = parse_script_args(
+            &xml_element("script", &[("args", "number:   ")], Vec::new()),
+            &BTreeMap::new(),
+        )
+        .expect_err("empty script arg name should fail");
+        assert_eq!(args_empty_name.code, "SCRIPT_ARGS_PARSE_ERROR");
+
+        let empty_fn_args = parse_function_args(&xml_element(
+            "function",
+            &[("name", "f"), ("args", "   "), ("return", "number:r")],
+            vec![xml_text("r = 1;")],
+        ))
+        .expect("empty function args should be accepted");
+        assert!(empty_fn_args.is_empty());
+        let fn_args_bad_start = parse_function_args(&xml_element(
+            "function",
+            &[("name", "f"), ("args", ":a"), ("return", "number:r")],
+            vec![xml_text("r = 1;")],
+        ))
+        .expect_err("bad function args should fail");
+        assert_eq!(fn_args_bad_start.code, "FUNCTION_ARGS_PARSE_ERROR");
+        let fn_args_bad_end = parse_function_args(&xml_element(
+            "function",
+            &[("name", "f"), ("args", "number:"), ("return", "number:r")],
+            vec![xml_text("r = 1;")],
+        ))
+        .expect_err("bad function args should fail");
+        assert_eq!(fn_args_bad_end.code, "FUNCTION_ARGS_PARSE_ERROR");
+        let fn_args_dup = parse_function_args(&xml_element(
+            "function",
+            &[
+                ("name", "f"),
+                ("args", "number:a,number:a"),
+                ("return", "number:r"),
+            ],
+            vec![xml_text("r = 1;")],
+        ))
+        .expect_err("duplicate function args should fail");
+        assert_eq!(fn_args_dup.code, "FUNCTION_ARGS_DUPLICATE");
+        let fn_args_no_colon = parse_function_args(&xml_element(
+            "function",
+            &[("name", "f"), ("args", "number"), ("return", "number:r")],
+            vec![xml_text("r = 1;")],
+        ))
+        .expect_err("function arg without colon should fail");
+        assert_eq!(fn_args_no_colon.code, "FUNCTION_ARGS_PARSE_ERROR");
+
+        let ret_no_colon = parse_function_return(&xml_element(
+            "function",
+            &[("name", "f"), ("return", "number")],
+            vec![xml_text("x")],
+        ))
+        .expect_err("return parse should fail");
+        assert_eq!(ret_no_colon.code, "FUNCTION_RETURN_PARSE_ERROR");
+        let ret_bad_edge = parse_function_return(&xml_element(
+            "function",
+            &[("name", "f"), ("return", "number:")],
+            vec![xml_text("x")],
+        ))
+        .expect_err("return parse should fail");
+        assert_eq!(ret_bad_edge.code, "FUNCTION_RETURN_PARSE_ERROR");
+
+        let empty_call_args = parse_args(Some("   ".to_string())).expect("empty call args");
+        assert!(empty_call_args.is_empty());
+        let _ = parse_type_expr("number[]", &SourceSpan::synthetic()).expect("array parse");
+        let _ =
+            parse_type_expr("Map<string, number>", &SourceSpan::synthetic()).expect("map parse");
+        let _ = parse_type_expr("Map<string, number[]>", &SourceSpan::synthetic())
+            .expect("nested map/array parse");
+
+        let inline = inline_text_content(&xml_element(
+            "x",
+            &[],
+            vec![XmlNode::Element(xml_element("y", &[], Vec::new()))],
+        ));
+        assert!(inline.is_empty());
+
+        let split = split_by_top_level_comma("'a,b',[1,2],{k:1}");
+        assert_eq!(split.len(), 3);
+
+        assert!(has_any_child_content(&xml_element(
+            "x",
+            &[],
+            vec![XmlNode::Element(xml_element("y", &[], Vec::new()))]
+        )));
+
+        let mut declared = BTreeSet::new();
+        collect_declared_var_names(
+            &xml_element("var", &[("name", "")], Vec::new()),
+            &mut declared,
+        );
+        assert!(declared.is_empty());
+        collect_declared_var_names(&xml_element("var", &[], Vec::new()), &mut declared);
+        assert!(declared.is_empty());
+        validate_reserved_prefix_in_user_var_declarations(&xml_element(
+            "var",
+            &[("name", "")],
+            Vec::new(),
+        ))
+        .expect("empty var name should be ignored");
+        validate_reserved_prefix_in_user_var_declarations(&xml_element("var", &[], Vec::new()))
+            .expect("var without name should be ignored");
+
+        let mut context = MacroExpansionContext {
+            used_var_names: BTreeSet::from([format!("{}{}_remaining", LOOP_TEMP_VAR_PREFIX, 0)]),
+            loop_counter: 0,
+        };
+        let generated = next_loop_temp_var_name(&mut context);
+        assert!(generated.ends_with("_remaining"));
+
+        assert_eq!(
+            slvalue_from_json(JsonValue::Null),
+            SlValue::String("null".to_string())
+        );
     }
 }

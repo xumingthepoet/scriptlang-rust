@@ -41,7 +41,7 @@
 - `cargo fmt --all -- --check`
 - `cargo clippy --all-targets --all-features -- -D warnings`
 - `cargo test --all-targets --all-features`
-- `cargo llvm-cov --workspace --all-features --summary-only --fail-under-lines 100`
+- `cargo tarpaulin --engine llvm --workspace --all-features --all-targets --rustflags=--cfg=coverage --out Stdout --fail-under 100`
 - `make gate`
 
 ## 完成定义（DoD）

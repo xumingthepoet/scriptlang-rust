@@ -122,20 +122,20 @@ mod tests {
 
     #[test]
     fn parse_xml_document_builds_tree_with_attributes_and_text() {
-        let source = r#"<script name="main"><text id="t1">Hello</text></script>"#;
+        let source = r#"<script name="main">prefix<text id="t1"><inner/>Hello</text></script>"#;
         let document = parse_xml_document(source).expect("xml should parse");
         assert_eq!(document.root.name, "script");
         assert_eq!(
             document.root.attributes.get("name"),
             Some(&"main".to_string())
         );
-        assert_eq!(document.root.children.len(), 1);
+        assert_eq!(document.root.children.len(), 2);
 
         let text_node = document
             .root
             .children
-            .first()
-            .and_then(|node| match node {
+            .iter()
+            .find_map(|node| match node {
                 XmlNode::Element(node) => Some(node),
                 XmlNode::Text(_) => None,
             })
@@ -145,8 +145,8 @@ mod tests {
 
         let text_value = text_node
             .children
-            .first()
-            .and_then(|node| match node {
+            .iter()
+            .find_map(|node| match node {
                 XmlNode::Text(value) => Some(value),
                 XmlNode::Element(_) => None,
             })

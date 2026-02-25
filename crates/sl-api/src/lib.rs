@@ -142,6 +142,24 @@ mod tests {
     }
 
     #[test]
+    fn compile_project_from_xml_map_accepts_explicit_entry() {
+        let scripts = map(&[
+            (
+                "main.script.xml",
+                r#"<script name="main"><text>Main</text></script>"#,
+            ),
+            (
+                "alt.script.xml",
+                r#"<script name="alt"><text>Alt</text></script>"#,
+            ),
+        ]);
+        let project = compile_project_from_xml_map(&scripts, Some("alt".to_string()))
+            .expect("compile should pass with explicit entry");
+        assert_eq!(project.entry_script, "alt");
+        assert!(project.scripts.contains_key("alt"));
+    }
+
+    #[test]
     fn compile_project_from_xml_map_returns_error_for_missing_explicit_entry() {
         let scripts = map(&[(
             "foo.script.xml",

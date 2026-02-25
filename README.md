@@ -18,7 +18,7 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 - `cargo qa`: `cargo fmt --all -- --check`
 - `cargo qc`: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 - `cargo qt`: `cargo test --workspace --all-targets --all-features`
-- `cargo llvm-cov --workspace --all-features --summary-only --fail-under-lines 100`: coverage gate.
+- `cargo tarpaulin --engine llvm --workspace --all-features --all-targets --rustflags=--cfg=coverage --out Stdout --fail-under 100`: coverage gate.
 - `make gate`: `check + fmt + clippy + test + coverage`.
 
 ## CLI Usage

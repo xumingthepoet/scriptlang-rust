@@ -355,3 +355,32 @@ fn tui_input_loop_continue_path_is_exercised() {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("[END]"));
 }
+
+#[test]
+fn tui_input_command_refresh_and_quit_paths_are_covered() {
+    let bin = env!("CARGO_BIN_EXE_sl-cli");
+    let scenario = examples_root().join("16-input-name");
+
+    let mut child = Command::new(bin)
+        .arg("tui")
+        .arg("--scripts-dir")
+        .arg(scenario.to_str().expect("path should be utf-8"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("tui should spawn");
+
+    {
+        let stdin = child.stdin.as_mut().expect("stdin should be piped");
+        stdin
+            .write_all(b":restart\n:quit\n")
+            .expect("should write command sequence");
+    }
+
+    let output = child.wait_with_output().expect("tui should finish");
+    assert!(output.status.success(), "tui should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("restarted"));
+    assert!(stdout.contains("bye"));
+}
