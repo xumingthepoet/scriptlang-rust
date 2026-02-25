@@ -2615,11 +2615,18 @@ mod tests {
         engine.start("main", None).expect("start");
 
         // lookup_group: script missing
-        let key = engine.group_lookup.keys().next().expect("group key").to_string();
+        let key = engine
+            .group_lookup
+            .keys()
+            .next()
+            .expect("group key")
+            .to_string();
         if let Some(lookup) = engine.group_lookup.get_mut(&key) {
             lookup.script_name = "missing".to_string();
         }
-        let error = engine.lookup_group(&key).expect_err("script should be missing");
+        let error = engine
+            .lookup_group(&key)
+            .expect_err("script should be missing");
         assert_eq!(error.code, "ENGINE_SCRIPT_NOT_FOUND");
 
         // restore engine for following checks
@@ -2628,11 +2635,18 @@ mod tests {
             r#"<script name="main"><text>Hello</text></script>"#,
         )]));
         engine.start("main", None).expect("start");
-        let key = engine.group_lookup.keys().next().expect("group key").to_string();
+        let key = engine
+            .group_lookup
+            .keys()
+            .next()
+            .expect("group key")
+            .to_string();
         if let Some(lookup) = engine.group_lookup.get_mut(&key) {
             lookup.group_id = "missing-group".to_string();
         }
-        let error = engine.lookup_group(&key).expect_err("group should be missing");
+        let error = engine
+            .lookup_group(&key)
+            .expect_err("group should be missing");
         assert_eq!(error.code, "ENGINE_GROUP_NOT_FOUND");
 
         // execute_continue_while: while body at index 0 has no owner
@@ -2682,7 +2696,9 @@ mod tests {
                 var_types: BTreeMap::new(),
             },
         ];
-        let error = engine.execute_break().expect_err("while owner node missing");
+        let error = engine
+            .execute_break()
+            .expect_err("while owner node missing");
         assert_eq!(error.code, "ENGINE_WHILE_CONTROL_TARGET_MISSING");
 
         // execute_continue_choice without choice context
@@ -2759,5 +2775,106 @@ mod tests {
         engine.start("main", None).expect("start");
         let error = engine.next().expect_err("arg type mismatch should fail");
         assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
+    }
+
+    #[test]
+    fn if_else_branch_covered_when_condition_false() {
+        // Test else branch when condition evaluates to false
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <var name="hp" type="number" value="1"/>
+  <if when="hp > 2">
+    <text>strong</text>
+    <else>
+      <text>weak</text>
+    </else>
+  </if>
+</script>
+"#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        let output = engine.next().expect("next should pass");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "weak"));
+    }
+
+    #[test]
+    fn while_loop_condition_false_covered() {
+        // Test while loop when condition is initially false
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <var name="hp" type="number" value="0"/>
+  <while when="hp > 0">
+    <code>hp = hp - 1;</code>
+  </while>
+  <text>done</text>
+</script>
+"#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        // Should skip while loop and go directly to "done"
+        let output = engine.next().expect("next should pass");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "done"));
+    }
+
+    #[test]
+    fn choice_with_no_visible_options_covered() {
+        // Test choice when all options have once=True and have been used
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A" once="true"><text>A</text></option>
+    <option text="B" once="true"><text>B</text></option>
+  </choice>
+  <text>end</text>
+</script>
+"#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        // First time: show choice
+        let first = engine.next().expect("next should pass");
+        assert!(matches!(first, EngineOutput::Choices { .. }));
+
+        // Choose option A
+        engine.choose(0).expect("choose should pass");
+
+        // After choice, should output A then move to end
+        let output = engine.next().expect("next should pass");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "A"));
+
+        // Now go back to choice - both options have once=True and were used, should skip
+        let output = engine.next().expect("next should pass");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "end"));
+    }
+
+    #[test]
+    fn nested_script_calls_covered() {
+        // Test nested script calls
+        let mut engine = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+<script name="main">
+  <call script="greeting"/>
+</script>
+"#,
+            ),
+            (
+                "greeting.script.xml",
+                r#"<script name="greeting"><text>Hi</text></script>"#,
+            ),
+        ]));
+        engine.start("main", None).expect("start");
+
+        let output = engine.next().expect("next should pass");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "Hi"));
     }
 }

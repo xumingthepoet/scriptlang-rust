@@ -1194,4 +1194,54 @@ mod tests {
         let code = emit_error(ScriptLangError::new("ERR", "failed"));
         assert_eq!(code, 1);
     }
+
+    #[test]
+    fn load_source_by_scripts_dir_works() {
+        let root = temp_path("scripts-dir-test");
+        fs::create_dir_all(&root).expect("root");
+        write_file(
+            &root.join("main.script.xml"),
+            r#"<script name="main"><text>Hello</text></script>"#,
+        );
+
+        let loaded =
+            load_source_by_scripts_dir(&root.to_string_lossy(), "main").expect("load should pass");
+        assert!(loaded.id.starts_with("scripts-dir:"));
+        assert_eq!(loaded.entry_script, "main");
+        assert!(loaded.scripts_xml.contains_key("main.script.xml"));
+    }
+
+    #[test]
+    fn load_source_by_scripts_dir_with_nested_entry() {
+        let root = temp_path("scripts-dir-nested");
+        fs::create_dir_all(&root).expect("root");
+        write_file(
+            &root.join("game.script.xml"),
+            r#"<script name="game"><text>Game</text></script>"#,
+        );
+
+        let loaded =
+            load_source_by_scripts_dir(&root.to_string_lossy(), "game").expect("load should pass");
+        assert_eq!(loaded.entry_script, "game");
+    }
+
+    #[test]
+    fn load_source_by_ref_validates_prefix() {
+        let error = load_source_by_ref("invalid").expect_err("no prefix should fail");
+        assert_eq!(error.code, "CLI_SOURCE_REF_INVALID");
+
+        let error = load_source_by_ref("").expect_err("empty ref should fail");
+        assert_eq!(error.code, "CLI_SOURCE_REF_INVALID");
+    }
+
+    #[test]
+    fn make_scripts_dir_scenario_id_generates_consistent_ids() {
+        let root = temp_path("scenario-id-test");
+        fs::create_dir_all(&root).expect("root");
+
+        let id1 = make_scripts_dir_scenario_id(&root);
+        let id2 = make_scripts_dir_scenario_id(&root);
+        assert_eq!(id1, id2);
+        assert!(id1.starts_with("scripts-dir:"));
+    }
 }
