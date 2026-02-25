@@ -1,4 +1,4 @@
-.PHONY: check fmt lint test gate
+.PHONY: check docs fmt lint test coverage gate
 
 check:
 	cargo qk
@@ -12,4 +12,7 @@ lint:
 test:
 	cargo qt
 
-gate: fmt lint test
+coverage:
+	cargo llvm-cov --workspace --all-features --summary-only --fail-under-lines 20
+
+gate: check fmt lint test coverage

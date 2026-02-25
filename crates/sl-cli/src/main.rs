@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use clap::{Args, Parser, Subcommand};
@@ -25,6 +26,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Mode {
     Agent(AgentArgs),
+    Tui(TuiArgs),
 }
 
 #[derive(Debug, Args)]
@@ -68,6 +70,16 @@ struct InputArgs {
     text: String,
     #[arg(long = "state-out")]
     state_out: String,
+}
+
+#[derive(Debug, Args)]
+struct TuiArgs {
+    #[arg(long = "scripts-dir")]
+    scripts_dir: String,
+    #[arg(long = "entry-script")]
+    entry_script: Option<String>,
+    #[arg(long = "state-file")]
+    state_file: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -116,6 +128,7 @@ fn main() {
 fn run(cli: Cli) -> Result<i32, ScriptLangError> {
     match cli.command {
         Mode::Agent(args) => run_agent(args),
+        Mode::Tui(args) => run_tui(args),
     }
 }
 
@@ -125,6 +138,160 @@ fn run_agent(args: AgentArgs) -> Result<i32, ScriptLangError> {
         AgentCommand::Choose(args) => run_choose(args),
         AgentCommand::Input(args) => run_input(args),
     }
+}
+
+fn run_tui(args: TuiArgs) -> Result<i32, ScriptLangError> {
+    let entry_script = args.entry_script.unwrap_or_else(|| "main".to_string());
+    let state_file = args
+        .state_file
+        .unwrap_or_else(|| ".scriptlang/save.json".to_string());
+    let scenario = load_source_by_scripts_dir(&args.scripts_dir, &entry_script)?;
+    let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
+        scripts_xml: scenario.scripts_xml.clone(),
+        entry_script: Some(entry_script.clone()),
+        entry_args: None,
+        host_functions: None,
+        random_seed: None,
+        compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+    })?;
+
+    println!("ScriptLang TUI");
+    println!("commands: :help :save :load :restart :quit");
+
+    loop {
+        match engine.next()? {
+            EngineOutput::Text { text } => {
+                println!();
+                println!("{}", text);
+            }
+            EngineOutput::Choices { items, prompt_text } => {
+                println!();
+                if let Some(prompt_text) = prompt_text {
+                    println!("{}", prompt_text);
+                }
+                for item in &items {
+                    println!("  [{}] {}", item.index, item.text);
+                }
+                loop {
+                    let raw = prompt_input("> ")?;
+                    if handle_tui_command(
+                        raw.as_str(),
+                        &state_file,
+                        &scenario,
+                        &entry_script,
+                        &mut engine,
+                    )? {
+                        continue;
+                    }
+                    let choice = raw.parse::<usize>().map_err(|_| {
+                        ScriptLangError::new(
+                            "TUI_CHOICE_PARSE",
+                            format!("Invalid choice index: {}", raw),
+                        )
+                    })?;
+                    engine.choose(choice)?;
+                    break;
+                }
+            }
+            EngineOutput::Input {
+                prompt_text,
+                default_text,
+            } => {
+                println!();
+                println!("{}", prompt_text);
+                println!("(default: {})", default_text);
+                loop {
+                    let raw = prompt_input("> ")?;
+                    if handle_tui_command(
+                        raw.as_str(),
+                        &state_file,
+                        &scenario,
+                        &entry_script,
+                        &mut engine,
+                    )? {
+                        continue;
+                    }
+                    engine.submit_input(&raw)?;
+                    break;
+                }
+            }
+            EngineOutput::End => {
+                println!();
+                println!("[END]");
+                return Ok(0);
+            }
+        }
+    }
+}
+
+fn handle_tui_command(
+    raw: &str,
+    state_file: &str,
+    scenario: &LoadedScenario,
+    entry_script: &str,
+    engine: &mut sl_runtime::ScriptLangEngine,
+) -> Result<bool, ScriptLangError> {
+    match raw {
+        ":help" => {
+            println!("commands: :help :save :load :restart :quit");
+            Ok(true)
+        }
+        ":save" => {
+            let snapshot = engine.snapshot()?;
+            let state = PlayerStateV3 {
+                schema_version: PLAYER_STATE_SCHEMA.to_string(),
+                scenario_id: scenario.id.clone(),
+                compiler_version: DEFAULT_COMPILER_VERSION.to_string(),
+                snapshot,
+            };
+            save_player_state(Path::new(state_file), &state)?;
+            println!("saved: {}", state_file);
+            Ok(true)
+        }
+        ":load" => {
+            let state = load_player_state(Path::new(state_file))?;
+            let loaded = load_source_by_ref(&state.scenario_id)?;
+            let resumed = resume_engine_from_xml(ResumeEngineFromXmlOptions {
+                scripts_xml: loaded.scripts_xml,
+                snapshot: state.snapshot,
+                host_functions: None,
+                compiler_version: Some(state.compiler_version),
+            })?;
+            *engine = resumed;
+            println!("loaded: {}", state_file);
+            Ok(true)
+        }
+        ":restart" => {
+            let mut restarted = create_engine_from_xml(CreateEngineFromXmlOptions {
+                scripts_xml: scenario.scripts_xml.clone(),
+                entry_script: Some(entry_script.to_string()),
+                entry_args: None,
+                host_functions: None,
+                random_seed: None,
+                compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+            })?;
+            std::mem::swap(engine, &mut restarted);
+            println!("restarted");
+            Ok(true)
+        }
+        ":quit" => {
+            println!("bye");
+            std::process::exit(0);
+        }
+        _ => Ok(false),
+    }
+}
+
+fn prompt_input(prefix: &str) -> Result<String, ScriptLangError> {
+    print!("{}", prefix);
+    io::stdout()
+        .flush()
+        .map_err(|error| ScriptLangError::new("TUI_IO", error.to_string()))?;
+    let mut input = String::new();
+    io::stdin()
+        .read_line(&mut input)
+        .map_err(|error| ScriptLangError::new("TUI_IO", error.to_string()))?;
+    Ok(input.trim_end_matches(&['\r', '\n'][..]).to_string())
 }
 
 fn run_start(args: StartArgs) -> Result<i32, ScriptLangError> {
