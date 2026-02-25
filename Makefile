@@ -10,7 +10,7 @@ lint:
 	cargo qc
 
 test:
-	cargo qt
+	env -u LLVM_PROFILE_FILE cargo qt
 
 coverage:
 	bash scripts/gate.sh coverage

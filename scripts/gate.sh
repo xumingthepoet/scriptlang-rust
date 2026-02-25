@@ -96,20 +96,26 @@ run_coverage() {
   local start
   start="$(now_seconds)"
 
-  local log_file tmp_dir report_json
+  local log_file tmp_dir report_json tarpaulin_cwd
   log_file="$(mktemp)"
   tmp_dir="$(mktemp -d)"
   report_json="$tmp_dir/tarpaulin-report.json"
+  tarpaulin_cwd="$tmp_dir/run"
+  mkdir -p "$tarpaulin_cwd"
 
-  if cargo tarpaulin \
-    --engine llvm \
-    --workspace \
-    --all-features \
-    --all-targets \
-    --rustflags=--cfg=coverage \
-    --out Json \
-    --output-dir "$tmp_dir" \
-    --fail-under 100 >"$log_file" 2>&1; then
+  if (
+    cd "$tarpaulin_cwd" && \
+    env LLVM_PROFILE_FILE="$tmp_dir/build_rs_cov-%p-%m.profraw" cargo tarpaulin \
+      --manifest-path "$ROOT_DIR/Cargo.toml" \
+      --engine llvm \
+      --workspace \
+      --all-features \
+      --all-targets \
+      --rustflags=--cfg=coverage \
+      --out Json \
+      --output-dir "$tmp_dir" \
+      --fail-under 100
+  ) >"$log_file" 2>&1; then
     local end
     end="$(now_seconds)"
     print_ok "coverage" "$((end - start))"
@@ -135,7 +141,7 @@ run_gate() {
   run_step "check" cargo qk || return 1
   run_step "fmt" cargo qa || return 1
   run_step "lint" cargo qc || return 1
-  run_step "test" cargo qt || return 1
+  run_step "test" env -u LLVM_PROFILE_FILE cargo qt || return 1
   run_coverage || return 1
 
   local end
@@ -161,7 +167,7 @@ case "$TARGET" in
     run_step "lint" cargo qc
     ;;
   test)
-    run_step "test" cargo qt
+    run_step "test" env -u LLVM_PROFILE_FILE cargo qt
     ;;
   *)
     echo "Unknown target: $TARGET"

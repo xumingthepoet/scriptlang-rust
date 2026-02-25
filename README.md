@@ -18,7 +18,9 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 - `cargo qa`: `cargo fmt --all -- --check`
 - `cargo qc`: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 - `cargo qt`: `cargo test --workspace --all-targets --all-features`
+- `make test`: runs `cargo qt` with `LLVM_PROFILE_FILE` unset (avoid transient `*.profraw` in project root).
 - `cargo tarpaulin --engine llvm --workspace --all-features --all-targets --rustflags=--cfg=coverage --out Stdout --fail-under 100`: coverage gate.
+- `make coverage`: runs tarpaulin in a temp working dir and redirects `LLVM_PROFILE_FILE` to temp dir (avoid transient `*.profraw` in project root).
 - `make gate`: `check + fmt + clippy + test + coverage`.
 
 ## CLI Usage
