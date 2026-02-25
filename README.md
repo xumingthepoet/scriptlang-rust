@@ -44,6 +44,13 @@ cargo run -p sl-cli -- agent input --state-in /tmp/sl-next.json --text "Rin" --s
 cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/06-snapshot-flow
 ```
 
+`tui` mode uses a `ratatui + crossterm` full-screen interface on real terminals:
+- story panel + boundary panel + input/command panel
+- `Up/Down` to select choices, `Enter` to submit
+- command input supports `:help :save :load :restart :quit`
+
+When stdin/stdout is not a TTY (for example, piped in tests), it automatically falls back to the previous line-based interactive mode.
+
 All example entry commands:
 ```bash
 cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/01-text-code
@@ -64,7 +71,7 @@ cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/15-entry-override
 cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/16-input-name
 ```
 
-TUI supports built-in commands:
+TUI built-in commands:
 - `:help`
 - `:save`
 - `:load`

@@ -2089,7 +2089,10 @@ mod tests {
             detect_source_kind("a.defs.xml"),
             Some(SourceKind::DefsXml)
         ));
-        assert!(matches!(detect_source_kind("a.json"), Some(SourceKind::Json)));
+        assert!(matches!(
+            detect_source_kind("a.json"),
+            Some(SourceKind::Json)
+        ));
         assert!(detect_source_kind("a.txt").is_none());
 
         assert_eq!(
@@ -2186,7 +2189,11 @@ mod tests {
 
         let fn_node = xml_element(
             "function",
-            &[("name", "f"), ("args", "ref:number:a"), ("return", "number:r")],
+            &[
+                ("name", "f"),
+                ("args", "ref:number:a"),
+                ("return", "number:r"),
+            ],
             vec![xml_text("r = a;")],
         );
         let error = parse_function_declaration_node(&fn_node).expect_err("ref arg unsupported");
@@ -2194,11 +2201,15 @@ mod tests {
 
         let fn_bad_return = xml_element(
             "function",
-            &[("name", "f"), ("args", "number:a"), ("return", "ref:number:r")],
+            &[
+                ("name", "f"),
+                ("args", "number:a"),
+                ("return", "ref:number:r"),
+            ],
             vec![xml_text("r = a;")],
         );
-        let error = parse_function_declaration_node(&fn_bad_return)
-            .expect_err("ref return unsupported");
+        let error =
+            parse_function_declaration_node(&fn_bad_return).expect_err("ref return unsupported");
         assert_eq!(error.code, "XML_FUNCTION_RETURN_REF_UNSUPPORTED");
     }
 
@@ -2233,7 +2244,11 @@ mod tests {
                 .expect_err("empty attr");
         assert_eq!(empty_attr.code, "XML_EMPTY_ATTR");
 
-        assert!(has_any_child_content(&xml_element("x", &[], vec![xml_text(" t ")])));
+        assert!(has_any_child_content(&xml_element(
+            "x",
+            &[],
+            vec![xml_text(" t ")]
+        )));
         assert!(split_by_top_level_comma("a, f(1,2), Map<string,number>, #{a:1,b:2}").len() >= 4);
     }
 

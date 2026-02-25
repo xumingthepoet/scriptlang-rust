@@ -113,7 +113,10 @@ mod tests {
         let includes = parse_include_directives(source);
         assert_eq!(
             includes,
-            vec!["a.script.xml".to_string(), "nested/b.script.xml".to_string()]
+            vec![
+                "a.script.xml".to_string(),
+                "nested/b.script.xml".to_string()
+            ]
         );
     }
 
@@ -122,7 +125,10 @@ mod tests {
         let source = r#"<script name="main"><text id="t1">Hello</text></script>"#;
         let document = parse_xml_document(source).expect("xml should parse");
         assert_eq!(document.root.name, "script");
-        assert_eq!(document.root.attributes.get("name"), Some(&"main".to_string()));
+        assert_eq!(
+            document.root.attributes.get("name"),
+            Some(&"main".to_string())
+        );
         assert_eq!(document.root.children.len(), 1);
 
         let text_node = document
