@@ -197,7 +197,7 @@ mod tests {
         })
         .expect("engine should build");
 
-        let first = engine.next().expect("next should succeed");
+        let first = engine.next_output().expect("next should succeed");
         assert!(matches!(first, EngineOutput::Text { .. }));
     }
 
@@ -223,7 +223,7 @@ mod tests {
             compiler_version: Some("player.v1".to_string()),
         })
         .expect("engine should build");
-        let first = engine.next().expect("next should succeed");
+        let first = engine.next_output().expect("next should succeed");
         assert!(matches!(first, EngineOutput::Choices { .. }));
         let snapshot = engine.snapshot().expect("snapshot should succeed");
 
@@ -235,7 +235,7 @@ mod tests {
         })
         .expect("resume should succeed");
         resumed.choose(0).expect("choose should succeed");
-        let next = resumed.next().expect("next should succeed");
+        let next = resumed.next_output().expect("next should succeed");
         assert!(matches!(next, EngineOutput::Text { .. }));
     }
 }

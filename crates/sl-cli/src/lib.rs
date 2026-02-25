@@ -1,5 +1,3 @@
-#![allow(unexpected_cfgs)]
-
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
@@ -216,7 +214,7 @@ fn run_tui_line_mode_with_io(
     };
 
     loop {
-        match engine.next()? {
+        match engine.next_output()? {
             EngineOutput::Text { text } => {
                 println!();
                 println!("{}", text);
@@ -374,7 +372,7 @@ fn run_to_boundary(
     let mut texts = Vec::new();
 
     loop {
-        match engine.next()? {
+        match engine.next_output()? {
             EngineOutput::Text { text } => texts.push(text),
             EngineOutput::Choices { items, prompt_text } => {
                 return Ok(BoundaryResult {

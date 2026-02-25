@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "sl-cli"
 path = "src/main.rs"

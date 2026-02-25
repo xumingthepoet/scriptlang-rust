@@ -966,8 +966,7 @@ fn compile_script(
         &mut builder,
         visible_types,
         &visible_var_types,
-        0,
-        false,
+        CompileGroupMode::new(0, false),
     )?;
 
     let ir = ScriptIr {
@@ -1241,7 +1240,21 @@ fn contains_root_identifier(source: &str, symbol: &str) -> bool {
         .is_match(source)
 }
 
-#[allow(clippy::too_many_arguments)]
+#[derive(Debug, Clone, Copy)]
+struct CompileGroupMode {
+    while_depth: usize,
+    allow_option_direct_continue: bool,
+}
+
+impl CompileGroupMode {
+    fn new(while_depth: usize, allow_option_direct_continue: bool) -> Self {
+        Self {
+            while_depth,
+            allow_option_direct_continue,
+        }
+    }
+}
+
 fn compile_group(
     group_id: &str,
     parent_group_id: Option<&str>,
@@ -1249,8 +1262,7 @@ fn compile_group(
     builder: &mut GroupBuilder,
     visible_types: &BTreeMap<String, ScriptType>,
     visible_var_types: &BTreeMap<String, ScriptType>,
-    while_depth: usize,
-    allow_option_direct_continue: bool,
+    mode: CompileGroupMode,
 ) -> Result<(), ScriptLangError> {
     let mut local_var_types = visible_var_types.clone();
     let mut nodes = Vec::new();
@@ -1264,8 +1276,7 @@ fn compile_group(
                 builder,
                 visible_types,
                 &local_var_types,
-                $child_while_depth,
-                $allow_continue,
+                CompileGroupMode::new($child_while_depth, $allow_continue),
             )
         };
     }
@@ -1330,10 +1341,10 @@ fn compile_group(
                     location: child.location.clone(),
                 };
 
-                compile_child_group!(&then_group_id, &then_container, while_depth, false)?;
+                compile_child_group!(&then_group_id, &then_container, mode.while_depth, false)?;
 
                 if let Some(else_child) = else_node {
-                    compile_child_group!(&else_group_id, else_child, while_depth, false)?;
+                    compile_child_group!(&else_group_id, else_child, mode.while_depth, false)?;
                 } else {
                     builder.groups.insert(
                         else_group_id.clone(),
@@ -1356,7 +1367,7 @@ fn compile_group(
             }
             "while" => {
                 let body_group_id = builder.next_group_id();
-                compile_child_group!(&body_group_id, child, while_depth + 1, false)?;
+                compile_child_group!(&body_group_id, child, mode.while_depth + 1, false)?;
                 ScriptNode::While {
                     id: builder.next_node_id("while"),
                     when_expr: get_required_non_empty_attr(child, "when")?,
@@ -1393,7 +1404,7 @@ fn compile_group(
                     }
 
                     let option_group_id = builder.next_group_id();
-                    compile_child_group!(&option_group_id, option, while_depth, true)?;
+                    compile_child_group!(&option_group_id, option, mode.while_depth, true)?;
 
                     options.push(ChoiceOption {
                         id: builder.next_choice_id(),
@@ -1455,7 +1466,7 @@ fn compile_group(
                 }
             }
             "break" => {
-                if while_depth == 0 {
+                if mode.while_depth == 0 {
                     return Err(ScriptLangError::with_span(
                         "XML_BREAK_OUTSIDE_WHILE",
                         "<break/> is only valid inside <while>.",
@@ -1468,9 +1479,9 @@ fn compile_group(
                 }
             }
             "continue" => {
-                let target = if while_depth > 0 {
+                let target = if mode.while_depth > 0 {
                     ContinueTarget::While
-                } else if allow_option_direct_continue {
+                } else if mode.allow_option_direct_continue {
                     ContinueTarget::Choice
                 } else {
                     return Err(ScriptLangError::with_span(
@@ -3110,8 +3121,7 @@ mod tests {
             &mut builder,
             &BTreeMap::new(),
             &BTreeMap::new(),
-            0,
-            false,
+            CompileGroupMode::new(0, false),
         )
         .expect("group should compile");
 
@@ -3236,8 +3246,7 @@ mod tests {
             &mut builder,
             &visible_types,
             &local_var_types,
-            0,
-            false,
+            CompileGroupMode::new(0, false),
         )
         .expect_err("once on code should fail");
         assert_eq!(error.code, "XML_ATTR_NOT_ALLOWED");
@@ -3256,8 +3265,7 @@ mod tests {
             &mut builder,
             &visible_types,
             &local_var_types,
-            0,
-            false,
+            CompileGroupMode::new(0, false),
         )
         .expect_err("break outside while should fail");
         assert_eq!(error.code, "XML_BREAK_OUTSIDE_WHILE");
@@ -3276,8 +3284,7 @@ mod tests {
             &mut builder,
             &visible_types,
             &local_var_types,
-            0,
-            false,
+            CompileGroupMode::new(0, false),
         )
         .expect_err("continue outside while/option should fail");
         assert_eq!(error.code, "XML_CONTINUE_OUTSIDE_WHILE_OR_OPTION");
@@ -3300,8 +3307,7 @@ mod tests {
             &mut builder,
             &visible_types,
             &local_var_types,
-            0,
-            false,
+            CompileGroupMode::new(0, false),
         )
         .expect_err("return args without script should fail");
         assert_eq!(error.code, "XML_RETURN_ARGS_REQUIRE_SCRIPT");
@@ -3320,8 +3326,7 @@ mod tests {
             &mut builder,
             &visible_types,
             &local_var_types,
-            0,
-            false,
+            CompileGroupMode::new(0, false),
         )
         .expect_err("unknown node should fail");
         assert_eq!(error.code, "XML_NODE_UNSUPPORTED");
@@ -3785,8 +3790,7 @@ mod tests {
             &mut builder_ok,
             &BTreeMap::new(),
             &BTreeMap::new(),
-            0,
-            false,
+            CompileGroupMode::new(0, false),
         )
         .expect("manual complex compile_group should pass");
 
@@ -3811,8 +3815,7 @@ mod tests {
             &mut loop_builder,
             &BTreeMap::new(),
             &BTreeMap::new(),
-            0,
-            false,
+            CompileGroupMode::new(0, false),
         )
         .expect_err("loop should have been expanded");
         assert_eq!(loop_error.code, "XML_LOOP_INTERNAL");

@@ -232,8 +232,7 @@ impl ScriptLangEngine {
         Ok(())
     }
 
-    #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Result<EngineOutput, ScriptLangError> {
+    pub fn next_output(&mut self) -> Result<EngineOutput, ScriptLangError> {
         if let Some(boundary) = &self.pending_boundary {
             return Ok(self.boundary_output(boundary));
         }
@@ -1946,7 +1945,7 @@ mod tests {
 
     fn drive_engine_to_end(engine: &mut ScriptLangEngine) {
         for _ in 0..5_000usize {
-            match engine.next().expect("next should pass") {
+            match engine.next_output().expect("next should pass") {
                 EngineOutput::Text { .. } => {}
                 EngineOutput::Choices { items, .. } => {
                     let index = items.first().map(|item| item.index).unwrap_or(0);
@@ -1968,10 +1967,10 @@ mod tests {
         )]));
         engine.start("main", None).expect("start");
 
-        let first = engine.next().expect("next");
+        let first = engine.next_output().expect("next");
         assert!(matches!(first, EngineOutput::Text { .. }));
 
-        let second = engine.next().expect("next");
+        let second = engine.next_output().expect("next");
         assert!(matches!(second, EngineOutput::End));
     }
 
@@ -1990,7 +1989,7 @@ mod tests {
         )]));
         engine.start("main", None).expect("start");
 
-        let first = engine.next().expect("next");
+        let first = engine.next_output().expect("next");
         assert!(matches!(first, EngineOutput::Choices { .. }));
         let snapshot = engine.snapshot().expect("snapshot");
 
@@ -2007,7 +2006,7 @@ mod tests {
         )]));
         resumed.resume(snapshot).expect("resume");
         resumed.choose(0).expect("choose");
-        let next = resumed.next().expect("next");
+        let next = resumed.next_output().expect("next");
         assert!(matches!(next, EngineOutput::Text { .. }));
     }
 
@@ -2189,7 +2188,7 @@ mod tests {
 "#,
         )]));
         engine.start("main", None).expect("start");
-        let first = engine.next().expect("next");
+        let first = engine.next_output().expect("next");
         assert!(matches!(first, EngineOutput::Choices { .. }));
         let error = engine.choose(9).expect_err("index out of range");
         assert_eq!(error.code, "ENGINE_CHOICE_INDEX");
@@ -2208,10 +2207,10 @@ mod tests {
 "#,
         )]));
         engine.start("main", None).expect("start");
-        let first = engine.next().expect("next");
+        let first = engine.next_output().expect("next");
         assert!(matches!(first, EngineOutput::Input { .. }));
         engine.submit_input("   ").expect("submit input");
-        let second = engine.next().expect("next");
+        let second = engine.next_output().expect("next");
         let mut text = String::new();
         if let EngineOutput::Text { text: output } = second {
             text = output;
@@ -2232,10 +2231,10 @@ mod tests {
 "#,
         )]));
         engine.start("main", None).expect("start");
-        let first = engine.next().expect("next");
+        let first = engine.next_output().expect("next");
         assert!(matches!(first, EngineOutput::Input { .. }));
         engine.submit_input("Guild").expect("submit input");
-        let second = engine.next().expect("next");
+        let second = engine.next_output().expect("next");
         let mut text = String::new();
         if let EngineOutput::Text { text: output } = second {
             text = output;
@@ -2263,11 +2262,11 @@ mod tests {
         let mut engine = engine_from_sources(files.clone());
         engine.start("main", None).expect("start");
         assert!(matches!(
-            engine.next().expect("text"),
+            engine.next_output().expect("text"),
             EngineOutput::Text { .. }
         ));
         assert!(matches!(
-            engine.next().expect("choice"),
+            engine.next_output().expect("choice"),
             EngineOutput::Choices { .. }
         ));
         let snapshot = engine.snapshot().expect("snapshot");
@@ -2276,7 +2275,10 @@ mod tests {
         let mut resumed = engine_from_sources(files);
         resumed.resume(snapshot).expect("resume");
         resumed.choose(0).expect("choose should pass");
-        assert!(matches!(resumed.next().expect("end"), EngineOutput::End));
+        assert!(matches!(
+            resumed.next_output().expect("end"),
+            EngineOutput::End
+        ));
     }
 
     #[test]
@@ -2295,7 +2297,7 @@ mod tests {
         let mut engine = engine_from_sources(files.clone());
         engine.start("main", None).expect("start");
         assert!(matches!(
-            engine.next().expect("input"),
+            engine.next_output().expect("input"),
             EngineOutput::Input { .. }
         ));
         let snapshot = engine.snapshot().expect("snapshot");
@@ -2303,12 +2305,12 @@ mod tests {
         let mut resumed = engine_from_sources(files);
         resumed.resume(snapshot).expect("resume");
         assert!(matches!(
-            resumed.next().expect("input"),
+            resumed.next_output().expect("input"),
             EngineOutput::Input { .. }
         ));
         resumed.submit_input("Guild").expect("submit input");
         assert!(matches!(
-            resumed.next().expect("text"),
+            resumed.next_output().expect("text"),
             EngineOutput::Text { .. }
         ));
     }
@@ -2339,7 +2341,7 @@ mod tests {
 
         let mut base = engine_from_sources(sources.clone());
         base.start("main", None).expect("start");
-        let first = base.next().expect("next");
+        let first = base.next_output().expect("next");
         assert!(matches!(first, EngineOutput::Choices { .. }));
         let snapshot = base.snapshot().expect("snapshot");
 
@@ -2374,7 +2376,7 @@ mod tests {
         )]);
         let mut engine = engine_from_sources(sources.clone());
         engine.start("main", None).expect("start");
-        let first = engine.next().expect("next");
+        let first = engine.next_output().expect("next");
         assert!(matches!(first, EngineOutput::Choices { .. }));
         let mut snapshot = engine.snapshot().expect("snapshot");
         if let PendingBoundaryV3::Choice { node_id, .. } = &mut snapshot.pending_boundary {
@@ -2403,7 +2405,9 @@ mod tests {
             ),
         ]));
         engine.start("main", None).expect("start");
-        let error = engine.next().expect_err("global mutation should fail");
+        let error = engine
+            .next_output()
+            .expect_err("global mutation should fail");
         assert_eq!(error.code, "ENGINE_GLOBAL_READONLY");
     }
 
@@ -2519,7 +2523,7 @@ mod tests {
         assert_eq!(engine.compiler_version(), DEFAULT_COMPILER_VERSION);
         assert!(!engine.waiting_choice());
         engine.start("main", None).expect("start");
-        let next = engine.next().expect("next");
+        let next = engine.next_output().expect("next");
         assert!(matches!(next, EngineOutput::Choices { .. }));
         assert!(engine.waiting_choice());
     }
@@ -2537,7 +2541,7 @@ mod tests {
         )]));
         input_type.start("main", None).expect("start");
         let error = input_type
-            .next()
+            .next_output()
             .expect_err("input on non-string should fail");
         assert_eq!(error.code, "ENGINE_INPUT_VAR_TYPE");
 
@@ -2546,7 +2550,9 @@ mod tests {
             r#"<script name="main"><if when="1"><text>A</text></if></script>"#,
         )]));
         if_non_bool.start("main", None).expect("start");
-        let error = if_non_bool.next().expect_err("non-boolean if should fail");
+        let error = if_non_bool
+            .next_output()
+            .expect_err("non-boolean if should fail");
         assert_eq!(error.code, "ENGINE_BOOLEAN_EXPECTED");
 
         let mut random_bad = engine_from_sources(map(&[(
@@ -2554,7 +2560,7 @@ mod tests {
             r#"<script name="main"><var name="x" type="int">random(0)</var></script>"#,
         )]));
         random_bad.start("main", None).expect("start");
-        let error = random_bad.next().expect_err("random(0) should fail");
+        let error = random_bad.next_output().expect_err("random(0) should fail");
         assert_eq!(error.code, "ENGINE_EVAL_ERROR");
 
         let files = sources_from_example_dir("01-text-code");
@@ -2571,7 +2577,7 @@ mod tests {
         .expect("engine should build");
         host_unsupported.start("main", None).expect("start");
         let error = host_unsupported
-            .next()
+            .next_output()
             .expect_err("host functions unsupported");
         assert_eq!(error.code, "ENGINE_HOST_FUNCTION_UNSUPPORTED");
     }
@@ -2584,7 +2590,7 @@ mod tests {
         )]));
         call_missing_target.start("main", None).expect("start");
         let error = call_missing_target
-            .next()
+            .next_output()
             .expect_err("missing call target should fail");
         assert_eq!(error.code, "ENGINE_CALL_TARGET");
 
@@ -2606,7 +2612,7 @@ mod tests {
         ]));
         call_arg_mismatch.start("main", None).expect("start");
         let error = call_arg_mismatch
-            .next()
+            .next_output()
             .expect_err("ref mismatch should fail");
         assert_eq!(error.code, "ENGINE_CALL_REF_MISMATCH");
 
@@ -2616,7 +2622,7 @@ mod tests {
         )]));
         return_target_missing.start("main", None).expect("start");
         let error = return_target_missing
-            .next()
+            .next_output()
             .expect_err("missing return target should fail");
         assert_eq!(error.code, "ENGINE_RETURN_TARGET");
     }
@@ -2633,7 +2639,9 @@ mod tests {
 "#,
         )]));
         duplicate_var.start("main", None).expect("start");
-        let error = duplicate_var.next().expect_err("duplicate var should fail");
+        let error = duplicate_var
+            .next_output()
+            .expect_err("duplicate var should fail");
         assert_eq!(error.code, "ENGINE_VAR_DUPLICATE");
 
         let mut bad_type = engine_from_sources(map(&[(
@@ -2641,7 +2649,9 @@ mod tests {
             r#"<script name="main"><var name="x" type="int">&quot;str&quot;</var></script>"#,
         )]));
         bad_type.start("main", None).expect("start");
-        let error = bad_type.next().expect_err("type mismatch should fail");
+        let error = bad_type
+            .next_output()
+            .expect_err("type mismatch should fail");
         assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
 
         let mut bad_ref_read = engine_from_sources(map(&[(
@@ -2650,7 +2660,7 @@ mod tests {
         )]));
         bad_ref_read.start("main", None).expect("start");
         let error = bad_ref_read
-            .next()
+            .next_output()
             .expect_err("missing ref path should fail");
         assert!(
             error.code == "ENGINE_VAR_READ"
@@ -2668,7 +2678,9 @@ mod tests {
 "#,
         )]));
         bad_ref_write.start("main", None).expect("start");
-        let error = bad_ref_write.next().expect_err("write path should fail");
+        let error = bad_ref_write
+            .next_output()
+            .expect_err("write path should fail");
         assert!(error.code == "ENGINE_REF_PATH_WRITE" || error.code == "ENGINE_EVAL_ERROR");
     }
 
@@ -2685,7 +2697,7 @@ mod tests {
 "#,
         )]));
         source.start("main", None).expect("start");
-        let _ = source.next().expect("choice");
+        let _ = source.next_output().expect("choice");
         let mut snapshot = source.snapshot().expect("snapshot");
         if let Some(frame) = snapshot.runtime_frames.last_mut() {
             frame.group_id = "missing-group".to_string();
@@ -2717,7 +2729,7 @@ mod tests {
         ]));
         return_arg_unknown.start("main", None).expect("start");
         let error = return_arg_unknown
-            .next()
+            .next_output()
             .expect_err("extra return arg should fail");
         assert_eq!(error.code, "ENGINE_RETURN_ARG_UNKNOWN");
     }
@@ -2735,7 +2747,7 @@ mod tests {
 "#,
         )]));
         engine.start("main", None).expect("start");
-        let _ = engine.next().expect("choice");
+        let _ = engine.next_output().expect("choice");
         let mut snapshot = engine.snapshot().expect("snapshot");
 
         snapshot.runtime_frames.clear();
@@ -2755,7 +2767,7 @@ mod tests {
 "#,
         )]));
         fresh.start("main", None).expect("start fresh");
-        let _ = fresh.next().expect("choice fresh");
+        let _ = fresh.next_output().expect("choice fresh");
         let mut bad_index = fresh.snapshot().expect("snapshot again");
         if let Some(frame) = bad_index.runtime_frames.last_mut() {
             frame.node_index = 9999;
@@ -2780,7 +2792,7 @@ mod tests {
         )]));
 
         engine.start("main", None).expect("start");
-        let first = engine.next().expect("choice");
+        let first = engine.next_output().expect("choice");
         assert!(matches!(first, EngineOutput::Choices { .. }));
         let mut items = Vec::new();
         let mut prompt_text = None;
@@ -2801,12 +2813,12 @@ mod tests {
             options: items.clone(),
             prompt_text: prompt_text.clone(),
         });
-        let again = engine.next().expect("pending boundary should echo");
+        let again = engine.next_output().expect("pending boundary should echo");
         assert!(matches!(again, EngineOutput::Choices { .. }));
 
         engine.pending_boundary = None;
         engine.ended = true;
-        let end = engine.next().expect("ended should return end");
+        let end = engine.next_output().expect("ended should return end");
         assert!(matches!(end, EngineOutput::End));
 
         engine.pending_boundary = Some(PendingBoundary::Choice {
@@ -3000,7 +3012,7 @@ mod tests {
             ),
         ]));
         engine.start("main", None).expect("start");
-        let error = engine.next().expect_err("arg unknown should fail");
+        let error = engine.next_output().expect_err("arg unknown should fail");
         assert_eq!(error.code, "ENGINE_CALL_ARG_UNKNOWN");
 
         // execute_call arg type mismatch at scope creation
@@ -3020,7 +3032,9 @@ mod tests {
             ),
         ]));
         engine.start("main", None).expect("start");
-        let error = engine.next().expect_err("arg type mismatch should fail");
+        let error = engine
+            .next_output()
+            .expect_err("arg type mismatch should fail");
         assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
     }
 
@@ -3043,7 +3057,7 @@ mod tests {
         )]));
         engine.start("main", None).expect("start");
 
-        let output = engine.next().expect("next should pass");
+        let output = engine.next_output().expect("next should pass");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "weak"));
     }
 
@@ -3065,7 +3079,7 @@ mod tests {
         engine.start("main", None).expect("start");
 
         // Should skip while loop and go directly to "done"
-        let output = engine.next().expect("next should pass");
+        let output = engine.next_output().expect("next should pass");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "done"));
     }
 
@@ -3087,18 +3101,18 @@ mod tests {
         engine.start("main", None).expect("start");
 
         // First time: show choice
-        let first = engine.next().expect("next should pass");
+        let first = engine.next_output().expect("next should pass");
         assert!(matches!(first, EngineOutput::Choices { .. }));
 
         // Choose option A
         engine.choose(0).expect("choose should pass");
 
         // After choice, should output A then move to end
-        let output = engine.next().expect("next should pass");
+        let output = engine.next_output().expect("next should pass");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "A"));
 
         // Now go back to choice - both options have once=True and were used, should skip
-        let output = engine.next().expect("next should pass");
+        let output = engine.next_output().expect("next should pass");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "end"));
     }
 
@@ -3121,7 +3135,7 @@ mod tests {
         ]));
         engine.start("main", None).expect("start");
 
-        let output = engine.next().expect("next should pass");
+        let output = engine.next_output().expect("next should pass");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "Hi"));
     }
 
@@ -3138,7 +3152,7 @@ mod tests {
 "#,
         )]));
         infinite.start("main", None).expect("start");
-        let error = infinite.next().expect_err("guard should exceed");
+        let error = infinite.next_output().expect_err("guard should exceed");
         assert_eq!(error.code, "ENGINE_GUARD_EXCEEDED");
 
         let mut skip_choice = engine_from_sources(map(&[(
@@ -3153,7 +3167,7 @@ mod tests {
 "#,
         )]));
         skip_choice.start("main", None).expect("start");
-        let output = skip_choice.next().expect("next");
+        let output = skip_choice.next_output().expect("next");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "after"));
 
         let mut choice_node_missing = engine_from_sources(map(&[(
@@ -3168,7 +3182,7 @@ mod tests {
 "#,
         )]));
         choice_node_missing.start("main", None).expect("start");
-        let _ = choice_node_missing.next().expect("choice boundary");
+        let _ = choice_node_missing.next_output().expect("choice boundary");
         if let Some(frame) = choice_node_missing.frames.last_mut() {
             frame.node_index += 1;
         }
@@ -3188,7 +3202,7 @@ mod tests {
 "#,
         )]));
         option_missing.start("main", None).expect("start");
-        let _ = option_missing.next().expect("choice boundary");
+        let _ = option_missing.next_output().expect("choice boundary");
         let pending = option_missing
             .pending_boundary
             .as_mut()
@@ -3214,7 +3228,7 @@ mod tests {
 "#,
         )]));
         input_engine.start("main", None).expect("start");
-        let input = input_engine.next().expect("input boundary");
+        let input = input_engine.next_output().expect("input boundary");
         assert!(matches!(input, EngineOutput::Input { .. }));
         let input_snapshot = input_engine.snapshot().expect("snapshot");
 
@@ -3251,7 +3265,7 @@ mod tests {
 "#,
         )]));
         choice_engine.start("main", None).expect("start");
-        let _ = choice_engine.next().expect("choice");
+        let _ = choice_engine.next_output().expect("choice");
         let choice_snapshot = choice_engine.snapshot().expect("snapshot");
 
         let mut input_on_choice = choice_snapshot.clone();
@@ -3560,7 +3574,7 @@ mod tests {
         ]));
         ref_mismatch.start("main", None).expect("start");
         let error = ref_mismatch
-            .next()
+            .next_output()
             .expect_err("non-ref param with ref arg should fail");
         assert_eq!(error.code, "ENGINE_CALL_REF_MISMATCH");
 
@@ -3665,7 +3679,7 @@ mod tests {
             ),
         ]));
         globals.start("main", None).expect("start");
-        let output = globals.next().expect("next");
+        let output = globals.next_output().expect("next");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "11"));
         assert!(!globals.is_visible_json_global(None, "game"));
         assert!(!globals.is_visible_json_global(Some("missing"), "game"));
@@ -3780,7 +3794,7 @@ mod tests {
             r#"<script name="main"><if when="false"><text>x</text></if><text>done</text></script>"#,
         )]));
         if_without_else.start("main", None).expect("start");
-        let output = if_without_else.next().expect("next");
+        let output = if_without_else.next_output().expect("next");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "done"));
 
         let mut with_choice = engine_from_sources(map(&[(
@@ -3788,7 +3802,7 @@ mod tests {
             r#"<script name="main"><choice text="Pick"><option text="A"><text>A</text></option></choice></script>"#,
         )]));
         with_choice.start("main", None).expect("start");
-        let _ = with_choice.next().expect("choice");
+        let _ = with_choice.next_output().expect("choice");
         let frame_id = with_choice.frames.last().expect("frame").frame_id;
         with_choice.frames.insert(
             0,
@@ -3981,7 +3995,7 @@ mod tests {
 "#,
         )]));
         choice_ctx.start("main", None).expect("start");
-        let _ = choice_ctx.next().expect("choice");
+        let _ = choice_ctx.next_output().expect("choice");
         choice_ctx.choose(0).expect("choose");
         let found = choice_ctx
             .find_choice_continue_context()
@@ -4003,7 +4017,7 @@ mod tests {
             ),
         ]));
         expr_engine.start("main", None).expect("start");
-        let output = expr_engine.next().expect("next");
+        let output = expr_engine.next_output().expect("next");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "6"));
         let global = expr_engine
             .global_json
@@ -4032,7 +4046,7 @@ mod tests {
 "#,
         )]));
         snapshot_engine.start("main", None).expect("start");
-        let _ = snapshot_engine.next().expect("choice");
+        let _ = snapshot_engine.next_output().expect("choice");
         snapshot_engine.frames.push(RuntimeFrame {
             frame_id: 99,
             group_id: snapshot_engine.frames[0].group_id.clone(),
@@ -4112,7 +4126,7 @@ mod tests {
             .read_variable("game")
             .expect("global should be readable");
         assert!(matches!(global, SlValue::Map(_)));
-        let text = globals.next().expect("next");
+        let text = globals.next_output().expect("next");
         assert!(matches!(text, EngineOutput::Text { text, .. } if text == "6"));
         globals
             .write_variable(
@@ -4207,7 +4221,7 @@ mod tests {
 "#,
         )]));
         find_ctx.start("main", None).expect("start");
-        let _ = find_ctx.next().expect("choice");
+        let _ = find_ctx.next_output().expect("choice");
         find_ctx.choose(0).expect("choose");
         let found = find_ctx
             .find_choice_continue_context()
