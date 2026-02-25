@@ -40,10 +40,15 @@ impl SlValue {
     }
 }
 
+fn is_integral_number(value: f64) -> bool {
+    value.is_finite() && value.fract().abs() < f64::EPSILON
+}
+
 pub fn default_value_from_type(ty: &ScriptType) -> SlValue {
     match ty {
         ScriptType::Primitive { name } => match name.as_str() {
-            "number" => SlValue::Number(0.0),
+            "int" => SlValue::Number(0.0),
+            "float" => SlValue::Number(0.0),
             "string" => SlValue::String(String::new()),
             "boolean" => SlValue::Bool(false),
             _ => SlValue::String(String::new()),
@@ -62,12 +67,13 @@ pub fn default_value_from_type(ty: &ScriptType) -> SlValue {
 
 pub fn is_type_compatible(value: &SlValue, ty: &ScriptType) -> bool {
     match ty {
-        ScriptType::Primitive { name } => matches!(
-            (name.as_str(), value),
-            ("number", SlValue::Number(_))
-                | ("string", SlValue::String(_))
-                | ("boolean", SlValue::Bool(_))
-        ),
+        ScriptType::Primitive { name } => match (name.as_str(), value) {
+            ("int", SlValue::Number(v)) => is_integral_number(*v),
+            ("float", SlValue::Number(v)) => v.is_finite(),
+            ("string", SlValue::String(_)) => true,
+            ("boolean", SlValue::Bool(_)) => true,
+            _ => false,
+        },
         ScriptType::Array { element_type } => match value {
             SlValue::Array(values) => values
                 .iter()
@@ -132,7 +138,13 @@ mod tests {
         };
         assert_eq!(
             default_value_from_type(&ScriptType::Primitive {
-                name: "number".to_string()
+                name: "int".to_string()
+            }),
+            SlValue::Number(0.0)
+        );
+        assert_eq!(
+            default_value_from_type(&ScriptType::Primitive {
+                name: "float".to_string()
             }),
             SlValue::Number(0.0)
         );
@@ -155,7 +167,7 @@ mod tests {
 
         let array_type = ScriptType::Array {
             element_type: Box::new(ScriptType::Primitive {
-                name: "number".to_string(),
+                name: "int".to_string(),
             }),
         };
         assert_eq!(
@@ -166,7 +178,7 @@ mod tests {
         let map_type = ScriptType::Map {
             key_type: "string".to_string(),
             value_type: Box::new(ScriptType::Primitive {
-                name: "number".to_string(),
+                name: "int".to_string(),
             }),
         };
         assert_eq!(
@@ -186,7 +198,7 @@ mod tests {
                 (
                     "hp".to_string(),
                     ScriptType::Primitive {
-                        name: "number".to_string(),
+                        name: "int".to_string(),
                     },
                 ),
             ]),
@@ -201,18 +213,23 @@ mod tests {
 
     #[test]
     fn is_type_compatible_validates_primitive_array_map_and_object() {
-        let number_type = ScriptType::Primitive {
-            name: "number".to_string(),
+        let int_type = ScriptType::Primitive {
+            name: "int".to_string(),
         };
-        assert!(is_type_compatible(&SlValue::Number(1.0), &number_type));
+        let float_type = ScriptType::Primitive {
+            name: "float".to_string(),
+        };
+        assert!(is_type_compatible(&SlValue::Number(1.0), &int_type));
+        assert!(!is_type_compatible(&SlValue::Number(1.25), &int_type));
+        assert!(is_type_compatible(&SlValue::Number(1.25), &float_type));
         assert!(!is_type_compatible(
             &SlValue::String("1".to_string()),
-            &number_type
+            &int_type
         ));
 
         let array_type = ScriptType::Array {
             element_type: Box::new(ScriptType::Primitive {
-                name: "number".to_string(),
+                name: "int".to_string(),
             }),
         };
         assert!(is_type_compatible(
@@ -220,7 +237,7 @@ mod tests {
             &array_type
         ));
         assert!(!is_type_compatible(
-            &SlValue::Array(vec![SlValue::Number(1.0), SlValue::String("x".to_string())]),
+            &SlValue::Array(vec![SlValue::Number(1.5), SlValue::String("x".to_string())]),
             &array_type
         ));
         assert!(!is_type_compatible(

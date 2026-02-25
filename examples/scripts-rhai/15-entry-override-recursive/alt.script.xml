@@ -1,6 +1,6 @@
 <!-- include: shared.defs.xml -->
 <!-- include: nested/config.json -->
 <script name="alt" args="string:name">
-  <var name="who" type="string" value="name"/>
+  <var name="who" type="string">name</var>
   <text>Alt entry ${greet(who)}</text>
 </script>

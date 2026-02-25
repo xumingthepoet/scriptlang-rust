@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::cmp::Reverse;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -99,6 +100,7 @@ pub struct ScriptLangEngine {
     group_lookup: HashMap<String, GroupLookup>,
     global_json: BTreeMap<String, SlValue>,
     visible_json_by_script: HashMap<String, BTreeSet<String>>,
+    visible_function_symbols_by_script: HashMap<String, BTreeMap<String, String>>,
     initial_random_seed: u32,
 
     frames: Vec<RuntimeFrame>,
@@ -125,6 +127,7 @@ impl ScriptLangEngine {
 
         let mut group_lookup = HashMap::new();
         let mut visible_json_by_script = HashMap::new();
+        let mut visible_function_symbols_by_script = HashMap::new();
 
         for (script_name, script) in &options.scripts {
             for group_id in script.groups.keys() {
@@ -156,6 +159,26 @@ impl ScriptLangEngine {
                     ));
                 }
             }
+
+            let mut symbol_to_public = BTreeMap::new();
+            let mut public_to_symbol = BTreeMap::new();
+            for function_name in script.visible_functions.keys() {
+                let symbol = rhai_function_symbol(function_name);
+                if let Some(existing) = symbol_to_public.get(&symbol) {
+                    if existing != function_name {
+                        return Err(ScriptLangError::new(
+                            "ENGINE_DEFS_FUNCTION_SYMBOL_CONFLICT",
+                            format!(
+                                "Defs function \"{}\" conflicts with \"{}\" after Rhai symbol normalization.",
+                                function_name, existing
+                            ),
+                        ));
+                    }
+                }
+                symbol_to_public.insert(symbol.clone(), function_name.clone());
+                public_to_symbol.insert(function_name.clone(), symbol);
+            }
+            visible_function_symbols_by_script.insert(script_name.clone(), public_to_symbol);
         }
 
         let initial_random_seed = options.random_seed.unwrap_or(1);
@@ -169,6 +192,7 @@ impl ScriptLangEngine {
             group_lookup,
             global_json: options.global_json,
             visible_json_by_script,
+            visible_function_symbols_by_script,
             initial_random_seed,
             frames: Vec::new(),
             pending_boundary: None,
@@ -1292,6 +1316,11 @@ impl ScriptLangEngine {
         is_expression: bool,
     ) -> Result<SlValue, ScriptLangError> {
         let script_name = self.resolve_current_script_name().unwrap_or_default();
+        let function_symbol_map = self
+            .visible_function_symbols_by_script
+            .get(&script_name)
+            .cloned()
+            .unwrap_or_default();
 
         if !self.host_functions.names().is_empty() {
             return Err(ScriptLangError::new(
@@ -1346,17 +1375,18 @@ impl ScriptLangEngine {
             },
         );
 
-        let prelude = self.build_defs_prelude(&script_name)?;
+        let prelude = self.build_defs_prelude(&script_name, &function_symbol_map)?;
+        let rewritten_script = rewrite_function_calls(script, &function_symbol_map)?;
         let source = if is_expression {
             if prelude.is_empty() {
-                format!("({})", script)
+                format!("({})", rewritten_script)
             } else {
-                format!("{}\n({})", prelude, script)
+                format!("{}\n({})", prelude, rewritten_script)
             }
         } else if prelude.is_empty() {
-            script.to_string()
+            rewritten_script
         } else {
-            format!("{}\n{}", prelude, script)
+            format!("{}\n{}", prelude, rewritten_script)
         };
 
         let run_result = if is_expression {
@@ -1410,7 +1440,11 @@ impl ScriptLangEngine {
         run_result
     }
 
-    fn build_defs_prelude(&self, script_name: &str) -> Result<String, ScriptLangError> {
+    fn build_defs_prelude(
+        &self,
+        script_name: &str,
+        function_symbol_map: &BTreeMap<String, String>,
+    ) -> Result<String, ScriptLangError> {
         let Some(script) = self.scripts.get(script_name) else {
             return Ok(String::new());
         };
@@ -1422,8 +1456,14 @@ impl ScriptLangEngine {
 
         let mut out = String::new();
         for (name, decl) in &script.visible_functions {
+            let rhai_name = function_symbol_map.get(name).cloned().ok_or_else(|| {
+                ScriptLangError::new(
+                    "ENGINE_DEFS_FUNCTION_SYMBOL_MISSING",
+                    format!("Missing Rhai function symbol mapping for \"{}\".", name),
+                )
+            })?;
             out.push_str("fn ");
-            out.push_str(name);
+            out.push_str(&rhai_name);
             out.push('(');
             out.push_str(
                 &decl
@@ -1451,7 +1491,7 @@ impl ScriptLangEngine {
                 decl.return_binding.name,
                 slvalue_to_rhai_literal(&default_value)
             ));
-            out.push_str(&decl.code);
+            out.push_str(&rewrite_function_calls(&decl.code, function_symbol_map)?);
             out.push('\n');
             out.push_str(&decl.return_binding.name);
             out.push_str("\n}\n");
@@ -1671,6 +1711,50 @@ fn assign_nested_path(target: &mut SlValue, path: &[String], value: SlValue) -> 
         None => return Err(format!("missing key \"{}\"", head)),
     };
     assign_nested_path(next, &path[1..], value)
+}
+
+fn rhai_function_symbol(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for ch in name.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+    }
+    out
+}
+
+fn rewrite_function_calls(
+    source: &str,
+    function_symbol_map: &BTreeMap<String, String>,
+) -> Result<String, ScriptLangError> {
+    if function_symbol_map.is_empty() {
+        return Ok(source.to_string());
+    }
+
+    let mut names = function_symbol_map.iter().collect::<Vec<_>>();
+    names.sort_by_key(|(name, _)| Reverse(name.len()));
+
+    let mut rewritten = source.to_string();
+    for (public_name, symbol_name) in names {
+        if public_name == symbol_name {
+            continue;
+        }
+        let pattern = Regex::new(&format!(
+            r"(^|[^A-Za-z0-9_]){}\s*\(",
+            regex::escape(public_name)
+        ))
+        .expect("escaped function name regex should compile");
+
+        rewritten = pattern
+            .replace_all(&rewritten, |captures: &regex::Captures<'_>| {
+                format!("{}{}(", &captures[1], symbol_name)
+            })
+            .to_string();
+    }
+
+    Ok(rewritten)
 }
 
 fn slvalue_to_text(value: &SlValue) -> String {
@@ -2001,7 +2085,7 @@ mod tests {
                 "shared.defs.xml",
                 r#"
 <defs name="shared">
-  <function name="addWithGameBonus" args="number:a1,number:a2" return="number:out">
+  <function name="addWithGameBonus" args="int:a1,int:a2" return="int:out">
     out = a1 + a2;
   </function>
 </defs>
@@ -2021,6 +2105,49 @@ mod tests {
         assert!(result.is_err());
         let error = result.err().expect("conflicting defs function should fail");
         assert_eq!(error.code, "ENGINE_HOST_FUNCTION_CONFLICT");
+    }
+
+    #[test]
+    fn new_rejects_defs_function_symbol_conflict_after_normalization() {
+        let files = map(&[
+            (
+                "main.script.xml",
+                r#"
+<!-- include: a.defs.xml -->
+<!-- include: x.defs.xml -->
+<script name="main"><text>Hello</text></script>
+"#,
+            ),
+            (
+                "a.defs.xml",
+                r#"
+<defs name="a">
+  <function name="b" return="int:out">out = 1;</function>
+</defs>
+"#,
+            ),
+            (
+                "x.defs.xml",
+                r#"
+<defs name="x">
+  <function name="a_b" return="int:out">out = 2;</function>
+</defs>
+"#,
+            ),
+        ]);
+        let compiled = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        let result = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_json: compiled.global_json,
+            host_functions: None,
+            random_seed: Some(1),
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        });
+        let error = match result {
+            Ok(_) => panic!("normalized symbol conflict should fail"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, "ENGINE_DEFS_FUNCTION_SYMBOL_CONFLICT");
     }
 
     #[test]
@@ -2074,7 +2201,7 @@ mod tests {
             "main.script.xml",
             r#"
 <script name="main">
-  <var name="heroName" type="string" value="&quot;Traveler&quot;"/>
+  <var name="heroName" type="string">&quot;Traveler&quot;</var>
   <input var="heroName" text="Name your hero"/>
   <text>Hello ${heroName}</text>
 </script>
@@ -2098,7 +2225,7 @@ mod tests {
             "main.script.xml",
             r#"
 <script name="main">
-  <var name="heroName" type="string" value="&quot;Traveler&quot;"/>
+  <var name="heroName" type="string">&quot;Traveler&quot;</var>
   <input var="heroName" text="Name your hero"/>
   <text>Hello ${heroName}</text>
 </script>
@@ -2122,7 +2249,7 @@ mod tests {
             "main.script.xml",
             r#"
 <script name="main">
-  <var name="n" type="number" value="1"/>
+  <var name="n" type="int">1</var>
   <text once="true">Intro</text>
   <while when="n > 0">
     <choice text="Pick">
@@ -2158,7 +2285,7 @@ mod tests {
             "main.script.xml",
             r#"
 <script name="main">
-  <var name="heroName" type="string" value="&quot;Traveler&quot;"/>
+  <var name="heroName" type="string">&quot;Traveler&quot;</var>
   <input var="heroName" text="Name your hero"/>
   <text>Hello ${heroName}</text>
 </script>
@@ -2403,7 +2530,7 @@ mod tests {
             "main.script.xml",
             r#"
 <script name="main">
-  <var name="hp" type="number" value="1"/>
+  <var name="hp" type="int">1</var>
   <input var="hp" text="bad"/>
 </script>
 "#,
@@ -2424,7 +2551,7 @@ mod tests {
 
         let mut random_bad = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><var name="x" type="number" value="random(0)"/></script>"#,
+            r#"<script name="main"><var name="x" type="int">random(0)</var></script>"#,
         )]));
         random_bad.start("main", None).expect("start");
         let error = random_bad.next().expect_err("random(0) should fail");
@@ -2467,14 +2594,14 @@ mod tests {
                 r#"
 <!-- include: callee.script.xml -->
 <script name="main">
-  <var name="hp" type="number" value="1"/>
+  <var name="hp" type="int">1</var>
   <call script="callee" args="hp"/>
 </script>
 "#,
             ),
             (
                 "callee.script.xml",
-                r#"<script name="callee" args="ref:number:x"><return/></script>"#,
+                r#"<script name="callee" args="ref:int:x"><return/></script>"#,
             ),
         ]));
         call_arg_mismatch.start("main", None).expect("start");
@@ -2500,8 +2627,8 @@ mod tests {
             "main.script.xml",
             r#"
 <script name="main">
-  <var name="x" type="number" value="1"/>
-  <var name="x" type="number" value="2"/>
+  <var name="x" type="int">1</var>
+  <var name="x" type="int">2</var>
 </script>
 "#,
         )]));
@@ -2511,7 +2638,7 @@ mod tests {
 
         let mut bad_type = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><var name="x" type="number" value="&quot;str&quot;"/></script>"#,
+            r#"<script name="main"><var name="x" type="int">&quot;str&quot;</var></script>"#,
         )]));
         bad_type.start("main", None).expect("start");
         let error = bad_type.next().expect_err("type mismatch should fail");
@@ -2535,7 +2662,7 @@ mod tests {
             "main.script.xml",
             r#"
 <script name="main">
-  <var name="x" type="number" value="1"/>
+  <var name="x" type="int">1</var>
   <code>x.value = 1;</code>
 </script>
 "#,
@@ -2585,7 +2712,7 @@ mod tests {
             ),
             (
                 "next.script.xml",
-                r#"<script name="next" args="number:x"><text>${x}</text></script>"#,
+                r#"<script name="next" args="int:x"><text>${x}</text></script>"#,
             ),
         ]));
         return_arg_unknown.start("main", None).expect("start");
@@ -2838,7 +2965,7 @@ mod tests {
         // create_script_root_scope unknown arg / type mismatch
         let engine = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main" args="number:x"><text>${x}</text></script>"#,
+            r#"<script name="main" args="int:x"><text>${x}</text></script>"#,
         )]));
         let error = engine
             .create_script_root_scope(
@@ -2889,7 +3016,7 @@ mod tests {
             ),
             (
                 "callee.script.xml",
-                r#"<script name="callee" args="number:x"><return/></script>"#,
+                r#"<script name="callee" args="int:x"><return/></script>"#,
             ),
         ]));
         engine.start("main", None).expect("start");
@@ -2904,7 +3031,7 @@ mod tests {
             "main.script.xml",
             r#"
 <script name="main">
-  <var name="hp" type="number" value="1"/>
+  <var name="hp" type="int">1</var>
   <if when="hp > 2">
     <text>strong</text>
     <else>
@@ -2927,7 +3054,7 @@ mod tests {
             "main.script.xml",
             r#"
 <script name="main">
-  <var name="hp" type="number" value="0"/>
+  <var name="hp" type="int">0</var>
   <while when="hp > 0">
     <code>hp = hp - 1;</code>
   </while>
@@ -3081,7 +3208,7 @@ mod tests {
             "main.script.xml",
             r#"
 <script name="main">
-  <var name="name" type="string" value="&quot;X&quot;"/>
+  <var name="name" type="string">&quot;X&quot;</var>
   <input var="name" text="name?"/>
 </script>
 "#,
@@ -3103,7 +3230,7 @@ mod tests {
             "main.script.xml",
             r#"
 <script name="main">
-  <var name="name" type="string" value="&quot;X&quot;"/>
+  <var name="name" type="string">&quot;X&quot;</var>
   <input var="name" text="name?"/>
 </script>
 "#,
@@ -3159,7 +3286,7 @@ mod tests {
             "main.script.xml",
             r#"
 <script name="main">
-  <var name="name" type="string" value="&quot;X&quot;"/>
+  <var name="name" type="string">&quot;X&quot;</var>
   <input var="name" text="name?"/>
 </script>
 "#,
@@ -3211,7 +3338,7 @@ mod tests {
             .expect("group key")
             .to_string();
         let number_ty = ScriptType::Primitive {
-            name: "number".to_string(),
+            name: "int".to_string(),
         };
 
         engine.frames = vec![RuntimeFrame {
@@ -3421,14 +3548,14 @@ mod tests {
                 r#"
 <!-- include: callee.script.xml -->
 <script name="main">
-  <var name="x" type="number" value="1"/>
+  <var name="x" type="int">1</var>
   <call script="callee" args="ref:x"/>
 </script>
 "#,
             ),
             (
                 "callee.script.xml",
-                r#"<script name="callee" args="number:x"><return/></script>"#,
+                r#"<script name="callee" args="int:x"><return/></script>"#,
             ),
         ]));
         ref_mismatch.start("main", None).expect("start");
@@ -3444,7 +3571,7 @@ mod tests {
             ),
             (
                 "callee.script.xml",
-                r#"<script name="callee" args="ref:number:x"><text>${x}</text></script>"#,
+                r#"<script name="callee" args="ref:int:x"><text>${x}</text></script>"#,
             ),
         ]));
         let main_root = tail
@@ -3468,7 +3595,7 @@ mod tests {
             var_types: BTreeMap::from([(
                 "x".to_string(),
                 ScriptType::Primitive {
-                    name: "number".to_string(),
+                    name: "int".to_string(),
                 },
             )]),
         }];
@@ -3490,7 +3617,7 @@ mod tests {
             ),
             (
                 "callee.script.xml",
-                r#"<script name="callee" args="number:x"><text>${x}</text></script>"#,
+                r#"<script name="callee" args="int:x"><text>${x}</text></script>"#,
             ),
         ]));
         tail_ok.frames = vec![RuntimeFrame {
@@ -3508,7 +3635,7 @@ mod tests {
             var_types: BTreeMap::from([(
                 "x".to_string(),
                 ScriptType::Primitive {
-                    name: "number".to_string(),
+                    name: "int".to_string(),
                 },
             )]),
         }];
@@ -3530,7 +3657,7 @@ mod tests {
                 r#"
 <!-- include: game.json -->
 <script name="main">
-  <var name="x" type="number" value="1"/>
+  <var name="x" type="int">1</var>
   <code>x = x + game.score;</code>
   <text>${x}</text>
 </script>
@@ -3617,10 +3744,27 @@ mod tests {
         assert_eq!(error.code, "ENGINE_SCRIPT_NOT_FOUND");
         assert_eq!(
             globals
-                .build_defs_prelude("missing-script")
+                .build_defs_prelude("missing-script", &BTreeMap::new())
                 .expect("missing script prelude should be empty"),
             ""
         );
+        let defs_engine = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="main"><text>x</text></script>
+"#,
+            ),
+            (
+                "shared.defs.xml",
+                r#"<defs name="shared"><function name="make" return="int:out">out = 1;</function></defs>"#,
+            ),
+        ]));
+        let error = defs_engine
+            .build_defs_prelude("main", &BTreeMap::new())
+            .expect_err("missing symbol mapping should fail");
+        assert_eq!(error.code, "ENGINE_DEFS_FUNCTION_SYMBOL_MISSING");
 
         let registry = TestRegistry {
             names: vec!["f".to_string()],
@@ -3659,7 +3803,7 @@ mod tests {
                 var_types: BTreeMap::from([(
                     "target".to_string(),
                     ScriptType::Primitive {
-                        name: "number".to_string(),
+                        name: "int".to_string(),
                     },
                 )]),
             },
@@ -3688,7 +3832,7 @@ mod tests {
         let decl = sl_core::VarDeclaration {
             name: "x".to_string(),
             r#type: ScriptType::Primitive {
-                name: "number".to_string(),
+                name: "int".to_string(),
             },
             initial_value_expr: None,
             location: sl_core::SourceSpan::synthetic(),
@@ -3852,7 +3996,7 @@ mod tests {
                 r#"
 <!-- include: game.json -->
 <script name="main">
-  <var name="x" type="number" value="1"/>
+  <var name="x" type="int">1</var>
   <text>${x + game.score}</text>
 </script>
 "#,
@@ -3953,14 +4097,14 @@ mod tests {
             ("game.json", r#"{ "score": 5 }"#),
             (
                 "main.script.xml",
-                r#"
+                r##"
 <!-- include: game.json -->
 <script name="main">
-  <var name="obj" type="Map&lt;string,number&gt;"/>
+  <var name="obj" type="#{int}"/>
   <code>obj.n = game.score + 1;</code>
   <text>${obj.n}</text>
 </script>
-"#,
+"##,
             ),
         ]));
         globals.start("main", None).expect("start");

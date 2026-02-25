@@ -1,5 +1,5 @@
 <script name="main">
-  <var name="count" type="number" value="1"/>
+  <var name="count" type="int">1</var>
   <text>Scenario 01: text + code</text>
   <code>count = count + 1;</code>
   <text>count=${count}</text>

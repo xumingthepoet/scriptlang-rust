@@ -1,5 +1,5 @@
 <script name="main">
-  <var name="hasKey" type="boolean" value="false"/>
+  <var name="hasKey" type="boolean">false</var>
   <choice text="Open the gate">
     <option text="Search nearby" when="!hasKey" once="true">
       <text>You keep searching...</text>

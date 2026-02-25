@@ -2,9 +2,9 @@
 <defs name="shared">
   <type name="Player">
     <field name="name" type="string"/>
-    <field name="power" type="number"/>
+    <field name="power" type="int"/>
   </type>
   <function name="greet" args="string:name" return="string:out">
-    out = label(name, 2) + " @" + config.mode;
+    out = math.label(name, 2) + " @" + config.mode;
   </function>
 </defs>

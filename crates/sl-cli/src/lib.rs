@@ -3,34 +3,10 @@
 use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
-#[cfg(not(coverage))]
-use std::io::IsTerminal;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
-#[cfg(not(coverage))]
-use std::time::Duration;
 
 use clap::{Args, Parser, Subcommand};
-#[cfg(not(coverage))]
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-#[cfg(not(coverage))]
-use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-};
-#[cfg(not(coverage))]
-use crossterm::ExecutableCommand;
-#[cfg(not(coverage))]
-use ratatui::backend::CrosstermBackend;
-#[cfg(not(coverage))]
-use ratatui::layout::{Constraint, Direction, Layout};
-#[cfg(not(coverage))]
-use ratatui::style::{Color, Modifier, Style};
-#[cfg(not(coverage))]
-use ratatui::text::{Line, Span};
-#[cfg(not(coverage))]
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
-#[cfg(not(coverage))]
-use ratatui::{Frame, Terminal};
 use serde::{Deserialize, Serialize};
 use sl_api::{
     create_engine_from_xml, resume_engine_from_xml, CreateEngineFromXmlOptions,
@@ -39,6 +15,9 @@ use sl_api::{
 use sl_core::{EngineOutput, ScriptLangError, SnapshotV3};
 use sl_runtime::DEFAULT_COMPILER_VERSION;
 use walkdir::WalkDir;
+
+mod agent;
+mod tui;
 
 const PLAYER_STATE_SCHEMA: &str = "player-state.v3";
 
@@ -112,6 +91,7 @@ struct TuiArgs {
 #[derive(Debug, Clone)]
 struct LoadedScenario {
     id: String,
+    title: String,
     scripts_xml: BTreeMap<String, String>,
     entry_script: String,
 }
@@ -142,30 +122,6 @@ struct BoundaryResult {
     input_default_text: Option<String>,
 }
 
-#[cfg(not(coverage))]
-#[derive(Debug, Clone)]
-enum TuiBoundary {
-    Choices {
-        prompt: Option<String>,
-        items: Vec<(usize, String)>,
-        selected: usize,
-    },
-    Input {
-        prompt: String,
-        default_text: String,
-    },
-    End,
-}
-
-#[cfg(not(coverage))]
-#[derive(Debug)]
-struct TuiUiState {
-    logs: Vec<String>,
-    input: String,
-    status: String,
-    boundary: TuiBoundary,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TuiCommandAction {
     NotHandled,
@@ -178,37 +134,6 @@ struct TuiCommandContext<'a> {
     state_file: &'a str,
     scenario: &'a LoadedScenario,
     entry_script: &'a str,
-}
-
-#[cfg(not(coverage))]
-struct TuiTerminal {
-    terminal: Terminal<CrosstermBackend<io::Stdout>>,
-}
-
-#[cfg(not(coverage))]
-impl TuiTerminal {
-    fn new() -> Result<Self, ScriptLangError> {
-        enable_raw_mode().map_err(|error| ScriptLangError::new("TUI_IO", error.to_string()))?;
-        io::stdout()
-            .execute(EnterAlternateScreen)
-            .map_err(|error| ScriptLangError::new("TUI_IO", error.to_string()))?;
-        let backend = CrosstermBackend::new(io::stdout());
-        let terminal = Terminal::new(backend)
-            .map_err(|error| ScriptLangError::new("TUI_IO", error.to_string()))?;
-        Ok(Self { terminal })
-    }
-
-    fn terminal_mut(&mut self) -> &mut Terminal<CrosstermBackend<io::Stdout>> {
-        &mut self.terminal
-    }
-}
-
-#[cfg(not(coverage))]
-impl Drop for TuiTerminal {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let _ = io::stdout().execute(LeaveAlternateScreen);
-    }
 }
 
 pub fn run_cli_from_args<I, T>(args: I) -> i32
@@ -234,14 +159,9 @@ fn run(cli: Cli) -> Result<i32, ScriptLangError> {
 }
 
 fn run_agent(args: AgentArgs) -> Result<i32, ScriptLangError> {
-    match args.command {
-        AgentCommand::Start(args) => run_start(args),
-        AgentCommand::Choose(args) => run_choose(args),
-        AgentCommand::Input(args) => run_input(args),
-    }
+    agent::run_agent(args)
 }
 
-#[cfg(not(coverage))]
 fn run_tui(args: TuiArgs) -> Result<i32, ScriptLangError> {
     let entry_script = args.entry_script.unwrap_or("main".to_string());
     let state_file = args
@@ -257,29 +177,7 @@ fn run_tui(args: TuiArgs) -> Result<i32, ScriptLangError> {
         compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
     })?;
 
-    if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
-        return run_tui_line_mode(&state_file, &scenario, &entry_script, &mut engine);
-    }
-
-    run_tui_ratatui_mode(&state_file, &scenario, &entry_script, &mut engine)
-}
-
-#[cfg(coverage)]
-fn run_tui(args: TuiArgs) -> Result<i32, ScriptLangError> {
-    let entry_script = args.entry_script.unwrap_or("main".to_string());
-    let state_file = args
-        .state_file
-        .unwrap_or(".scriptlang/save.json".to_string());
-    let scenario = load_source_by_scripts_dir(&args.scripts_dir, &entry_script)?;
-    let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
-        scripts_xml: scenario.scripts_xml.clone(),
-        entry_script: Some(entry_script.clone()),
-        entry_args: None,
-        host_functions: None,
-        random_seed: None,
-        compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
-    })?;
-    run_tui_line_mode(&state_file, &scenario, &entry_script, &mut engine)
+    tui::run_tui_ratatui_mode(&state_file, &scenario, &entry_script, &mut engine)
 }
 
 fn run_tui_line_mode(
@@ -383,296 +281,6 @@ fn run_tui_line_mode_with_io(
     }
 }
 
-#[cfg(not(coverage))]
-fn run_tui_ratatui_mode(
-    state_file: &str,
-    scenario: &LoadedScenario,
-    entry_script: &str,
-    engine: &mut sl_runtime::ScriptLangEngine,
-) -> Result<i32, ScriptLangError> {
-    let mut terminal = TuiTerminal::new()?;
-    let mut ui = TuiUiState {
-        logs: vec![
-            "ScriptLang TUI".to_string(),
-            "commands: :help :save :load :restart :quit".to_string(),
-            "Use Up/Down to select choice, Enter to submit.".to_string(),
-        ],
-        input: String::new(),
-        status: String::new(),
-        boundary: TuiBoundary::End,
-    };
-
-    refresh_tui_boundary(engine, &mut ui)?;
-    loop {
-        terminal
-            .terminal_mut()
-            .draw(|frame| render_tui(frame, &ui))
-            .map_err(|error| ScriptLangError::new("TUI_IO", error.to_string()))?;
-
-        if !event::poll(Duration::from_millis(100))
-            .map_err(|error| ScriptLangError::new("TUI_IO", error.to_string()))?
-        {
-            continue;
-        }
-
-        let evt =
-            event::read().map_err(|error| ScriptLangError::new("TUI_IO", error.to_string()))?;
-        if let Event::Key(key) = evt {
-            if key.kind != KeyEventKind::Press {
-                continue;
-            }
-            let should_quit =
-                handle_tui_key(key, state_file, scenario, entry_script, engine, &mut ui)?;
-            if should_quit {
-                break;
-            }
-        }
-    }
-    Ok(0)
-}
-
-#[cfg(not(coverage))]
-fn handle_tui_key(
-    key: KeyEvent,
-    state_file: &str,
-    scenario: &LoadedScenario,
-    entry_script: &str,
-    engine: &mut sl_runtime::ScriptLangEngine,
-    ui: &mut TuiUiState,
-) -> Result<bool, ScriptLangError> {
-    match key.code {
-        KeyCode::Up => {
-            if ui.input.is_empty() {
-                if let TuiBoundary::Choices {
-                    selected, items, ..
-                } = &mut ui.boundary
-                {
-                    if !items.is_empty() {
-                        *selected = selected.saturating_sub(1);
-                    }
-                }
-            }
-        }
-        KeyCode::Down => {
-            if ui.input.is_empty() {
-                if let TuiBoundary::Choices {
-                    selected, items, ..
-                } = &mut ui.boundary
-                {
-                    if !items.is_empty() {
-                        let last = items.len().saturating_sub(1);
-                        *selected = (*selected + 1).min(last);
-                    }
-                }
-            }
-        }
-        KeyCode::Backspace => {
-            ui.input.pop();
-        }
-        KeyCode::Esc => {
-            ui.input.clear();
-            ui.status.clear();
-        }
-        KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => return Ok(true),
-        KeyCode::Char(ch) => {
-            if !key.modifiers.contains(KeyModifiers::CONTROL) {
-                ui.input.push(ch);
-            }
-        }
-        KeyCode::Enter => {
-            let submitted = std::mem::take(&mut ui.input);
-            if submitted.starts_with(':') {
-                let mut emit = |line: String| tui_push_log(ui, line);
-                match handle_tui_command(
-                    submitted.as_str(),
-                    state_file,
-                    scenario,
-                    entry_script,
-                    engine,
-                    &mut emit,
-                )? {
-                    TuiCommandAction::Continue => {
-                        ui.status = "Command executed.".to_string();
-                    }
-                    TuiCommandAction::RefreshBoundary => {
-                        refresh_tui_boundary(engine, ui)?;
-                        ui.status = "State refreshed.".to_string();
-                    }
-                    TuiCommandAction::Quit => return Ok(true),
-                    TuiCommandAction::NotHandled => {
-                        ui.status = format!("Unknown command: {}", submitted);
-                    }
-                }
-                return Ok(false);
-            }
-
-            match &mut ui.boundary {
-                TuiBoundary::Choices {
-                    items, selected, ..
-                } => {
-                    let choice = if submitted.trim().is_empty() {
-                        items.get(*selected).map(|item| item.0).ok_or_else(|| {
-                            ScriptLangError::new("TUI_CHOICE_PARSE", "No choices available")
-                        })?
-                    } else {
-                        submitted.trim().parse::<usize>().map_err(|_| {
-                            ScriptLangError::new(
-                                "TUI_CHOICE_PARSE",
-                                format!("Invalid choice index: {}", submitted),
-                            )
-                        })?
-                    };
-                    engine.choose(choice)?;
-                    refresh_tui_boundary(engine, ui)?;
-                }
-                TuiBoundary::Input { .. } => {
-                    engine.submit_input(submitted.trim_end_matches(&['\r', '\n'][..]))?;
-                    refresh_tui_boundary(engine, ui)?;
-                }
-                TuiBoundary::End => return Ok(true),
-            }
-        }
-        _ => {}
-    }
-    Ok(false)
-}
-
-#[cfg(not(coverage))]
-fn refresh_tui_boundary(
-    engine: &mut sl_runtime::ScriptLangEngine,
-    ui: &mut TuiUiState,
-) -> Result<(), ScriptLangError> {
-    let boundary = run_to_boundary(engine)?;
-    for text in boundary.texts {
-        tui_push_log(ui, text);
-    }
-
-    ui.boundary = match boundary.event {
-        BoundaryEvent::Choices => TuiBoundary::Choices {
-            prompt: boundary.choice_prompt_text,
-            items: boundary.choices,
-            selected: 0,
-        },
-        BoundaryEvent::Input => TuiBoundary::Input {
-            prompt: boundary.input_prompt_text.unwrap_or_default(),
-            default_text: boundary.input_default_text.unwrap_or_default(),
-        },
-        BoundaryEvent::End => {
-            tui_push_log(ui, "[END]".to_string());
-            TuiBoundary::End
-        }
-    };
-    Ok(())
-}
-
-#[cfg(not(coverage))]
-fn tui_push_log(ui: &mut TuiUiState, line: String) {
-    ui.logs.push(line);
-    const MAX_LOG_LINES: usize = 200;
-    if ui.logs.len() > MAX_LOG_LINES {
-        let excess = ui.logs.len() - MAX_LOG_LINES;
-        ui.logs.drain(0..excess);
-    }
-}
-
-#[cfg(not(coverage))]
-fn render_tui(frame: &mut Frame<'_>, ui: &TuiUiState) {
-    let layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Min(8),
-            Constraint::Length(3),
-            Constraint::Length(2),
-        ])
-        .split(frame.area());
-
-    let header = Paragraph::new("ScriptLang TUI  |  :help :save :load :restart :quit")
-        .style(
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )
-        .block(Block::default().borders(Borders::ALL).title("Header"));
-    frame.render_widget(header, layout[0]);
-
-    let body = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(66), Constraint::Percentage(34)])
-        .split(layout[1]);
-
-    let logs = Paragraph::new(ui.logs.join("\n"))
-        .wrap(Wrap { trim: false })
-        .block(Block::default().borders(Borders::ALL).title("Story"));
-    frame.render_widget(logs, body[0]);
-
-    match &ui.boundary {
-        TuiBoundary::Choices {
-            prompt,
-            items,
-            selected,
-        } => {
-            let mut lines: Vec<ListItem<'_>> = Vec::new();
-            if let Some(text) = prompt {
-                lines.push(ListItem::new(Line::from(Span::styled(
-                    text,
-                    Style::default().fg(Color::Yellow),
-                ))));
-                lines.push(ListItem::new(""));
-            }
-            for (idx, (index, text)) in items.iter().enumerate() {
-                let style = if idx == *selected {
-                    Style::default().fg(Color::Black).bg(Color::Green)
-                } else {
-                    Style::default()
-                };
-                lines.push(ListItem::new(Line::from(vec![
-                    Span::styled(format!("[{}] ", index), style.add_modifier(Modifier::BOLD)),
-                    Span::styled(text, style),
-                ])));
-            }
-            let list =
-                List::new(lines).block(Block::default().borders(Borders::ALL).title("Choices"));
-            frame.render_widget(list, body[1]);
-        }
-        TuiBoundary::Input {
-            prompt,
-            default_text,
-        } => {
-            let panel = Paragraph::new(vec![
-                Line::from(Span::styled(
-                    prompt,
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                )),
-                Line::from(""),
-                Line::from(format!("default: {}", default_text)),
-            ])
-            .wrap(Wrap { trim: false })
-            .block(Block::default().borders(Borders::ALL).title("Input"));
-            frame.render_widget(panel, body[1]);
-        }
-        TuiBoundary::End => {
-            let panel = Paragraph::new("Reached [END]. Press Enter or Ctrl+C to exit.")
-                .block(Block::default().borders(Borders::ALL).title("Status"));
-            frame.render_widget(panel, body[1]);
-        }
-    }
-
-    let input = Paragraph::new(ui.input.as_str()).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title("Input / Command"),
-    );
-    frame.render_widget(input, layout[2]);
-
-    let status = Paragraph::new(ui.status.as_str())
-        .style(Style::default().fg(Color::LightBlue))
-        .block(Block::default().borders(Borders::ALL).title("Feedback"));
-    frame.render_widget(status, layout[3]);
-}
-
 fn handle_tui_command(
     raw: &str,
     state_file: &str,
@@ -758,109 +366,6 @@ fn prompt_input_from(
     let mut input = String::new();
     reader.read_line(&mut input).map_err(map_tui_io)?;
     Ok(input.trim_end_matches(&['\r', '\n'][..]).to_string())
-}
-
-fn run_start(args: StartArgs) -> Result<i32, ScriptLangError> {
-    let scenario = load_source_by_scripts_dir(
-        &args.scripts_dir,
-        args.entry_script.as_deref().unwrap_or("main"),
-    )?;
-
-    let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
-        scripts_xml: scenario.scripts_xml.clone(),
-        entry_script: Some(scenario.entry_script.clone()),
-        entry_args: None,
-        host_functions: None,
-        random_seed: None,
-        compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
-    })?;
-
-    let boundary = run_to_boundary(&mut engine)?;
-
-    if matches!(
-        boundary.event,
-        BoundaryEvent::Choices | BoundaryEvent::Input
-    ) {
-        let snapshot = engine.snapshot()?;
-        let state = PlayerStateV3 {
-            schema_version: PLAYER_STATE_SCHEMA.to_string(),
-            scenario_id: scenario.id,
-            compiler_version: DEFAULT_COMPILER_VERSION.to_string(),
-            snapshot,
-        };
-        save_player_state(Path::new(&args.state_out), &state)?;
-        emit_boundary(boundary, Some(args.state_out));
-        return Ok(0);
-    }
-
-    emit_boundary(boundary, None);
-    Ok(0)
-}
-
-fn run_choose(args: ChooseArgs) -> Result<i32, ScriptLangError> {
-    let state = load_player_state(Path::new(&args.state_in))?;
-    let scenario = load_source_by_ref(&state.scenario_id)?;
-
-    let mut engine = resume_engine_from_xml(ResumeEngineFromXmlOptions {
-        scripts_xml: scenario.scripts_xml.clone(),
-        snapshot: state.snapshot,
-        host_functions: None,
-        compiler_version: Some(state.compiler_version.clone()),
-    })?;
-
-    engine.choose(args.choice)?;
-    let boundary = run_to_boundary(&mut engine)?;
-
-    if matches!(
-        boundary.event,
-        BoundaryEvent::Choices | BoundaryEvent::Input
-    ) {
-        let next_state = PlayerStateV3 {
-            schema_version: PLAYER_STATE_SCHEMA.to_string(),
-            scenario_id: state.scenario_id,
-            compiler_version: state.compiler_version,
-            snapshot: engine.snapshot()?,
-        };
-        save_player_state(Path::new(&args.state_out), &next_state)?;
-        emit_boundary(boundary, Some(args.state_out));
-        return Ok(0);
-    }
-
-    emit_boundary(boundary, None);
-    Ok(0)
-}
-
-fn run_input(args: InputArgs) -> Result<i32, ScriptLangError> {
-    let state = load_player_state(Path::new(&args.state_in))?;
-    let scenario = load_source_by_ref(&state.scenario_id)?;
-
-    let mut engine = resume_engine_from_xml(ResumeEngineFromXmlOptions {
-        scripts_xml: scenario.scripts_xml.clone(),
-        snapshot: state.snapshot,
-        host_functions: None,
-        compiler_version: Some(state.compiler_version.clone()),
-    })?;
-
-    engine.submit_input(&args.text)?;
-    let boundary = run_to_boundary(&mut engine)?;
-
-    if matches!(
-        boundary.event,
-        BoundaryEvent::Choices | BoundaryEvent::Input
-    ) {
-        let next_state = PlayerStateV3 {
-            schema_version: PLAYER_STATE_SCHEMA.to_string(),
-            scenario_id: state.scenario_id,
-            compiler_version: state.compiler_version,
-            snapshot: engine.snapshot()?,
-        };
-        save_player_state(Path::new(&args.state_out), &next_state)?;
-        emit_boundary(boundary, Some(args.state_out));
-        return Ok(0);
-    }
-
-    emit_boundary(boundary, None);
-    Ok(0)
 }
 
 fn run_to_boundary(
@@ -978,9 +483,17 @@ fn load_source_by_scripts_dir(
     let scripts_root = resolve_scripts_dir(scripts_dir)?;
     let scripts_xml = read_scripts_xml_from_dir(&scripts_root)?;
     let scenario_id = make_scripts_dir_scenario_id(&scripts_root);
+    let title = format!(
+        "Scripts {}",
+        scripts_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("unknown")
+    );
 
     Ok(LoadedScenario {
         id: scenario_id,
+        title,
         scripts_xml,
         entry_script: entry_script.to_string(),
     })
@@ -1397,7 +910,7 @@ mod tests {
         .expect("agent choose should pass");
         assert_eq!(choose_code, 0);
 
-        let input_start_code = run_start(StartArgs {
+        let input_start_code = agent::run_start(StartArgs {
             scripts_dir: input_scenario.clone(),
             entry_script: Some("main".to_string()),
             state_out: input_state_1.to_string_lossy().to_string(),
@@ -1405,7 +918,7 @@ mod tests {
         .expect("input scenario start should pass");
         assert_eq!(input_start_code, 0);
 
-        let input_code = run_input(InputArgs {
+        let input_code = agent::run_input(InputArgs {
             state_in: input_state_1.to_string_lossy().to_string(),
             text: "Guild".to_string(),
             state_out: input_state_2.to_string_lossy().to_string(),

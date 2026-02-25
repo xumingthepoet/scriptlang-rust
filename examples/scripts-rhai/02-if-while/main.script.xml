@@ -1,5 +1,5 @@
 <script name="main">
-  <var name="hp" type="number" value="3"/>
+  <var name="hp" type="int">3</var>
   <if when="hp > 2">
     <text>strong</text>
     <else>

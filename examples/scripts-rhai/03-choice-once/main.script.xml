@@ -1,5 +1,5 @@
 <script name="main">
-  <var name="round" type="number" value="0"/>
+  <var name="round" type="int">0</var>
   <while when="round &lt; 2">
     <choice text="Choose">
       <option text="Pick">

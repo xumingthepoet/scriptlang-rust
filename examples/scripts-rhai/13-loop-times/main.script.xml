@@ -1,6 +1,6 @@
 <script name="main">
-  <var name="i" type="number" value="0"/>
-  <var name="times" type="number" value="3"/>
+  <var name="i" type="int">0</var>
+  <var name="times" type="int">3</var>
 
   <loop times="times">
     <code>i = i + 1;</code>

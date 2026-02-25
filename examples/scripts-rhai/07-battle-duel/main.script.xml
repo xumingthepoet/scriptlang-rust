@@ -3,8 +3,8 @@
 <!-- include: victory.script.xml -->
 <!-- include: defeat.script.xml -->
 <script name="main">
-  <var name="player" type="Combatant" value="#{name: &quot;Hero&quot;, hp: 12}"/>
-  <var name="enemy" type="Combatant" value="#{name: &quot;Bandit&quot;, hp: 12}"/>
+  <var name="player" type="actors.Combatant">#{name: &quot;Hero&quot;, hp: 12}</var>
+  <var name="enemy" type="actors.Combatant">#{name: &quot;Bandit&quot;, hp: 12}</var>
 
   <text>Battle start: ${player.name}(${player.hp}) vs ${enemy.name}(${enemy.hp})</text>
   <text>Tip: if you keep using weak attacks, you will lose.</text>

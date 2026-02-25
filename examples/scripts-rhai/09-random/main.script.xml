@@ -1,14 +1,14 @@
 <script name="main">
   <text>Scenario 09: random builtin</text>
-  <var name="weatherRoll" type="number" value="random(100)"/>
+  <var name="weatherRoll" type="int">random(100)</var>
   <text>weather roll=${weatherRoll}</text>
   <choice text="Pick action (rng=${random(10)})">
     <option text="Attack (rng=${random(6)})">
-      <var name="damage" type="number" value="random(4) + 1"/>
+      <var name="damage" type="int">random(4) + 1</var>
       <text>attack damage=${damage}</text>
     </option>
     <option text="Defend (rng=${random(6)})">
-      <var name="guard" type="number" value="random(3) + 1"/>
+      <var name="guard" type="int">random(3) + 1</var>
       <text>guard=${guard}</text>
     </option>
   </choice>

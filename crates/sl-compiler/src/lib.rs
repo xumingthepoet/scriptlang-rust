@@ -39,6 +39,7 @@ struct SourceFile {
 #[derive(Debug, Clone)]
 struct ParsedTypeDecl {
     name: String,
+    qualified_name: String,
     fields: Vec<ParsedTypeFieldDecl>,
     location: SourceSpan,
 }
@@ -53,6 +54,7 @@ struct ParsedTypeFieldDecl {
 #[derive(Debug, Clone)]
 struct ParsedFunctionDecl {
     name: String,
+    qualified_name: String,
     params: Vec<ParsedFunctionParamDecl>,
     return_binding: ParsedFunctionParamDecl,
     code: String,
@@ -416,8 +418,14 @@ fn parse_defs_files(
 
         for child in element_children(root) {
             match child.name.as_str() {
-                "type" => type_decls.push(parse_type_declaration_node(child)?),
-                "function" => function_decls.push(parse_function_declaration_node(child)?),
+                "type" => type_decls.push(parse_type_declaration_node_with_namespace(
+                    child,
+                    &collection_name,
+                )?),
+                "function" => function_decls.push(parse_function_declaration_node_with_namespace(
+                    child,
+                    &collection_name,
+                )?),
                 _ => {
                     return Err(ScriptLangError::with_span(
                         "XML_DEFS_CHILD_INVALID",
@@ -521,37 +529,62 @@ fn resolve_visible_defs(
     reachable: &BTreeSet<String>,
     defs_by_path: &BTreeMap<String, DefsDeclarations>,
 ) -> Result<(VisibleTypeMap, VisibleFunctionMap), ScriptLangError> {
-    let mut type_decls_map = BTreeMap::new();
+    let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
+    let mut type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
     for path in reachable {
         let Some(defs) = defs_by_path.get(path) else {
             continue;
         };
         for decl in &defs.type_decls {
-            if type_decls_map.contains_key(&decl.name) {
+            if type_decls_map.contains_key(&decl.qualified_name) {
                 return Err(ScriptLangError::with_span(
                     "TYPE_DECL_DUPLICATE",
-                    format!("Duplicate type declaration \"{}\".", decl.name),
+                    format!("Duplicate type declaration \"{}\".", decl.qualified_name),
                     decl.location.clone(),
                 ));
             }
-            type_decls_map.insert(decl.name.clone(), decl.clone());
+            type_decls_map.insert(decl.qualified_name.clone(), decl.clone());
+            type_short_candidates
+                .entry(decl.name.clone())
+                .or_default()
+                .push(decl.qualified_name.clone());
         }
     }
+
+    let type_aliases = type_short_candidates
+        .into_iter()
+        .filter_map(|(short, qualified)| {
+            if qualified.len() == 1 {
+                Some((short, qualified[0].clone()))
+            } else {
+                None
+            }
+        })
+        .collect::<BTreeMap<_, _>>();
 
     let mut resolved_types: BTreeMap<String, ScriptType> = BTreeMap::new();
     let mut visiting = HashSet::new();
 
     for type_name in type_decls_map.keys() {
-        resolve_named_type(
+        resolve_named_type_with_aliases(
             type_name,
             &type_decls_map,
+            &type_aliases,
             &mut resolved_types,
             &mut visiting,
         )?;
     }
 
-    let mut functions = BTreeMap::new();
+    let mut visible_types = resolved_types.clone();
+    for (alias, qualified_name) in &type_aliases {
+        if let Some(ty) = resolved_types.get(qualified_name).cloned() {
+            visible_types.insert(alias.clone(), ty);
+        }
+    }
+
+    let mut functions: BTreeMap<String, FunctionDecl> = BTreeMap::new();
+    let mut function_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
     for path in reachable {
         let Some(defs) = defs_by_path.get(path) else {
@@ -559,10 +592,13 @@ fn resolve_visible_defs(
         };
 
         for decl in &defs.function_decls {
-            if functions.contains_key(&decl.name) {
+            if functions.contains_key(&decl.qualified_name) {
                 return Err(ScriptLangError::with_span(
                     "FUNCTION_DECL_DUPLICATE",
-                    format!("Duplicate function declaration \"{}\".", decl.name),
+                    format!(
+                        "Duplicate function declaration \"{}\".",
+                        decl.qualified_name
+                    ),
                     decl.location.clone(),
                 ));
             }
@@ -571,18 +607,18 @@ fn resolve_visible_defs(
             for param in &decl.params {
                 params.push(FunctionParam {
                     name: param.name.clone(),
-                    r#type: resolve_type_expr(&param.type_expr, &resolved_types, &param.location)?,
+                    r#type: resolve_type_expr(&param.type_expr, &visible_types, &param.location)?,
                     location: param.location.clone(),
                 });
             }
 
             let rb = &decl.return_binding;
-            let return_type = resolve_type_expr(&rb.type_expr, &resolved_types, &rb.location)?;
+            let return_type = resolve_type_expr(&rb.type_expr, &visible_types, &rb.location)?;
 
             functions.insert(
-                decl.name.clone(),
+                decl.qualified_name.clone(),
                 FunctionDecl {
-                    name: decl.name.clone(),
+                    name: decl.qualified_name.clone(),
                     params,
                     return_binding: FunctionReturn {
                         name: decl.return_binding.name.clone(),
@@ -593,31 +629,78 @@ fn resolve_visible_defs(
                     location: decl.location.clone(),
                 },
             );
+            function_short_candidates
+                .entry(decl.name.clone())
+                .or_default()
+                .push(decl.qualified_name.clone());
         }
     }
 
-    Ok((resolved_types, functions))
+    for (alias, qualified_names) in function_short_candidates {
+        if qualified_names.len() != 1 {
+            continue;
+        }
+        let qualified = &qualified_names[0];
+        let decl = functions
+            .get(qualified)
+            .cloned()
+            .expect("qualified function should exist in function map");
+        if !functions.contains_key(&alias) {
+            functions.insert(
+                alias.clone(),
+                FunctionDecl {
+                    name: alias,
+                    ..decl
+                },
+            );
+        }
+    }
+
+    Ok((visible_types, functions))
 }
 
+#[cfg(test)]
 fn resolve_named_type(
     name: &str,
     type_decls_map: &BTreeMap<String, ParsedTypeDecl>,
     resolved: &mut BTreeMap<String, ScriptType>,
     visiting: &mut HashSet<String>,
 ) -> Result<ScriptType, ScriptLangError> {
-    if let Some(found) = resolved.get(name) {
+    let empty_aliases = BTreeMap::new();
+    resolve_named_type_with_aliases(name, type_decls_map, &empty_aliases, resolved, visiting)
+}
+
+fn resolve_named_type_with_aliases(
+    name: &str,
+    type_decls_map: &BTreeMap<String, ParsedTypeDecl>,
+    type_aliases: &BTreeMap<String, String>,
+    resolved: &mut BTreeMap<String, ScriptType>,
+    visiting: &mut HashSet<String>,
+) -> Result<ScriptType, ScriptLangError> {
+    let lookup_name = if type_decls_map.contains_key(name) {
+        name.to_string()
+    } else if let Some(qualified) = type_aliases.get(name) {
+        qualified.clone()
+    } else {
+        return Err(ScriptLangError::new(
+            "TYPE_UNKNOWN",
+            format!("Unknown type \"{}\".", name),
+        ));
+    };
+
+    if let Some(found) = resolved.get(&lookup_name) {
         return Ok(found.clone());
     }
 
-    if !visiting.insert(name.to_string()) {
+    if !visiting.insert(lookup_name.clone()) {
         return Err(ScriptLangError::new(
             "TYPE_DECL_RECURSIVE",
             format!("Recursive type declaration detected for \"{}\".", name),
         ));
     }
 
-    let Some(decl) = type_decls_map.get(name) else {
-        visiting.remove(name);
+    let Some(decl) = type_decls_map.get(&lookup_name) else {
+        visiting.remove(&lookup_name);
         return Err(ScriptLangError::new(
             "TYPE_UNKNOWN",
             format!("Unknown type \"{}\".", name),
@@ -627,16 +710,17 @@ fn resolve_named_type(
     let mut fields = BTreeMap::new();
     for field in &decl.fields {
         if fields.contains_key(&field.name) {
-            visiting.remove(name);
+            visiting.remove(&lookup_name);
             return Err(ScriptLangError::with_span(
                 "TYPE_FIELD_DUPLICATE",
                 format!("Duplicate field \"{}\" in type \"{}\".", field.name, name),
                 field.location.clone(),
             ));
         }
-        let field_type = resolve_type_expr_with_lookup(
+        let field_type = resolve_type_expr_with_lookup_with_aliases(
             &field.type_expr,
             type_decls_map,
+            type_aliases,
             resolved,
             visiting,
             &field.location,
@@ -644,16 +728,17 @@ fn resolve_named_type(
         fields.insert(field.name.clone(), field_type);
     }
 
-    visiting.remove(name);
+    visiting.remove(&lookup_name);
 
     let resolved_type = ScriptType::Object {
-        type_name: name.to_string(),
+        type_name: lookup_name.clone(),
         fields,
     };
-    resolved.insert(name.to_string(), resolved_type.clone());
+    resolved.insert(lookup_name, resolved_type.clone());
     Ok(resolved_type)
 }
 
+#[cfg(test)]
 fn resolve_type_expr_with_lookup(
     expr: &ParsedTypeExpr,
     type_decls_map: &BTreeMap<String, ParsedTypeDecl>,
@@ -661,12 +746,32 @@ fn resolve_type_expr_with_lookup(
     visiting: &mut HashSet<String>,
     span: &SourceSpan,
 ) -> Result<ScriptType, ScriptLangError> {
+    let empty_aliases = BTreeMap::new();
+    resolve_type_expr_with_lookup_with_aliases(
+        expr,
+        type_decls_map,
+        &empty_aliases,
+        resolved,
+        visiting,
+        span,
+    )
+}
+
+fn resolve_type_expr_with_lookup_with_aliases(
+    expr: &ParsedTypeExpr,
+    type_decls_map: &BTreeMap<String, ParsedTypeDecl>,
+    type_aliases: &BTreeMap<String, String>,
+    resolved: &mut BTreeMap<String, ScriptType>,
+    visiting: &mut HashSet<String>,
+    span: &SourceSpan,
+) -> Result<ScriptType, ScriptLangError> {
     match expr {
         ParsedTypeExpr::Primitive(name) => Ok(ScriptType::Primitive { name: name.clone() }),
         ParsedTypeExpr::Array(element_type) => {
-            let resolved_element = resolve_type_expr_with_lookup(
+            let resolved_element = resolve_type_expr_with_lookup_with_aliases(
                 element_type,
                 type_decls_map,
+                type_aliases,
                 resolved,
                 visiting,
                 span,
@@ -676,9 +781,10 @@ fn resolve_type_expr_with_lookup(
             })
         }
         ParsedTypeExpr::Map(value_type) => {
-            let resolved_value = resolve_type_expr_with_lookup(
+            let resolved_value = resolve_type_expr_with_lookup_with_aliases(
                 value_type,
                 type_decls_map,
+                type_aliases,
                 resolved,
                 visiting,
                 span,
@@ -689,7 +795,13 @@ fn resolve_type_expr_with_lookup(
             })
         }
         ParsedTypeExpr::Custom(name) => {
-            match resolve_named_type(name, type_decls_map, resolved, visiting) {
+            match resolve_named_type_with_aliases(
+                name,
+                type_decls_map,
+                type_aliases,
+                resolved,
+                visiting,
+            ) {
                 Ok(value) => Ok(value),
                 Err(_) => Err(ScriptLangError::with_span(
                     "TYPE_UNKNOWN",
@@ -726,7 +838,15 @@ fn resolve_type_expr(
     }
 }
 
+#[cfg(test)]
 fn parse_type_declaration_node(node: &XmlElementNode) -> Result<ParsedTypeDecl, ScriptLangError> {
+    parse_type_declaration_node_with_namespace(node, "defs")
+}
+
+fn parse_type_declaration_node_with_namespace(
+    node: &XmlElementNode,
+    namespace: &str,
+) -> Result<ParsedTypeDecl, ScriptLangError> {
     let name = get_required_non_empty_attr(node, "name")?;
     assert_name_not_reserved(&name, "type", node.location.clone())?;
 
@@ -761,15 +881,25 @@ fn parse_type_declaration_node(node: &XmlElementNode) -> Result<ParsedTypeDecl, 
         });
     }
 
+    let qualified_name = format!("{}.{}", namespace, name);
     Ok(ParsedTypeDecl {
         name,
+        qualified_name,
         fields,
         location: node.location.clone(),
     })
 }
 
+#[cfg(test)]
 fn parse_function_declaration_node(
     node: &XmlElementNode,
+) -> Result<ParsedFunctionDecl, ScriptLangError> {
+    parse_function_declaration_node_with_namespace(node, "defs")
+}
+
+fn parse_function_declaration_node_with_namespace(
+    node: &XmlElementNode,
+    namespace: &str,
 ) -> Result<ParsedFunctionDecl, ScriptLangError> {
     let name = get_required_non_empty_attr(node, "name")?;
     assert_name_not_reserved(&name, "function", node.location.clone())?;
@@ -778,8 +908,10 @@ fn parse_function_declaration_node(
     let return_binding = parse_function_return(node)?;
     let code = parse_inline_required_no_element_children(node)?;
 
+    let qualified_name = format!("{}.{}", namespace, name);
     Ok(ParsedFunctionDecl {
         name,
+        qualified_name,
         params,
         return_binding,
         code,
@@ -1197,10 +1329,36 @@ fn parse_var_declaration(
     let ty_expr = parse_type_expr(&type_raw, &node.location)?;
     let ty = resolve_type_expr(&ty_expr, visible_types, &node.location)?;
 
+    if has_attr(node, "value") {
+        return Err(ScriptLangError::with_span(
+            "XML_ATTR_NOT_ALLOWED",
+            "Attribute \"value\" is not allowed on <var>. Use inline content instead.",
+            node.location.clone(),
+        ));
+    }
+
+    if let Some(child) = element_children(node).next() {
+        return Err(ScriptLangError::with_span(
+            "XML_VAR_CHILD_INVALID",
+            format!(
+                "<var> cannot contain child element <{}>. Use inline expression text only.",
+                child.name
+            ),
+            child.location.clone(),
+        ));
+    }
+
+    let inline = inline_text_content(node);
+    let initial_value_expr = if inline.trim().is_empty() {
+        None
+    } else {
+        Some(inline.trim().to_string())
+    };
+
     Ok(VarDeclaration {
         name,
         r#type: ty,
-        initial_value_expr: get_optional_attr(node, "value"),
+        initial_value_expr,
         location: node.location.clone(),
     })
 }
@@ -1371,7 +1529,7 @@ fn parse_function_return(
 
 fn parse_type_expr(raw: &str, span: &SourceSpan) -> Result<ParsedTypeExpr, ScriptLangError> {
     let source = raw.trim();
-    if source == "number" || source == "string" || source == "boolean" {
+    if source == "int" || source == "float" || source == "string" || source == "boolean" {
         return Ok(ParsedTypeExpr::Primitive(source.to_string()));
     }
 
@@ -1381,14 +1539,22 @@ fn parse_type_expr(raw: &str, span: &SourceSpan) -> Result<ParsedTypeExpr, Scrip
     }
 
     if let Some(value) = source
-        .strip_prefix("Map<string,")
-        .and_then(|inner| inner.strip_suffix('>'))
+        .strip_prefix("#{")
+        .and_then(|inner| inner.strip_suffix('}'))
     {
+        if value.trim().is_empty() {
+            return Err(ScriptLangError::with_span(
+                "TYPE_PARSE_ERROR",
+                format!("Unsupported type syntax: \"{}\".", raw),
+                span.clone(),
+            ));
+        }
         let value_type = parse_type_expr(value.trim(), span)?;
         return Ok(ParsedTypeExpr::Map(Box::new(value_type)));
     }
 
-    let custom_regex = Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").expect("type regex must compile");
+    let custom_regex = Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
+        .expect("type regex must compile");
     if custom_regex.is_match(source) {
         return Ok(ParsedTypeExpr::Custom(source.to_string()));
     }
@@ -1510,7 +1676,6 @@ fn parse_bool_attr(
 fn split_by_top_level_comma(raw: &str) -> Vec<String> {
     let mut parts = Vec::new();
     let mut current = String::new();
-    let mut angle_depth = 0usize;
     let mut paren_depth = 0usize;
     let mut bracket_depth = 0usize;
     let mut brace_depth = 0usize;
@@ -1532,19 +1697,13 @@ fn split_by_top_level_comma(raw: &str) -> Vec<String> {
         }
 
         match ch {
-            '<' => angle_depth += 1,
-            '>' if angle_depth > 0 => angle_depth -= 1,
             '(' => paren_depth += 1,
             ')' if paren_depth > 0 => paren_depth -= 1,
             '[' => bracket_depth += 1,
             ']' if bracket_depth > 0 => bracket_depth -= 1,
             '{' => brace_depth += 1,
             '}' if brace_depth > 0 => brace_depth -= 1,
-            ',' if angle_depth == 0
-                && paren_depth == 0
-                && bracket_depth == 0
-                && brace_depth == 0 =>
-            {
+            ',' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
                 parts.push(current.trim().to_string());
                 current.clear();
                 continue;
@@ -1748,13 +1907,15 @@ fn expand_element_with_macros(
 
     let mut loop_var_attrs = BTreeMap::new();
     loop_var_attrs.insert("name".to_string(), temp_var_name.clone());
-    loop_var_attrs.insert("type".to_string(), "number".to_string());
-    loop_var_attrs.insert("value".to_string(), times_expr);
+    loop_var_attrs.insert("type".to_string(), "int".to_string());
 
     let loop_var = XmlElementNode {
         name: "var".to_string(),
         attributes: loop_var_attrs,
-        children: Vec::new(),
+        children: vec![XmlNode::Text(XmlTextNode {
+            value: times_expr,
+            location: node.location.clone(),
+        })],
         location: node.location.clone(),
     };
 
@@ -1863,7 +2024,7 @@ mod tests {
             "main.script.xml",
             r#"
 <script name="main">
-  <var name="i" type="number" value="0"/>
+  <var name="i" type="int">0</var>
   <loop times="2">
     <code>i = i + 1;</code>
   </loop>
@@ -2021,7 +2182,7 @@ mod tests {
             ScriptParam {
                 name: "hp".to_string(),
                 r#type: ScriptType::Primitive {
-                    name: "number".to_string(),
+                    name: "int".to_string(),
                 },
                 is_ref: false,
                 location: SourceSpan::synthetic(),
@@ -2134,23 +2295,25 @@ mod tests {
     fn parse_type_and_call_argument_helpers_cover_valid_and_invalid_inputs() {
         let span = SourceSpan::synthetic();
         assert!(matches!(
-            parse_type_expr("number", &span).expect("primitive"),
+            parse_type_expr("int", &span).expect("primitive"),
             ParsedTypeExpr::Primitive(_)
         ));
         assert!(matches!(
-            parse_type_expr("number[]", &span).expect("array"),
+            parse_type_expr("int[]", &span).expect("array"),
             ParsedTypeExpr::Array(_)
         ));
         assert!(matches!(
-            parse_type_expr("Map<string,number>", &span).expect("map"),
+            parse_type_expr("#{int}", &span).expect("map"),
             ParsedTypeExpr::Map(_)
         ));
         assert!(matches!(
             parse_type_expr("CustomType", &span).expect("custom"),
             ParsedTypeExpr::Custom(_)
         ));
-        let invalid_type = parse_type_expr("Map<number,string>", &span).expect_err("invalid");
+        let invalid_type = parse_type_expr("Map<int,string>", &span).expect_err("invalid");
         assert_eq!(invalid_type.code, "TYPE_PARSE_ERROR");
+        let empty_map_type = parse_type_expr("#{   }", &span).expect_err("empty map type");
+        assert_eq!(empty_map_type.code, "TYPE_PARSE_ERROR");
 
         let args = parse_args(Some("1, ref:hp, a + 1".to_string())).expect("args");
         assert_eq!(args.len(), 3);
@@ -2158,6 +2321,32 @@ mod tests {
 
         let bad_args = parse_args(Some("ref:   ".to_string())).expect_err("bad args");
         assert_eq!(bad_args.code, "CALL_ARGS_PARSE_ERROR");
+    }
+
+    #[test]
+    fn parse_var_declaration_rejects_value_attr_and_child_elements() {
+        let visible_types = BTreeMap::new();
+        let with_value = xml_element(
+            "var",
+            &[("name", "x"), ("type", "int"), ("value", "1")],
+            Vec::new(),
+        );
+        let value_error =
+            parse_var_declaration(&with_value, &visible_types).expect_err("value attr forbidden");
+        assert_eq!(value_error.code, "XML_ATTR_NOT_ALLOWED");
+
+        let with_child = xml_element(
+            "var",
+            &[("name", "x"), ("type", "int")],
+            vec![XmlNode::Element(xml_element(
+                "text",
+                &[],
+                vec![xml_text("bad")],
+            ))],
+        );
+        let child_error = parse_var_declaration(&with_child, &visible_types)
+            .expect_err("child element should be rejected");
+        assert_eq!(child_error.code, "XML_VAR_CHILD_INVALID");
     }
 
     #[test]
@@ -2170,26 +2359,22 @@ mod tests {
                 fields: BTreeMap::new(),
             },
         );
-        let root_ok = xml_element("script", &[("args", "number:a,ref:Custom:b")], Vec::new());
+        let root_ok = xml_element("script", &[("args", "int:a,ref:Custom:b")], Vec::new());
         let parsed = parse_script_args(&root_ok, &visible_types).expect("args parse");
         assert_eq!(parsed.len(), 2);
         assert!(parsed[1].is_ref);
 
-        let root_bad = xml_element("script", &[("args", "number")], Vec::new());
+        let root_bad = xml_element("script", &[("args", "int")], Vec::new());
         let error = parse_script_args(&root_bad, &visible_types).expect_err("bad args");
         assert_eq!(error.code, "SCRIPT_ARGS_PARSE_ERROR");
 
-        let root_dup = xml_element("script", &[("args", "number:a,number:a")], Vec::new());
+        let root_dup = xml_element("script", &[("args", "int:a,int:a")], Vec::new());
         let error = parse_script_args(&root_dup, &visible_types).expect_err("duplicate args");
         assert_eq!(error.code, "SCRIPT_ARGS_DUPLICATE");
 
         let fn_node = xml_element(
             "function",
-            &[
-                ("name", "f"),
-                ("args", "ref:number:a"),
-                ("return", "number:r"),
-            ],
+            &[("name", "f"), ("args", "ref:int:a"), ("return", "int:r")],
             vec![xml_text("r = a;")],
         );
         let error = parse_function_declaration_node(&fn_node).expect_err("ref arg unsupported");
@@ -2197,11 +2382,7 @@ mod tests {
 
         let fn_bad_return = xml_element(
             "function",
-            &[
-                ("name", "f"),
-                ("args", "number:a"),
-                ("return", "ref:number:r"),
-            ],
+            &[("name", "f"), ("args", "int:a"), ("return", "ref:int:r")],
             vec![xml_text("r = a;")],
         );
         let error =
@@ -2215,18 +2396,20 @@ mod tests {
         let defs = DefsDeclarations {
             type_decls: vec![ParsedTypeDecl {
                 name: "Obj".to_string(),
+                qualified_name: "shared.Obj".to_string(),
                 fields: vec![ParsedTypeFieldDecl {
                     name: "value".to_string(),
-                    type_expr: ParsedTypeExpr::Primitive("number".to_string()),
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                     location: span.clone(),
                 }],
                 location: span.clone(),
             }],
             function_decls: vec![ParsedFunctionDecl {
                 name: "make".to_string(),
+                qualified_name: "shared.make".to_string(),
                 params: vec![ParsedFunctionParamDecl {
                     name: "seed".to_string(),
-                    type_expr: ParsedTypeExpr::Primitive("number".to_string()),
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                     location: span.clone(),
                 }],
                 return_binding: ParsedFunctionParamDecl {
@@ -2254,6 +2437,92 @@ mod tests {
     }
 
     #[test]
+    fn resolve_visible_defs_handles_namespace_collisions_and_alias_edges() {
+        let span = SourceSpan::synthetic();
+
+        let duplicate_qualified = DefsDeclarations {
+            type_decls: vec![ParsedTypeDecl {
+                name: "T".to_string(),
+                qualified_name: "shared.T".to_string(),
+                fields: vec![ParsedTypeFieldDecl {
+                    name: "v".to_string(),
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    location: span.clone(),
+                }],
+                location: span.clone(),
+            }],
+            function_decls: Vec::new(),
+        };
+        let duplicate_defs_by_path = BTreeMap::from([
+            ("a.defs.xml".to_string(), duplicate_qualified.clone()),
+            ("b.defs.xml".to_string(), duplicate_qualified),
+        ]);
+        let duplicate_reachable =
+            BTreeSet::from(["a.defs.xml".to_string(), "b.defs.xml".to_string()]);
+        let duplicate_error = resolve_visible_defs(&duplicate_reachable, &duplicate_defs_by_path)
+            .expect_err("duplicate qualified type should fail");
+        assert_eq!(duplicate_error.code, "TYPE_DECL_DUPLICATE");
+
+        let defs_by_path = BTreeMap::from([
+            (
+                "a.defs.xml".to_string(),
+                DefsDeclarations {
+                    type_decls: Vec::new(),
+                    function_decls: vec![ParsedFunctionDecl {
+                        name: "doit".to_string(),
+                        qualified_name: "a.doit".to_string(),
+                        params: Vec::new(),
+                        return_binding: ParsedFunctionParamDecl {
+                            name: "out".to_string(),
+                            type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                            location: span.clone(),
+                        },
+                        code: "out = 1;".to_string(),
+                        location: span.clone(),
+                    }],
+                },
+            ),
+            (
+                "b.defs.xml".to_string(),
+                DefsDeclarations {
+                    type_decls: Vec::new(),
+                    function_decls: vec![ParsedFunctionDecl {
+                        name: "doit".to_string(),
+                        qualified_name: "b.doit".to_string(),
+                        params: Vec::new(),
+                        return_binding: ParsedFunctionParamDecl {
+                            name: "out".to_string(),
+                            type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                            location: span.clone(),
+                        },
+                        code: "out = 2;".to_string(),
+                        location: span.clone(),
+                    }],
+                },
+            ),
+        ]);
+        let reachable = BTreeSet::from(["a.defs.xml".to_string(), "b.defs.xml".to_string()]);
+        let (_types, functions) =
+            resolve_visible_defs(&reachable, &defs_by_path).expect("defs should resolve");
+        assert!(functions.contains_key("a.doit"));
+        assert!(functions.contains_key("b.doit"));
+        assert!(!functions.contains_key("doit"));
+    }
+
+    #[test]
+    fn resolve_named_type_with_aliases_reports_missing_aliased_target() {
+        let error = resolve_named_type_with_aliases(
+            "Alias",
+            &BTreeMap::new(),
+            &BTreeMap::from([("Alias".to_string(), "missing.Type".to_string())]),
+            &mut BTreeMap::new(),
+            &mut HashSet::new(),
+        )
+        .expect_err("missing aliased target should fail");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
+
+    #[test]
     fn type_resolution_helpers_cover_nested_array_and_map_paths() {
         let span = SourceSpan::synthetic();
         let mut resolved = BTreeMap::new();
@@ -2262,9 +2531,10 @@ mod tests {
             "Obj".to_string(),
             ParsedTypeDecl {
                 name: "Obj".to_string(),
+                qualified_name: "Obj".to_string(),
                 fields: vec![ParsedTypeFieldDecl {
                     name: "n".to_string(),
-                    type_expr: ParsedTypeExpr::Primitive("number".to_string()),
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                     location: span.clone(),
                 }],
                 location: span.clone(),
@@ -2311,7 +2581,7 @@ mod tests {
         .expect_err("unknown map value type should fail");
         assert_eq!(map_err.code, "TYPE_UNKNOWN");
 
-        let nested = parse_type_expr("Map<string,number[]>", &span).expect("type should parse");
+        let nested = parse_type_expr("#{int[]}", &span).expect("type should parse");
         assert!(matches!(nested, ParsedTypeExpr::Map(_)));
 
         let type_node = xml_element(
@@ -2319,7 +2589,7 @@ mod tests {
             &[("name", "Bag")],
             vec![XmlNode::Element(xml_element(
                 "field",
-                &[("name", "values"), ("type", "Map<string,number[]>")],
+                &[("name", "values"), ("type", "#{int[]}")],
                 Vec::new(),
             ))],
         );
@@ -2331,7 +2601,7 @@ mod tests {
     fn parse_function_return_and_type_expr_success_paths_are_covered() {
         let function_node = xml_element(
             "function",
-            &[("name", "f"), ("return", "number:out")],
+            &[("name", "f"), ("return", "int:out")],
             vec![xml_text("out = 1;")],
         );
         let parsed_return = parse_function_return(&function_node).expect("return should parse");
@@ -2339,11 +2609,11 @@ mod tests {
 
         let span = SourceSpan::synthetic();
         assert!(matches!(
-            parse_type_expr("number[]", &span).expect("array should parse"),
+            parse_type_expr("int[]", &span).expect("array should parse"),
             ParsedTypeExpr::Array(_)
         ));
         assert!(matches!(
-            parse_type_expr("Map<string,number>", &span).expect("map should parse"),
+            parse_type_expr("#{int}", &span).expect("map should parse"),
             ParsedTypeExpr::Map(_)
         ));
     }
@@ -2458,7 +2728,7 @@ mod tests {
             &[],
             vec![xml_text("   ")]
         )));
-        assert!(split_by_top_level_comma("a, f(1,2), Map<string,number>, #{a:1,b:2}").len() >= 4);
+        assert!(split_by_top_level_comma("a, f(1,2), #{int}, #{a:1,b:2}").len() >= 4);
     }
 
     #[test]
@@ -2470,11 +2740,11 @@ mod tests {
         let duplicate_types = map(&[
             (
                 "a.defs.xml",
-                r#"<defs name="a"><type name="T"><field name="v" type="number"/></type></defs>"#,
+                r#"<defs name="a"><type name="T"><field name="v" type="int"/></type></defs>"#,
             ),
             (
                 "b.defs.xml",
-                r#"<defs name="b"><type name="T"><field name="v" type="number"/></type></defs>"#,
+                r#"<defs name="b"><type name="T"><field name="v" type="int"/></type></defs>"#,
             ),
             (
                 "main.script.xml",
@@ -2486,8 +2756,8 @@ mod tests {
             ),
         ]);
         let error = compile_project_bundle_from_xml_map(&duplicate_types)
-            .expect_err("duplicate type declarations should fail");
-        assert_eq!(error.code, "TYPE_DECL_DUPLICATE");
+            .expect_err("ambiguous unqualified type should fail");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
 
         let recursive = map(&[
             (
@@ -2671,7 +2941,7 @@ mod tests {
                 map(&[
                     (
                         "x.defs.xml",
-                        "<defs name=\"x\"><type name=\"A\"><field name=\"v\" type=\"number\"/><field name=\"v\" type=\"number\"/></type></defs>",
+                        "<defs name=\"x\"><type name=\"A\"><field name=\"v\" type=\"int\"/><field name=\"v\" type=\"int\"/></type></defs>",
                     ),
                     (
                         "main.script.xml",
@@ -2688,7 +2958,7 @@ mod tests {
                 map(&[
                     (
                         "x.defs.xml",
-                        "<defs name=\"x\"><function name=\"f\" return=\"number:r\">r=1;</function><function name=\"f\" return=\"number:r\">r=2;</function></defs>",
+                        "<defs name=\"x\"><function name=\"f\" return=\"int:r\">r=1;</function><function name=\"f\" return=\"int:r\">r=2;</function></defs>",
                     ),
                     (
                         "main.script.xml",
@@ -2808,7 +3078,7 @@ mod tests {
                 "script args reserved prefix",
                 map(&[(
                     "main.script.xml",
-                    "<script name=\"main\" args=\"number:__sl_x\"><text>x</text></script>",
+                    "<script name=\"main\" args=\"int:__sl_x\"><text>x</text></script>",
                 )]),
                 "NAME_RESERVED_PREFIX",
             ),
@@ -2878,13 +3148,14 @@ mod tests {
         let span = SourceSpan::synthetic();
         let field = ParsedTypeFieldDecl {
             name: "v".to_string(),
-            type_expr: ParsedTypeExpr::Primitive("number".to_string()),
+            type_expr: ParsedTypeExpr::Primitive("int".to_string()),
             location: span.clone(),
         };
         let mut type_map = BTreeMap::from([(
             "A".to_string(),
             ParsedTypeDecl {
                 name: "A".to_string(),
+                qualified_name: "A".to_string(),
                 fields: vec![field.clone()],
                 location: span.clone(),
             },
@@ -2908,6 +3179,7 @@ mod tests {
             "Dup".to_string(),
             ParsedTypeDecl {
                 name: "Dup".to_string(),
+                qualified_name: "Dup".to_string(),
                 fields: vec![field.clone(), field],
                 location: span.clone(),
             },
@@ -2920,7 +3192,7 @@ mod tests {
         let mut resolved_for_lookup = BTreeMap::new();
         let mut visiting_for_lookup = HashSet::new();
         let array_ty = resolve_type_expr_with_lookup(
-            &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Primitive("number".to_string()))),
+            &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Primitive("int".to_string()))),
             &BTreeMap::new(),
             &mut resolved_for_lookup,
             &mut visiting_for_lookup,
@@ -2939,14 +3211,14 @@ mod tests {
         assert!(matches!(map_ty, ScriptType::Map { .. }));
 
         let array = resolve_type_expr(
-            &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Primitive("number".to_string()))),
+            &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Primitive("int".to_string()))),
             &BTreeMap::new(),
             &span,
         )
         .expect("array should resolve");
         assert!(matches!(array, ScriptType::Array { .. }));
         let map_resolved = resolve_type_expr(
-            &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Primitive("number".to_string()))),
+            &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Primitive("int".to_string()))),
             &BTreeMap::new(),
             &span,
         )
@@ -2999,16 +3271,16 @@ mod tests {
         let defs_resolution = map(&[
             (
                 "shared.defs.xml",
-                r#"
+                r##"
 <defs name="shared">
   <type name="Obj">
-    <field name="values" type="Map&lt;string,number[]&gt;"/>
+    <field name="values" type="#{int[]}"/>
   </type>
   <function name="build" return="Obj:r">
     r = #{values: #{a: [1]}};
   </function>
 </defs>
-"#,
+"##,
             ),
             (
                 "main.script.xml",
@@ -3140,7 +3412,7 @@ mod tests {
         .expect("empty script args should be accepted");
         assert!(empty_args.is_empty());
         let args_with_empty_segment = parse_script_args(
-            &xml_element("script", &[("args", "number:a,,number:b")], Vec::new()),
+            &xml_element("script", &[("args", "int:a,,int:b")], Vec::new()),
             &BTreeMap::new(),
         )
         .expect("empty arg segment should be ignored");
@@ -3152,13 +3424,13 @@ mod tests {
         .expect_err("bad args should fail");
         assert_eq!(args_bad_start.code, "SCRIPT_ARGS_PARSE_ERROR");
         let args_bad_end = parse_script_args(
-            &xml_element("script", &[("args", "number:")], Vec::new()),
+            &xml_element("script", &[("args", "int:")], Vec::new()),
             &BTreeMap::new(),
         )
         .expect_err("bad args should fail");
         assert_eq!(args_bad_end.code, "SCRIPT_ARGS_PARSE_ERROR");
         let args_empty_name = parse_script_args(
-            &xml_element("script", &[("args", "number:   ")], Vec::new()),
+            &xml_element("script", &[("args", "int:   ")], Vec::new()),
             &BTreeMap::new(),
         )
         .expect_err("empty script arg name should fail");
@@ -3166,39 +3438,35 @@ mod tests {
 
         let empty_fn_args = parse_function_args(&xml_element(
             "function",
-            &[("name", "f"), ("args", "   "), ("return", "number:r")],
+            &[("name", "f"), ("args", "   "), ("return", "int:r")],
             vec![xml_text("r = 1;")],
         ))
         .expect("empty function args should be accepted");
         assert!(empty_fn_args.is_empty());
         let fn_args_bad_start = parse_function_args(&xml_element(
             "function",
-            &[("name", "f"), ("args", ":a"), ("return", "number:r")],
+            &[("name", "f"), ("args", ":a"), ("return", "int:r")],
             vec![xml_text("r = 1;")],
         ))
         .expect_err("bad function args should fail");
         assert_eq!(fn_args_bad_start.code, "FUNCTION_ARGS_PARSE_ERROR");
         let fn_args_bad_end = parse_function_args(&xml_element(
             "function",
-            &[("name", "f"), ("args", "number:"), ("return", "number:r")],
+            &[("name", "f"), ("args", "int:"), ("return", "int:r")],
             vec![xml_text("r = 1;")],
         ))
         .expect_err("bad function args should fail");
         assert_eq!(fn_args_bad_end.code, "FUNCTION_ARGS_PARSE_ERROR");
         let fn_args_dup = parse_function_args(&xml_element(
             "function",
-            &[
-                ("name", "f"),
-                ("args", "number:a,number:a"),
-                ("return", "number:r"),
-            ],
+            &[("name", "f"), ("args", "int:a,int:a"), ("return", "int:r")],
             vec![xml_text("r = 1;")],
         ))
         .expect_err("duplicate function args should fail");
         assert_eq!(fn_args_dup.code, "FUNCTION_ARGS_DUPLICATE");
         let fn_args_no_colon = parse_function_args(&xml_element(
             "function",
-            &[("name", "f"), ("args", "number"), ("return", "number:r")],
+            &[("name", "f"), ("args", "int"), ("return", "int:r")],
             vec![xml_text("r = 1;")],
         ))
         .expect_err("function arg without colon should fail");
@@ -3206,14 +3474,14 @@ mod tests {
 
         let ret_no_colon = parse_function_return(&xml_element(
             "function",
-            &[("name", "f"), ("return", "number")],
+            &[("name", "f"), ("return", "int")],
             vec![xml_text("x")],
         ))
         .expect_err("return parse should fail");
         assert_eq!(ret_no_colon.code, "FUNCTION_RETURN_PARSE_ERROR");
         let ret_bad_edge = parse_function_return(&xml_element(
             "function",
-            &[("name", "f"), ("return", "number:")],
+            &[("name", "f"), ("return", "int:")],
             vec![xml_text("x")],
         ))
         .expect_err("return parse should fail");
@@ -3221,11 +3489,10 @@ mod tests {
 
         let empty_call_args = parse_args(Some("   ".to_string())).expect("empty call args");
         assert!(empty_call_args.is_empty());
-        let _ = parse_type_expr("number[]", &SourceSpan::synthetic()).expect("array parse");
+        let _ = parse_type_expr("int[]", &SourceSpan::synthetic()).expect("array parse");
+        let _ = parse_type_expr("#{int}", &SourceSpan::synthetic()).expect("map parse");
         let _ =
-            parse_type_expr("Map<string, number>", &SourceSpan::synthetic()).expect("map parse");
-        let _ = parse_type_expr("Map<string, number[]>", &SourceSpan::synthetic())
-            .expect("nested map/array parse");
+            parse_type_expr("#{int[]}", &SourceSpan::synthetic()).expect("nested map/array parse");
 
         let inline = inline_text_content(&xml_element(
             "x",

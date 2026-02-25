@@ -1,7 +1,7 @@
 <!-- include: shared.defs.xml -->
 <script name="main">
-  <var name="base" type="number" value="2"/>
-  <var name="obj" type="CustomType" value="#{value: 5}"/>
-  <code>base = addWithGameBonus(base, obj);</code>
-  <text>Result ${addWithGameBonus(base, obj)}</text>
+  <var name="base" type="int">2</var>
+  <var name="obj" type="shared.CustomType">#{value: 5}</var>
+  <code>base = shared.addWithGameBonus(base, obj);</code>
+  <text>Result ${shared.addWithGameBonus(base, obj)}</text>
 </script>

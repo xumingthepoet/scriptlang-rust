@@ -1,5 +1,5 @@
 <script name="main">
-  <var name="hp" type="number" value="10"/>
+  <var name="hp" type="int">10</var>
   <text>before ${hp}</text>
   <choice text="Choose">
     <option text="Heal">

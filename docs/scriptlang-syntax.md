@@ -12,7 +12,7 @@
 
 ```xml
 <!-- include: shared.defs.xml -->
-<script name="main" args="number:hp">
+<script name="main" args="int:hp">
   <text>HP=${hp}</text>
 </script>
 ```
@@ -53,15 +53,16 @@
 
 - `<type name="TypeName">` + `<field name="..." type="..."/>`
 - `<function name="Func" args="type:name,..." return="type:name">...</function>`
+- `<defs name="shared">` 中声明的类型/函数具备命名空间前缀：`shared.TypeName`、`shared.func(...)`
 
 示例：
 
 ```xml
 <defs name="shared">
   <type name="Fighter">
-    <field name="hp" type="number"/>
+    <field name="hp" type="int"/>
   </type>
-  <function name="boost" args="number:base" return="number:out">
+  <function name="boost" args="int:base" return="int:out">
     out = base + 1;
   </function>
 </defs>
@@ -71,14 +72,15 @@
 
 支持类型表达式：
 
-- 基础类型：`number` / `string` / `boolean`
+- 基础类型：`int` / `float` / `string` / `boolean`
 - 数组：`T[]`
-- 映射：`Map<string, T>`
-- 自定义对象类型：`TypeName`（来自可见 defs）
+- 映射：`#{T}`（key 固定为 string）
+- 自定义对象类型：`ns.TypeName`（推荐）或在无歧义时使用短名 `TypeName`
 
 ## 6. 常用节点语义
 
-- `<var name="x" type="number" value="1"/>`：声明变量，作用域在当前块内。
+- `<var name="x" type="int">1</var>`：声明变量，作用域在当前块内。
+- `<var>` 不再支持 `value` 属性，只能使用节点内联文本作为初始表达式。
 - `<text>...</text>`：输出文本，支持 `${expr}` 插值。
 - `<code>...</code>`：执行 Rhai 代码，可读写可见变量。
 - `<if when="...">...</if>`：条件分支，`when` 必须为布尔表达式。
@@ -88,6 +90,7 @@
 - `<input var="name" text="Prompt"/>`：等待宿主输入并写入字符串变量。
 - `<call script="other" args="..."/>`：调用其他脚本。
 - `<return/>` 或 `<return script="next" args="..."/>`：返回/跳转返回。
+- defs 函数调用支持命名空间写法，例如：`shared.boost(hp)`。
 
 ## 7. 参数语法
 
@@ -110,7 +113,7 @@
 ```xml
 <!-- include: shared.defs.xml -->
 <script name="main" args="string:name">
-  <var name="hp" type="number" value="3"/>
+  <var name="hp" type="int">3</var>
   <text>你好，${name}</text>
   <while when="hp > 0">
     <text>HP=${hp}</text>

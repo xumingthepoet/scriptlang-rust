@@ -1,5 +1,5 @@
 <defs name="math">
-  <function name="label" args="string:name,number:level" return="string:out">
+  <function name="label" args="string:name,int:level" return="string:out">
     out = name + "#" + level;
   </function>
 </defs>
