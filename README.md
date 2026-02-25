@@ -38,6 +38,8 @@ cargo run -p sl-cli -- agent input --state-in /tmp/sl-next.json --text "Rin" --s
 - `CHOICE:<index>|<json_text>`
 - `INPUT_DEFAULT_JSON:...`
 - `STATE_OUT:<path|NONE>`
+- `ERROR_CODE:...` (only when `RESULT:ERROR`)
+- `ERROR_MSG_JSON:...` (only when `RESULT:ERROR`)
 
 ### TUI mode
 ```bash
@@ -45,11 +47,18 @@ cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/06-snapshot-flow
 ```
 
 `tui` mode uses a `ratatui + crossterm` full-screen interface on real terminals:
-- story panel + boundary panel + input/command panel
-- `Up/Down` to select choices, `Enter` to submit
-- command input supports `:help :save :load :restart :quit`
+- `Up/Down` to select choices
+- typing + `Backspace` to edit input text
+- `Enter` to submit choice/input
+- `s` save snapshot, `l` load snapshot, `r` restart, `h` help, `q`/`Esc` quit
 
 When stdin/stdout is not a TTY (for example, piped in tests), it automatically falls back to the previous line-based interactive mode.
+Fallback line mode supports command input:
+- `:help`
+- `:save`
+- `:load`
+- `:restart`
+- `:quit`
 
 All example entry commands:
 ```bash
@@ -70,13 +79,6 @@ cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/14-defs-functions
 cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/15-entry-override-recursive
 cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/16-input-name
 ```
-
-TUI built-in commands:
-- `:help`
-- `:save`
-- `:load`
-- `:restart`
-- `:quit`
 
 You can override defaults with:
 - `--entry-script <name>` (default: `main`)

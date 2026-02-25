@@ -28,7 +28,7 @@
 规则：
 
 - 一行一个 include。
-- 路径相对当前文件。
+- 路径相对当前文件（推荐写在文件头，编译器会扫描整份源文本中的 include 注释行）。
 - 支持目标：`.script.xml`、`.defs.xml`、`.json`。
 - include 缺失或循环依赖会在编译时报错。
 
@@ -44,6 +44,7 @@
 - `<loop>`
 - `<choice>` / `<option>`
 - `<input>`
+- `<break>` / `<continue>`
 - `<call>`
 - `<return>`
 
@@ -81,15 +82,17 @@
 
 - `<var name="x" type="int">1</var>`：声明变量，作用域在当前块内。
 - `<var>` 不再支持 `value` 属性，只能使用节点内联文本作为初始表达式。
-- `<text>...</text>`：输出文本，支持 `${expr}` 插值。
+- `<text once="true">...</text>`：文本输出，支持 `${expr}` 插值；`once` 仅允许 `true/false`，表示同一脚本生命周期内只触发一次。
 - `<code>...</code>`：执行 Rhai 代码，可读写可见变量。
-- `<if when="...">...</if>`：条件分支，`when` 必须为布尔表达式。
+- `<if when="...">...</if>`：条件分支，`when` 必须为布尔表达式；可选 `<else>` 分支。
 - `<while when="...">...</while>`：循环；支持 `<break/>`、`<continue/>`。
 - `<loop times="...">...</loop>`：循环语法糖（编译期展开）。
 - `<choice text="...">` + `<option text="...">`：生成选项分支。
-- `<input var="name" text="Prompt"/>`：等待宿主输入并写入字符串变量。
+- `<option>` 支持 `when`（条件显示）、`once`（单次可见）与 `fall_over`（兜底项）。
+- `<continue/>` 还可作为 `<option>` 的直接子节点，表示选中后立即回到当前 choice 边界。
+- `<input var="name" text="Prompt"/>`：等待宿主输入并写入字符串变量；不支持 `default` 属性，也不能带子节点/内联文本。
 - `<call script="other" args="..."/>`：调用其他脚本。
-- `<return/>` 或 `<return script="next" args="..."/>`：返回/跳转返回。
+- `<return/>` 或 `<return script="next" args="..."/>`：返回/跳转返回；`return` 的 `args` 不支持 `ref`，且声明 `args` 时必须同时声明 `script`。
 - defs 函数调用支持命名空间写法，例如：`shared.boost(hp)`。
 
 ## 7. 参数语法
@@ -105,6 +108,11 @@
 
 - `script name` 必须唯一。
 - `choice/option/input/call/if/while` 等必填属性缺失会编译报错。
+- `once` 属性只允许出现在 `<text>` 和 `<option>`。
+- `fall_over` 每个 `<choice>` 最多一个，且必须是最后一个 `<option>`，同时不能声明 `when`。
+- `<continue/>` 只能出现在 `<while>` 内，或作为 `<option>` 的直接子节点。
+- `<else>` 只能出现在 `<if>` 内。
+- 已移除节点：`<vars> <step> <set> <push> <remove>`。
 - `__` 前缀为保留命名（脚本名、类型名、字段名、函数名、变量名等均不建议使用）。
 - XML 属性中 `<` 需要写成 `&lt;`。
 
