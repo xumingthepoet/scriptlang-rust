@@ -650,6 +650,11 @@ mod rich {
 }
 
 #[cfg(not(coverage))]
+fn should_force_line_mode() -> bool {
+    std::env::var_os("RUST_TEST_THREADS").is_some()
+}
+
+#[cfg(not(coverage))]
 pub(super) fn run_tui_ratatui_mode(
     state_file: &str,
     scenario: &super::LoadedScenario,
@@ -658,7 +663,10 @@ pub(super) fn run_tui_ratatui_mode(
 ) -> Result<i32, sl_core::ScriptLangError> {
     use std::io::IsTerminal;
 
-    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+    if should_force_line_mode()
+        || !std::io::stdin().is_terminal()
+        || !std::io::stdout().is_terminal()
+    {
         return super::run_tui_line_mode(state_file, scenario, entry_script, engine);
     }
     rich::run_tui_ratatui_mode(state_file, scenario, entry_script, engine)
