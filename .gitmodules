@@ -1,0 +1,3 @@
+[submodule "script-lang"]
+	path = script-lang
+	url = https://github.com/xumingthepoet/scriptlang.git
