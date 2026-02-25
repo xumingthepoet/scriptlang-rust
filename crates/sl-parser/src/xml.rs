@@ -43,12 +43,7 @@ pub fn parse_xml_document(source: &str) -> Result<XmlDocument, ScriptLangError> 
     let document = Document::parse(source)
         .map_err(|error| ScriptLangError::new("XML_PARSE_ERROR", error.to_string()))?;
 
-    let Some(root) = document.root().children().find(|node| node.is_element()) else {
-        return Err(ScriptLangError::new(
-            "XML_PARSE_ERROR",
-            "XML document must contain a root element.",
-        ));
-    };
+    let root = document.root_element();
 
     Ok(XmlDocument {
         root: parse_element(&document, root),
@@ -130,19 +125,26 @@ mod tests {
         assert_eq!(document.root.attributes.get("name"), Some(&"main".to_string()));
         assert_eq!(document.root.children.len(), 1);
 
-        assert!(matches!(document.root.children[0], XmlNode::Element(_)));
-        let text_node = match &document.root.children[0] {
-            XmlNode::Element(node) => node,
-            XmlNode::Text(_) => unreachable!("already asserted element"),
-        };
+        let text_node = document
+            .root
+            .children
+            .first()
+            .and_then(|node| match node {
+                XmlNode::Element(node) => Some(node),
+                XmlNode::Text(_) => None,
+            })
+            .expect("expected first child to be element");
         assert_eq!(text_node.name, "text");
         assert_eq!(text_node.attributes.get("id"), Some(&"t1".to_string()));
 
-        assert!(matches!(text_node.children[0], XmlNode::Text(_)));
-        let text_value = match &text_node.children[0] {
-            XmlNode::Text(value) => value,
-            XmlNode::Element(_) => unreachable!("already asserted text"),
-        };
+        let text_value = text_node
+            .children
+            .first()
+            .and_then(|node| match node {
+                XmlNode::Text(value) => Some(value),
+                XmlNode::Element(_) => None,
+            })
+            .expect("expected first text child");
         assert_eq!(text_value.value, "Hello");
         assert!(text_value.location.start.line >= 1);
         assert!(document.root.location.end.column >= document.root.location.start.column);

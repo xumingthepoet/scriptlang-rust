@@ -186,14 +186,11 @@ mod tests {
             ]),
         };
 
-        let object_default = default_value_from_type(&object_type);
-        assert!(matches!(object_default, SlValue::Map(_)));
-        let fields = match object_default {
-            SlValue::Map(fields) => fields,
-            _ => unreachable!("already asserted map variant"),
-        };
-        assert_eq!(fields.get("name"), Some(&SlValue::String(String::new())));
-        assert_eq!(fields.get("hp"), Some(&SlValue::Number(0.0)));
+        let expected_default = SlValue::Map(BTreeMap::from([
+            ("hp".to_string(), SlValue::Number(0.0)),
+            ("name".to_string(), SlValue::String(String::new())),
+        ]));
+        assert_eq!(default_value_from_type(&object_type), expected_default);
     }
 
     #[test]

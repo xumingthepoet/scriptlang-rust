@@ -2595,4 +2595,159 @@ mod tests {
             .expect_err("no root frame");
         assert_eq!(err.code, "ENGINE_ROOT_FRAME");
     }
+
+    #[test]
+    fn runtime_private_helpers_cover_additional_error_paths() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        // lookup_group: script missing
+        let key = engine.group_lookup.keys().next().expect("group key").to_string();
+        if let Some(lookup) = engine.group_lookup.get_mut(&key) {
+            lookup.script_name = "missing".to_string();
+        }
+        let error = engine.lookup_group(&key).expect_err("script should be missing");
+        assert_eq!(error.code, "ENGINE_SCRIPT_NOT_FOUND");
+
+        // restore engine for following checks
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]));
+        engine.start("main", None).expect("start");
+        let key = engine.group_lookup.keys().next().expect("group key").to_string();
+        if let Some(lookup) = engine.group_lookup.get_mut(&key) {
+            lookup.group_id = "missing-group".to_string();
+        }
+        let error = engine.lookup_group(&key).expect_err("group should be missing");
+        assert_eq!(error.code, "ENGINE_GROUP_NOT_FOUND");
+
+        // execute_continue_while: while body at index 0 has no owner
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]));
+        engine.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id: "main.script.xml::g0".to_string(),
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::WhileBody,
+            script_root: false,
+            return_continuation: None,
+            var_types: BTreeMap::new(),
+        }];
+        let error = engine
+            .execute_continue_while()
+            .expect_err("no owning while frame");
+        assert_eq!(error.code, "ENGINE_WHILE_CONTROL_TARGET_MISSING");
+
+        // execute_break: owner exists but node is not while
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]));
+        engine.frames = vec![
+            RuntimeFrame {
+                frame_id: 1,
+                group_id: "main.script.xml::g0".to_string(),
+                node_index: 0,
+                scope: BTreeMap::new(),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: None,
+                var_types: BTreeMap::new(),
+            },
+            RuntimeFrame {
+                frame_id: 2,
+                group_id: "main.script.xml::g0".to_string(),
+                node_index: 0,
+                scope: BTreeMap::new(),
+                completion: CompletionKind::WhileBody,
+                script_root: false,
+                return_continuation: None,
+                var_types: BTreeMap::new(),
+            },
+        ];
+        let error = engine.execute_break().expect_err("while owner node missing");
+        assert_eq!(error.code, "ENGINE_WHILE_CONTROL_TARGET_MISSING");
+
+        // execute_continue_choice without choice context
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]));
+        engine.start("main", None).expect("start");
+        let error = engine
+            .execute_continue_choice()
+            .expect_err("no choice context");
+        assert_eq!(error.code, "ENGINE_CHOICE_CONTINUE_TARGET_MISSING");
+    }
+
+    #[test]
+    fn call_and_scope_validation_error_paths_are_covered() {
+        // create_script_root_scope unknown arg / type mismatch
+        let engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main" args="number:x"><text>${x}</text></script>"#,
+        )]));
+        let error = engine
+            .create_script_root_scope(
+                "main",
+                BTreeMap::from([("unknown".to_string(), SlValue::Number(1.0))]),
+            )
+            .expect_err("unknown arg should fail");
+        assert_eq!(error.code, "ENGINE_CALL_ARG_UNKNOWN");
+
+        let error = engine
+            .create_script_root_scope(
+                "main",
+                BTreeMap::from([("x".to_string(), SlValue::String("bad".to_string()))]),
+            )
+            .expect_err("type mismatch should fail");
+        assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
+
+        // execute_call arg unknown
+        let mut engine = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+<!-- include: callee.script.xml -->
+<script name="main">
+  <call script="callee" args="1"/>
+</script>
+"#,
+            ),
+            (
+                "callee.script.xml",
+                r#"<script name="callee"><return/></script>"#,
+            ),
+        ]));
+        engine.start("main", None).expect("start");
+        let error = engine.next().expect_err("arg unknown should fail");
+        assert_eq!(error.code, "ENGINE_CALL_ARG_UNKNOWN");
+
+        // execute_call arg type mismatch at scope creation
+        let mut engine = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+<!-- include: callee.script.xml -->
+<script name="main">
+  <call script="callee" args="&quot;str&quot;"/>
+</script>
+"#,
+            ),
+            (
+                "callee.script.xml",
+                r#"<script name="callee" args="number:x"><return/></script>"#,
+            ),
+        ]));
+        engine.start("main", None).expect("start");
+        let error = engine.next().expect_err("arg type mismatch should fail");
+        assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
+    }
 }

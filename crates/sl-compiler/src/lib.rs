@@ -2396,4 +2396,213 @@ mod tests {
         .expect_err("unknown node should fail");
         assert_eq!(error.code, "XML_NODE_UNSUPPORTED");
     }
+
+    #[test]
+    fn compiler_error_matrix_covers_more_validation_paths() {
+        let cases: Vec<(&str, BTreeMap<String, String>, &str)> = vec![
+            (
+                "json parse error",
+                map(&[
+                    ("bad.json", "{"),
+                    ("main.script.xml", "<script name=\"main\"><text>x</text></script>"),
+                ]),
+                "JSON_PARSE_ERROR",
+            ),
+            (
+                "defs child invalid",
+                map(&[
+                    (
+                        "x.defs.xml",
+                        "<defs name=\"x\"><unknown/></defs>",
+                    ),
+                    (
+                        "main.script.xml",
+                        r#"
+<!-- include: x.defs.xml -->
+<script name="main"><text>x</text></script>
+"#,
+                    ),
+                ]),
+                "XML_DEFS_CHILD_INVALID",
+            ),
+            (
+                "type field child invalid",
+                map(&[
+                    (
+                        "x.defs.xml",
+                        "<defs name=\"x\"><type name=\"A\"><bad/></type></defs>",
+                    ),
+                    (
+                        "main.script.xml",
+                        r#"
+<!-- include: x.defs.xml -->
+<script name="main"><text>x</text></script>
+"#,
+                    ),
+                ]),
+                "XML_TYPE_CHILD_INVALID",
+            ),
+            (
+                "type field duplicate",
+                map(&[
+                    (
+                        "x.defs.xml",
+                        "<defs name=\"x\"><type name=\"A\"><field name=\"v\" type=\"number\"/><field name=\"v\" type=\"number\"/></type></defs>",
+                    ),
+                    (
+                        "main.script.xml",
+                        r#"
+<!-- include: x.defs.xml -->
+<script name="main"><text>x</text></script>
+"#,
+                    ),
+                ]),
+                "TYPE_FIELD_DUPLICATE",
+            ),
+            (
+                "function duplicate",
+                map(&[
+                    (
+                        "x.defs.xml",
+                        "<defs name=\"x\"><function name=\"f\" return=\"number:r\">r=1;</function><function name=\"f\" return=\"number:r\">r=2;</function></defs>",
+                    ),
+                    (
+                        "main.script.xml",
+                        r#"
+<!-- include: x.defs.xml -->
+<script name="main"><text>x</text></script>
+"#,
+                    ),
+                ]),
+                "FUNCTION_DECL_DUPLICATE",
+            ),
+            (
+                "unknown custom type in var",
+                map(&[(
+                    "main.script.xml",
+                    "<script name=\"main\"><var name=\"x\" type=\"Unknown\"/></script>",
+                )]),
+                "TYPE_UNKNOWN",
+            ),
+            (
+                "choice child invalid",
+                map(&[(
+                    "main.script.xml",
+                    "<script name=\"main\"><choice text=\"c\"><bad/></choice></script>",
+                )]),
+                "XML_CHOICE_CHILD_INVALID",
+            ),
+            (
+                "choice fall_over with when forbidden",
+                map(&[(
+                    "main.script.xml",
+                    "<script name=\"main\"><choice text=\"c\"><option text=\"a\" fall_over=\"true\" when=\"true\"/></choice></script>",
+                )]),
+                "XML_OPTION_FALL_OVER_WHEN_FORBIDDEN",
+            ),
+            (
+                "choice fall_over duplicate",
+                map(&[(
+                    "main.script.xml",
+                    "<script name=\"main\"><choice text=\"c\"><option text=\"a\" fall_over=\"true\"/><option text=\"b\" fall_over=\"true\"/></choice></script>",
+                )]),
+                "XML_OPTION_FALL_OVER_DUPLICATE",
+            ),
+            (
+                "choice fall_over not last",
+                map(&[(
+                    "main.script.xml",
+                    "<script name=\"main\"><choice text=\"c\"><option text=\"a\" fall_over=\"true\"/><option text=\"b\"/></choice></script>",
+                )]),
+                "XML_OPTION_FALL_OVER_NOT_LAST",
+            ),
+            (
+                "input default unsupported",
+                map(&[(
+                    "main.script.xml",
+                    "<script name=\"main\"><input var=\"x\" text=\"p\" default=\"d\"/></script>",
+                )]),
+                "XML_INPUT_DEFAULT_UNSUPPORTED",
+            ),
+            (
+                "input content forbidden",
+                map(&[(
+                    "main.script.xml",
+                    "<script name=\"main\"><input var=\"x\" text=\"p\">x</input></script>",
+                )]),
+                "XML_INPUT_CONTENT_FORBIDDEN",
+            ),
+            (
+                "return ref unsupported",
+                map(&[(
+                    "main.script.xml",
+                    "<script name=\"main\"><return script=\"next\" args=\"ref:x\"/></script>",
+                )]),
+                "XML_RETURN_REF_UNSUPPORTED",
+            ),
+            (
+                "removed node",
+                map(&[(
+                    "main.script.xml",
+                    "<script name=\"main\"><set/></script>",
+                )]),
+                "XML_REMOVED_NODE",
+            ),
+            (
+                "else at top level",
+                map(&[(
+                    "main.script.xml",
+                    "<script name=\"main\"><else/></script>",
+                )]),
+                "XML_ELSE_POSITION",
+            ),
+            (
+                "break outside while",
+                map(&[(
+                    "main.script.xml",
+                    "<script name=\"main\"><break/></script>",
+                )]),
+                "XML_BREAK_OUTSIDE_WHILE",
+            ),
+            (
+                "continue outside while or option",
+                map(&[(
+                    "main.script.xml",
+                    "<script name=\"main\"><continue/></script>",
+                )]),
+                "XML_CONTINUE_OUTSIDE_WHILE_OR_OPTION",
+            ),
+            (
+                "call args parse error",
+                map(&[(
+                    "main.script.xml",
+                    "<script name=\"main\"><call script=\"s\" args=\"ref:\"/></script>",
+                )]),
+                "CALL_ARGS_PARSE_ERROR",
+            ),
+            (
+                "script args reserved prefix",
+                map(&[(
+                    "main.script.xml",
+                    "<script name=\"main\" args=\"number:__sl_x\"><text>x</text></script>",
+                )]),
+                "NAME_RESERVED_PREFIX",
+            ),
+            (
+                "loop times template unsupported",
+                map(&[(
+                    "main.script.xml",
+                    "<script name=\"main\"><loop times=\"${n}\"><text>x</text></loop></script>",
+                )]),
+                "XML_LOOP_TIMES_TEMPLATE_UNSUPPORTED",
+            ),
+        ];
+
+        for (name, files, expected_code) in cases {
+            match compile_project_bundle_from_xml_map(&files) {
+                Ok(_) => panic!("{} should fail but succeeded", name),
+                Err(error) => assert_eq!(error.code, expected_code, "case: {}", name),
+            }
+        }
+    }
 }
