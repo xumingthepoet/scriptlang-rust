@@ -1,0 +1,25 @@
+{
+  "meta": {
+    "title": "JSON Globals Demo"
+  },
+  "player": {
+    "name": "Rin",
+    "stats": {
+      "hp": 12,
+      "mp": 5
+    }
+  },
+  "inventory": [
+    {
+      "id": "potion",
+      "count": 3
+    },
+    {
+      "id": "ether",
+      "count": 1
+    }
+  ],
+  "flags": {
+    "hardMode": false
+  }
+}

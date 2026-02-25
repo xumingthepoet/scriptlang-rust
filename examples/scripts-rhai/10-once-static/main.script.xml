@@ -1,0 +1,16 @@
+<script name="main">
+  <var name="i" type="number" value="0"/>
+  <while when="i &lt; 3">
+    <code>i = i + 1;</code>
+    <text once="true">You step into the tavern for the first time.</text>
+    <text>You watch around.</text>
+    <choice text="Talk to the bartender">
+      <option text="Ask for rumors" once="true">
+        <text>You hear a secret route to the castle.</text>
+      </option>
+      <option text="Order water">
+        <text>A calm break.</text>
+      </option>
+    </choice>
+  </while>
+</script>

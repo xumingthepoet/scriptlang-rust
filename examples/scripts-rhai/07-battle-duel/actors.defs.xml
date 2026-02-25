@@ -1,0 +1,6 @@
+<defs name="actors">
+  <type name="Combatant">
+    <field name="name" type="string"/>
+    <field name="hp" type="number"/>
+  </type>
+</defs>

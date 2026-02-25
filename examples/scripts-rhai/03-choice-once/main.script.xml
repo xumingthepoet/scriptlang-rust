@@ -1,0 +1,16 @@
+<script name="main">
+  <var name="round" type="number" value="0"/>
+  <while when="round &lt; 2">
+    <choice text="Choose">
+      <option text="Pick">
+        <code>round = round + 1;</code>
+        <text>picked</text>
+      </option>
+      <option text="Skip">
+        <code>round = round + 1;</code>
+        <text>skip</text>
+      </option>
+    </choice>
+  </while>
+  <text>done</text>
+</script>

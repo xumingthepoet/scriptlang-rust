@@ -1,0 +1,11 @@
+[package]
+name = "sl-parser"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+regex.workspace = true
+roxmltree.workspace = true
+sl-core = { path = "../sl-core" }

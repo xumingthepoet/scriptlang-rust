@@ -1,0 +1,14 @@
+<script name="main">
+  <var name="i" type="number" value="0"/>
+  <while when="i &lt; 6">
+    <code>i = i + 1;</code>
+    <if when="i == 2">
+      <continue/>
+    </if>
+    <if when="i == 5">
+      <break/>
+    </if>
+    <text>tick-${i}</text>
+  </while>
+  <text>done-${i}</text>
+</script>

@@ -1,0 +1,13 @@
+<script name="main">
+  <var name="i" type="number" value="0"/>
+  <var name="times" type="number" value="3"/>
+
+  <loop times="times">
+    <code>i = i + 1;</code>
+    <if when="i == 2"><continue/></if>
+    <if when="i == 3"><break/></if>
+    <text>tick-${i}</text>
+  </loop>
+
+  <text>done-${i}</text>
+</script>

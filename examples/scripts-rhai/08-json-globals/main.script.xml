@@ -1,0 +1,17 @@
+<!-- include: game.json -->
+<script name="main">
+  <text>${game.meta.title}</text>
+  <text>${game.player.name} hp=${game.player.stats.hp}, mp=${game.player.stats.mp}</text>
+  <text>slot0=${game.inventory[0].id} x${game.inventory[0].count}</text>
+  <choice text="Choose">
+    <option text="View mode">
+      <if when="game.flags.hardMode">
+        <text>hard mode</text>
+        <else>
+          <text>normal mode</text>
+        </else>
+      </if>
+      <text>done</text>
+    </option>
+  </choice>
+</script>

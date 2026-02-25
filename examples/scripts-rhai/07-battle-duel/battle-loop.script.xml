@@ -1,0 +1,54 @@
+<!-- include: actors.defs.xml -->
+<script
+  name="battle-loop"
+  args="ref:Combatant:player,ref:Combatant:enemy"
+>
+  <var name="potions" type="number" value="1"/>
+  <var name="rounds" type="number" value="0"/>
+
+  <while when="player.hp > 0 &amp;&amp; enemy.hp > 0">
+    <code>rounds = rounds + 1;</code>
+    <var name="roundBanner" type="string"/>
+    <code>roundBanner = "Round " + rounds;</code>
+    <text>== ${roundBanner} ==</text>
+    <text>${player.name} hp=${player.hp}, ${enemy.name} hp=${enemy.hp}, potions=${potions}</text>
+
+    <choice text="Choose">
+      <option text="Heavy Slash (4 dmg)">
+        <var name="damage" type="number" value="4"/>
+        <text>You use Heavy Slash for ${damage}.</text>
+        <code>enemy.hp = enemy.hp - damage;</code>
+      </option>
+      <option text="Quick Jab (1 dmg)">
+        <var name="damage" type="number" value="1"/>
+        <text>You use Quick Jab for ${damage}.</text>
+        <code>enemy.hp = enemy.hp - damage;</code>
+      </option>
+      <option text="Drink Potion (+3 hp)" when="potions > 0">
+        <var name="heal" type="number" value="3"/>
+        <code>potions = potions - 1; player.hp = player.hp + heal;</code>
+        <text>You drink a potion and recover ${heal}. hp=${player.hp}, potions=${potions}</text>
+      </option>
+    </choice>
+
+    <if when="enemy.hp &lt;= 0">
+      <text>${enemy.name} is down.</text>
+      <else>
+        <var name="enemyRoll" type="number" value="(rounds + player.hp + enemy.hp) % 3"/>
+        <if when="enemyRoll == 0">
+          <var name="enemyDamage" type="number" value="3"/>
+          <text>${enemy.name} uses Wild Smash for ${enemyDamage}.</text>
+          <code>player.hp = player.hp - enemyDamage;</code>
+          <else>
+            <var name="enemyDamage" type="number" value="2"/>
+            <text>${enemy.name} uses Guard Break for ${enemyDamage}.</text>
+            <code>player.hp = player.hp - enemyDamage;</code>
+          </else>
+        </if>
+        <text>After enemy action: ${player.name} hp=${player.hp}, ${enemy.name} hp=${enemy.hp}</text>
+      </else>
+    </if>
+  </while>
+  <text>Battle ended in ${rounds} rounds.</text>
+  <return/>
+</script>

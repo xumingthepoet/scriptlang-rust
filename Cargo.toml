@@ -1,8 +1,28 @@
-[package]
-name = "scriptlang-rs"
-version = "0.1.0"
+[workspace]
+resolver = "2"
+members = [
+  "crates/sl-core",
+  "crates/sl-parser",
+  "crates/sl-compiler",
+  "crates/sl-runtime",
+  "crates/sl-api",
+  "crates/sl-cli",
+]
+default-members = ["crates/sl-cli"]
+
+[workspace.package]
 edition = "2021"
+version = "0.1.0"
+license = "MIT"
+authors = ["scriptlang-rs"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
+[workspace.dependencies]
+anyhow = "1.0"
+thiserror = "=1.0.69"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.149"
+regex = "=1.12.3"
+roxmltree = "=0.19.0"
+rhai = "=1.23.6"
+clap = { version = "=4.4.18", features = ["derive"] }
+walkdir = "=2.5.0"

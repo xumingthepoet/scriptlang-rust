@@ -1,0 +1,4 @@
+<script name="buff" args="number:amount,ref:number:target">
+  <code>target = target + amount;</code>
+  <return/>
+</script>

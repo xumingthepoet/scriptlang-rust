@@ -1,0 +1,7 @@
+<!-- include: buff.script.xml -->
+<script name="main">
+  <var name="hp" type="number" value="1"/>
+  <text>before hp=${hp}</text>
+  <call script="buff" args="3,ref:hp"/>
+  <text>after hp=${hp}</text>
+</script>

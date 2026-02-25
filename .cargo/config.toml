@@ -3,6 +3,6 @@ target-dir = "target"
 
 [alias]
 qa = "fmt --all -- --check"
-qc = "clippy --all-targets --all-features -- -D warnings"
-qt = "test --all-targets --all-features"
-qk = "check --all-targets --all-features"
+qc = "clippy --workspace --all-targets --all-features -- -D warnings"
+qt = "test --workspace --all-targets --all-features"
+qk = "check --workspace --all-targets --all-features"

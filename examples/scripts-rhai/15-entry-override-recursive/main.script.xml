@@ -1,0 +1,5 @@
+<!-- include: shared.defs.xml -->
+<!-- include: nested/config.json -->
+<script name="main">
+  <text>Main entry ${greet("main")}</text>
+</script>

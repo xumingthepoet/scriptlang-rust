@@ -1,0 +1,16 @@
+<script name="main">
+  <text>Scenario 09: random builtin</text>
+  <var name="weatherRoll" type="number" value="random(100)"/>
+  <text>weather roll=${weatherRoll}</text>
+  <choice text="Pick action (rng=${random(10)})">
+    <option text="Attack (rng=${random(6)})">
+      <var name="damage" type="number" value="random(4) + 1"/>
+      <text>attack damage=${damage}</text>
+    </option>
+    <option text="Defend (rng=${random(6)})">
+      <var name="guard" type="number" value="random(3) + 1"/>
+      <text>guard=${guard}</text>
+    </option>
+  </choice>
+  <text>done</text>
+</script>

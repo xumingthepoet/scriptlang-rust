@@ -1,0 +1,25 @@
+<!-- include: actors.defs.xml -->
+<!-- include: battle-loop.script.xml -->
+<!-- include: victory.script.xml -->
+<!-- include: defeat.script.xml -->
+<script name="main">
+  <var name="player" type="Combatant" value="#{name: &quot;Hero&quot;, hp: 12}"/>
+  <var name="enemy" type="Combatant" value="#{name: &quot;Bandit&quot;, hp: 12}"/>
+
+  <text>Battle start: ${player.name}(${player.hp}) vs ${enemy.name}(${enemy.hp})</text>
+  <text>Tip: if you keep using weak attacks, you will lose.</text>
+
+  <call
+    script="battle-loop"
+    args="ref:player,ref:enemy"
+  />
+
+  <if when="player.hp > 0 &amp;&amp; enemy.hp &lt;= 0">
+    <text>Result: ${player.name} wins. hp=${player.hp}</text>
+    <return script="victory"/>
+    <else>
+      <text>Result: ${enemy.name} wins. hp=${enemy.hp}</text>
+      <return script="defeat"/>
+    </else>
+  </if>
+</script>

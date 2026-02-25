@@ -1,0 +1,10 @@
+<script name="main">
+  <var name="heroName" type="string" value="&quot;Traveler&quot;"/>
+  <input var="heroName" text="Name your hero"/>
+  <text>Hero: ${heroName}</text>
+
+  <var name="guildName" type="string" value="&quot;Nameless Guild&quot;"/>
+  <code>guildName = guildName + " Mk2";</code>
+  <input var="guildName" text="Name your guild"/>
+  <text>Guild: ${guildName}</text>
+</script>
