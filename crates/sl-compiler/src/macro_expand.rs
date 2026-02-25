@@ -165,3 +165,36 @@ fn next_loop_temp_var_name(context: &mut MacroExpansionContext) -> String {
     }
 }
 
+#[cfg(test)]
+mod macro_expand_tests {
+    use super::*;
+    use crate::compiler_test_support::*;
+
+    #[test]
+    fn loop_macro_expands_to_var_and_while() {
+        let files = map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="i" type="int">0</var>
+      <loop times="2">
+        <code>i = i + 1;</code>
+      </loop>
+    </script>
+    "#,
+        )]);
+    
+        let result = compile_project_bundle_from_xml_map(&files).expect("project should compile");
+        let main = result.scripts.get("main").expect("main script");
+        let root = main.groups.get(&main.root_group_id).expect("root group");
+        assert!(root
+            .nodes
+            .iter()
+            .any(|node| matches!(node, ScriptNode::Var { .. })));
+        assert!(root
+            .nodes
+            .iter()
+            .any(|node| matches!(node, ScriptNode::While { .. })));
+    }
+    
+}

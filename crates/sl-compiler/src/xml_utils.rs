@@ -263,3 +263,85 @@ fn has_attr(node: &XmlElementNode, name: &str) -> bool {
     node.attributes.contains_key(name)
 }
 
+#[cfg(test)]
+mod xml_utils_tests {
+    use super::*;
+    use crate::compiler_test_support::*;
+
+    #[test]
+    fn parse_type_and_call_argument_helpers_cover_valid_and_invalid_inputs() {
+        let span = SourceSpan::synthetic();
+        assert!(matches!(
+            parse_type_expr("int", &span).expect("primitive"),
+            ParsedTypeExpr::Primitive(_)
+        ));
+        assert!(matches!(
+            parse_type_expr("int[]", &span).expect("array"),
+            ParsedTypeExpr::Array(_)
+        ));
+        assert!(matches!(
+            parse_type_expr("#{int}", &span).expect("map"),
+            ParsedTypeExpr::Map(_)
+        ));
+        assert!(matches!(
+            parse_type_expr("CustomType", &span).expect("custom"),
+            ParsedTypeExpr::Custom(_)
+        ));
+        let invalid_type = parse_type_expr("Map<int,string>", &span).expect_err("invalid");
+        assert_eq!(invalid_type.code, "TYPE_PARSE_ERROR");
+        let empty_map_type = parse_type_expr("#{   }", &span).expect_err("empty map type");
+        assert_eq!(empty_map_type.code, "TYPE_PARSE_ERROR");
+    
+        let args = parse_args(Some("1, ref:hp, a + 1".to_string())).expect("args");
+        assert_eq!(args.len(), 3);
+        assert!(args[1].is_ref);
+    
+        let bad_args = parse_args(Some("ref:   ".to_string())).expect_err("bad args");
+        assert_eq!(bad_args.code, "CALL_ARGS_PARSE_ERROR");
+    }
+
+    #[test]
+    fn inline_bool_and_attr_helpers_cover_errors() {
+        let node = xml_element("text", &[("value", "x")], vec![xml_text("ignored")]);
+        let error = parse_inline_required(&node).expect_err("value attr forbidden");
+        assert_eq!(error.code, "XML_ATTR_NOT_ALLOWED");
+    
+        let empty = xml_element("text", &[], vec![xml_text("   ")]);
+        let error = parse_inline_required(&empty).expect_err("empty inline forbidden");
+        assert_eq!(error.code, "XML_EMPTY_NODE_CONTENT");
+    
+        let with_child = xml_element(
+            "function",
+            &[],
+            vec![XmlNode::Element(xml_element("x", &[], Vec::new()))],
+        );
+        let error = parse_inline_required_no_element_children(&with_child)
+            .expect_err("child element forbidden");
+        assert_eq!(error.code, "XML_FUNCTION_CHILD_NODE_INVALID");
+    
+        let bool_node = xml_element("text", &[("once", "maybe")], vec![xml_text("x")]);
+        let error = parse_bool_attr(&bool_node, "once", false).expect_err("invalid bool attr");
+        assert_eq!(error.code, "XML_ATTR_BOOL_INVALID");
+    
+        let miss_attr = get_required_non_empty_attr(&xml_element("x", &[], vec![]), "name")
+            .expect_err("missing attr");
+        assert_eq!(miss_attr.code, "XML_MISSING_ATTR");
+        let empty_attr =
+            get_required_non_empty_attr(&xml_element("x", &[("name", " ")], vec![]), "name")
+                .expect_err("empty attr");
+        assert_eq!(empty_attr.code, "XML_EMPTY_ATTR");
+    
+        assert!(has_any_child_content(&xml_element(
+            "x",
+            &[],
+            vec![xml_text(" t ")]
+        )));
+        assert!(!has_any_child_content(&xml_element(
+            "x",
+            &[],
+            vec![xml_text("   ")]
+        )));
+        assert!(split_by_top_level_comma("a, f(1,2), #{int}, #{a:1,b:2}").len() >= 4);
+    }
+
+}

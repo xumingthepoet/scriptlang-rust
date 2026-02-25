@@ -293,3 +293,222 @@ fn find_hidden_json_symbol(
         .cloned()
 }
 
+#[cfg(test)]
+mod json_symbols_tests {
+    use super::*;
+    use crate::compiler_test_support::*;
+
+    #[test]
+    fn parse_json_symbol_and_global_collection_errors_are_reported() {
+        assert_eq!(
+            parse_json_global_symbol("game.json").expect("symbol"),
+            "game"
+        );
+        let invalid = parse_json_global_symbol("bad-name.json").expect_err("invalid");
+        assert_eq!(invalid.code, "JSON_SYMBOL_INVALID");
+    
+        let reserved = parse_json_global_symbol("__sl_reserved.json").expect_err("reserved");
+        assert_eq!(reserved.code, "NAME_RESERVED_PREFIX");
+    
+        let duplicate = compile_project_bundle_from_xml_map(&map(&[
+            ("a/x.json", r#"{"v":1}"#),
+            ("b/x.json", r#"{"v":2}"#),
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: a/x.json -->
+    <!-- include: b/x.json -->
+    <script name="main"><text>x</text></script>
+    "#,
+            ),
+        ]))
+        .expect_err("duplicate symbol should fail");
+        assert_eq!(duplicate.code, "JSON_SYMBOL_DUPLICATE");
+    
+        let missing_sources = BTreeMap::from([(
+            "broken.json".to_string(),
+            SourceFile {
+                kind: SourceKind::Json,
+                includes: Vec::new(),
+                xml_root: None,
+                json_value: None,
+            },
+        )]);
+        let missing = collect_global_json(&missing_sources).expect_err("missing value");
+        assert_eq!(missing.code, "JSON_MISSING_VALUE");
+    }
+
+    #[test]
+    fn json_symbol_visibility_helpers_cover_context_edges() {
+        let hidden_json = BTreeSet::from(["game".to_string()]);
+        let allowed = BTreeSet::new();
+    
+        assert_eq!(
+            find_hidden_json_symbol("value = game.hp;", &hidden_json, &allowed),
+            Some("game".to_string())
+        );
+        assert_eq!(
+            find_hidden_json_symbol("value = obj.game;", &hidden_json, &allowed),
+            None
+        );
+        assert_eq!(
+            find_hidden_json_symbol("value = #{game: 1};", &hidden_json, &allowed),
+            None
+        );
+        assert_eq!(
+            find_hidden_json_symbol(r#"value = "game"; // game"#, &hidden_json, &allowed),
+            None
+        );
+        assert_eq!(
+            find_hidden_json_symbol("/* game */ value = 1;", &hidden_json, &allowed),
+            None
+        );
+    
+        let locals = extract_local_bindings("let game = 1; const score = game + 1;");
+        assert!(locals.contains("game"));
+        assert!(locals.contains("score"));
+    
+        let allowed_game = BTreeSet::from(["game".to_string()]);
+        assert_eq!(
+            find_hidden_json_symbol("value = game.hp;", &hidden_json, &allowed_game),
+            None
+        );
+    }
+
+    #[test]
+    fn compile_bundle_rejects_hidden_json_usage_without_include_in_script() {
+        let files = map(&[
+            ("game.json", r#"{ "hp": 5 }"#),
+            (
+                "main.script.xml",
+                r#"<script name="main"><text>${game.hp}</text></script>"#,
+            ),
+        ]);
+    
+        let error = compile_project_bundle_from_xml_map(&files)
+            .expect_err("missing json include should fail at compile time");
+        assert_eq!(error.code, "JSON_SYMBOL_NOT_VISIBLE");
+    }
+
+    #[test]
+    fn compile_bundle_rejects_hidden_json_usage_without_include_in_defs() {
+        let files = map(&[
+            ("game.json", r#"{ "hp": 5 }"#),
+            (
+                "shared.defs.xml",
+                r#"
+    <defs name="shared">
+      <function name="boost" return="int:out">
+        out = game.hp;
+      </function>
+    </defs>
+    "#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: shared.defs.xml -->
+    <script name="main">
+      <var name="hp" type="int">1</var>
+      <code>hp = shared.boost();</code>
+    </script>
+    "#,
+            ),
+        ]);
+    
+        let error = compile_project_bundle_from_xml_map(&files)
+            .expect_err("defs code should fail when json is not visible");
+        assert_eq!(error.code, "JSON_SYMBOL_NOT_VISIBLE");
+    }
+
+    #[test]
+    fn compile_bundle_allows_visible_or_shadowed_json_symbols() {
+        let visible = map(&[
+            ("game.json", r#"{ "hp": 5 }"#),
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: game.json -->
+    <script name="main">
+      <text>${game.hp}</text>
+    </script>
+    "#,
+            ),
+        ]);
+        compile_project_bundle_from_xml_map(&visible).expect("visible json symbol should compile");
+    
+        let shadowed = map(&[
+            ("game.json", r#"{ "hp": 5 }"#),
+            (
+                "main.script.xml",
+                r#"
+    <script name="main">
+      <var name="game" type="int">1</var>
+      <code>game = game + 1;</code>
+    </script>
+    "#,
+            ),
+        ]);
+        compile_project_bundle_from_xml_map(&shadowed)
+            .expect("shadowed local name should compile without include");
+    }
+
+    #[test]
+    fn json_symbol_visibility_validation_covers_all_script_node_paths() {
+        let files = map(&[
+            ("game.json", r#"{ "hp": 5 }"#),
+            ("secret.json", r#"{ "v": 9 }"#),
+            (
+                "helpers.defs.xml",
+                r#"
+    <defs name="helpers">
+      <function name="boost" args="int:x" return="int:out">
+        let local = x + game.hp;
+        out = local;
+      </function>
+    </defs>
+    "#,
+            ),
+            (
+                "next.script.xml",
+                r#"
+    <script name="next" args="int:n">
+      <text>${n}</text>
+    </script>
+    "#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: game.json -->
+    <!-- include: helpers.defs.xml -->
+    <script name="main">
+      <var name="hp" type="int">1</var>
+      <var name="name" type="string">&quot;A&quot;</var>
+      <if when="hp > 0">
+        <text>ok</text>
+      </if>
+      <while when="hp > 0">
+        <code>hp = hp - 1;</code>
+        <continue/>
+        <break/>
+      </while>
+      <choice text="c">
+        <option text="o1" when="hp >= 0">
+          <text>x</text>
+        </option>
+      </choice>
+      <input var="name" text="in"/>
+      <code>hp = helpers.boost(hp);</code>
+      <call script="next" args="hp"/>
+      <return script="next" args="hp"/>
+    </script>
+    "#,
+            ),
+        ]);
+    
+        compile_project_bundle_from_xml_map(&files)
+            .expect("validation should pass when hidden json is not referenced");
+    }
+
+}

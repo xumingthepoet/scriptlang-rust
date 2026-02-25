@@ -120,3 +120,124 @@ pub(crate) fn read_scripts_xml_from_dir(
 pub(crate) fn make_scripts_dir_scenario_id(scripts_dir: &Path) -> String {
     format!("scripts-dir:{}", scripts_dir.display())
 }
+
+#[cfg(test)]
+mod source_loader_tests {
+    use super::*;
+    use crate::cli_test_support::*;
+
+    #[test]
+    fn load_source_by_ref_validates_ref_prefix() {
+        let error = load_source_by_ref("unknown:main").expect_err("invalid ref should fail");
+        assert_eq!(error.code, "CLI_SOURCE_REF_INVALID");
+    }
+
+    #[test]
+    fn resolve_scripts_dir_validates_existence_and_directory() {
+        let missing = temp_path("missing-dir");
+        let missing_err = resolve_scripts_dir(missing.to_string_lossy().as_ref())
+            .expect_err("missing path should fail");
+        assert_eq!(missing_err.code, "CLI_SOURCE_NOT_FOUND");
+
+        let file_path = temp_path("plain-file");
+        write_file(&file_path, "x");
+        let file_err = resolve_scripts_dir(file_path.to_string_lossy().as_ref())
+            .expect_err("file path should fail");
+        assert_eq!(file_err.code, "CLI_SOURCE_NOT_DIR");
+
+        let cwd = std::env::current_dir().expect("cwd");
+        let relative_root = temp_path("relative-scripts-dir");
+        fs::create_dir_all(&relative_root).expect("root");
+        let relative_child = relative_root.join("child");
+        fs::create_dir_all(&relative_child).expect("child");
+        write_file(
+            &relative_child.join("main.script.xml"),
+            "<script name=\"main\"></script>",
+        );
+
+        std::env::set_current_dir(&relative_root).expect("switch cwd");
+        let resolved = resolve_scripts_dir("child").expect("relative dir should resolve");
+        assert!(resolved.ends_with("child"));
+        std::env::set_current_dir(cwd).expect("restore cwd");
+    }
+
+    #[test]
+    fn read_scripts_xml_from_dir_filters_supported_extensions() {
+        let root = temp_path("scripts-dir");
+        fs::create_dir_all(&root).expect("root should be created");
+        write_file(
+            &root.join("main.script.xml"),
+            "<script name=\"main\"></script>",
+        );
+        write_file(&root.join("defs.defs.xml"), "<defs name=\"d\"></defs>");
+        write_file(&root.join("data.json"), "{\"ok\":true}");
+        write_file(&root.join("skip.txt"), "ignored");
+
+        let scripts = read_scripts_xml_from_dir(&root).expect("scan should pass");
+        assert_eq!(scripts.len(), 3);
+        assert!(scripts.contains_key("main.script.xml"));
+        assert!(scripts.contains_key("defs.defs.xml"));
+        assert!(scripts.contains_key("data.json"));
+    }
+
+    #[test]
+    fn read_scripts_xml_from_dir_errors_when_no_source_files() {
+        let root = temp_path("empty-scripts-dir");
+        fs::create_dir_all(&root).expect("root should be created");
+        write_file(&root.join("readme.txt"), "not source");
+
+        let error =
+            read_scripts_xml_from_dir(&root).expect_err("empty source set should return error");
+        assert_eq!(error.code, "CLI_SOURCE_EMPTY");
+    }
+
+    #[test]
+    fn load_source_by_scripts_dir_works() {
+        let root = temp_path("scripts-dir-test");
+        fs::create_dir_all(&root).expect("root");
+        write_file(
+            &root.join("main.script.xml"),
+            r#"<script name="main"><text>Hello</text></script>"#,
+        );
+
+        let loaded =
+            load_source_by_scripts_dir(&root.to_string_lossy(), "main").expect("load should pass");
+        assert!(loaded.id.starts_with("scripts-dir:"));
+        assert_eq!(loaded.entry_script, "main");
+        assert!(loaded.scripts_xml.contains_key("main.script.xml"));
+    }
+
+    #[test]
+    fn load_source_by_scripts_dir_with_nested_entry() {
+        let root = temp_path("scripts-dir-nested");
+        fs::create_dir_all(&root).expect("root");
+        write_file(
+            &root.join("game.script.xml"),
+            r#"<script name="game"><text>Game</text></script>"#,
+        );
+
+        let loaded =
+            load_source_by_scripts_dir(&root.to_string_lossy(), "game").expect("load should pass");
+        assert_eq!(loaded.entry_script, "game");
+    }
+
+    #[test]
+    fn load_source_by_ref_validates_prefix() {
+        let error = load_source_by_ref("invalid").expect_err("no prefix should fail");
+        assert_eq!(error.code, "CLI_SOURCE_REF_INVALID");
+
+        let error = load_source_by_ref("").expect_err("empty ref should fail");
+        assert_eq!(error.code, "CLI_SOURCE_REF_INVALID");
+    }
+
+    #[test]
+    fn make_scripts_dir_scenario_id_generates_consistent_ids() {
+        let root = temp_path("scenario-id-test");
+        fs::create_dir_all(&root).expect("root");
+
+        let id1 = make_scripts_dir_scenario_id(&root);
+        let id2 = make_scripts_dir_scenario_id(&root);
+        assert_eq!(id1, id2);
+        assert!(id1.starts_with("scripts-dir:"));
+    }
+}

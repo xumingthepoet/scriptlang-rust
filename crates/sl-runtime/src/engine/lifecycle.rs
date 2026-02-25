@@ -234,3 +234,164 @@ impl ScriptLangEngine {
 
 
 }
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use super::runtime_test_support::*;
+    
+    #[derive(Debug)]
+    struct TestRegistry {
+        names: Vec<String>,
+    }
+    
+    impl HostFunctionRegistry for TestRegistry {
+        fn call(&self, _name: &str, _args: &[SlValue]) -> Result<SlValue, ScriptLangError> {
+            Ok(SlValue::Bool(true))
+        }
+    
+        fn names(&self) -> &[String] {
+            &self.names
+        }
+    }
+
+    #[test]
+    fn new_rejects_reserved_host_function_name_random() {
+        let files = map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]);
+        let compiled = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        let result = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_json: compiled.global_json,
+            host_functions: Some(Arc::new(TestRegistry {
+                names: vec!["random".to_string()],
+            })),
+            random_seed: Some(1),
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        });
+        assert!(result.is_err());
+        let error = result.err().expect("reserved random name should fail");
+        assert_eq!(error.code, "ENGINE_HOST_FUNCTION_RESERVED");
+    }
+
+    #[test]
+    fn new_rejects_host_function_conflicting_with_defs_function() {
+        let files = map(&[
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: shared.defs.xml -->
+    <script name="main"><text>Hello</text></script>
+    "#,
+            ),
+            (
+                "shared.defs.xml",
+                r#"
+    <defs name="shared">
+      <function name="addWithGameBonus" args="int:a1,int:a2" return="int:out">
+        out = a1 + a2;
+      </function>
+    </defs>
+    "#,
+            ),
+        ]);
+        let compiled = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        let result = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_json: compiled.global_json,
+            host_functions: Some(Arc::new(TestRegistry {
+                names: vec!["addWithGameBonus".to_string()],
+            })),
+            random_seed: Some(1),
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        });
+        assert!(result.is_err());
+        let error = result.err().expect("conflicting defs function should fail");
+        assert_eq!(error.code, "ENGINE_HOST_FUNCTION_CONFLICT");
+    }
+
+    #[test]
+    fn new_rejects_defs_function_symbol_conflict_after_normalization() {
+        let files = map(&[
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: a.defs.xml -->
+    <!-- include: x.defs.xml -->
+    <script name="main"><text>Hello</text></script>
+    "#,
+            ),
+            (
+                "a.defs.xml",
+                r#"
+    <defs name="a">
+      <function name="b" return="int:out">out = 1;</function>
+    </defs>
+    "#,
+            ),
+            (
+                "x.defs.xml",
+                r#"
+    <defs name="x">
+      <function name="a_b" return="int:out">out = 2;</function>
+    </defs>
+    "#,
+            ),
+        ]);
+        let compiled = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        let result = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_json: compiled.global_json,
+            host_functions: None,
+            random_seed: Some(1),
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        });
+        let error = match result {
+            Ok(_) => panic!("normalized symbol conflict should fail"),
+            Err(error) => error,
+        };
+        assert_eq!(error.code, "ENGINE_DEFS_FUNCTION_SYMBOL_CONFLICT");
+    }
+
+    #[test]
+    fn start_returns_error_for_missing_script() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]));
+        let error = engine
+            .start("missing", None)
+            .expect_err("unknown entry should fail");
+        assert_eq!(error.code, "ENGINE_SCRIPT_NOT_FOUND");
+    }
+
+    #[test]
+    fn public_state_accessors_and_empty_registry_are_covered() {
+        let registry = EmptyHostFunctionRegistry::default();
+        assert!(registry.names().is_empty());
+        let call_error = registry
+            .call("noop", &[])
+            .expect_err("empty registry call should fail");
+        assert_eq!(call_error.code, "ENGINE_HOST_FUNCTION_MISSING");
+    
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <choice text="Pick">
+        <option text="A"><text>A</text></option>
+      </choice>
+    </script>
+    "#,
+        )]));
+        assert_eq!(engine.compiler_version(), DEFAULT_COMPILER_VERSION);
+        assert!(!engine.waiting_choice());
+        engine.start("main", None).expect("start");
+        let next = engine.next_output().expect("next");
+        assert!(matches!(next, EngineOutput::Choices { .. }));
+        assert!(engine.waiting_choice());
+    }
+
+}

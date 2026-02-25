@@ -232,3 +232,526 @@ impl ScriptLangEngine {
     }
 
 }
+
+#[cfg(test)]
+mod callstack_tests {
+    use super::*;
+    use super::runtime_test_support::*;
+
+    #[test]
+    fn nested_script_calls_covered() {
+        // Test nested script calls
+        let mut engine = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+    <script name="main">
+      <call script="greeting"/>
+    </script>
+    "#,
+            ),
+            (
+                "greeting.script.xml",
+                r#"<script name="greeting"><text>Hi</text></script>"#,
+            ),
+        ]));
+        engine.start("main", None).expect("start");
+    
+        let output = engine.next_output().expect("next should pass");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "Hi"));
+    }
+
+    #[test]
+    fn runtime_errors_cover_call_argument_and_return_target_paths() {
+        let mut call_missing_target = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><call script="missing"/></script>"#,
+        )]));
+        call_missing_target.start("main", None).expect("start");
+        let error = call_missing_target
+            .next_output()
+            .expect_err("missing call target should fail");
+        assert_eq!(error.code, "ENGINE_CALL_TARGET");
+    
+        let mut call_arg_mismatch = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: callee.script.xml -->
+    <script name="main">
+      <var name="hp" type="int">1</var>
+      <call script="callee" args="hp"/>
+    </script>
+    "#,
+            ),
+            (
+                "callee.script.xml",
+                r#"<script name="callee" args="ref:int:x"><return/></script>"#,
+            ),
+        ]));
+        call_arg_mismatch.start("main", None).expect("start");
+        let error = call_arg_mismatch
+            .next_output()
+            .expect_err("ref mismatch should fail");
+        assert_eq!(error.code, "ENGINE_CALL_REF_MISMATCH");
+    
+        let mut return_target_missing = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><return script="missing"/></script>"#,
+        )]));
+        return_target_missing.start("main", None).expect("start");
+        let error = return_target_missing
+            .next_output()
+            .expect_err("missing return target should fail");
+        assert_eq!(error.code, "ENGINE_RETURN_TARGET");
+    }
+
+    #[test]
+    fn finish_frame_and_return_paths_are_covered() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]));
+        let group_id = engine
+            .group_lookup
+            .keys()
+            .next()
+            .expect("group key")
+            .to_string();
+        let number_ty = ScriptType::Primitive {
+            name: "int".to_string(),
+        };
+    
+        engine.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id: group_id.clone(),
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: Some(ContinuationFrame {
+                resume_frame_id: 99,
+                next_node_index: 1,
+                ref_bindings: BTreeMap::new(),
+            }),
+            var_types: BTreeMap::new(),
+        }];
+        engine.finish_frame(1).expect("finish should pass");
+        assert!(engine.ended);
+    
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]));
+        let group_id = engine
+            .group_lookup
+            .keys()
+            .next()
+            .expect("group key")
+            .to_string();
+        engine.frames = vec![
+            RuntimeFrame {
+                frame_id: 2,
+                group_id: group_id.clone(),
+                node_index: 0,
+                scope: BTreeMap::from([("target".to_string(), SlValue::Number(0.0))]),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: None,
+                var_types: BTreeMap::from([("target".to_string(), number_ty.clone())]),
+            },
+            RuntimeFrame {
+                frame_id: 1,
+                group_id: group_id.clone(),
+                node_index: 0,
+                scope: BTreeMap::new(),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: Some(ContinuationFrame {
+                    resume_frame_id: 2,
+                    next_node_index: 3,
+                    ref_bindings: BTreeMap::from([("missing".to_string(), "target".to_string())]),
+                }),
+                var_types: BTreeMap::new(),
+            },
+        ];
+        let error = engine
+            .finish_frame(1)
+            .expect_err("missing ref value should fail");
+        assert_eq!(error.code, "ENGINE_REF_VALUE_MISSING");
+    
+        let mut engine = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"<script name="main"><text>main</text></script>"#,
+            ),
+            (
+                "next.script.xml",
+                r#"<script name="next"><text>next</text></script>"#,
+            ),
+        ]));
+        let main_root = engine
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        let next_root = engine
+            .scripts
+            .get("next")
+            .expect("next script")
+            .root_group_id
+            .clone();
+        engine.frames = vec![
+            RuntimeFrame {
+                frame_id: 10,
+                group_id: main_root.clone(),
+                node_index: 0,
+                scope: BTreeMap::from([("caller".to_string(), SlValue::Number(0.0))]),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: None,
+                var_types: BTreeMap::from([("caller".to_string(), number_ty.clone())]),
+            },
+            RuntimeFrame {
+                frame_id: 11,
+                group_id: main_root.clone(),
+                node_index: 0,
+                scope: BTreeMap::from([("x".to_string(), SlValue::Number(7.0))]),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: Some(ContinuationFrame {
+                    resume_frame_id: 10,
+                    next_node_index: 4,
+                    ref_bindings: BTreeMap::from([("x".to_string(), "caller".to_string())]),
+                }),
+                var_types: BTreeMap::from([("x".to_string(), number_ty.clone())]),
+            },
+        ];
+        engine
+            .execute_return(Some("next".to_string()), &[])
+            .expect("return to next should pass");
+        assert_eq!(engine.frames.len(), 2);
+        assert_eq!(
+            engine.frames[0].scope.get("caller"),
+            Some(&SlValue::Number(7.0))
+        );
+        assert_eq!(engine.frames[1].group_id, next_root);
+    
+        engine.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id: main_root.clone(),
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::new(),
+        }];
+        engine
+            .execute_return(None, &[])
+            .expect("return without continuation should pass");
+        assert!(engine.ended);
+    
+        engine.ended = false;
+        engine.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id: main_root.clone(),
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: Some(ContinuationFrame {
+                resume_frame_id: 999,
+                next_node_index: 1,
+                ref_bindings: BTreeMap::new(),
+            }),
+            var_types: BTreeMap::new(),
+        }];
+        engine
+            .execute_return(None, &[])
+            .expect("missing resume frame should end execution");
+        assert!(engine.ended);
+    
+        engine.ended = false;
+        engine.frames = vec![
+            RuntimeFrame {
+                frame_id: 20,
+                group_id: main_root.clone(),
+                node_index: 0,
+                scope: BTreeMap::from([("caller".to_string(), SlValue::Number(1.0))]),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: None,
+                var_types: BTreeMap::from([("caller".to_string(), number_ty.clone())]),
+            },
+            RuntimeFrame {
+                frame_id: 21,
+                group_id: main_root,
+                node_index: 0,
+                scope: BTreeMap::from([("x".to_string(), SlValue::Number(3.0))]),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: Some(ContinuationFrame {
+                    resume_frame_id: 20,
+                    next_node_index: 6,
+                    ref_bindings: BTreeMap::from([("x".to_string(), "caller".to_string())]),
+                }),
+                var_types: BTreeMap::from([("x".to_string(), number_ty)]),
+            },
+        ];
+        engine
+            .execute_return(None, &[])
+            .expect("return with continuation should pass");
+        assert_eq!(engine.frames.len(), 1);
+        assert_eq!(engine.frames[0].node_index, 6);
+        assert_eq!(
+            engine.frames[0].scope.get("caller"),
+            Some(&SlValue::Number(3.0))
+        );
+    }
+
+    #[test]
+    fn call_helpers_and_value_path_branches_are_covered() {
+        let mut no_frame = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>x</text></script>"#,
+        )]));
+        no_frame.frames.clear();
+        let error = no_frame
+            .execute_call("main", &[])
+            .expect_err("execute_call without frame should fail");
+        assert_eq!(error.code, "ENGINE_CALL_NO_FRAME");
+    
+        let mut ref_mismatch = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: callee.script.xml -->
+    <script name="main">
+      <var name="x" type="int">1</var>
+      <call script="callee" args="ref:x"/>
+    </script>
+    "#,
+            ),
+            (
+                "callee.script.xml",
+                r#"<script name="callee" args="int:x"><return/></script>"#,
+            ),
+        ]));
+        ref_mismatch.start("main", None).expect("start");
+        let error = ref_mismatch
+            .next_output()
+            .expect_err("non-ref param with ref arg should fail");
+        assert_eq!(error.code, "ENGINE_CALL_REF_MISMATCH");
+    
+        let mut tail = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"<script name="main"><text>main</text></script>"#,
+            ),
+            (
+                "callee.script.xml",
+                r#"<script name="callee" args="ref:int:x"><text>${x}</text></script>"#,
+            ),
+        ]));
+        let main_root = tail
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        tail.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id: main_root.clone(),
+            node_index: 0,
+            scope: BTreeMap::from([("x".to_string(), SlValue::Number(1.0))]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: Some(ContinuationFrame {
+                resume_frame_id: 99,
+                next_node_index: 1,
+                ref_bindings: BTreeMap::new(),
+            }),
+            var_types: BTreeMap::from([(
+                "x".to_string(),
+                ScriptType::Primitive {
+                    name: "int".to_string(),
+                },
+            )]),
+        }];
+        let error = tail
+            .execute_call(
+                "callee",
+                &[sl_core::CallArgument {
+                    value_expr: "x".to_string(),
+                    is_ref: true,
+                }],
+            )
+            .expect_err("tail call with ref args should fail");
+        assert_eq!(error.code, "ENGINE_TAIL_REF_UNSUPPORTED");
+    
+        let mut tail_ok = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"<script name="main"><text>main</text></script>"#,
+            ),
+            (
+                "callee.script.xml",
+                r#"<script name="callee" args="int:x"><text>${x}</text></script>"#,
+            ),
+        ]));
+        tail_ok.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id: main_root,
+            node_index: 0,
+            scope: BTreeMap::from([("x".to_string(), SlValue::Number(2.0))]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: Some(ContinuationFrame {
+                resume_frame_id: 42,
+                next_node_index: 1,
+                ref_bindings: BTreeMap::new(),
+            }),
+            var_types: BTreeMap::from([(
+                "x".to_string(),
+                ScriptType::Primitive {
+                    name: "int".to_string(),
+                },
+            )]),
+        }];
+        tail_ok
+            .execute_call(
+                "callee",
+                &[sl_core::CallArgument {
+                    value_expr: "x".to_string(),
+                    is_ref: false,
+                }],
+            )
+            .expect("tail call optimization path should pass");
+        assert_eq!(tail_ok.frames.len(), 1);
+    
+        let mut globals = engine_from_sources(map(&[
+            ("game.json", r#"{ "score": 10 }"#),
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: game.json -->
+    <script name="main">
+      <var name="x" type="int">1</var>
+      <code>x = x + game.score;</code>
+      <text>${x}</text>
+    </script>
+    "#,
+            ),
+        ]));
+        globals.start("main", None).expect("start");
+        let output = globals.next_output().expect("next");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "11"));
+        assert!(!globals.is_visible_json_global(None, "game"));
+        assert!(!globals.is_visible_json_global(Some("missing"), "game"));
+        assert!(globals.is_visible_json_global(Some("main"), "game"));
+    
+        let value = globals
+            .read_variable("game")
+            .expect("visible json global should be readable");
+        assert_eq!(
+            value,
+            SlValue::Map(BTreeMap::from([(
+                "score".to_string(),
+                SlValue::Number(10.0)
+            )]))
+        );
+        let error = globals
+            .read_variable("missing")
+            .expect_err("missing variable should fail");
+        assert_eq!(error.code, "ENGINE_VAR_READ");
+    
+        let error = globals
+            .write_variable("x", SlValue::String("bad".to_string()))
+            .expect_err("type mismatch should fail");
+        assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
+        let error = globals
+            .write_variable("game", SlValue::Number(1.0))
+            .expect_err("global should be readonly");
+        assert_eq!(error.code, "ENGINE_GLOBAL_READONLY");
+        let error = globals
+            .write_variable("unknown", SlValue::Number(1.0))
+            .expect_err("unknown variable should fail");
+        assert_eq!(error.code, "ENGINE_VAR_WRITE");
+    
+        let error = globals.read_path(" . ").expect_err("invalid path");
+        assert_eq!(error.code, "ENGINE_REF_PATH");
+        let error = globals
+            .read_path("x.y")
+            .expect_err("path read on non-map should fail");
+        assert_eq!(error.code, "ENGINE_REF_PATH_READ");
+        let error = globals
+            .read_path("game.missing")
+            .expect_err("missing nested key should fail");
+        assert_eq!(error.code, "ENGINE_REF_PATH_READ");
+    
+        let error = globals
+            .write_path(" . ", SlValue::Number(1.0))
+            .expect_err("invalid write path should fail");
+        assert_eq!(error.code, "ENGINE_REF_PATH");
+        globals
+            .write_path("x", SlValue::Number(12.0))
+            .expect("single segment write should pass");
+        let error = globals
+            .write_path("x.y", SlValue::Number(1.0))
+            .expect_err("nested write on non-map should fail");
+        assert_eq!(error.code, "ENGINE_REF_PATH_WRITE");
+    
+        assert!(slvalue_to_text(&SlValue::Array(vec![SlValue::Number(1.0)])).contains("Array"));
+        assert_eq!(slvalue_to_rhai_literal(&SlValue::Bool(false)), "false");
+        assert_eq!(slvalue_to_rhai_literal(&SlValue::Number(2.5)), "2.5");
+        assert_eq!(
+            slvalue_to_rhai_literal(&SlValue::Array(vec![SlValue::Number(1.0)])),
+            "[1]"
+        );
+    
+        let mut state = 1u32;
+        let bounded = next_random_bounded_with(&mut state, 3, |state| {
+            let candidate = if *state == 1 { u32::MAX } else { 7 };
+            *state = state.wrapping_add(1);
+            candidate
+        });
+        assert_eq!(bounded, 1);
+    
+        let error = globals
+            .create_script_root_scope("missing-script", BTreeMap::new())
+            .expect_err("missing script should fail");
+        assert_eq!(error.code, "ENGINE_SCRIPT_NOT_FOUND");
+        assert_eq!(
+            globals
+                .build_defs_prelude("missing-script", &BTreeMap::new())
+                .expect("missing script prelude should be empty"),
+            ""
+        );
+        let defs_engine = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: shared.defs.xml -->
+    <script name="main"><text>x</text></script>
+    "#,
+            ),
+            (
+                "shared.defs.xml",
+                r#"<defs name="shared"><function name="make" return="int:out">out = 1;</function></defs>"#,
+            ),
+        ]));
+        let error = defs_engine
+            .build_defs_prelude("main", &BTreeMap::new())
+            .expect_err("missing symbol mapping should fail");
+        assert_eq!(error.code, "ENGINE_DEFS_FUNCTION_SYMBOL_MISSING");
+    
+        let registry = TestRegistry {
+            names: vec!["f".to_string()],
+        };
+        let call_value = registry.call("f", &[]).expect("test registry call");
+        assert_eq!(call_value, SlValue::Bool(true));
+    }
+
+}

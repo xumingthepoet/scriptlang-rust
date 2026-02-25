@@ -37,3 +37,14 @@ pub(crate) fn map_cli_state_read(error: std::io::Error) -> ScriptLangError {
 pub(crate) fn map_cli_state_invalid(error: serde_json::Error) -> ScriptLangError {
     ScriptLangError::new("CLI_STATE_INVALID", error.to_string())
 }
+
+#[cfg(test)]
+mod error_map_tests {
+    use super::*;
+
+    #[test]
+    fn emit_error_returns_non_zero_exit_code() {
+        let code = emit_error(ScriptLangError::new("ERR", "failed"));
+        assert_eq!(code, 1);
+    }
+}

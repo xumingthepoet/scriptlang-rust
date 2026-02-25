@@ -124,3 +124,133 @@ impl ScriptLangEngine {
     }
 
 }
+
+#[cfg(test)]
+mod scope_tests {
+    use super::*;
+    use super::runtime_test_support::*;
+
+    #[test]
+    fn runtime_errors_cover_var_and_ref_path_failures() {
+        let mut duplicate_var = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="x" type="int">1</var>
+      <var name="x" type="int">2</var>
+    </script>
+    "#,
+        )]));
+        duplicate_var.start("main", None).expect("start");
+        let error = duplicate_var
+            .next_output()
+            .expect_err("duplicate var should fail");
+        assert_eq!(error.code, "ENGINE_VAR_DUPLICATE");
+    
+        let mut bad_type = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><var name="x" type="int">&quot;str&quot;</var></script>"#,
+        )]));
+        bad_type.start("main", None).expect("start");
+        let error = bad_type
+            .next_output()
+            .expect_err("type mismatch should fail");
+        assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
+    
+        let mut bad_ref_read = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>${missing.value}</text></script>"#,
+        )]));
+        bad_ref_read.start("main", None).expect("start");
+        let error = bad_ref_read
+            .next_output()
+            .expect_err("missing ref path should fail");
+        assert!(
+            error.code == "ENGINE_VAR_READ"
+                || error.code == "ENGINE_REF_PATH_READ"
+                || error.code == "ENGINE_EVAL_ERROR"
+        );
+    
+        let mut bad_ref_write = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="x" type="int">1</var>
+      <code>x.value = 1;</code>
+    </script>
+    "#,
+        )]));
+        bad_ref_write.start("main", None).expect("start");
+        let error = bad_ref_write
+            .next_output()
+            .expect_err("write path should fail");
+        assert!(error.code == "ENGINE_REF_PATH_WRITE" || error.code == "ENGINE_EVAL_ERROR");
+    }
+
+    #[test]
+    fn call_and_scope_validation_error_paths_are_covered() {
+        // create_script_root_scope unknown arg / type mismatch
+        let engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main" args="int:x"><text>${x}</text></script>"#,
+        )]));
+        let error = engine
+            .create_script_root_scope(
+                "main",
+                BTreeMap::from([("unknown".to_string(), SlValue::Number(1.0))]),
+            )
+            .expect_err("unknown arg should fail");
+        assert_eq!(error.code, "ENGINE_CALL_ARG_UNKNOWN");
+    
+        let error = engine
+            .create_script_root_scope(
+                "main",
+                BTreeMap::from([("x".to_string(), SlValue::String("bad".to_string()))]),
+            )
+            .expect_err("type mismatch should fail");
+        assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
+    
+        // execute_call arg unknown
+        let mut engine = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: callee.script.xml -->
+    <script name="main">
+      <call script="callee" args="1"/>
+    </script>
+    "#,
+            ),
+            (
+                "callee.script.xml",
+                r#"<script name="callee"><return/></script>"#,
+            ),
+        ]));
+        engine.start("main", None).expect("start");
+        let error = engine.next_output().expect_err("arg unknown should fail");
+        assert_eq!(error.code, "ENGINE_CALL_ARG_UNKNOWN");
+    
+        // execute_call arg type mismatch at scope creation
+        let mut engine = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: callee.script.xml -->
+    <script name="main">
+      <call script="callee" args="&quot;str&quot;"/>
+    </script>
+    "#,
+            ),
+            (
+                "callee.script.xml",
+                r#"<script name="callee" args="int:x"><return/></script>"#,
+            ),
+        ]));
+        engine.start("main", None).expect("start");
+        let error = engine
+            .next_output()
+            .expect_err("arg type mismatch should fail");
+        assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
+    }
+
+}

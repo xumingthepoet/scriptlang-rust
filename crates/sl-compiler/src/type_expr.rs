@@ -258,3 +258,84 @@ fn parse_function_declaration_node_with_namespace(
     })
 }
 
+#[cfg(test)]
+mod type_expr_tests {
+    use super::*;
+    use crate::compiler_test_support::*;
+
+    #[test]
+    fn type_resolution_helpers_cover_nested_array_and_map_paths() {
+        let span = SourceSpan::synthetic();
+        let mut resolved = BTreeMap::new();
+        let mut visiting = HashSet::new();
+        let type_map = BTreeMap::from([(
+            "Obj".to_string(),
+            ParsedTypeDecl {
+                name: "Obj".to_string(),
+                qualified_name: "Obj".to_string(),
+                fields: vec![ParsedTypeFieldDecl {
+                    name: "n".to_string(),
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    location: span.clone(),
+                }],
+                location: span.clone(),
+            },
+        )]);
+    
+        let array = resolve_type_expr_with_lookup(
+            &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Custom("Obj".to_string()))),
+            &type_map,
+            &mut resolved,
+            &mut visiting,
+            &span,
+        )
+        .expect("array custom type should resolve");
+        assert!(matches!(array, ScriptType::Array { .. }));
+    
+        let map = resolve_type_expr_with_lookup(
+            &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Custom("Obj".to_string()))),
+            &type_map,
+            &mut resolved,
+            &mut visiting,
+            &span,
+        )
+        .expect("map custom type should resolve");
+        assert!(matches!(map, ScriptType::Map { .. }));
+    
+        let array_err = resolve_type_expr_with_lookup(
+            &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Custom("Missing".to_string()))),
+            &type_map,
+            &mut resolved,
+            &mut visiting,
+            &span,
+        )
+        .expect_err("unknown array element type should fail");
+        assert_eq!(array_err.code, "TYPE_UNKNOWN");
+    
+        let map_err = resolve_type_expr_with_lookup(
+            &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Custom("Missing".to_string()))),
+            &type_map,
+            &mut resolved,
+            &mut visiting,
+            &span,
+        )
+        .expect_err("unknown map value type should fail");
+        assert_eq!(map_err.code, "TYPE_UNKNOWN");
+    
+        let nested = parse_type_expr("#{int[]}", &span).expect("type should parse");
+        assert!(matches!(nested, ParsedTypeExpr::Map(_)));
+    
+        let type_node = xml_element(
+            "type",
+            &[("name", "Bag")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("name", "values"), ("type", "#{int[]}")],
+                Vec::new(),
+            ))],
+        );
+        let parsed = parse_type_declaration_node(&type_node).expect("type node should parse");
+        assert_eq!(parsed.fields.len(), 1);
+    }
+
+}

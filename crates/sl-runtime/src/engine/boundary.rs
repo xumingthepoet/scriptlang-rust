@@ -97,3 +97,91 @@ impl ScriptLangEngine {
     }
 
 }
+
+#[cfg(test)]
+mod boundary_tests {
+    use super::*;
+    use super::runtime_test_support::*;
+
+    #[test]
+    fn choose_and_input_validate_pending_boundary_state() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]));
+        engine.start("main", None).expect("start");
+    
+        let choose_error = engine.choose(0).expect_err("no pending choice");
+        assert_eq!(choose_error.code, "ENGINE_NO_PENDING_CHOICE");
+        let input_error = engine.submit_input("x").expect_err("no pending input");
+        assert_eq!(input_error.code, "ENGINE_NO_PENDING_INPUT");
+    }
+
+    #[test]
+    fn choose_rejects_out_of_range_index() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <choice text="Pick">
+        <option text="A"><text>A</text></option>
+      </choice>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+        let first = engine.next_output().expect("next");
+        assert!(matches!(first, EngineOutput::Choices { .. }));
+        let error = engine.choose(9).expect_err("index out of range");
+        assert_eq!(error.code, "ENGINE_CHOICE_INDEX");
+    }
+
+    #[test]
+    fn submit_input_uses_default_value_for_blank_input() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="heroName" type="string">&quot;Traveler&quot;</var>
+      <input var="heroName" text="Name your hero"/>
+      <text>Hello ${heroName}</text>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+        let first = engine.next_output().expect("next");
+        assert!(matches!(first, EngineOutput::Input { .. }));
+        engine.submit_input("   ").expect("submit input");
+        let second = engine.next_output().expect("next");
+        let mut text = String::new();
+        if let EngineOutput::Text { text: output } = second {
+            text = output;
+        }
+        assert_eq!(text, "Hello Traveler");
+    }
+
+    #[test]
+    fn submit_input_uses_provided_non_empty_value() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="heroName" type="string">&quot;Traveler&quot;</var>
+      <input var="heroName" text="Name your hero"/>
+      <text>Hello ${heroName}</text>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+        let first = engine.next_output().expect("next");
+        assert!(matches!(first, EngineOutput::Input { .. }));
+        engine.submit_input("Guild").expect("submit input");
+        let second = engine.next_output().expect("next");
+        let mut text = String::new();
+        if let EngineOutput::Text { text: output } = second {
+            text = output;
+        }
+        assert_eq!(text, "Hello Guild");
+    }
+
+}

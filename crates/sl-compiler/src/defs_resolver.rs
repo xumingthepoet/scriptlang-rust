@@ -270,3 +270,187 @@ fn resolve_visible_defs(
     Ok((visible_types, functions))
 }
 
+#[cfg(test)]
+mod defs_resolver_tests {
+    use super::*;
+    use crate::compiler_test_support::*;
+
+    #[test]
+    fn resolve_visible_defs_builds_function_signatures() {
+        let span = SourceSpan::synthetic();
+        let defs = DefsDeclarations {
+            type_decls: vec![ParsedTypeDecl {
+                name: "Obj".to_string(),
+                qualified_name: "shared.Obj".to_string(),
+                fields: vec![ParsedTypeFieldDecl {
+                    name: "value".to_string(),
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    location: span.clone(),
+                }],
+                location: span.clone(),
+            }],
+            function_decls: vec![ParsedFunctionDecl {
+                name: "make".to_string(),
+                qualified_name: "shared.make".to_string(),
+                params: vec![ParsedFunctionParamDecl {
+                    name: "seed".to_string(),
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    location: span.clone(),
+                }],
+                return_binding: ParsedFunctionParamDecl {
+                    name: "ret".to_string(),
+                    type_expr: ParsedTypeExpr::Custom("Obj".to_string()),
+                    location: span.clone(),
+                },
+                code: "ret = #{value: seed};".to_string(),
+                location: span.clone(),
+            }],
+        };
+    
+        let reachable = BTreeSet::from(["shared.defs.xml".to_string()]);
+        let defs_by_path = BTreeMap::from([("shared.defs.xml".to_string(), defs)]);
+    
+        let (types, functions) =
+            resolve_visible_defs(&reachable, &defs_by_path).expect("defs should resolve");
+        assert!(types.contains_key("Obj"));
+        let function = functions.get("make").expect("function should exist");
+        assert_eq!(function.params.len(), 1);
+        assert!(matches!(
+            function.return_binding.r#type,
+            ScriptType::Object { .. }
+        ));
+    }
+
+    #[test]
+    fn resolve_visible_defs_handles_namespace_collisions_and_alias_edges() {
+        let span = SourceSpan::synthetic();
+    
+        let duplicate_qualified = DefsDeclarations {
+            type_decls: vec![ParsedTypeDecl {
+                name: "T".to_string(),
+                qualified_name: "shared.T".to_string(),
+                fields: vec![ParsedTypeFieldDecl {
+                    name: "v".to_string(),
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    location: span.clone(),
+                }],
+                location: span.clone(),
+            }],
+            function_decls: Vec::new(),
+        };
+        let duplicate_defs_by_path = BTreeMap::from([
+            ("a.defs.xml".to_string(), duplicate_qualified.clone()),
+            ("b.defs.xml".to_string(), duplicate_qualified),
+        ]);
+        let duplicate_reachable =
+            BTreeSet::from(["a.defs.xml".to_string(), "b.defs.xml".to_string()]);
+        let duplicate_error = resolve_visible_defs(&duplicate_reachable, &duplicate_defs_by_path)
+            .expect_err("duplicate qualified type should fail");
+        assert_eq!(duplicate_error.code, "TYPE_DECL_DUPLICATE");
+    
+        let defs_by_path = BTreeMap::from([
+            (
+                "a.defs.xml".to_string(),
+                DefsDeclarations {
+                    type_decls: Vec::new(),
+                    function_decls: vec![ParsedFunctionDecl {
+                        name: "doit".to_string(),
+                        qualified_name: "a.doit".to_string(),
+                        params: Vec::new(),
+                        return_binding: ParsedFunctionParamDecl {
+                            name: "out".to_string(),
+                            type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                            location: span.clone(),
+                        },
+                        code: "out = 1;".to_string(),
+                        location: span.clone(),
+                    }],
+                },
+            ),
+            (
+                "b.defs.xml".to_string(),
+                DefsDeclarations {
+                    type_decls: Vec::new(),
+                    function_decls: vec![ParsedFunctionDecl {
+                        name: "doit".to_string(),
+                        qualified_name: "b.doit".to_string(),
+                        params: Vec::new(),
+                        return_binding: ParsedFunctionParamDecl {
+                            name: "out".to_string(),
+                            type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                            location: span.clone(),
+                        },
+                        code: "out = 2;".to_string(),
+                        location: span.clone(),
+                    }],
+                },
+            ),
+        ]);
+        let reachable = BTreeSet::from(["a.defs.xml".to_string(), "b.defs.xml".to_string()]);
+        let (_types, functions) =
+            resolve_visible_defs(&reachable, &defs_by_path).expect("defs should resolve");
+        assert!(functions.contains_key("a.doit"));
+        assert!(functions.contains_key("b.doit"));
+        assert!(!functions.contains_key("doit"));
+    }
+
+    #[test]
+    fn resolve_named_type_with_aliases_reports_missing_aliased_target() {
+        let error = resolve_named_type_with_aliases(
+            "Alias",
+            &BTreeMap::new(),
+            &BTreeMap::from([("Alias".to_string(), "missing.Type".to_string())]),
+            &mut BTreeMap::new(),
+            &mut HashSet::new(),
+        )
+        .expect_err("missing aliased target should fail");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
+
+    #[test]
+    fn defs_and_type_resolution_helpers_cover_duplicate_and_recursive_errors() {
+        let bad_defs = map(&[("x.defs.xml", "<script name=\"x\"></script>")]);
+        let error = compile_project_bundle_from_xml_map(&bad_defs).expect_err("bad defs root");
+        assert_eq!(error.code, "XML_ROOT_INVALID");
+    
+        let duplicate_types = map(&[
+            (
+                "a.defs.xml",
+                r#"<defs name="a"><type name="T"><field name="v" type="int"/></type></defs>"#,
+            ),
+            (
+                "b.defs.xml",
+                r#"<defs name="b"><type name="T"><field name="v" type="int"/></type></defs>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: a.defs.xml -->
+    <!-- include: b.defs.xml -->
+    <script name="main"><var name="v" type="T"/></script>
+    "#,
+            ),
+        ]);
+        let error = compile_project_bundle_from_xml_map(&duplicate_types)
+            .expect_err("ambiguous unqualified type should fail");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+    
+        let recursive = map(&[
+            (
+                "x.defs.xml",
+                r#"<defs name="x"><type name="A"><field name="b" type="B"/></type><type name="B"><field name="a" type="A"/></type></defs>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: x.defs.xml -->
+    <script name="main"><var name="v" type="A"/></script>
+    "#,
+            ),
+        ]);
+        let error = compile_project_bundle_from_xml_map(&recursive)
+            .expect_err("recursive type declarations should fail");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
+
+}

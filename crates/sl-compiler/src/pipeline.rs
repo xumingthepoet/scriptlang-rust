@@ -67,3 +67,125 @@ pub fn compile_project_bundle_from_xml_map(
     })
 }
 
+#[cfg(test)]
+mod pipeline_tests {
+    use super::*;
+    use crate::compiler_test_support::*;
+    use std::fs;
+
+    #[test]
+    fn compile_basic_script_project() {
+        let files = map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <text>Hello</text>
+      <choice text="Pick">
+        <option text="A"><text>A1</text></option>
+      </choice>
+    </script>
+    "#,
+        )]);
+    
+        let result = compile_project_bundle_from_xml_map(&files).expect("project should compile");
+        assert!(result.scripts.contains_key("main"));
+        let main = result.scripts.get("main").expect("main script");
+        assert!(!main.groups.is_empty());
+    }
+
+    #[test]
+    fn compile_bundle_supports_all_example_scenarios() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let examples_root = manifest_dir
+            .join("..")
+            .join("..")
+            .join("examples")
+            .join("scripts-rhai");
+    
+        let mut dirs = fs::read_dir(&examples_root)
+            .expect("examples root should exist")
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .collect::<Vec<_>>();
+        dirs.sort();
+    
+        assert!(!dirs.is_empty(), "examples should not be empty");
+    
+        for directory in dirs {
+            let mut files = BTreeMap::new();
+            read_sources_recursive(&directory, &directory, &mut files)
+                .expect("read sources should pass");
+            let compiled =
+                compile_project_bundle_from_xml_map(&files).expect("example should compile");
+            assert!(!compiled.scripts.is_empty());
+        }
+    }
+
+    #[test]
+    fn compile_scripts_from_xml_map_returns_script_only_bundle() {
+        let files = sources_from_example_dir("15-entry-override-recursive");
+        let scripts = compile_project_scripts_from_xml_map(&files).expect("compile should pass");
+        assert!(scripts.contains_key("main"));
+        assert!(scripts.contains_key("alt"));
+    }
+
+    #[test]
+    fn compile_bundle_rejects_unsupported_source_extension() {
+        let files = BTreeMap::from([("x.txt".to_string(), "bad".to_string())]);
+        let error = compile_project_bundle_from_xml_map(&files)
+            .expect_err("unsupported extension should fail");
+        assert_eq!(error.code, "SOURCE_KIND_UNSUPPORTED");
+    }
+
+    #[test]
+    fn compile_bundle_rejects_missing_include_and_cycle() {
+        let missing_include = map(&[(
+            "main.script.xml",
+            r#"
+    <!-- include: missing.script.xml -->
+    <script name="main"></script>
+    "#,
+        )]);
+        let missing = compile_project_bundle_from_xml_map(&missing_include)
+            .expect_err("missing include should fail");
+        assert_eq!(missing.code, "INCLUDE_NOT_FOUND");
+    
+        let cycle = map(&[
+            (
+                "a.script.xml",
+                r#"
+    <!-- include: b.script.xml -->
+    <script name="a"></script>
+    "#,
+            ),
+            (
+                "b.script.xml",
+                r#"
+    <!-- include: a.script.xml -->
+    <script name="b"></script>
+    "#,
+            ),
+        ]);
+        let cycle_error =
+            compile_project_bundle_from_xml_map(&cycle).expect_err("include cycle should fail");
+        assert_eq!(cycle_error.code, "INCLUDE_CYCLE");
+    }
+
+    #[test]
+    fn compile_bundle_rejects_invalid_root_and_duplicate_script_names() {
+        let invalid_root = map(&[("main.script.xml", "<defs name=\"x\"></defs>")]);
+        let root_error =
+            compile_project_bundle_from_xml_map(&invalid_root).expect_err("invalid root");
+        assert_eq!(root_error.code, "XML_ROOT_INVALID");
+    
+        let duplicate_script_name = map(&[
+            ("a.script.xml", "<script name=\"main\"></script>"),
+            ("b.script.xml", "<script name=\"main\"></script>"),
+        ]);
+        let duplicate_error = compile_project_bundle_from_xml_map(&duplicate_script_name)
+            .expect_err("duplicate script names should fail");
+        assert_eq!(duplicate_error.code, "SCRIPT_NAME_DUPLICATE");
+    }
+
+}

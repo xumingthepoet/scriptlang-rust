@@ -158,3 +158,97 @@ impl ScriptLangEngine {
     }
 
 }
+
+#[cfg(test)]
+mod frame_stack_tests {
+    use super::*;
+    use super::runtime_test_support::*;
+
+    #[test]
+    fn internal_state_error_paths_are_covered() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <choice text="Pick">
+        <option text="A"><text>A</text></option>
+      </choice>
+    </script>
+    "#,
+        )]));
+    
+        engine.start("main", None).expect("start");
+        let first = engine.next_output().expect("choice");
+        assert!(matches!(first, EngineOutput::Choices { .. }));
+        let mut items = Vec::new();
+        let mut prompt_text = None;
+        if let Some(PendingBoundary::Choice {
+            options,
+            prompt_text: choice_prompt,
+            ..
+        }) = engine.pending_boundary.clone()
+        {
+            items = options;
+            prompt_text = choice_prompt;
+        }
+        assert!(!items.is_empty());
+        let frame_id = engine.frames.last().expect("frame").frame_id;
+        engine.pending_boundary = Some(PendingBoundary::Choice {
+            frame_id,
+            node_id: "x".to_string(),
+            options: items.clone(),
+            prompt_text: prompt_text.clone(),
+        });
+        let again = engine.next_output().expect("pending boundary should echo");
+        assert!(matches!(again, EngineOutput::Choices { .. }));
+    
+        engine.pending_boundary = None;
+        engine.ended = true;
+        let end = engine.next_output().expect("ended should return end");
+        assert!(matches!(end, EngineOutput::End));
+    
+        engine.pending_boundary = Some(PendingBoundary::Choice {
+            frame_id: 999_999,
+            node_id: "x".to_string(),
+            options: items.clone(),
+            prompt_text,
+        });
+        let error = engine.choose(0).expect_err("missing frame should fail");
+        assert_eq!(error.code, "ENGINE_CHOICE_FRAME_MISSING");
+    
+        engine.pending_boundary = Some(PendingBoundary::Input {
+            frame_id: 999_999,
+            node_id: "x".to_string(),
+            target_var: "name".to_string(),
+            prompt_text: "p".to_string(),
+            default_text: "d".to_string(),
+        });
+        let error = engine
+            .submit_input("abc")
+            .expect_err("missing input frame should fail");
+        assert_eq!(error.code, "ENGINE_INPUT_FRAME_MISSING");
+    
+        let mut helper_engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]));
+        let err = helper_engine.top_frame_id().expect_err("no frame");
+        assert_eq!(err.code, "ENGINE_NO_FRAME");
+        let err = helper_engine
+            .bump_top_node_index(1)
+            .expect_err("no frame for bump");
+        assert_eq!(err.code, "ENGINE_NO_FRAME");
+    
+        let err = helper_engine
+            .push_group_frame("missing-group", CompletionKind::ResumeAfterChild)
+            .expect_err("missing group");
+        assert_eq!(err.code, "ENGINE_GROUP_NOT_FOUND");
+    
+        assert!(helper_engine.finish_frame(123).is_ok());
+        let err = helper_engine
+            .find_current_root_frame_index()
+            .expect_err("no root frame");
+        assert_eq!(err.code, "ENGINE_ROOT_FRAME");
+    }
+
+}

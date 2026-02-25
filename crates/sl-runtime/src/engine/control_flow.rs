@@ -105,3 +105,59 @@ impl ScriptLangEngine {
     }
 
 }
+
+#[cfg(test)]
+mod control_flow_tests {
+    use super::runtime_test_support::*;
+
+    #[test]
+    fn runtime_errors_cover_break_continue_and_return_args() {
+        let mut source = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <choice text="Pick">
+        <option text="A"><text>A</text></option>
+      </choice>
+    </script>
+    "#,
+        )]));
+        source.start("main", None).expect("start");
+        let _ = source.next_output().expect("choice");
+        let mut snapshot = source.snapshot().expect("snapshot");
+        if let Some(frame) = snapshot.runtime_frames.last_mut() {
+            frame.group_id = "missing-group".to_string();
+        }
+        let mut resumed = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <choice text="Pick">
+        <option text="A"><text>A</text></option>
+      </choice>
+    </script>
+    "#,
+        )]));
+        let error = resumed
+            .resume(snapshot)
+            .expect_err("missing group in snapshot should fail");
+        assert_eq!(error.code, "ENGINE_GROUP_NOT_FOUND");
+    
+        let mut return_arg_unknown = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"<script name="main"><return script="next" args="1,2"/></script>"#,
+            ),
+            (
+                "next.script.xml",
+                r#"<script name="next" args="int:x"><text>${x}</text></script>"#,
+            ),
+        ]));
+        return_arg_unknown.start("main", None).expect("start");
+        let error = return_arg_unknown
+            .next_output()
+            .expect_err("extra return arg should fail");
+        assert_eq!(error.code, "ENGINE_RETURN_ARG_UNKNOWN");
+    }
+
+}
