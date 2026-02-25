@@ -432,7 +432,11 @@ impl ScriptLangEngine {
         let group_id = self.frames[frame_index].group_id.clone();
         let (script_name, group) = self.lookup_group(&group_id)?;
 
-        let Some(ScriptNode::Choice { options: node_options, .. }) = group.nodes.get(node_index) else {
+        let Some(ScriptNode::Choice {
+            options: node_options,
+            ..
+        }) = group.nodes.get(node_index)
+        else {
             return Err(ScriptLangError::new(
                 "ENGINE_CHOICE_NODE_MISSING",
                 "Pending choice node is no longer valid.",
@@ -934,7 +938,10 @@ impl ScriptLangEngine {
             let Some(param) = target.params.get(index) else {
                 return Err(ScriptLangError::new(
                     "ENGINE_CALL_ARG_UNKNOWN",
-                    format!("Call argument at position {} has no matching parameter.", index + 1),
+                    format!(
+                        "Call argument at position {} has no matching parameter.",
+                        index + 1
+                    ),
                 ));
             };
 
@@ -1015,7 +1022,10 @@ impl ScriptLangEngine {
                 let Some(param) = target.params.get(index) else {
                     return Err(ScriptLangError::new(
                         "ENGINE_RETURN_ARG_UNKNOWN",
-                        format!("Return argument at position {} has no target parameter.", index + 1),
+                        format!(
+                            "Return argument at position {} has no target parameter.",
+                            index + 1
+                        ),
                     ));
                 };
                 transfer_arg_values
@@ -1139,7 +1149,8 @@ impl ScriptLangEngine {
     }
 
     fn execute_continue_choice(&mut self) -> Result<(), ScriptLangError> {
-        let Some((choice_frame_index, choice_node_index)) = self.find_choice_continue_context()? else {
+        let Some((choice_frame_index, choice_node_index)) = self.find_choice_continue_context()?
+        else {
             return Err(ScriptLangError::new(
                 "ENGINE_CHOICE_CONTINUE_TARGET_MISSING",
                 "No target <choice> node found for option <continue>.",
@@ -1160,7 +1171,8 @@ impl ScriptLangEngine {
 
             let (_, group) = self.lookup_group(&frame.group_id)?;
             let choice_node_index = frame.node_index - 1;
-            let Some(ScriptNode::Choice { options, .. }) = group.nodes.get(choice_node_index) else {
+            let Some(ScriptNode::Choice { options, .. }) = group.nodes.get(choice_node_index)
+            else {
                 continue;
             };
 

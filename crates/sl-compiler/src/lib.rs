@@ -1627,7 +1627,10 @@ fn get_required_non_empty_attr(
     let Some(raw) = node.attributes.get(name) else {
         return Err(ScriptLangError::with_span(
             "XML_MISSING_ATTR",
-            format!("Missing required attribute \"{}\" on <{}>.", name, node.name),
+            format!(
+                "Missing required attribute \"{}\" on <{}>.",
+                name, node.name
+            ),
             node.location.clone(),
         ));
     };
