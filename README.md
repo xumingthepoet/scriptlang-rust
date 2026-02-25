@@ -1,6 +1,6 @@
 # scriptlang-rs
 
-Rust workspace implementation of ScriptLang (Phase 1), with Rhai as embedded script engine.
+Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded script engine.
 
 ## Workspace Crates
 - `crates/sl-core`: shared types, values, errors, snapshot/player schemas.
@@ -8,20 +8,69 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as embedded scr
 - `crates/sl-compiler`: include graph validation + defs/json/script compilation to IR.
 - `crates/sl-runtime`: execution engine (`next/choose/submit_input/snapshot/resume`).
 - `crates/sl-api`: high-level create/compile/resume API.
-- `crates/sl-cli`: `agent start/choose/input` command-line interface.
+- `crates/sl-cli`: host-side CLI (`agent` and `tui` modes).
 
 ## Commands
-- `cargo qk`: workspace check.
-- `cargo qt`: workspace tests.
-- `cargo qc`: workspace clippy (`-D warnings`).
-- `make gate`: fmt + clippy + test.
+- `cargo qk`: `cargo check --workspace --all-targets --all-features`
+- `cargo qa`: `cargo fmt --all -- --check`
+- `cargo qc`: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+- `cargo qt`: `cargo test --workspace --all-targets --all-features`
+- `cargo llvm-cov --workspace --all-features --summary-only --fail-under-lines 100`: coverage gate.
+- `make gate`: `check + fmt + clippy + test + coverage`.
 
-## Agent CLI
+## CLI Usage
+
+### Agent mode
 ```bash
 cargo run -p sl-cli -- agent start --scripts-dir examples/scripts-rhai/06-snapshot-flow --state-out /tmp/sl-state.json
 cargo run -p sl-cli -- agent choose --state-in /tmp/sl-state.json --choice 0 --state-out /tmp/sl-next.json
 cargo run -p sl-cli -- agent input --state-in /tmp/sl-next.json --text "Rin" --state-out /tmp/sl-next2.json
 ```
+
+`agent` mode prints line-based machine-readable output:
+- `RESULT:OK|ERROR`
+- `EVENT:CHOICES|INPUT|END`
+- `TEXT_JSON:...`
+- `PROMPT_JSON:...`
+- `CHOICE:<index>|<json_text>`
+- `INPUT_DEFAULT_JSON:...`
+- `STATE_OUT:<path|NONE>`
+
+### TUI mode
+```bash
+cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/06-snapshot-flow
+```
+
+All example entry commands:
+```bash
+cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/01-text-code
+cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/02-if-while
+cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/03-choice-once
+cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/04-call-ref-return
+cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/05-return-transfer
+cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/06-snapshot-flow
+cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/07-battle-duel
+cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/08-json-globals
+cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/09-random
+cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/10-once-static
+cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/11-choice-fallover-continue
+cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/12-while-break-continue
+cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/13-loop-times
+cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/14-defs-functions
+cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/15-entry-override-recursive
+cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/16-input-name
+```
+
+TUI supports built-in commands:
+- `:help`
+- `:save`
+- `:load`
+- `:restart`
+- `:quit`
+
+You can override defaults with:
+- `--entry-script <name>` (default: `main`)
+- `--state-file <path>` (default: `.scriptlang/save.json`)
 
 ## Examples
 Rhai-authored smoke scenarios live in `examples/scripts-rhai`.
