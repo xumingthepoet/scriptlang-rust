@@ -13,6 +13,23 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 - `crates/sl-api`: high-level create/compile/resume API.
 - `crates/sl-cli`: host-side CLI (`agent` and `tui` modes).
 
+## Internal Module Layout
+- `crates/sl-cli/src`:
+  `lib.rs` only coordinates modules; runtime logic is split into
+  `cli_args.rs`, `models.rs`, `source_loader.rs`, `state_store.rs`,
+  `boundary_runner.rs`, `line_tui.rs`, `error_map.rs`, plus `agent.rs` and `tui.rs`.
+- `crates/sl-runtime/src`:
+  public entry is `lib.rs -> engine/mod.rs`; engine logic is split into
+  `engine/lifecycle.rs`, `step.rs`, `boundary.rs`, `snapshot.rs`, `frame_stack.rs`,
+  `callstack.rs`, `control_flow.rs`, `eval.rs`, `scope.rs`, `once_state.rs`, `rng.rs`;
+  helpers are in `helpers/value_path.rs` and `helpers/rhai_bridge.rs`.
+- `crates/sl-compiler/src`:
+  compile pipeline is split into `context.rs`, `pipeline.rs`, `source_parse.rs`,
+  `include_graph.rs`, `defs_resolver.rs`, `type_expr.rs`, `json_symbols.rs`,
+  `sanitize.rs`, `script_compile.rs`, `xml_utils.rs`, `macro_expand.rs`, `defaults.rs`.
+
+This split keeps crate boundaries unchanged and enforces one-way internal dependencies.
+
 ## Commands
 - `cargo qk`: `cargo check --workspace --all-targets --all-features`
 - `cargo qa`: `cargo fmt --all -- --check`

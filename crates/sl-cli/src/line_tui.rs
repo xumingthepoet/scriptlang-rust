@@ -1,0 +1,202 @@
+use std::io::{self, BufRead, Write};
+use std::path::Path;
+
+use sl_api::{
+    create_engine_from_xml, resume_engine_from_xml, CreateEngineFromXmlOptions,
+    ResumeEngineFromXmlOptions,
+};
+use sl_core::{EngineOutput, ScriptLangError};
+use sl_runtime::DEFAULT_COMPILER_VERSION;
+
+use crate::{
+    load_player_state, load_source_by_ref, map_tui_io, save_player_state, LoadedScenario,
+    PlayerStateV3, TuiCommandAction, TuiCommandContext, PLAYER_STATE_SCHEMA,
+};
+
+pub(crate) fn run_tui_line_mode(
+    state_file: &str,
+    scenario: &LoadedScenario,
+    entry_script: &str,
+    engine: &mut sl_runtime::ScriptLangEngine,
+) -> Result<i32, ScriptLangError> {
+    let stdin = io::stdin();
+    let mut reader = stdin.lock();
+    let mut writer = io::stdout();
+    run_tui_line_mode_with_io(
+        state_file,
+        scenario,
+        entry_script,
+        engine,
+        &mut reader,
+        &mut writer,
+    )
+}
+
+pub(crate) fn run_tui_line_mode_with_io(
+    state_file: &str,
+    scenario: &LoadedScenario,
+    entry_script: &str,
+    engine: &mut sl_runtime::ScriptLangEngine,
+    reader: &mut dyn BufRead,
+    writer: &mut dyn Write,
+) -> Result<i32, ScriptLangError> {
+    println!("ScriptLang TUI");
+    println!("commands: :help :save :load :restart :quit");
+    let command_context = TuiCommandContext {
+        state_file,
+        scenario,
+        entry_script,
+    };
+
+    loop {
+        match engine.next_output()? {
+            EngineOutput::Text { text } => {
+                println!();
+                println!("{}", text);
+            }
+            EngineOutput::Choices { items, prompt_text } => {
+                println!();
+                if let Some(prompt_text) = prompt_text {
+                    println!("{}", prompt_text);
+                }
+                for item in &items {
+                    println!("  [{}] {}", item.index, item.text);
+                }
+                loop {
+                    let raw = prompt_input_from("> ", reader, writer)?;
+                    let mut emit = |line: String| println!("{}", line);
+                    let action =
+                        handle_line_cmd(raw.as_str(), &command_context, engine, &mut emit)?;
+                    match action {
+                        TuiCommandAction::Continue => continue,
+                        TuiCommandAction::RefreshBoundary => break,
+                        TuiCommandAction::Quit => return Ok(0),
+                        TuiCommandAction::NotHandled => {}
+                    }
+                    let choice = raw.parse::<usize>().map_err(|_| {
+                        ScriptLangError::new(
+                            "TUI_CHOICE_PARSE",
+                            format!("Invalid choice index: {}", raw),
+                        )
+                    })?;
+                    engine.choose(choice)?;
+                    break;
+                }
+            }
+            EngineOutput::Input {
+                prompt_text,
+                default_text,
+            } => {
+                println!();
+                println!("{}", prompt_text);
+                println!("(default: {})", default_text);
+                loop {
+                    let raw = prompt_input_from("> ", reader, writer)?;
+                    let mut emit = |line: String| println!("{}", line);
+                    let action =
+                        handle_line_cmd(raw.as_str(), &command_context, engine, &mut emit)?;
+                    match action {
+                        TuiCommandAction::Continue => continue,
+                        TuiCommandAction::RefreshBoundary => break,
+                        TuiCommandAction::Quit => return Ok(0),
+                        TuiCommandAction::NotHandled => {}
+                    }
+                    engine.submit_input(&raw)?;
+                    break;
+                }
+            }
+            EngineOutput::End => {
+                println!();
+                println!("[END]");
+                return Ok(0);
+            }
+        }
+    }
+}
+
+pub(crate) fn handle_tui_command(
+    raw: &str,
+    state_file: &str,
+    scenario: &LoadedScenario,
+    entry_script: &str,
+    engine: &mut sl_runtime::ScriptLangEngine,
+    emit: &mut dyn FnMut(String),
+) -> Result<TuiCommandAction, ScriptLangError> {
+    match raw {
+        ":help" => {
+            emit("commands: :help :save :load :restart :quit".to_string());
+            Ok(TuiCommandAction::Continue)
+        }
+        ":save" => {
+            let snapshot = engine.snapshot()?;
+            let state = PlayerStateV3 {
+                schema_version: PLAYER_STATE_SCHEMA.to_string(),
+                scenario_id: scenario.id.clone(),
+                compiler_version: DEFAULT_COMPILER_VERSION.to_string(),
+                snapshot,
+            };
+            save_player_state(Path::new(state_file), &state)?;
+            emit(format!("saved: {}", state_file));
+            Ok(TuiCommandAction::Continue)
+        }
+        ":load" => {
+            let state = load_player_state(Path::new(state_file))?;
+            let loaded = load_source_by_ref(&state.scenario_id)?;
+            let resumed = resume_engine_from_xml(ResumeEngineFromXmlOptions {
+                scripts_xml: loaded.scripts_xml,
+                snapshot: state.snapshot,
+                host_functions: None,
+                compiler_version: Some(state.compiler_version),
+            })?;
+            *engine = resumed;
+            emit(format!("loaded: {}", state_file));
+            Ok(TuiCommandAction::RefreshBoundary)
+        }
+        ":restart" => {
+            let mut restarted = create_engine_from_xml(CreateEngineFromXmlOptions {
+                scripts_xml: scenario.scripts_xml.clone(),
+                entry_script: Some(entry_script.to_string()),
+                entry_args: None,
+                host_functions: None,
+                random_seed: None,
+                compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+            })?;
+            std::mem::swap(engine, &mut restarted);
+            emit("restarted".to_string());
+            Ok(TuiCommandAction::RefreshBoundary)
+        }
+        ":quit" => {
+            emit("bye".to_string());
+            Ok(TuiCommandAction::Quit)
+        }
+        _ => Ok(TuiCommandAction::NotHandled),
+    }
+}
+
+pub(crate) fn handle_line_cmd(
+    raw: &str,
+    context: &TuiCommandContext<'_>,
+    engine: &mut sl_runtime::ScriptLangEngine,
+    emit: &mut dyn FnMut(String),
+) -> Result<TuiCommandAction, ScriptLangError> {
+    handle_tui_command(
+        raw,
+        context.state_file,
+        context.scenario,
+        context.entry_script,
+        engine,
+        emit,
+    )
+}
+
+pub(crate) fn prompt_input_from(
+    prefix: &str,
+    reader: &mut dyn BufRead,
+    writer: &mut dyn Write,
+) -> Result<String, ScriptLangError> {
+    write!(writer, "{}", prefix).map_err(map_tui_io)?;
+    writer.flush().map_err(map_tui_io)?;
+    let mut input = String::new();
+    reader.read_line(&mut input).map_err(map_tui_io)?;
+    Ok(input.trim_end_matches(&['\r', '\n'][..]).to_string())
+}
