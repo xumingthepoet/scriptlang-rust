@@ -3,6 +3,7 @@
 Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded script engine.
 
 ## Documentation
+- [SL Engine API usage](docs/sl-engine-api.md)
 - [ScriptLang syntax rules](docs/scriptlang-syntax.md)
 
 ## Workspace Crates

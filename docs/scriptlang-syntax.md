@@ -1,142 +1,466 @@
-# ScriptLang 语法规则（scriptlang-rs）
+# ScriptLang 语法手册（scriptlang-rs）
 
-本文档记录 `scriptlang-rs` 当前支持的 ScriptLang XML 语法，用于编写 `examples/scripts-rhai` 下的脚本与 defs。
+本文档按“语法点”逐一说明当前 `scriptlang-rs` 支持的 XML 语法。每个语法点都附带至少一个示例，可直接用于 `examples/scripts-rhai` 风格工程。
 
-## 1. 文件类型与根节点
+## 1. 文件类型
 
-- 可执行脚本：`*.script.xml`，根节点为 `<script name="...">`
-- 声明文件：`*.defs.xml`，根节点为 `<defs name="...">`
-- 全局只读数据：`*.json`（通过 include 暴露为全局符号）
+## 1.1 `*.script.xml`（可执行脚本）
 
-示例：
+要求根节点是 `<script>`。
 
 ```xml
-<!-- include: shared.defs.xml -->
-<script name="main" args="int:hp">
-  <text>HP=${hp}</text>
+<script name="main">
+  <text>Hello</text>
 </script>
 ```
 
-## 2. include 头注释
+## 1.2 `*.defs.xml`（类型/函数声明）
 
-在 `.script.xml` / `.defs.xml` 文件头可使用：
+要求根节点是 `<defs>`。
+
+```xml
+<defs name="shared">
+  <type name="Hero">
+    <field name="hp" type="int"/>
+  </type>
+</defs>
+```
+
+## 1.3 `*.json`（全局只读数据）
+
+通过 include 进入可见闭包后，以“文件名（去扩展名）”作为符号使用。
+
+```json
+{ "bonus": 10 }
+```
+
+例如 `game.json` 在脚本里用 `game` 访问。
+
+## 2. include 语法
+
+使用 XML 注释行：
 
 ```xml
 <!-- include: relative/path.ext -->
 ```
 
-规则：
-
-- 一行一个 include。
-- 路径相对当前文件（推荐写在文件头，编译器会扫描整份源文本中的 include 注释行）。
-- 支持目标：`.script.xml`、`.defs.xml`、`.json`。
-- include 缺失或循环依赖会在编译时报错。
-- 脚本表达式/defs 函数代码若引用了 JSON 全局符号，但当前可见 include 闭包中没有该 `.json`，会在编译期报错（而不是等到运行期）。
-
-## 3. `<script>` 顶层可执行节点
-
-`<script>` 的直接子节点支持：
-
-- `<var>`
-- `<text>`
-- `<code>`
-- `<if>` / `<else>`
-- `<while>`
-- `<loop>`
-- `<choice>` / `<option>`
-- `<input>`
-- `<break>` / `<continue>`
-- `<call>`
-- `<return>`
-
-说明：`<function>` 只能定义在 `<defs>` 中，不能作为 `<script>` 直接子节点。
-
-## 4. `<defs>` 声明节点
-
-- `<type name="TypeName">` + `<field name="..." type="..."/>`
-- `<function name="Func" args="type:name,..." return="type:name">...</function>`
-- `<defs name="shared">` 中声明的类型/函数具备命名空间前缀：`shared.TypeName`、`shared.func(...)`
-
 示例：
 
 ```xml
+<!-- include: shared.defs.xml -->
+<!-- include: game.json -->
+<script name="main">
+  <text>${shared.add(1, game.bonus)}</text>
+</script>
+```
+
+规则：
+- 允许在 `.script.xml` 和 `.defs.xml` 中声明 include。
+- 路径相对当前文件。
+- include 缺失或循环依赖会编译报错。
+
+## 3. `<script>` 顶层属性
+
+## 3.1 `name`（必填）
+
+脚本名，全工程必须唯一。
+
+```xml
+<script name="main">
+  <text>Main</text>
+</script>
+```
+
+## 3.2 `args`（可选）
+
+参数格式：`type:name` 或 `ref:type:name`，逗号分隔。
+
+```xml
+<script name="battle" args="int:hp,ref:int:score">
+  <text>HP=${hp}</text>
+</script>
+```
+
+## 4. `<defs>` 顶层属性
+
+## 4.1 `name`（必填）
+
+作为命名空间前缀（如 `shared.boost`）。
+
+```xml
 <defs name="shared">
-  <type name="Fighter">
-    <field name="hp" type="int"/>
-  </type>
-  <function name="boost" args="int:base" return="int:out">
-    out = base + 1;
+  <function name="boost" args="int:x" return="int:out">
+    out = x + 1;
   </function>
 </defs>
 ```
 
-## 5. 类型系统（摘要）
+## 5. 类型语法
 
-支持类型表达式：
+## 5.1 基础类型
 
-- 基础类型：`int` / `float` / `string` / `boolean`
-- 数组：`T[]`
-- 映射：`#{T}`（key 固定为 string）
-- 自定义对象类型：`ns.TypeName`（推荐）或在无歧义时使用短名 `TypeName`
-
-## 6. 常用节点语义
-
-- `<var name="x" type="int">1</var>`：声明变量，作用域在当前块内。
-- `<var>` 不再支持 `value` 属性，只能使用节点内联文本作为初始表达式。
-- `<text once="true">...</text>`：文本输出，支持 `${expr}` 插值；`once` 仅允许 `true/false`，表示同一脚本生命周期内只触发一次。
-- `<code>...</code>`：执行 Rhai 代码，可读写可见变量。
-- `<if when="...">...</if>`：条件分支，`when` 必须为布尔表达式；可选 `<else>` 分支。
-- `<while when="...">...</while>`：循环；支持 `<break/>`、`<continue/>`。
-- `<loop times="...">...</loop>`：循环语法糖（编译期展开）。
-- `<choice text="...">` + `<option text="...">`：生成选项分支。
-- `<option>` 支持 `when`（条件显示）、`once`（单次可见）与 `fall_over`（兜底项）。
-- `<continue/>` 还可作为 `<option>` 的直接子节点，表示选中后立即回到当前 choice 边界。
-- `<input var="name" text="Prompt"/>`：等待宿主输入并写入字符串变量；不支持 `default` 属性，也不能带子节点/内联文本。
-- `<call script="other" args="..."/>`：调用其他脚本。
-- `<return/>` 或 `<return script="next" args="..."/>`：返回/跳转返回；`return` 的 `args` 不支持 `ref`，且声明 `args` 时必须同时声明 `script`。
-- defs 函数调用支持命名空间写法，例如：`shared.boost(hp)`。
-
-## 7. 参数语法
-
-- `<script args="...">` 使用逗号分隔参数：
-  - 值传递：`type:name`
-  - 引用传递：`ref:type:name`
-- `<call args="...">` 使用位置参数：
-  - 值参数：`expr`
-  - 引用参数：`ref:varName`
-
-## 8. 命名与约束（重点）
-
-- `script name` 必须唯一。
-- `choice/option/input/call/if/while` 等必填属性缺失会编译报错。
-- `once` 属性只允许出现在 `<text>` 和 `<option>`。
-- `fall_over` 每个 `<choice>` 最多一个，且必须是最后一个 `<option>`，同时不能声明 `when`。
-- `<continue/>` 只能出现在 `<while>` 内，或作为 `<option>` 的直接子节点。
-- `<else>` 只能出现在 `<if>` 内。
-- 已移除节点：`<vars> <step> <set> <push> <remove>`。
-- `__` 前缀为保留命名（脚本名、类型名、字段名、函数名、变量名等均不建议使用）。
-- XML 属性中 `<` 需要写成 `&lt;`。
-
-## 9. 一个最小可运行示例
+支持：`int` / `float` / `string` / `boolean`
 
 ```xml
-<!-- include: shared.defs.xml -->
-<script name="main" args="string:name">
-  <var name="hp" type="int">3</var>
-  <text>你好，${name}</text>
-  <while when="hp > 0">
-    <text>HP=${hp}</text>
-    <code>hp = hp - 1;</code>
-  </while>
-  <choice text="下一步？">
-    <option text="结束">
-      <return/>
-    </option>
-  </choice>
+<var name="hp" type="int">10</var>
+```
+
+## 5.2 数组类型 `T[]`
+
+```xml
+<var name="nums" type="int[]">[1, 2, 3]</var>
+```
+
+## 5.3 映射类型 `#{T}`
+
+key 固定是 string。
+
+```xml
+<var name="dict" type="#{int}">#{a: 1, b: 2}</var>
+```
+
+## 5.4 自定义类型（来自 defs）
+
+可用全名 `ns.Type`，或在无歧义场景下用短名。
+
+```xml
+<var name="hero" type="shared.Hero">#{hp: 10}</var>
+```
+
+## 6. `<script>` 可执行节点语法点
+
+## 6.1 `<var>`
+
+用途：声明变量。  
+属性：`name`、`type`（必填）。  
+初值：使用节点内联表达式；为空则用类型默认值。  
+
+```xml
+<var name="hp" type="int">3</var>
+<var name="title" type="string">"Knight"</var>
+```
+
+## 6.2 `<text>`
+
+用途：输出文本。支持 `${expr}` 插值。  
+属性：`once`（可选，`true/false`）。  
+
+```xml
+<text once="true">Welcome, ${name}</text>
+```
+
+## 6.3 `<code>`
+
+用途：执行 Rhai 代码。  
+
+```xml
+<code>hp = hp - 1;</code>
+```
+
+## 6.4 `<if>`
+
+用途：条件分支。  
+属性：`when`（必填，布尔表达式）。  
+
+```xml
+<if when="hp > 0">
+  <text>alive</text>
+</if>
+```
+
+## 6.5 `<else>`
+
+用途：`<if>` 的否则分支，只能出现在 `<if>` 内。
+
+```xml
+<if when="hp > 0">
+  <text>alive</text>
+  <else>
+    <text>dead</text>
+  </else>
+</if>
+```
+
+## 6.6 `<while>`
+
+用途：循环执行。  
+属性：`when`（必填，布尔表达式）。  
+
+```xml
+<while when="hp > 0">
+  <text>HP=${hp}</text>
+  <code>hp = hp - 1;</code>
+</while>
+```
+
+## 6.7 `<loop>`
+
+用途：循环语法糖（编译期展开为 `var + while`）。  
+属性：`times`（必填，表达式，不能写 `${...}` 包裹）。  
+
+```xml
+<loop times="3">
+  <text>tick</text>
+</loop>
+```
+
+## 6.8 `<choice>`
+
+用途：生成可选分支边界。  
+属性：`text`（必填，提示文本）。  
+子节点：仅允许 `<option>`。  
+
+```xml
+<choice text="Choose">
+  <option text="A"><text>Alpha</text></option>
+  <option text="B"><text>Beta</text></option>
+</choice>
+```
+
+## 6.9 `<option>`
+
+用途：`<choice>` 的选项。  
+属性：
+- `text`（必填）
+- `when`（可选，显示条件）
+- `once`（可选，单次可见）
+- `fall_over`（可选，兜底选项）
+
+```xml
+<choice text="Choose">
+  <option text="Fight" when="hp > 0"><text>Battle</text></option>
+  <option text="Leave" fall_over="true"><text>Escape</text></option>
+</choice>
+```
+
+`fall_over` 规则：
+- 每个 `<choice>` 最多一个 `fall_over="true"`。
+- 必须是最后一个 `<option>`。
+- `fall_over` 选项不能再声明 `when`。
+
+## 6.10 `<input>`
+
+用途：请求宿主输入字符串并写入变量。  
+属性：`var`、`text`（必填）。  
+限制：不支持 `default` 属性，不允许子节点/内联文本。  
+
+```xml
+<var name="heroName" type="string">"Traveler"</var>
+<input var="heroName" text="请输入名字"/>
+<text>Hello ${heroName}</text>
+```
+
+## 6.11 `<break/>`
+
+用途：跳出最近的 `<while>`。  
+限制：只能在 `<while>` 内使用。  
+
+```xml
+<while when="true">
+  <break/>
+</while>
+```
+
+## 6.12 `<continue/>`
+
+用途：继续最近循环，或作为 `<option>` 直接子节点回到 choice。  
+限制：
+- 在循环语义下：必须在 `<while>` 内。
+- 在 choice 语义下：必须是 `<option>` 的直接子节点。
+
+```xml
+<while when="hp > 0">
+  <code>hp = hp - 1;</code>
+  <continue/>
+</while>
+```
+
+```xml
+<choice text="Pick">
+  <option text="Again">
+    <continue/>
+  </option>
+</choice>
+```
+
+## 6.13 `<call>`
+
+用途：调用其他脚本。  
+属性：
+- `script`（必填）
+- `args`（可选，位置参数）
+
+`args` 支持：
+- 值参数：`expr`
+- 引用参数：`ref:path`
+
+```xml
+<call script="battle" args="hp, ref:score"/>
+```
+
+## 6.14 `<return>`
+
+用途：从当前脚本返回，或转移到新脚本。  
+属性：
+- `script`（可选）
+- `args`（可选）
+
+规则：
+- `args` 不支持 `ref:`
+- 若声明 `args`，必须同时声明 `script`
+
+```xml
+<return/>
+```
+
+```xml
+<return script="nextScene" args="heroName, hp"/>
+```
+
+## 7. `<defs>` 声明语法点
+
+## 7.1 `<type>`
+
+用途：声明对象类型。  
+属性：`name`（必填）。  
+子节点：`<field>`。  
+
+```xml
+<defs name="shared">
+  <type name="Hero">
+    <field name="hp" type="int"/>
+    <field name="name" type="string"/>
+  </type>
+</defs>
+```
+
+## 7.2 `<field>`
+
+用途：定义类型字段。  
+属性：`name`、`type`（必填）。  
+
+```xml
+<field name="hp" type="int"/>
+```
+
+## 7.3 `<function>`
+
+用途：声明 defs 函数。  
+属性：
+- `name`（必填）
+- `args`（可选，`type:name`）
+- `return`（必填，`type:name`）
+
+限制：
+- defs 函数 `args` 不支持 `ref:`
+- defs 函数 `return` 不支持 `ref:`
+- 函数体只能是内联代码文本，不允许子元素
+
+```xml
+<defs name="shared">
+  <function name="add" args="int:a,int:b" return="int:out">
+    out = a + b;
+  </function>
+</defs>
+```
+
+## 8. JSON 全局可见性语法点
+
+JSON 全局符号必须在 include 闭包内可见，否则编译失败。
+
+```xml
+<!-- include: game.json -->
+<script name="main">
+  <text>bonus=${game.bonus}</text>
 </script>
 ```
 
-## 10. 参考
+## 9. 参数解析语法点
 
-- Rust workspace 示例：`examples/scripts-rhai/`
-- TypeScript 参考语法手册：[xumingthepoet/scriptlang/docs/product-specs/syntax-manual.md](https://github.com/xumingthepoet/scriptlang/blob/main/docs/product-specs/syntax-manual.md)
+## 9.1 `<script args="...">`
+
+```xml
+<script name="main" args="int:hp,ref:int:score">
+  <text>${hp}</text>
+</script>
+```
+
+## 9.2 `<call args="...">`
+
+```xml
+<call script="battle" args="hp + 1, ref:score"/>
+```
+
+## 9.3 `<return args="...">`
+
+```xml
+<return script="next" args="hp, title"/>
+```
+
+## 10. 命名与约束语法点
+
+## 10.1 保留前缀
+
+`__` 前缀为保留命名，不可用于脚本名、类型名、函数名、变量名等。
+
+```xml
+<!-- 不建议/会被拒绝 -->
+<script name="__internal">
+  <text>x</text>
+</script>
+```
+
+## 10.2 已移除节点
+
+以下节点已移除：`<vars> <step> <set> <push> <remove>`。
+
+```xml
+<!-- 会编译报错 -->
+<script name="main">
+  <set path="x">1</set>
+</script>
+```
+
+## 10.3 XML 转义
+
+属性中出现 `<` 需写 `&lt;`。
+
+```xml
+<if when="hp &lt; 10">
+  <text>danger</text>
+</if>
+```
+
+## 11. 综合示例
+
+```xml
+<!-- include: shared.defs.xml -->
+<!-- include: game.json -->
+<script name="main" args="string:name">
+  <var name="hp" type="int">3</var>
+  <text once="true">你好，${name}</text>
+
+  <loop times="2">
+    <code>hp = hp + 1;</code>
+  </loop>
+
+  <while when="hp > 0">
+    <choice text="动作">
+      <option text="攻击" when="hp > 1">
+        <code>hp = hp - 2;</code>
+      </option>
+      <option text="防御" once="true">
+        <continue/>
+      </option>
+      <option text="结束" fall_over="true">
+        <return script="result" args="name, hp"/>
+      </option>
+    </choice>
+  </while>
+</script>
+```
+
+## 12. 参考
+
+- 运行示例：`examples/scripts-rhai/`
+- Engine API：`docs/sl-engine-api.md`
