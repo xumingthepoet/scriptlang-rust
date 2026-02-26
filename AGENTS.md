@@ -41,7 +41,7 @@
 - `cargo fmt --all -- --check`
 - `cargo clippy --all-targets --all-features -- -D warnings`
 - `cargo test --all-targets --all-features`
-- `cargo llvm-cov --workspace --exclude sl-cli --all-features --all-targets --summary-only --fail-under-lines 100`
+- `make coverage`（调用 `scripts/coverage.sh`，基于 `cargo llvm-cov --json`，仅输出 line 覆盖率和每文件未覆盖行区间）
 - `make gate`
 
 ## 完成定义（DoD）

@@ -13,7 +13,7 @@ test:
 	env -u LLVM_PROFILE_FILE cargo test --workspace --all-targets --all-features 
 
 coverage:
-	cargo llvm-cov --workspace --exclude sl-cli --exclude sl-test-example --all-features --all-targets --summary-only --fail-under-lines 100 
+	bash scripts/coverage.sh
 
 gate:
 	$(MAKE) check
