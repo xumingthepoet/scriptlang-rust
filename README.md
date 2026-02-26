@@ -19,6 +19,7 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
   `lib.rs` only coordinates modules; runtime logic is split into
   `cli_args.rs`, `models.rs`, `source_loader.rs`, `state_store.rs`,
   `boundary_runner.rs`, `line_tui.rs`, `error_map.rs`, plus `agent.rs` and `tui.rs`.
+  `error_map.rs` uses a shared mapper helper to keep CLI error conversions concise and consistent.
 - `crates/sl-runtime/src`:
   public entry is `lib.rs -> engine/mod.rs`; engine logic is split into
   `engine/lifecycle.rs`, `step.rs`, `boundary.rs`, `snapshot.rs`, `frame_stack.rs`,
