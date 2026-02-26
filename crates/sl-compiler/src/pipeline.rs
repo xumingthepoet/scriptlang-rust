@@ -80,7 +80,6 @@ pub fn compile_project_bundle_from_xml_map(
 mod pipeline_tests {
     use super::*;
     use crate::compiler_test_support::*;
-    use std::fs;
 
     #[test]
     fn compile_basic_script_project() {
@@ -103,36 +102,52 @@ mod pipeline_tests {
     }
 
     #[test]
-    fn compile_bundle_supports_all_example_scenarios() {
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        let examples_root = manifest_dir
-            .join("..")
-            .join("..")
-            .join("examples");
-    
-        let mut dirs = fs::read_dir(&examples_root)
-            .expect("examples root should exist")
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| path.is_dir())
-            .collect::<Vec<_>>();
-        dirs.sort();
-    
-        assert!(!dirs.is_empty(), "examples should not be empty");
-    
-        for directory in dirs {
-            let mut files = BTreeMap::new();
-            read_sources_recursive(&directory, &directory, &mut files)
-                .expect("read sources should pass");
-            let compiled =
-                compile_project_bundle_from_xml_map(&files).expect("example should compile");
-            assert!(!compiled.scripts.is_empty());
-        }
+    fn compile_bundle_supports_mixed_sources_without_filesystem_examples() {
+        let files = map(&[
+            (
+                "shared.defs.xml",
+                r#"
+<defs name="shared">
+  <var name="hp" type="int">100</var>
+</defs>
+"#,
+            ),
+            ("config.json", r#"{"base": 3}"#),
+            (
+                "battle.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="battle">
+  <text>battle.hp=${shared.hp}</text>
+</script>
+"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<!-- include: battle.script.xml -->
+<!-- include: config.json -->
+<script name="main">
+  <text>main.base=${config.base}</text>
+  <call script="battle"/>
+</script>
+"#,
+            ),
+        ]);
+
+        let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        assert!(bundle.scripts.contains_key("main"));
+        assert!(bundle.scripts.contains_key("battle"));
+        assert!(bundle.global_json.contains_key("config"));
     }
 
     #[test]
     fn compile_scripts_from_xml_map_returns_script_only_bundle() {
-        let files = sources_from_example_dir("15-entry-override-recursive");
+        let files = map(&[
+            ("main.script.xml", r#"<script name="main"><text>Main</text></script>"#),
+            ("alt.script.xml", r#"<script name="alt"><text>Alt</text></script>"#),
+        ]);
         let scripts = compile_project_scripts_from_xml_map(&files).expect("compile should pass");
         assert!(scripts.contains_key("main"));
         assert!(scripts.contains_key("alt"));

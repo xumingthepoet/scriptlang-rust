@@ -102,13 +102,49 @@ pub(crate) mod cli_test_support {
     }
 
     pub(crate) fn example_scripts_dir(example: &str) -> String {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join("examples")
-            .join(example)
-            .to_string_lossy()
-            .to_string()
+        let root = temp_path(&format!("example-{}", example));
+        fs::create_dir_all(&root).expect("example root should be created");
+        match example {
+            "01-text-code" => {
+                write_file(
+                    &root.join("main.script.xml"),
+                    r#"
+<script name="main">
+  <var name="count" type="int">1</var>
+  <text>Scenario 01: text + code</text>
+  <code>count = count + 1;</code>
+  <text>count=${count}</text>
+</script>
+"#,
+                );
+            }
+            "06-snapshot-flow" => {
+                write_file(
+                    &root.join("main.script.xml"),
+                    r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A"><text>A</text></option>
+  </choice>
+</script>
+"#,
+                );
+            }
+            "16-input-name" => {
+                write_file(
+                    &root.join("main.script.xml"),
+                    r#"
+<script name="main">
+  <var name="name" type="string">"Traveler"</var>
+  <input var="name" text="Name"/>
+  <text>${name}</text>
+</script>
+"#,
+                );
+            }
+            _ => panic!("unsupported test scenario: {}", example),
+        }
+        root.to_string_lossy().to_string()
     }
 }
 
@@ -261,7 +297,7 @@ mod lib_tests {
             "agent",
             "start",
             "--scripts-dir",
-            "examples/does-not-exist",
+            "does-not-exist",
             "--state-out",
             state_out.to_string_lossy().as_ref(),
         ]);

@@ -499,5 +499,5 @@ JSON 全局符号必须在 include 闭包内可见，否则编译失败。
 
 ## 12. 参考
 
-- 运行示例：`examples/`
+- 运行示例：`crates/sl-test-example/examples/`
 - Engine API：`docs/sl-engine-api.md`

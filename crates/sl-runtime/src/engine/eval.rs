@@ -702,7 +702,15 @@ mod eval_tests {
         let error = random_bad.next_output().expect_err("random(0) should fail");
         assert_eq!(error.code, "ENGINE_EVAL_ERROR");
     
-        let files = sources_from_example_dir("01-text-code");
+        let files = map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <var name="count" type="int">1</var>
+  <code>count = count + 1;</code>
+</script>
+"#,
+        )]);
         let compiled = compile_project_bundle_from_xml_map(&files).expect("compile");
         let mut host_unsupported = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,

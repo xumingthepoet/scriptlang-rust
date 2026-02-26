@@ -328,8 +328,6 @@ impl ScriptLangEngine {
 mod step_tests {
     use super::*;
     use super::runtime_test_support::*;
-    use std::fs;
-    use std::path::PathBuf;
 
     #[test]
     fn next_text_and_end() {
@@ -347,31 +345,77 @@ mod step_tests {
     }
 
     #[test]
-    fn drives_all_examples_to_end() {
-        let examples_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join("examples");
-        let mut dirs = fs::read_dir(&examples_root)
-            .expect("examples should exist")
-            .filter_map(Result::ok)
-            .map(|entry| entry.path())
-            .filter(|path| path.is_dir())
-            .collect::<Vec<_>>();
-        dirs.sort();
-    
-        for dir in dirs {
-            let mut files = BTreeMap::new();
-            read_sources_recursive(&dir, &dir, &mut files).expect("load sources");
-            let mut engine = engine_from_sources(files);
-            engine.start("main", None).expect("start main");
-            drive_engine_to_end(&mut engine);
-        }
+    fn drives_complex_flow_to_end() {
+        let files = map(&[
+            (
+                "main.script.xml",
+                r#"
+<script name="main">
+  <var name="name" type="string">"Traveler"</var>
+  <choice text="Pick">
+    <option text="A"><text>A</text></option>
+  </choice>
+  <input var="name" text="Name"/>
+  <call script="next"/>
+  <text>done ${name}</text>
+</script>
+"#,
+            ),
+            (
+                "next.script.xml",
+                r#"
+<script name="next">
+  <text>Next</text>
+</script>
+"#,
+            ),
+        ]);
+
+        let mut engine = engine_from_sources(files);
+        engine.start("main", None).expect("start main");
+        drive_engine_to_end(&mut engine);
     }
 
     #[test]
     fn defs_global_shadowing_example_behaves_as_expected() {
-        let files = sources_from_example_dir("17-defs-global-shadowing");
+        let files = map(&[
+            (
+                "shared.defs.xml",
+                r#"
+<defs name="shared">
+  <var name="hp" type="int">100</var>
+</defs>
+"#,
+            ),
+            (
+                "battle.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="battle">
+  <var name="hp" type="int">30</var>
+  <code>hp = hp + 5; shared.hp = shared.hp - 40;</code>
+  <text>battle.local=${hp}</text>
+  <text>battle.global=${shared.hp}</text>
+  <return/>
+</script>
+"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<!-- include: battle.script.xml -->
+<script name="main">
+  <var name="hp" type="int">10</var>
+  <text>main.local.before=${hp}</text>
+  <text>main.global.before=${shared.hp}</text>
+  <call script="battle"/>
+  <text>main.local.after=${hp}</text>
+  <text>main.global.after=${shared.hp}</text>
+</script>
+"#,
+            ),
+        ]);
         let mut engine = engine_from_sources(files);
         engine.start("main", None).expect("start main");
 

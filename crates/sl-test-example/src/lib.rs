@@ -7,7 +7,7 @@ pub fn workspace_root() -> PathBuf {
 }
 
 pub fn examples_root() -> PathBuf {
-    workspace_root().join("examples")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples")
 }
 
 pub fn example_dir(name: &str) -> PathBuf {

@@ -52,7 +52,7 @@ This split keeps crate boundaries unchanged and enforces one-way internal depend
 - `cargo qa`: `cargo fmt --all -- --check`
 - `cargo qc`: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 - `cargo qt`: `cargo test --workspace --all-targets --all-features`
-- `cargo test -p sl-test-example --all-targets --all-features`: run example cases from `examples/*/testcase.json`
+- `cargo test -p sl-test-example --all-targets --all-features`: run example cases from `crates/sl-test-example/examples/*/testcase.json`
 - `make test`: runs `cargo qt` with `LLVM_PROFILE_FILE` unset.
 - `make coverage`: `cargo llvm-cov --workspace --exclude sl-cli --all-features --all-targets --summary-only --fail-under-lines 100`
 - `make gate`: `check + fmt + clippy + test + coverage`.
@@ -61,7 +61,7 @@ This split keeps crate boundaries unchanged and enforces one-way internal depend
 
 ### Agent mode
 ```bash
-cargo run -p sl-cli -- agent start --scripts-dir examples/06-snapshot-flow --state-out /tmp/sl-state.json
+cargo run -p sl-cli -- agent start --scripts-dir crates/sl-test-example/examples/06-snapshot-flow --state-out /tmp/sl-state.json
 cargo run -p sl-cli -- agent choose --state-in /tmp/sl-state.json --choice 0 --state-out /tmp/sl-next.json
 cargo run -p sl-cli -- agent input --state-in /tmp/sl-next.json --text "Rin" --state-out /tmp/sl-next2.json
 ```
@@ -79,7 +79,7 @@ cargo run -p sl-cli -- agent input --state-in /tmp/sl-next.json --text "Rin" --s
 
 ### TUI mode
 ```bash
-cargo run -p sl-cli -- tui --scripts-dir examples/06-snapshot-flow
+cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/06-snapshot-flow
 ```
 
 `tui` mode uses a `ratatui + crossterm` full-screen interface on real terminals:
@@ -99,24 +99,24 @@ Fallback line mode supports command input:
 
 All example entry commands:
 ```bash
-cargo run -p sl-cli -- tui --scripts-dir examples/01-text-code
-cargo run -p sl-cli -- tui --scripts-dir examples/02-if-while
-cargo run -p sl-cli -- tui --scripts-dir examples/03-choice-once
-cargo run -p sl-cli -- tui --scripts-dir examples/04-call-ref-return
-cargo run -p sl-cli -- tui --scripts-dir examples/05-return-transfer
-cargo run -p sl-cli -- tui --scripts-dir examples/06-snapshot-flow
-cargo run -p sl-cli -- tui --scripts-dir examples/07-battle-duel
-cargo run -p sl-cli -- tui --scripts-dir examples/08-json-globals
-cargo run -p sl-cli -- tui --scripts-dir examples/09-random
-cargo run -p sl-cli -- tui --scripts-dir examples/10-once-static
-cargo run -p sl-cli -- tui --scripts-dir examples/11-choice-fallover-continue
-cargo run -p sl-cli -- tui --scripts-dir examples/12-while-break-continue
-cargo run -p sl-cli -- tui --scripts-dir examples/13-loop-times
-cargo run -p sl-cli -- tui --scripts-dir examples/14-defs-functions
-cargo run -p sl-cli -- tui --scripts-dir examples/15-entry-override-recursive
-cargo run -p sl-cli -- tui --scripts-dir examples/16-input-name
-cargo run -p sl-cli -- tui --scripts-dir examples/17-defs-global-shadowing
-cargo run -p sl-cli -- tui --scripts-dir examples/18-group-container
+cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/01-text-code
+cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/02-if-while
+cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/03-choice-once
+cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/04-call-ref-return
+cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/05-return-transfer
+cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/06-snapshot-flow
+cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/07-battle-duel
+cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/08-json-globals
+cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/09-random
+cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/10-once-static
+cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/11-choice-fallover-continue
+cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/12-while-break-continue
+cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/13-loop-times
+cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/14-defs-functions
+cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/15-entry-override-recursive
+cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/16-input-name
+cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/17-defs-global-shadowing
+cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/18-group-container
 ```
 
 You can override defaults with:
@@ -124,5 +124,5 @@ You can override defaults with:
 - `--state-file <path>` (default: `.scriptlang/save.json`)
 
 ## Examples
-Rhai-authored smoke scenarios live in `examples`.
+Rhai-authored smoke scenarios live in `crates/sl-test-example/examples`.
 Each example directory also carries a `testcase.json` consumed by `sl-tool`/`sl-test-example`.

@@ -21,8 +21,6 @@ include!("../helpers/rhai_bridge.rs");
 pub(super) mod runtime_test_support {
     use super::*;
     pub(super) use sl_compiler::compile_project_bundle_from_xml_map;
-    use std::fs;
-    use std::path::{Path, PathBuf};
 
     #[derive(Debug)]
     pub(super) struct TestRegistry {
@@ -58,39 +56,6 @@ pub(super) mod runtime_test_support {
             compiler_version: None,
         })
         .expect("engine should build")
-    }
-
-    pub(super) fn read_sources_recursive(
-        root: &Path,
-        current: &Path,
-        out: &mut BTreeMap<String, String>,
-    ) -> Result<(), std::io::Error> {
-        for entry in fs::read_dir(current)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                read_sources_recursive(root, &path, out)?;
-                continue;
-            }
-            let relative = path
-                .strip_prefix(root)
-                .expect("path should be under root")
-                .to_string_lossy()
-                .replace('\\', "/");
-            out.insert(relative, fs::read_to_string(path)?);
-        }
-        Ok(())
-    }
-
-    pub(super) fn sources_from_example_dir(name: &str) -> BTreeMap<String, String> {
-        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join("examples")
-            .join(name);
-        let mut files = BTreeMap::new();
-        read_sources_recursive(&root, &root, &mut files).expect("example should load");
-        files
     }
 
     pub(super) fn drive_engine_to_end(engine: &mut ScriptLangEngine) {

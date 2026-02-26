@@ -1,9 +1,9 @@
 # Example Testing with `sl-tool`
 
-This workspace uses `sl-tool` + `sl-test-example` to validate all examples under `examples`.
+This workspace uses `sl-tool` + `sl-test-example` to validate all examples under `crates/sl-test-example/examples`.
 
 ## Layout
-- Case file path: `examples/<example>/testcase.json`
+- Case file path: `crates/sl-test-example/examples/<example>/testcase.json`
 - Runner API: `sl_tool::run_case(...)` and `sl_tool::assert_case(...)`
 - Integration tests: `crates/sl-test-example/tests/*_it.rs`
 
