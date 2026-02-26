@@ -7,7 +7,7 @@ pub fn workspace_root() -> PathBuf {
 }
 
 pub fn examples_root() -> PathBuf {
-    workspace_root().join("examples").join("scripts-rhai")
+    workspace_root().join("examples")
 }
 
 pub fn example_dir(name: &str) -> PathBuf {

@@ -6,7 +6,7 @@
 
 ### 顶层目录
 - `crates/`: Rust workspace 主体代码（核心实现都在这里）。
-- `examples/scripts-rhai/`: 可运行的脚本样例与 smoke 场景。
+- `examples/`: 可运行的脚本样例与 smoke 场景。
 - TypeScript 参考实现仓库：`https://github.com/xumingthepoet/scriptlang`（用于对齐行为，不直接参与 Rust 构建）。
 - `Cargo.toml`: workspace 成员与共享依赖声明。
 - `Makefile`: 统一质量门禁入口（`make gate`）。
@@ -30,7 +30,7 @@
 
 ## 开发流程
 1. 先确认修改落在哪一层（parser/compiler/runtime/api/cli），避免跨层耦合。
-2. 优先复用 `examples/scripts-rhai` 补充或回归场景。
+2. 优先复用 `examples` 补充或回归场景。
 3. 提交前运行 `make gate`。
 4. 只要 `make gate` 通过，可直接提交，无需再次询问。
 5. 单元测试必须参考子项目结构组织，按源代码文件一对一建立测试防守。

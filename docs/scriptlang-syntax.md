@@ -1,6 +1,6 @@
 # ScriptLang 语法手册（scriptlang-rs）
 
-本文档按“语法点”逐一说明当前 `scriptlang-rs` 支持的 XML 语法。每个语法点都附带至少一个示例，可直接用于 `examples/scripts-rhai` 风格工程。
+本文档按“语法点”逐一说明当前 `scriptlang-rs` 支持的 XML 语法。每个语法点都附带至少一个示例，可直接用于 `examples` 风格工程。
 
 ## 1. 文件类型
 
@@ -499,5 +499,5 @@ JSON 全局符号必须在 include 闭包内可见，否则编译失败。
 
 ## 12. 参考
 
-- 运行示例：`examples/scripts-rhai/`
+- 运行示例：`examples/`
 - Engine API：`docs/sl-engine-api.md`

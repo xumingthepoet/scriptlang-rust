@@ -108,8 +108,7 @@ mod pipeline_tests {
         let examples_root = manifest_dir
             .join("..")
             .join("..")
-            .join("examples")
-            .join("scripts-rhai");
+            .join("examples");
     
         let mut dirs = fs::read_dir(&examples_root)
             .expect("examples root should exist")

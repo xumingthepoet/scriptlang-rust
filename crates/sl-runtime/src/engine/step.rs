@@ -351,8 +351,7 @@ mod step_tests {
         let examples_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..")
-            .join("examples")
-            .join("scripts-rhai");
+            .join("examples");
         let mut dirs = fs::read_dir(&examples_root)
             .expect("examples should exist")
             .filter_map(Result::ok)

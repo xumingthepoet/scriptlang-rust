@@ -106,7 +106,6 @@ pub(crate) mod cli_test_support {
             .join("..")
             .join("..")
             .join("examples")
-            .join("scripts-rhai")
             .join(example)
             .to_string_lossy()
             .to_string()
@@ -262,7 +261,7 @@ mod lib_tests {
             "agent",
             "start",
             "--scripts-dir",
-            "examples/scripts-rhai/does-not-exist",
+            "examples/does-not-exist",
             "--state-out",
             state_out.to_string_lossy().as_ref(),
         ]);

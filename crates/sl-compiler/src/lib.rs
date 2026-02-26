@@ -53,7 +53,6 @@ pub(crate) mod compiler_test_support {
             .join("..")
             .join("..")
             .join("examples")
-            .join("scripts-rhai")
             .join(name);
         let mut out = BTreeMap::new();
         read_sources_recursive(&root, &root, &mut out).expect("example sources should read");

@@ -87,7 +87,6 @@ pub(super) mod runtime_test_support {
             .join("..")
             .join("..")
             .join("examples")
-            .join("scripts-rhai")
             .join(name);
         let mut files = BTreeMap::new();
         read_sources_recursive(&root, &root, &mut files).expect("example should load");
