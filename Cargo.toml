@@ -32,4 +32,4 @@ ratatui = "=0.28.1"
 crossterm = "=0.28.1"
 
 [workspace.lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage)'] }
+unexpected_cfgs = "warn"

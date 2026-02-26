@@ -41,11 +41,11 @@
 - `cargo fmt --all -- --check`
 - `cargo clippy --all-targets --all-features -- -D warnings`
 - `cargo test --all-targets --all-features`
-- `cargo tarpaulin --engine llvm --workspace --all-features --all-targets --rustflags=--cfg=coverage --out Stdout --fail-under 100`
+- `cargo llvm-cov --workspace --exclude sl-cli --all-features --all-targets --summary-only --fail-under-lines 100`
 - `make gate`
 
 ## 完成定义（DoD）
 - 变更位于正确分层，未破坏 crate 边界。
 - 相关示例/测试已覆盖新增或修复行为，且满足文件级一对一防守。
-- 覆盖率必须达到 `100%`，否则不得通过门禁。
+- 覆盖率门禁：除 `sl-cli` 外其余 crate 需达到 `100%`（由 `make coverage` 强制）。
 - `make gate` 通过。

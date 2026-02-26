@@ -1,5 +1,3 @@
-#![cfg(not(coverage))]
-
 use std::path::Path;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};

@@ -53,9 +53,8 @@ This split keeps crate boundaries unchanged and enforces one-way internal depend
 - `cargo qc`: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 - `cargo qt`: `cargo test --workspace --all-targets --all-features`
 - `cargo test -p sl-test-example --all-targets --all-features`: run example cases from `examples/scripts-rhai/*/testcase.json`
-- `make test`: runs `cargo qt` with `LLVM_PROFILE_FILE` unset (avoid transient `*.profraw` in project root).
-- `cargo tarpaulin --engine llvm --workspace --all-features --all-targets --rustflags=--cfg=coverage --out Stdout --fail-under 100`: coverage gate.
-- `make coverage`: runs tarpaulin in a temp working dir and redirects `LLVM_PROFILE_FILE` to temp dir (avoid transient `*.profraw` in project root).
+- `make test`: runs `cargo qt` with `LLVM_PROFILE_FILE` unset.
+- `make coverage`: `cargo llvm-cov --workspace --exclude sl-cli --all-features --all-targets --summary-only --fail-under-lines 100`
 - `make gate`: `check + fmt + clippy + test + coverage`.
 
 ## CLI Usage

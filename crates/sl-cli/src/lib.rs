@@ -17,11 +17,8 @@ mod session_ops;
 mod source_loader;
 mod state_store;
 mod tui;
-#[cfg(not(coverage))]
 mod tui_actions;
-#[cfg(not(coverage))]
 mod tui_render;
-#[cfg(not(coverage))]
 mod tui_state;
 
 pub(crate) use boundary_runner::{emit_boundary, run_to_boundary};

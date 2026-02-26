@@ -1,5 +1,3 @@
-#![cfg(not(coverage))]
-
 use crate::{BoundaryEvent, BoundaryResult};
 
 #[derive(Debug, Clone)]

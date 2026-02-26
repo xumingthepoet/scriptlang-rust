@@ -1,14 +1,3 @@
-#[cfg(coverage)]
-pub(super) fn run_tui_ratatui_mode(
-    state_file: &str,
-    scenario: &super::LoadedScenario,
-    entry_script: &str,
-    engine: &mut sl_runtime::ScriptLangEngine,
-) -> Result<i32, sl_core::ScriptLangError> {
-    super::run_tui_line_mode(state_file, scenario, entry_script, engine)
-}
-
-#[cfg(not(coverage))]
 mod rich {
     use std::io;
     use std::time::{Duration, Instant};
@@ -116,12 +105,10 @@ mod rich {
     }
 }
 
-#[cfg(not(coverage))]
 fn should_force_line_mode() -> bool {
     cfg!(test) || std::env::var_os("RUST_TEST_THREADS").is_some()
 }
 
-#[cfg(not(coverage))]
 pub(super) fn run_tui_ratatui_mode(
     state_file: &str,
     scenario: &super::LoadedScenario,

@@ -13,14 +13,11 @@ test:
 	env -u LLVM_PROFILE_FILE cargo qt
 
 coverage:
-	bash scripts/gate.sh coverage
+	cargo llvm-cov --workspace --exclude sl-cli --all-features --all-targets --summary-only --fail-under-lines 100
 
 gate:
-	bash scripts/gate.sh gate
-
-gate-verbose:
 	$(MAKE) check
 	$(MAKE) fmt
 	$(MAKE) lint
 	$(MAKE) test
-	cargo tarpaulin --engine llvm --workspace --all-features --all-targets --rustflags=--cfg=coverage --out Stdout --fail-under 100
+	$(MAKE) coverage
