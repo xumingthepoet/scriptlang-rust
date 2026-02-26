@@ -39,6 +39,8 @@ pub fn compile_project_from_xml_map(
     let CompileProjectBundleResult {
         scripts,
         global_json,
+        defs_global_declarations,
+        defs_global_init_order,
     } = compile_project_bundle_from_xml_map(xml_by_path)?;
 
     let entry_script = resolve_entry_script(&scripts, entry_script)?;
@@ -47,6 +49,8 @@ pub fn compile_project_from_xml_map(
         scripts,
         entry_script,
         global_json,
+        defs_global_declarations,
+        defs_global_init_order,
     })
 }
 
@@ -58,6 +62,8 @@ pub fn create_engine_from_xml(
     let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
         scripts: compiled.scripts,
         global_json: compiled.global_json,
+        defs_global_declarations: compiled.defs_global_declarations,
+        defs_global_init_order: compiled.defs_global_init_order,
         host_functions: options.host_functions,
         random_seed: options.random_seed,
         compiler_version: options.compiler_version,
@@ -75,6 +81,8 @@ pub fn resume_engine_from_xml(
     let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
         scripts: compiled.scripts,
         global_json: compiled.global_json,
+        defs_global_declarations: compiled.defs_global_declarations,
+        defs_global_init_order: compiled.defs_global_init_order,
         host_functions: options.host_functions,
         random_seed: None,
         compiler_version: options.compiler_version,

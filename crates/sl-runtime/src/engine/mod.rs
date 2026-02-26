@@ -51,6 +51,8 @@ pub(super) mod runtime_test_support {
         ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
+            defs_global_declarations: compiled.defs_global_declarations,
+            defs_global_init_order: compiled.defs_global_init_order,
             host_functions: None,
             random_seed: Some(1),
             compiler_version: None,

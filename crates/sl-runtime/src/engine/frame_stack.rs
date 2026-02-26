@@ -7,6 +7,7 @@ impl ScriptLangEngine {
         self.frame_counter = 1;
         self.rng_state = self.initial_random_seed;
         *self.shared_rng_state.borrow_mut() = self.initial_random_seed;
+        self.defs_globals_value.clear();
     }
 
     fn boundary_output(&self, boundary: &PendingBoundary) -> EngineOutput {

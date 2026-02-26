@@ -53,6 +53,16 @@ pub struct VarDeclaration {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DefsGlobalVarDecl {
+    pub namespace: String,
+    pub name: String,
+    pub qualified_name: String,
+    pub r#type: ScriptType,
+    pub initial_value_expr: Option<String>,
+    pub location: SourceSpan,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScriptParam {
     pub name: String,
     pub r#type: ScriptType,
@@ -191,6 +201,7 @@ pub struct ScriptIr {
     pub groups: BTreeMap<String, ImplicitGroup>,
     pub visible_json_globals: Vec<String>,
     pub visible_functions: BTreeMap<String, FunctionDecl>,
+    pub visible_defs_globals: BTreeMap<String, DefsGlobalVarDecl>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -258,6 +269,8 @@ pub struct SnapshotV3 {
     pub runtime_frames: Vec<SnapshotFrameV3>,
     pub rng_state: u32,
     pub pending_boundary: PendingBoundaryV3,
+    #[serde(default)]
+    pub defs_globals: BTreeMap<String, SlValue>,
     pub once_state_by_script: BTreeMap<String, Vec<String>>,
 }
 
@@ -283,4 +296,6 @@ pub struct CompileProjectResult {
     pub scripts: BTreeMap<String, ScriptIr>,
     pub entry_script: String,
     pub global_json: BTreeMap<String, SlValue>,
+    pub defs_global_declarations: BTreeMap<String, DefsGlobalVarDecl>,
+    pub defs_global_init_order: Vec<String>,
 }

@@ -1,0 +1,8 @@
+<!-- include: shared.defs.xml -->
+<script name="battle">
+  <var name="hp" type="int">30</var>
+  <code>hp = hp + 5; shared.hp = shared.hp - 40;</code>
+  <text>battle.local=${hp}</text>
+  <text>battle.global=${shared.hp}</text>
+  <return/>
+</script>

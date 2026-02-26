@@ -14,7 +14,7 @@
 </script>
 ```
 
-## 1.2 `*.defs.xml`（类型/函数声明）
+## 1.2 `*.defs.xml`（类型/函数/全局变量声明）
 
 要求根节点是 `<defs>`。
 
@@ -23,6 +23,7 @@
   <type name="Hero">
     <field name="hp" type="int"/>
   </type>
+  <var name="baseHp" type="int">100</var>
 </defs>
 ```
 
@@ -94,6 +95,24 @@
   </function>
 </defs>
 ```
+
+## 4.2 `<defs><var>`（全局可写变量）
+
+`<defs>` 下可以声明全局变量：
+
+```xml
+<defs name="shared">
+  <var name="hp" type="int">100</var>
+</defs>
+```
+
+语义规则：
+- 变量在 `engine.start(...)` 时按声明顺序初始化。
+- 可见性遵循 include 闭包：脚本可见才可读写。
+- 读取/写入优先级：局部（含参数） > defs 全局 > JSON 全局（JSON 仍只读）。
+- 访问方式：短名（如 `hp`）和全名（如 `shared.hp`）。
+- 若短名冲突（多个 namespace 同名），短名不可用，只能用全名。
+- defs 全局初始化表达式可以引用“前面已声明并已初始化”的 defs 全局；前向引用会编译失败。
 
 ## 5. 类型语法
 

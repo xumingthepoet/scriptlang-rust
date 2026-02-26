@@ -13,6 +13,8 @@ pub fn compile_project_bundle_from_xml_map(
     let defs_by_path = parse_defs_files(&sources)?;
     let global_json = collect_global_json(&sources)?;
     let all_json_symbols = global_json.keys().cloned().collect::<BTreeSet<_>>();
+    let (defs_global_declarations, defs_global_init_order) =
+        collect_defs_globals_for_bundle(&defs_by_path)?;
 
     let mut scripts = BTreeMap::new();
     let mut reachable_cache = HashMap::new();
@@ -41,7 +43,8 @@ pub fn compile_project_bundle_from_xml_map(
         let reachable = reachable_cache
             .entry(file_path.clone())
             .or_insert_with(|| collect_reachable_files(file_path, &sources));
-        let (visible_types, visible_functions) = resolve_visible_defs(reachable, &defs_by_path)?;
+        let (visible_types, visible_functions, visible_defs_globals) =
+            resolve_visible_defs(reachable, &defs_by_path)?;
         let visible_json_symbols = collect_visible_json_symbols(reachable, &sources)?;
 
         let ir = compile_script(
@@ -49,6 +52,7 @@ pub fn compile_project_bundle_from_xml_map(
             script_root,
             &visible_types,
             &visible_functions,
+            &visible_defs_globals,
             &visible_json_symbols,
             &all_json_symbols,
         )?;
@@ -67,6 +71,8 @@ pub fn compile_project_bundle_from_xml_map(
     Ok(CompileProjectBundleResult {
         scripts,
         global_json,
+        defs_global_declarations,
+        defs_global_init_order,
     })
 }
 
@@ -189,6 +195,51 @@ mod pipeline_tests {
         let duplicate_error = compile_project_bundle_from_xml_map(&duplicate_script_name)
             .expect_err("duplicate script names should fail");
         assert_eq!(duplicate_error.code, "SCRIPT_NAME_DUPLICATE");
+    }
+
+    #[test]
+    fn compile_bundle_exposes_defs_globals_with_short_alias_rules() {
+        let unique = map(&[
+            (
+                "shared.defs.xml",
+                r#"<defs name="shared"><var name="hp" type="int">1</var></defs>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="main"><text>${hp + shared.hp}</text></script>
+"#,
+            ),
+        ]);
+        let unique_bundle = compile_project_bundle_from_xml_map(&unique).expect("compile");
+        let unique_main = unique_bundle.scripts.get("main").expect("main");
+        assert!(unique_main.visible_defs_globals.contains_key("shared.hp"));
+        assert!(unique_main.visible_defs_globals.contains_key("hp"));
+
+        let conflict = map(&[
+            (
+                "a.defs.xml",
+                r#"<defs name="a"><var name="hp" type="int">1</var></defs>"#,
+            ),
+            (
+                "b.defs.xml",
+                r#"<defs name="b"><var name="hp" type="int">2</var></defs>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: a.defs.xml -->
+<!-- include: b.defs.xml -->
+<script name="main"><text>${a.hp + b.hp}</text></script>
+"#,
+            ),
+        ]);
+        let conflict_bundle = compile_project_bundle_from_xml_map(&conflict).expect("compile");
+        let conflict_main = conflict_bundle.scripts.get("main").expect("main");
+        assert!(conflict_main.visible_defs_globals.contains_key("a.hp"));
+        assert!(conflict_main.visible_defs_globals.contains_key("b.hp"));
+        assert!(!conflict_main.visible_defs_globals.contains_key("hp"));
     }
 
 }

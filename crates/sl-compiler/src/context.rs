@@ -5,9 +5,9 @@ use std::sync::OnceLock;
 use regex::Regex;
 use serde_json::Value as JsonValue;
 use sl_core::{
-    default_value_from_type, CallArgument, ChoiceOption, ContinueTarget, FunctionDecl,
-    FunctionParam, FunctionReturn, ImplicitGroup, ScriptIr, ScriptLangError, ScriptNode,
-    ScriptParam, ScriptType, SlValue, SourceSpan, VarDeclaration,
+    default_value_from_type, CallArgument, ChoiceOption, ContinueTarget, DefsGlobalVarDecl,
+    FunctionDecl, FunctionParam, FunctionReturn, ImplicitGroup, ScriptIr, ScriptLangError,
+    ScriptNode, ScriptParam, ScriptType, SlValue, SourceSpan, VarDeclaration,
 };
 use sl_parser::{
     parse_include_directives, parse_xml_document, XmlElementNode, XmlNode, XmlTextNode,
@@ -20,6 +20,8 @@ const LOOP_TEMP_VAR_PREFIX: &str = "__sl_loop_";
 pub struct CompileProjectBundleResult {
     pub scripts: BTreeMap<String, ScriptIr>,
     pub global_json: BTreeMap<String, SlValue>,
+    pub defs_global_declarations: BTreeMap<String, DefsGlobalVarDecl>,
+    pub defs_global_init_order: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -63,6 +65,16 @@ struct ParsedFunctionDecl {
 }
 
 #[derive(Debug, Clone)]
+struct ParsedDefsGlobalVarDecl {
+    namespace: String,
+    name: String,
+    qualified_name: String,
+    type_expr: ParsedTypeExpr,
+    initial_value_expr: Option<String>,
+    location: SourceSpan,
+}
+
+#[derive(Debug, Clone)]
 struct ParsedFunctionParamDecl {
     name: String,
     type_expr: ParsedTypeExpr,
@@ -81,6 +93,7 @@ enum ParsedTypeExpr {
 struct DefsDeclarations {
     type_decls: Vec<ParsedTypeDecl>,
     function_decls: Vec<ParsedFunctionDecl>,
+    defs_global_var_decls: Vec<ParsedDefsGlobalVarDecl>,
 }
 
 type VisibleTypeMap = BTreeMap<String, ScriptType>;

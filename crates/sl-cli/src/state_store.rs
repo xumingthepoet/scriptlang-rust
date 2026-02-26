@@ -68,6 +68,7 @@ mod state_store_tests {
                     items: Vec::new(),
                     prompt_text: None,
                 },
+                defs_globals: BTreeMap::new(),
                 once_state_by_script: BTreeMap::new(),
             },
         };

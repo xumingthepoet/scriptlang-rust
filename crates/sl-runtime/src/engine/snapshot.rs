@@ -67,6 +67,7 @@ impl ScriptLangEngine {
             runtime_frames,
             rng_state: self.rng_state,
             pending_boundary,
+            defs_globals: self.defs_globals_value.clone(),
             once_state_by_script,
         })
     }
@@ -95,6 +96,38 @@ impl ScriptLangEngine {
         self.reset();
         self.rng_state = snapshot.rng_state;
         *self.shared_rng_state.borrow_mut() = snapshot.rng_state;
+
+        for qualified_name in snapshot.defs_globals.keys() {
+            if !self.defs_global_declarations.contains_key(qualified_name) {
+                return Err(ScriptLangError::new(
+                    "SNAPSHOT_DEFS_GLOBAL_UNKNOWN",
+                    format!(
+                        "Snapshot contains unknown defs global \"{}\".",
+                        qualified_name
+                    ),
+                ));
+            }
+        }
+
+        let mut restored_defs_globals = BTreeMap::new();
+        for (qualified_name, decl) in &self.defs_global_declarations {
+            let value = snapshot
+                .defs_globals
+                .get(qualified_name)
+                .cloned()
+                .unwrap_or_else(|| default_value_from_type(&decl.r#type));
+            if !is_type_compatible(&value, &decl.r#type) {
+                return Err(ScriptLangError::new(
+                    "SNAPSHOT_DEFS_GLOBAL_TYPE",
+                    format!(
+                        "Defs global \"{}\" from snapshot does not match declared type.",
+                        qualified_name
+                    ),
+                ));
+            }
+            restored_defs_globals.insert(qualified_name.clone(), value);
+        }
+        self.defs_globals_value = restored_defs_globals;
 
         self.once_state_by_script = snapshot
             .once_state_by_script
@@ -566,6 +599,99 @@ mod snapshot_tests {
         resumed
             .resume(with_resume)
             .expect("resume after child completion should work");
+    }
+
+    #[test]
+    fn snapshot_resume_persists_defs_globals() {
+        let files = map(&[
+            (
+                "shared.defs.xml",
+                r#"
+<defs name="shared">
+  <var name="hp" type="int">10</var>
+</defs>
+"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="main">
+  <code>shared.hp = shared.hp + 5;</code>
+  <choice text="Pick">
+    <option text="A"><text>${shared.hp}</text></option>
+  </choice>
+</script>
+"#,
+            ),
+        ]);
+
+        let mut engine = engine_from_sources(files.clone());
+        engine.start("main", None).expect("start");
+        let first = engine.next_output().expect("choice");
+        assert!(matches!(first, EngineOutput::Choices { .. }));
+        let snapshot = engine.snapshot().expect("snapshot");
+        assert_eq!(
+            snapshot.defs_globals.get("shared.hp"),
+            Some(&SlValue::Number(15.0))
+        );
+
+        let mut resumed = engine_from_sources(files);
+        resumed.resume(snapshot).expect("resume");
+        resumed.choose(0).expect("choose");
+        let text = resumed.next_output().expect("text");
+        assert!(matches!(text, EngineOutput::Text { text, .. } if text == "15"));
+    }
+
+    #[test]
+    fn resume_validates_defs_globals_shape_and_types() {
+        let files = map(&[
+            (
+                "shared.defs.xml",
+                r#"
+<defs name="shared">
+  <var name="hp" type="int">10</var>
+</defs>
+"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="main">
+  <choice text="Pick">
+    <option text="A"><text>${shared.hp}</text></option>
+  </choice>
+</script>
+"#,
+            ),
+        ]);
+
+        let mut engine = engine_from_sources(files.clone());
+        engine.start("main", None).expect("start");
+        let first = engine.next_output().expect("choice");
+        assert!(matches!(first, EngineOutput::Choices { .. }));
+        let snapshot = engine.snapshot().expect("snapshot");
+
+        let mut unknown = snapshot.clone();
+        unknown
+            .defs_globals
+            .insert("missing.hp".to_string(), SlValue::Number(1.0));
+        let mut unknown_engine = engine_from_sources(files.clone());
+        let error = unknown_engine
+            .resume(unknown)
+            .expect_err("unknown defs global should fail");
+        assert_eq!(error.code, "SNAPSHOT_DEFS_GLOBAL_UNKNOWN");
+
+        let mut bad_type = snapshot;
+        bad_type
+            .defs_globals
+            .insert("shared.hp".to_string(), SlValue::String("bad".to_string()));
+        let mut bad_type_engine = engine_from_sources(files);
+        let error = bad_type_engine
+            .resume(bad_type)
+            .expect_err("defs global type mismatch should fail");
+        assert_eq!(error.code, "SNAPSHOT_DEFS_GLOBAL_TYPE");
     }
 
 }

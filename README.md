@@ -39,6 +39,11 @@ This split keeps crate boundaries unchanged and enforces one-way internal depend
 - parser/compiler/runtime regex usage for stable patterns is lazily initialized once via static caches.
 - `sl-compiler` memoizes per-script reachable include closures during project compilation to avoid repeated DFS work.
 
+## Defs Globals (`<defs><var>`)
+- `*.defs.xml` now supports `<var name="..." type="...">expr</var>` as writable globals.
+- globals initialize on `engine.start`, support short name and `ns.var` access, and follow include-closure visibility.
+- when short names conflict across namespaces, only fully-qualified `ns.var` remains available.
+
 ## Commands
 - `cargo qk`: `cargo check --workspace --all-targets --all-features`
 - `cargo qa`: `cargo fmt --all -- --check`
@@ -107,6 +112,7 @@ cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/13-loop-times
 cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/14-defs-functions
 cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/15-entry-override-recursive
 cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/16-input-name
+cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/17-defs-global-shadowing
 ```
 
 You can override defaults with:

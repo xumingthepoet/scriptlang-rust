@@ -10,8 +10,8 @@ use rhai::{
 };
 use sl_core::{
     default_value_from_type, is_type_compatible, ChoiceItem, ContinuationFrame, ContinueTarget,
-    EngineOutput, PendingBoundaryV3, ScriptIr, ScriptLangError, ScriptNode, ScriptType, SlValue,
-    SnapshotCompletion, SnapshotFrameV3, SnapshotV3,
+    DefsGlobalVarDecl, EngineOutput, PendingBoundaryV3, ScriptIr, ScriptLangError, ScriptNode,
+    ScriptType, SlValue, SnapshotCompletion, SnapshotFrameV3, SnapshotV3,
 };
 
 pub const DEFAULT_COMPILER_VERSION: &str = "player.v1";
@@ -44,6 +44,8 @@ impl HostFunctionRegistry for EmptyHostFunctionRegistry {
 pub struct ScriptLangEngineOptions {
     pub scripts: BTreeMap<String, ScriptIr>,
     pub global_json: BTreeMap<String, SlValue>,
+    pub defs_global_declarations: BTreeMap<String, DefsGlobalVarDecl>,
+    pub defs_global_init_order: Vec<String>,
     pub host_functions: Option<Arc<dyn HostFunctionRegistry>>,
     pub random_seed: Option<u32>,
     pub compiler_version: Option<String>,
@@ -99,7 +101,13 @@ pub struct ScriptLangEngine {
     compiler_version: String,
     group_lookup: HashMap<String, GroupLookup>,
     global_json: BTreeMap<String, SlValue>,
+    defs_global_declarations: BTreeMap<String, DefsGlobalVarDecl>,
+    defs_global_init_order: Vec<String>,
+    defs_globals_value: BTreeMap<String, SlValue>,
+    defs_globals_type: BTreeMap<String, ScriptType>,
     visible_json_by_script: HashMap<String, BTreeSet<String>>,
+    visible_defs_by_script: HashMap<String, BTreeSet<String>>,
+    defs_global_alias_by_script: HashMap<String, BTreeMap<String, String>>,
     visible_function_symbols_by_script: HashMap<String, BTreeMap<String, String>>,
     defs_prelude_by_script: HashMap<String, String>,
     initial_random_seed: u32,
@@ -130,6 +138,8 @@ impl ScriptLangEngine {
 
         let mut group_lookup = HashMap::new();
         let mut visible_json_by_script = HashMap::new();
+        let mut visible_defs_by_script = HashMap::new();
+        let mut defs_global_alias_by_script = HashMap::new();
         let mut visible_function_symbols_by_script = HashMap::new();
 
         for (script_name, script) in &options.scripts {
@@ -146,6 +156,14 @@ impl ScriptLangEngine {
                 script_name.clone(),
                 script.visible_json_globals.iter().cloned().collect(),
             );
+            let mut defs_aliases = BTreeMap::new();
+            let mut visible_defs = BTreeSet::new();
+            for (public_name, decl) in &script.visible_defs_globals {
+                defs_aliases.insert(public_name.clone(), decl.qualified_name.clone());
+                visible_defs.insert(decl.qualified_name.clone());
+            }
+            visible_defs_by_script.insert(script_name.clone(), visible_defs);
+            defs_global_alias_by_script.insert(script_name.clone(), defs_aliases);
 
             for function_name in script.visible_functions.keys() {
                 if host_functions
@@ -205,6 +223,11 @@ impl ScriptLangEngine {
             },
         );
 
+        let mut defs_globals_type = BTreeMap::new();
+        for (qualified_name, decl) in &options.defs_global_declarations {
+            defs_globals_type.insert(qualified_name.clone(), decl.r#type.clone());
+        }
+
         Ok(Self {
             scripts: options.scripts,
             host_functions,
@@ -213,7 +236,13 @@ impl ScriptLangEngine {
                 .unwrap_or_else(|| DEFAULT_COMPILER_VERSION.to_string()),
             group_lookup,
             global_json: options.global_json,
+            defs_global_declarations: options.defs_global_declarations,
+            defs_global_init_order: options.defs_global_init_order,
+            defs_globals_value: BTreeMap::new(),
+            defs_globals_type,
             visible_json_by_script,
+            visible_defs_by_script,
+            defs_global_alias_by_script,
             visible_function_symbols_by_script,
             defs_prelude_by_script: HashMap::new(),
             initial_random_seed,
@@ -243,6 +272,7 @@ impl ScriptLangEngine {
         entry_args: Option<BTreeMap<String, SlValue>>,
     ) -> Result<(), ScriptLangError> {
         self.reset();
+        self.initialize_defs_globals()?;
         let Some(script) = self.scripts.get(entry_script_name) else {
             return Err(ScriptLangError::new(
                 "ENGINE_SCRIPT_NOT_FOUND",
@@ -254,6 +284,51 @@ impl ScriptLangEngine {
         let (scope, var_types) =
             self.create_script_root_scope(entry_script_name, entry_args.unwrap_or_default())?;
         self.push_root_frame(&root_group_id, scope, None, var_types);
+        Ok(())
+    }
+
+    fn initialize_defs_globals(&mut self) -> Result<(), ScriptLangError> {
+        self.defs_globals_value.clear();
+
+        for qualified_name in self.defs_global_init_order.clone() {
+            let decl = self
+                .defs_global_declarations
+                .get(&qualified_name)
+                .cloned()
+                .ok_or_else(|| {
+                    ScriptLangError::new(
+                        "ENGINE_DEFS_GLOBAL_DECL_MISSING",
+                        format!(
+                            "Defs global \"{}\" is present in init order but missing from declarations.",
+                            qualified_name
+                        ),
+                    )
+                })?;
+
+            let mut value = default_value_from_type(&decl.r#type);
+            if let Some(expr) = &decl.initial_value_expr {
+                value = self.eval_defs_global_initializer(expr)?;
+            }
+            if !is_type_compatible(&value, &decl.r#type) {
+                return Err(ScriptLangError::new(
+                    "ENGINE_TYPE_MISMATCH",
+                    format!(
+                        "Defs global \"{}\" does not match declared type.",
+                        qualified_name
+                    ),
+                ));
+            }
+            self.defs_globals_value.insert(qualified_name, value);
+        }
+
+        for (qualified_name, decl) in &self.defs_global_declarations {
+            if self.defs_globals_value.contains_key(qualified_name) {
+                continue;
+            }
+            self.defs_globals_value
+                .insert(qualified_name.clone(), default_value_from_type(&decl.r#type));
+        }
+
         Ok(())
     }
 
@@ -290,6 +365,8 @@ mod lifecycle_tests {
         let result = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
+            defs_global_declarations: compiled.defs_global_declarations,
+            defs_global_init_order: compiled.defs_global_init_order,
             host_functions: Some(Arc::new(TestRegistry {
                 names: vec!["random".to_string()],
             })),
@@ -326,6 +403,8 @@ mod lifecycle_tests {
         let result = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
+            defs_global_declarations: compiled.defs_global_declarations,
+            defs_global_init_order: compiled.defs_global_init_order,
             host_functions: Some(Arc::new(TestRegistry {
                 names: vec!["addWithGameBonus".to_string()],
             })),
@@ -369,6 +448,8 @@ mod lifecycle_tests {
         let result = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
+            defs_global_declarations: compiled.defs_global_declarations,
+            defs_global_init_order: compiled.defs_global_init_order,
             host_functions: None,
             random_seed: Some(1),
             compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
@@ -390,6 +471,73 @@ mod lifecycle_tests {
             .start("missing", None)
             .expect_err("unknown entry should fail");
         assert_eq!(error.code, "ENGINE_SCRIPT_NOT_FOUND");
+    }
+
+    #[test]
+    fn start_rejects_defs_global_initializer_type_mismatch() {
+        let mut engine = engine_from_sources(map(&[
+            (
+                "shared.defs.xml",
+                r#"
+<defs name="shared">
+  <var name="hp" type="int">"bad"</var>
+</defs>
+"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="main"><text>ok</text></script>
+"#,
+            ),
+        ]));
+
+        let error = engine
+            .start("main", None)
+            .expect_err("type mismatch should fail");
+        assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
+    }
+
+    #[test]
+    fn start_rejects_missing_defs_global_decl_in_init_order() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>ok</text></script>"#,
+        )]));
+        engine.defs_global_init_order = vec!["shared.hp".to_string()];
+        let error = engine
+            .start("main", None)
+            .expect_err("missing decl in init order should fail");
+        assert_eq!(error.code, "ENGINE_DEFS_GLOBAL_DECL_MISSING");
+    }
+
+    #[test]
+    fn start_fills_default_for_defs_global_not_present_in_init_order() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>ok</text></script>"#,
+        )]));
+        engine.defs_global_declarations.insert(
+            "shared.hp".to_string(),
+            DefsGlobalVarDecl {
+                namespace: "shared".to_string(),
+                name: "hp".to_string(),
+                qualified_name: "shared.hp".to_string(),
+                r#type: ScriptType::Primitive {
+                    name: "int".to_string(),
+                },
+                initial_value_expr: None,
+                location: sl_core::SourceSpan::synthetic(),
+            },
+        );
+        engine.defs_global_init_order.clear();
+
+        engine.start("main", None).expect("start");
+        assert_eq!(
+            engine.defs_globals_value.get("shared.hp"),
+            Some(&SlValue::Number(0.0))
+        );
     }
 
     #[test]

@@ -3,6 +3,7 @@ fn compile_script(
     root: &XmlElementNode,
     visible_types: &BTreeMap<String, ScriptType>,
     visible_functions: &BTreeMap<String, FunctionDecl>,
+    visible_defs_globals: &BTreeMap<String, DefsGlobalVarDecl>,
     visible_json_globals: &[String],
     all_json_symbols: &BTreeSet<String>,
 ) -> Result<ScriptIr, ScriptLangError> {
@@ -54,6 +55,7 @@ fn compile_script(
         groups: builder.groups,
         visible_json_globals: visible_json_globals.to_vec(),
         visible_functions: visible_functions.clone(),
+        visible_defs_globals: visible_defs_globals.clone(),
     };
 
     validate_json_symbol_visibility(&ir, all_json_symbols)?;
@@ -79,8 +81,13 @@ fn validate_json_symbol_visibility(
     }
 
     let function_roots = collect_visible_function_roots(&script_ir.visible_functions);
+    let defs_global_roots = collect_visible_defs_global_roots(&script_ir.visible_defs_globals);
+    let defs_global_short_aliases =
+        collect_visible_defs_global_short_aliases(&script_ir.visible_defs_globals);
     let mut script_allowed = collect_script_declared_names(script_ir);
     script_allowed.extend(function_roots.iter().cloned());
+    script_allowed.extend(defs_global_roots.iter().cloned());
+    script_allowed.extend(defs_global_short_aliases.iter().cloned());
     script_allowed.insert("random".to_string());
 
     for group in script_ir.groups.values() {
@@ -191,6 +198,8 @@ fn validate_json_symbol_visibility(
 
         let mut function_allowed = BTreeSet::new();
         function_allowed.extend(function_roots.iter().cloned());
+        function_allowed.extend(defs_global_roots.iter().cloned());
+        function_allowed.extend(defs_global_short_aliases.iter().cloned());
         function_allowed.insert("random".to_string());
         function_allowed.insert(decl.return_binding.name.clone());
         for param in &decl.params {
@@ -204,6 +213,32 @@ fn validate_json_symbol_visibility(
             &function_allowed,
             &script_ir.script_name,
             "defs function code",
+            &decl.location,
+        )?;
+    }
+
+    let mut seen_defs_globals = BTreeSet::new();
+    for decl in script_ir.visible_defs_globals.values() {
+        if !seen_defs_globals.insert(decl.qualified_name.clone()) {
+            continue;
+        }
+        let Some(expr) = &decl.initial_value_expr else {
+            continue;
+        };
+
+        let mut defs_global_allowed = BTreeSet::new();
+        defs_global_allowed.extend(function_roots.iter().cloned());
+        defs_global_allowed.extend(defs_global_roots.iter().cloned());
+        defs_global_allowed.extend(defs_global_short_aliases.iter().cloned());
+        defs_global_allowed.extend(extract_local_bindings(expr));
+        defs_global_allowed.insert("random".to_string());
+
+        ensure_no_hidden_json_symbol(
+            expr,
+            &hidden_json,
+            &defs_global_allowed,
+            &script_ir.script_name,
+            "defs global initializer",
             &decl.location,
         )?;
     }
@@ -237,6 +272,25 @@ fn collect_visible_function_roots(
         out.insert(root.to_string());
     }
     out
+}
+
+fn collect_visible_defs_global_roots(
+    visible_defs_globals: &BTreeMap<String, DefsGlobalVarDecl>,
+) -> BTreeSet<String> {
+    visible_defs_globals
+        .values()
+        .map(|decl| decl.namespace.clone())
+        .collect()
+}
+
+fn collect_visible_defs_global_short_aliases(
+    visible_defs_globals: &BTreeMap<String, DefsGlobalVarDecl>,
+) -> BTreeSet<String> {
+    visible_defs_globals
+        .keys()
+        .filter(|name| !name.contains('.'))
+        .cloned()
+        .collect()
 }
 
 fn extract_text_interpolations(template: &str) -> Vec<String> {
@@ -430,6 +484,55 @@ mod json_symbols_tests {
         let error = compile_project_bundle_from_xml_map(&files)
             .expect_err("defs code should fail when json is not visible");
         assert_eq!(error.code, "JSON_SYMBOL_NOT_VISIBLE");
+    }
+
+    #[test]
+    fn compile_bundle_rejects_hidden_json_usage_in_defs_global_initializer() {
+        let files = map(&[
+            ("game.json", r#"{ "hp": 5 }"#),
+            (
+                "shared.defs.xml",
+                r#"
+<defs name="shared">
+  <var name="bonus" type="int">game.hp + 1</var>
+</defs>
+"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="main">
+  <text>ok</text>
+</script>
+"#,
+            ),
+        ]);
+
+        let error = compile_project_bundle_from_xml_map(&files)
+            .expect_err("defs var init should fail when json is hidden");
+        assert_eq!(error.code, "JSON_SYMBOL_NOT_VISIBLE");
+    }
+
+    #[test]
+    fn compile_bundle_allows_defs_global_without_initializer_even_with_hidden_json() {
+        let files = map(&[
+            ("secret.json", r#"{ "v": 9 }"#),
+            (
+                "shared.defs.xml",
+                r#"<defs name="shared"><var name="hp" type="int"/></defs>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="main"><text>${shared.hp}</text></script>
+"#,
+            ),
+        ]);
+
+        compile_project_bundle_from_xml_map(&files)
+            .expect("defs var without initializer should skip hidden-json checks");
     }
 
     #[test]

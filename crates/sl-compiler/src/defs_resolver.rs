@@ -26,6 +26,7 @@ fn parse_defs_files(
 
         let mut type_decls = Vec::new();
         let mut function_decls = Vec::new();
+        let mut defs_global_var_decls = Vec::new();
 
         for child in element_children(root) {
             match child.name.as_str() {
@@ -37,6 +38,8 @@ fn parse_defs_files(
                     child,
                     &collection_name,
                 )?),
+                "var" => defs_global_var_decls
+                    .push(parse_defs_global_var_declaration(child, &collection_name)?),
                 _ => {
                     return Err(ScriptLangError::with_span(
                         "XML_DEFS_CHILD_INVALID",
@@ -52,11 +55,58 @@ fn parse_defs_files(
             DefsDeclarations {
                 type_decls,
                 function_decls,
+                defs_global_var_decls,
             },
         );
     }
 
     Ok(defs_by_path)
+}
+
+fn parse_defs_global_var_declaration(
+    node: &XmlElementNode,
+    namespace: &str,
+) -> Result<ParsedDefsGlobalVarDecl, ScriptLangError> {
+    let name = get_required_non_empty_attr(node, "name")?;
+    assert_name_not_reserved(&name, "defs var", node.location.clone())?;
+
+    let type_raw = get_required_non_empty_attr(node, "type")?;
+    let type_expr = parse_type_expr(&type_raw, &node.location)?;
+
+    if has_attr(node, "value") {
+        return Err(ScriptLangError::with_span(
+            "XML_ATTR_NOT_ALLOWED",
+            "Attribute \"value\" is not allowed on <var>. Use inline content instead.",
+            node.location.clone(),
+        ));
+    }
+
+    if let Some(child) = element_children(node).next() {
+        return Err(ScriptLangError::with_span(
+            "XML_VAR_CHILD_INVALID",
+            format!(
+                "<var> cannot contain child element <{}>. Use inline expression text only.",
+                child.name
+            ),
+            child.location.clone(),
+        ));
+    }
+
+    let inline = inline_text_content(node);
+    let initial_value_expr = if inline.trim().is_empty() {
+        None
+    } else {
+        Some(inline.trim().to_string())
+    };
+
+    Ok(ParsedDefsGlobalVarDecl {
+        namespace: namespace.to_string(),
+        name: name.clone(),
+        qualified_name: format!("{}.{}", namespace, name),
+        type_expr,
+        initial_value_expr,
+        location: node.location.clone(),
+    })
 }
 
 fn collect_global_json(
@@ -144,7 +194,14 @@ fn json_symbol_regex() -> &'static Regex {
 fn resolve_visible_defs(
     reachable: &BTreeSet<String>,
     defs_by_path: &BTreeMap<String, DefsDeclarations>,
-) -> Result<(VisibleTypeMap, VisibleFunctionMap), ScriptLangError> {
+) -> Result<
+    (
+        VisibleTypeMap,
+        VisibleFunctionMap,
+        BTreeMap<String, DefsGlobalVarDecl>,
+    ),
+    ScriptLangError,
+> {
     let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
     let mut type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
@@ -272,7 +329,196 @@ fn resolve_visible_defs(
         }
     }
 
-    Ok((visible_types, functions))
+    let mut defs_globals_qualified = BTreeMap::new();
+    let mut defs_global_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for path in reachable {
+        let Some(defs) = defs_by_path.get(path) else {
+            continue;
+        };
+
+        for decl in &defs.defs_global_var_decls {
+            if defs_globals_qualified.contains_key(&decl.qualified_name) {
+                return Err(ScriptLangError::with_span(
+                    "DEFS_GLOBAL_VAR_DUPLICATE",
+                    format!(
+                        "Duplicate defs global variable declaration \"{}\".",
+                        decl.qualified_name
+                    ),
+                    decl.location.clone(),
+                ));
+            }
+            defs_globals_qualified.insert(
+                decl.qualified_name.clone(),
+                DefsGlobalVarDecl {
+                    namespace: decl.namespace.clone(),
+                    name: decl.name.clone(),
+                    qualified_name: decl.qualified_name.clone(),
+                    r#type: resolve_type_expr(&decl.type_expr, &visible_types, &decl.location)?,
+                    initial_value_expr: decl.initial_value_expr.clone(),
+                    location: decl.location.clone(),
+                },
+            );
+            defs_global_short_candidates
+                .entry(decl.name.clone())
+                .or_default()
+                .push(decl.qualified_name.clone());
+        }
+    }
+
+    let mut defs_globals = defs_globals_qualified.clone();
+    for (alias, qualified_names) in defs_global_short_candidates {
+        if qualified_names.len() != 1 {
+            continue;
+        }
+        let qualified_name = &qualified_names[0];
+        let decl = defs_globals_qualified
+            .get(qualified_name)
+            .cloned()
+            .expect("defs global alias target should exist");
+        defs_globals.entry(alias).or_insert(decl);
+    }
+
+    Ok((visible_types, functions, defs_globals))
+}
+
+fn collect_defs_globals_for_bundle(
+    defs_by_path: &BTreeMap<String, DefsDeclarations>,
+) -> Result<(BTreeMap<String, DefsGlobalVarDecl>, Vec<String>), ScriptLangError> {
+    let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
+    let mut type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
+    for defs in defs_by_path.values() {
+        for decl in &defs.type_decls {
+            if type_decls_map.contains_key(&decl.qualified_name) {
+                return Err(ScriptLangError::with_span(
+                    "TYPE_DECL_DUPLICATE",
+                    format!("Duplicate type declaration \"{}\".", decl.qualified_name),
+                    decl.location.clone(),
+                ));
+            }
+            type_decls_map.insert(decl.qualified_name.clone(), decl.clone());
+            type_short_candidates
+                .entry(decl.name.clone())
+                .or_default()
+                .push(decl.qualified_name.clone());
+        }
+    }
+
+    let type_aliases = type_short_candidates
+        .into_iter()
+        .filter_map(|(short, qualified)| {
+            if qualified.len() == 1 {
+                Some((short, qualified[0].clone()))
+            } else {
+                None
+            }
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let mut resolved_types: BTreeMap<String, ScriptType> = BTreeMap::new();
+    let mut visiting = HashSet::new();
+    for type_name in type_decls_map.keys() {
+        resolve_named_type_with_aliases(
+            type_name,
+            &type_decls_map,
+            &type_aliases,
+            &mut resolved_types,
+            &mut visiting,
+        )?;
+    }
+
+    let mut visible_types = resolved_types.clone();
+    for (alias, qualified_name) in &type_aliases {
+        if let Some(ty) = resolved_types.get(qualified_name).cloned() {
+            visible_types.insert(alias.clone(), ty);
+        }
+    }
+
+    let mut defs_globals = BTreeMap::new();
+    let mut init_order = Vec::new();
+    for defs in defs_by_path.values() {
+        for decl in &defs.defs_global_var_decls {
+            if defs_globals.contains_key(&decl.qualified_name) {
+                return Err(ScriptLangError::with_span(
+                    "DEFS_GLOBAL_VAR_DUPLICATE",
+                    format!(
+                        "Duplicate defs global variable declaration \"{}\".",
+                        decl.qualified_name
+                    ),
+                    decl.location.clone(),
+                ));
+            }
+            defs_globals.insert(
+                decl.qualified_name.clone(),
+                DefsGlobalVarDecl {
+                    namespace: decl.namespace.clone(),
+                    name: decl.name.clone(),
+                    qualified_name: decl.qualified_name.clone(),
+                    r#type: resolve_type_expr(&decl.type_expr, &visible_types, &decl.location)?,
+                    initial_value_expr: decl.initial_value_expr.clone(),
+                    location: decl.location.clone(),
+                },
+            );
+            init_order.push(decl.qualified_name.clone());
+        }
+    }
+
+    validate_defs_global_init_order(&defs_globals, &init_order)?;
+    Ok((defs_globals, init_order))
+}
+
+fn validate_defs_global_init_order(
+    defs_globals: &BTreeMap<String, DefsGlobalVarDecl>,
+    init_order: &[String],
+) -> Result<(), ScriptLangError> {
+    let mut name_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (qualified, decl) in defs_globals {
+        name_candidates
+            .entry(qualified.clone())
+            .or_default()
+            .push(qualified.clone());
+        name_candidates
+            .entry(decl.name.clone())
+            .or_default()
+            .push(qualified.clone());
+    }
+    let name_to_qualified = name_candidates
+        .into_iter()
+        .filter_map(|(name, candidates)| {
+            if candidates.len() == 1 {
+                Some((name, candidates[0].clone()))
+            } else {
+                None
+            }
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let mut initialized = BTreeSet::new();
+    for qualified in init_order {
+        let decl = defs_globals
+            .get(qualified)
+            .expect("init order should only contain declared defs globals");
+        if let Some(expr) = &decl.initial_value_expr {
+            let sanitized = sanitize_rhai_source(expr);
+            for (name, target_qualified) in &name_to_qualified {
+                if !contains_root_identifier(&sanitized, name) {
+                    continue;
+                }
+                if !initialized.contains(target_qualified) {
+                    return Err(ScriptLangError::with_span(
+                        "DEFS_GLOBAL_INIT_ORDER",
+                        format!(
+                            "Defs global \"{}\" initializer references \"{}\" before initialization.",
+                            qualified, name
+                        ),
+                        decl.location.clone(),
+                    ));
+                }
+            }
+        }
+        initialized.insert(qualified.clone());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -310,16 +556,18 @@ mod defs_resolver_tests {
                 code: "ret = #{value: seed};".to_string(),
                 location: span.clone(),
             }],
+            defs_global_var_decls: Vec::new(),
         };
     
         let reachable = BTreeSet::from(["shared.defs.xml".to_string()]);
         let defs_by_path = BTreeMap::from([("shared.defs.xml".to_string(), defs)]);
     
-        let (types, functions) =
+        let (types, functions, defs_globals) =
             resolve_visible_defs(&reachable, &defs_by_path).expect("defs should resolve");
         assert!(types.contains_key("Obj"));
         let function = functions.get("make").expect("function should exist");
         assert_eq!(function.params.len(), 1);
+        assert!(defs_globals.is_empty());
         assert!(matches!(
             function.return_binding.r#type,
             ScriptType::Object { .. }
@@ -342,6 +590,7 @@ mod defs_resolver_tests {
                 location: span.clone(),
             }],
             function_decls: Vec::new(),
+            defs_global_var_decls: Vec::new(),
         };
         let duplicate_defs_by_path = BTreeMap::from([
             ("a.defs.xml".to_string(), duplicate_qualified.clone()),
@@ -370,6 +619,7 @@ mod defs_resolver_tests {
                         code: "out = 1;".to_string(),
                         location: span.clone(),
                     }],
+                    defs_global_var_decls: Vec::new(),
                 },
             ),
             (
@@ -388,15 +638,227 @@ mod defs_resolver_tests {
                         code: "out = 2;".to_string(),
                         location: span.clone(),
                     }],
+                    defs_global_var_decls: Vec::new(),
                 },
             ),
         ]);
         let reachable = BTreeSet::from(["a.defs.xml".to_string(), "b.defs.xml".to_string()]);
-        let (_types, functions) =
+        let (_types, functions, defs_globals) =
             resolve_visible_defs(&reachable, &defs_by_path).expect("defs should resolve");
         assert!(functions.contains_key("a.doit"));
         assert!(functions.contains_key("b.doit"));
         assert!(!functions.contains_key("doit"));
+        assert!(defs_globals.is_empty());
+    }
+
+    #[test]
+    fn resolve_visible_defs_applies_defs_global_short_alias_rules() {
+        let span = SourceSpan::synthetic();
+        let make_decl = |namespace: &str, name: &str| ParsedDefsGlobalVarDecl {
+            namespace: namespace.to_string(),
+            name: name.to_string(),
+            qualified_name: format!("{}.{}", namespace, name),
+            type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+            initial_value_expr: None,
+            location: span.clone(),
+        };
+
+        let unique_defs = BTreeMap::from([(
+            "a.defs.xml".to_string(),
+            DefsDeclarations {
+                type_decls: Vec::new(),
+                function_decls: Vec::new(),
+                defs_global_var_decls: vec![make_decl("a", "hp")],
+            },
+        )]);
+        let unique_reachable = BTreeSet::from(["a.defs.xml".to_string()]);
+        let (_types, _functions, unique_globals) =
+            resolve_visible_defs(&unique_reachable, &unique_defs).expect("defs should resolve");
+        assert!(unique_globals.contains_key("a.hp"));
+        assert!(unique_globals.contains_key("hp"));
+        assert_eq!(
+            unique_globals
+                .get("hp")
+                .expect("short alias should exist")
+                .qualified_name,
+            "a.hp"
+        );
+
+        let collision_defs = BTreeMap::from([
+            (
+                "a.defs.xml".to_string(),
+                DefsDeclarations {
+                    type_decls: Vec::new(),
+                    function_decls: Vec::new(),
+                    defs_global_var_decls: vec![make_decl("a", "hp")],
+                },
+            ),
+            (
+                "b.defs.xml".to_string(),
+                DefsDeclarations {
+                    type_decls: Vec::new(),
+                    function_decls: Vec::new(),
+                    defs_global_var_decls: vec![make_decl("b", "hp")],
+                },
+            ),
+        ]);
+        let collision_reachable =
+            BTreeSet::from(["a.defs.xml".to_string(), "b.defs.xml".to_string()]);
+        let (_types, _functions, collision_globals) =
+            resolve_visible_defs(&collision_reachable, &collision_defs)
+                .expect("defs should resolve");
+        assert!(collision_globals.contains_key("a.hp"));
+        assert!(collision_globals.contains_key("b.hp"));
+        assert!(!collision_globals.contains_key("hp"));
+    }
+
+    #[test]
+    fn compile_bundle_rejects_defs_global_forward_reference() {
+        let files = map(&[
+            (
+                "shared.defs.xml",
+                r#"
+<defs name="shared">
+  <var name="a" type="int">b + 1</var>
+  <var name="b" type="int">1</var>
+</defs>
+"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="main"><text>ok</text></script>
+"#,
+            ),
+        ]);
+
+        let error = compile_project_bundle_from_xml_map(&files)
+            .expect_err("forward reference should fail");
+        assert_eq!(error.code, "DEFS_GLOBAL_INIT_ORDER");
+    }
+
+    #[test]
+    fn parse_defs_global_var_rejects_value_attr_and_child_elements() {
+        let files_with_value = map(&[
+            (
+                "shared.defs.xml",
+                r#"<defs name="shared"><var name="hp" type="int" value="1"/></defs>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="main"><text>ok</text></script>
+"#,
+            ),
+        ]);
+        let value_error = compile_project_bundle_from_xml_map(&files_with_value)
+            .expect_err("value attr should fail");
+        assert_eq!(value_error.code, "XML_ATTR_NOT_ALLOWED");
+
+        let files_with_child = map(&[
+            (
+                "shared.defs.xml",
+                r#"<defs name="shared"><var name="hp" type="int"><text>1</text></var></defs>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="main"><text>ok</text></script>
+"#,
+            ),
+        ]);
+        let child_error = compile_project_bundle_from_xml_map(&files_with_child)
+            .expect_err("child element should fail");
+        assert_eq!(child_error.code, "XML_VAR_CHILD_INVALID");
+    }
+
+    #[test]
+    fn defs_global_resolution_rejects_duplicates_and_allows_empty_initializer() {
+        let duplicate_types_bundle = map(&[
+            (
+                "a.defs.xml",
+                r#"<defs name="shared"><type name="T"><field name="v" type="int"/></type></defs>"#,
+            ),
+            (
+                "b.defs.xml",
+                r#"<defs name="shared"><type name="T"><field name="v" type="int"/></type></defs>"#,
+            ),
+        ]);
+        let duplicate_types_error = compile_project_bundle_from_xml_map(&duplicate_types_bundle)
+            .expect_err("bundle duplicate type should fail");
+        assert_eq!(duplicate_types_error.code, "TYPE_DECL_DUPLICATE");
+
+        let duplicate_globals_bundle = map(&[
+            (
+                "a.defs.xml",
+                r#"<defs name="shared"><var name="hp" type="int">1</var></defs>"#,
+            ),
+            (
+                "b.defs.xml",
+                r#"<defs name="shared"><var name="hp" type="int">2</var></defs>"#,
+            ),
+        ]);
+        let duplicate_globals_error = compile_project_bundle_from_xml_map(&duplicate_globals_bundle)
+            .expect_err("bundle duplicate defs global should fail");
+        assert_eq!(duplicate_globals_error.code, "DEFS_GLOBAL_VAR_DUPLICATE");
+
+        let empty_initializer = map(&[
+            (
+                "shared.defs.xml",
+                r#"<defs name="shared"><var name="hp" type="int"/></defs>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="main"><text>${shared.hp}</text></script>
+"#,
+            ),
+        ]);
+        let bundle = compile_project_bundle_from_xml_map(&empty_initializer).expect("compile");
+        let decl = bundle
+            .defs_global_declarations
+            .get("shared.hp")
+            .expect("decl should exist");
+        assert!(decl.initial_value_expr.is_none());
+    }
+
+    #[test]
+    fn resolve_visible_defs_rejects_duplicate_defs_global_in_closure() {
+        let span = SourceSpan::synthetic();
+        let duplicate = ParsedDefsGlobalVarDecl {
+            namespace: "shared".to_string(),
+            name: "hp".to_string(),
+            qualified_name: "shared.hp".to_string(),
+            type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+            initial_value_expr: Some("1".to_string()),
+            location: span.clone(),
+        };
+        let defs_by_path = BTreeMap::from([
+            (
+                "a.defs.xml".to_string(),
+                DefsDeclarations {
+                    type_decls: Vec::new(),
+                    function_decls: Vec::new(),
+                    defs_global_var_decls: vec![duplicate.clone()],
+                },
+            ),
+            (
+                "b.defs.xml".to_string(),
+                DefsDeclarations {
+                    type_decls: Vec::new(),
+                    function_decls: Vec::new(),
+                    defs_global_var_decls: vec![duplicate],
+                },
+            ),
+        ]);
+        let reachable = BTreeSet::from(["a.defs.xml".to_string(), "b.defs.xml".to_string()]);
+        let error = resolve_visible_defs(&reachable, &defs_by_path)
+            .expect_err("duplicate defs global should fail");
+        assert_eq!(error.code, "DEFS_GLOBAL_VAR_DUPLICATE");
     }
 
     #[test]

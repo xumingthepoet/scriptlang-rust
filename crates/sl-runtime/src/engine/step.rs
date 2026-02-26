@@ -369,6 +369,40 @@ mod step_tests {
             drive_engine_to_end(&mut engine);
         }
     }
+
+    #[test]
+    fn defs_global_shadowing_example_behaves_as_expected() {
+        let files = sources_from_example_dir("17-defs-global-shadowing");
+        let mut engine = engine_from_sources(files);
+        engine.start("main", None).expect("start main");
+
+        let mut texts = Vec::new();
+        for _ in 0..64usize {
+            match engine.next_output().expect("next should pass") {
+                EngineOutput::Text { text } => texts.push(text),
+                EngineOutput::Choices { items, .. } => {
+                    let index = items.first().map(|item| item.index).unwrap_or(0);
+                    engine.choose(index).expect("choose should pass");
+                }
+                EngineOutput::Input { .. } => {
+                    engine.submit_input("").expect("input should pass");
+                }
+                EngineOutput::End => break,
+            }
+        }
+
+        assert_eq!(
+            texts,
+            vec![
+                "main.local.before=10".to_string(),
+                "main.global.before=100".to_string(),
+                "battle.local=35".to_string(),
+                "battle.global=60".to_string(),
+                "main.local.after=10".to_string(),
+                "main.global.after=60".to_string(),
+            ]
+        );
+    }
     
     #[test]
     fn if_else_branch_covered_when_condition_false() {

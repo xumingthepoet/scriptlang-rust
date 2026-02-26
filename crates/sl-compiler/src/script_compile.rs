@@ -1160,6 +1160,7 @@ mod script_compile_tests {
             &non_script_root,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &BTreeMap::new(),
             &[],
             &BTreeSet::new(),
         )
