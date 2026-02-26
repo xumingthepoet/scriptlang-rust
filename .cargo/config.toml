@@ -1,8 +1,2 @@
 [build]
 target-dir = "target"
-
-[alias]
-qa = "fmt --all -- --check"
-qc = "clippy --workspace --all-targets --all-features -- -D warnings"
-qt = "test --workspace --all-targets --all-features"
-qk = "check --workspace --all-targets --all-features"

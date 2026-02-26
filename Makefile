@@ -1,16 +1,16 @@
 .PHONY: check docs fmt lint test coverage gate gate-verbose
 
 check:
-	cargo qk
+	cargo check --workspace --all-targets --all-features
 
 fmt:
-	cargo qa
+	cargo fmt --all -- --check
 
 lint:
-	cargo qc
+	cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 test:
-	env -u LLVM_PROFILE_FILE cargo qt
+	env -u LLVM_PROFILE_FILE cargo test --workspace --all-targets --all-features
 
 coverage:
 	cargo llvm-cov --workspace --exclude sl-cli --all-features --all-targets --summary-only --fail-under-lines 100
