@@ -25,20 +25,6 @@ fn compile_group(
     let mut local_var_types = visible_var_types.clone();
     let mut nodes = Vec::new();
 
-    macro_rules! compile_child_group {
-        ($child_group_id:expr, $child_container:expr, $child_while_depth:expr, $allow_continue:expr) => {
-            compile_group(
-                $child_group_id,
-                Some(group_id),
-                $child_container,
-                builder,
-                visible_types,
-                &local_var_types,
-                CompileGroupMode::new($child_while_depth, $allow_continue),
-            )
-        };
-    }
-
     builder.groups.insert(
         group_id.to_string(),
         ImplicitGroup {
@@ -49,6 +35,34 @@ fn compile_group(
         },
     );
 
+    compile_group_nodes(
+        group_id,
+        container,
+        builder,
+        visible_types,
+        &mut local_var_types,
+        mode,
+        &mut nodes,
+    )?;
+
+    let entry_node_id = nodes.first().map(|node| node_id(node).to_string());
+    if let Some(group) = builder.groups.get_mut(group_id) {
+        group.entry_node_id = entry_node_id;
+        group.nodes = nodes;
+    }
+
+    Ok(())
+}
+
+fn compile_group_nodes(
+    group_id: &str,
+    container: &XmlElementNode,
+    builder: &mut GroupBuilder,
+    visible_types: &BTreeMap<String, ScriptType>,
+    local_var_types: &mut BTreeMap<String, ScriptType>,
+    mode: CompileGroupMode,
+    nodes: &mut Vec<ScriptNode>,
+) -> Result<(), ScriptLangError> {
     for child in element_children(container) {
         if has_attr(child, "once") && child.name != "text" {
             return Err(ScriptLangError::with_span(
@@ -59,6 +73,38 @@ fn compile_group(
         }
 
         let node = match child.name.as_str() {
+            "group" => {
+                let body_group_id = builder.next_group_id();
+                let else_group_id = builder.next_group_id();
+
+                compile_group(
+                    &body_group_id,
+                    Some(group_id),
+                    child,
+                    builder,
+                    visible_types,
+                    local_var_types,
+                    CompileGroupMode::new(mode.while_depth, false),
+                )?;
+
+                builder.groups.insert(
+                    else_group_id.clone(),
+                    ImplicitGroup {
+                        group_id: else_group_id.clone(),
+                        parent_group_id: Some(group_id.to_string()),
+                        entry_node_id: None,
+                        nodes: Vec::new(),
+                    },
+                );
+
+                ScriptNode::If {
+                    id: builder.next_node_id("if"),
+                    when_expr: "true".to_string(),
+                    then_group_id: body_group_id,
+                    else_group_id: Some(else_group_id),
+                    location: child.location.clone(),
+                }
+            }
             "var" => {
                 let declaration = parse_var_declaration(child, visible_types)?;
                 local_var_types.insert(declaration.name.clone(), declaration.r#type.clone());
@@ -99,10 +145,26 @@ fn compile_group(
                     location: child.location.clone(),
                 };
 
-                compile_child_group!(&then_group_id, &then_container, mode.while_depth, false)?;
+                compile_group(
+                    &then_group_id,
+                    Some(group_id),
+                    &then_container,
+                    builder,
+                    visible_types,
+                    local_var_types,
+                    CompileGroupMode::new(mode.while_depth, false),
+                )?;
 
                 if let Some(else_child) = else_node {
-                    compile_child_group!(&else_group_id, else_child, mode.while_depth, false)?;
+                    compile_group(
+                        &else_group_id,
+                        Some(group_id),
+                        else_child,
+                        builder,
+                        visible_types,
+                        local_var_types,
+                        CompileGroupMode::new(mode.while_depth, false),
+                    )?;
                 } else {
                     builder.groups.insert(
                         else_group_id.clone(),
@@ -125,7 +187,15 @@ fn compile_group(
             }
             "while" => {
                 let body_group_id = builder.next_group_id();
-                compile_child_group!(&body_group_id, child, mode.while_depth + 1, false)?;
+                compile_group(
+                    &body_group_id,
+                    Some(group_id),
+                    child,
+                    builder,
+                    visible_types,
+                    local_var_types,
+                    CompileGroupMode::new(mode.while_depth + 1, false),
+                )?;
                 ScriptNode::While {
                     id: builder.next_node_id("while"),
                     when_expr: get_required_non_empty_attr(child, "when")?,
@@ -162,7 +232,15 @@ fn compile_group(
                     }
 
                     let option_group_id = builder.next_group_id();
-                    compile_child_group!(&option_group_id, option, mode.while_depth, true)?;
+                    compile_group(
+                        &option_group_id,
+                        Some(group_id),
+                        option,
+                        builder,
+                        visible_types,
+                        local_var_types,
+                        CompileGroupMode::new(mode.while_depth, true),
+                    )?;
 
                     options.push(ChoiceOption {
                         id: builder.next_choice_id(),
@@ -317,19 +395,7 @@ fn compile_group(
             }
         };
 
-        let group = builder
-            .groups
-            .get_mut(group_id)
-            .expect("group should exist when compiling nodes");
-        if group.entry_node_id.is_none() {
-            group.entry_node_id = Some(node_id(&node).to_string());
-        }
-
         nodes.push(node);
-    }
-
-    if let Some(group) = builder.groups.get_mut(group_id) {
-        group.nodes = nodes;
     }
 
     Ok(())
@@ -712,6 +778,64 @@ mod script_compile_tests {
     }
 
     #[test]
+    fn compile_group_creates_scoped_child_group_node() {
+        let mut builder = GroupBuilder::new("group.script.xml");
+        let root_group = builder.next_group_id();
+        let container = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![
+                XmlNode::Element(xml_element(
+                    "group",
+                    &[],
+                    vec![
+                        XmlNode::Element(xml_element(
+                            "var",
+                            &[("name", "name"), ("type", "string")],
+                            vec![xml_text("\"Rin\"")],
+                        )),
+                        XmlNode::Element(xml_element("text", &[], vec![xml_text("in-group")])),
+                    ],
+                )),
+                XmlNode::Element(xml_element(
+                    "input",
+                    &[("var", "name"), ("text", "prompt")],
+                    Vec::new(),
+                )),
+            ],
+        );
+
+        compile_group(
+            &root_group,
+            None,
+            &container,
+            &mut builder,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            CompileGroupMode::new(0, false),
+        )
+        .expect("group container should compile");
+
+        let group = builder
+            .groups
+            .get(&root_group)
+            .expect("root group should exist");
+        assert_eq!(group.nodes.len(), 2);
+        assert!(matches!(group.nodes[1], ScriptNode::Input { .. }));
+
+        let ScriptNode::If { then_group_id, .. } = &group.nodes[0] else {
+            panic!("group node should compile into an if wrapper");
+        };
+        let scoped_group = builder
+            .groups
+            .get(then_group_id)
+            .expect("group child should exist");
+        assert_eq!(scoped_group.nodes.len(), 2);
+        assert!(matches!(scoped_group.nodes[0], ScriptNode::Var { .. }));
+        assert!(matches!(scoped_group.nodes[1], ScriptNode::Text { .. }));
+    }
+
+    #[test]
     fn compile_group_reports_script_structure_errors() {
         let visible_types = BTreeMap::new();
         let local_var_types = BTreeMap::new();
@@ -803,7 +927,11 @@ mod script_compile_tests {
         let bad_node = xml_element(
             "script",
             &[("name", "main")],
-            vec![XmlNode::Element(xml_element("unknown", &[], Vec::new()))],
+            vec![XmlNode::Element(xml_element(
+                "group",
+                &[],
+                vec![XmlNode::Element(xml_element("unknown", &[], Vec::new()))],
+            ))],
         );
         let mut builder = GroupBuilder::new("main.script.xml");
         let group_id = builder.next_group_id();

@@ -336,6 +336,24 @@ key 固定是 string。
 <return script="nextScene" args="heroName, hp"/>
 ```
 
+## 6.15 `<group>`
+
+用途：语句分组容器，创建块级作用域。  
+属性：无。  
+语义：其子节点按出现顺序执行；在 `<group>` 中声明的 `<var>` 仅在该组内可见，可在其他 `<group>` 中重名声明。  
+
+```xml
+<group>
+  <var name="title" type="string">"Knight"</var>
+  <text>In group: ${title}</text>
+</group>
+
+<group>
+  <var name="title" type="string">"Mage"</var>
+  <text>In group: ${title}</text>
+</group>
+```
+
 ## 7. `<defs>` 声明语法点
 
 ## 7.1 `<type>`

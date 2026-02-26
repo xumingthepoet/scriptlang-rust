@@ -247,6 +247,33 @@ mod scope_tests {
     }
 
     #[test]
+    fn group_scope_allows_redeclaring_same_var_name_in_separate_groups() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <group>
+    <var name="same" type="int">1</var>
+    <text>${same}</text>
+  </group>
+  <group>
+    <var name="same" type="int">2</var>
+    <text>${same}</text>
+  </group>
+</script>
+"#,
+        )]));
+
+        engine.start("main", None).expect("start");
+        let first = engine.next_output().expect("first text");
+        assert!(matches!(first, EngineOutput::Text { text, .. } if text == "1"));
+        let second = engine.next_output().expect("second text");
+        assert!(matches!(second, EngineOutput::Text { text, .. } if text == "2"));
+        let end = engine.next_output().expect("end");
+        assert!(matches!(end, EngineOutput::End));
+    }
+
+    #[test]
     fn call_and_scope_validation_error_paths_are_covered() {
         // create_script_root_scope unknown arg / type mismatch
         let engine = engine_from_sources(map(&[(

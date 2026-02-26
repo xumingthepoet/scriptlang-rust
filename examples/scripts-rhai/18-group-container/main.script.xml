@@ -1,0 +1,10 @@
+<script name="main">
+  <group>
+    <var name="title" type="string">"Knight"</var>
+    <text>In group: ${title}</text>
+  </group>
+  <group>
+    <var name="title" type="string">"Mage"</var>
+    <text>In group: ${title}</text>
+  </group>
+</script>

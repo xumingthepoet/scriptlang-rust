@@ -113,6 +113,7 @@ cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/14-defs-functions
 cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/15-entry-override-recursive
 cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/16-input-name
 cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/17-defs-global-shadowing
+cargo run -p sl-cli -- tui --scripts-dir examples/scripts-rhai/18-group-container
 ```
 
 You can override defaults with:
