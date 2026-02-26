@@ -10,7 +10,7 @@ lint:
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 test:
-	env -u LLVM_PROFILE_FILE cargo test --workspace --all-targets --all-features 
+	env -u LLVM_PROFILE_FILE cargo test --workspace --all-targets --all-features -q
 
 coverage:
 	bash scripts/coverage.sh
