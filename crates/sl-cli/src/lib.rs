@@ -1,8 +1,10 @@
 use std::ffi::OsString;
 
 use clap::Parser;
+#[cfg(test)]
 use sl_api::{create_engine_from_xml, CreateEngineFromXmlOptions};
 use sl_core::ScriptLangError;
+#[cfg(test)]
 use sl_runtime::DEFAULT_COMPILER_VERSION;
 
 mod agent;
@@ -11,9 +13,16 @@ mod cli_args;
 mod error_map;
 mod line_tui;
 mod models;
+mod session_ops;
 mod source_loader;
 mod state_store;
 mod tui;
+#[cfg(not(coverage))]
+mod tui_actions;
+#[cfg(not(coverage))]
+mod tui_render;
+#[cfg(not(coverage))]
+mod tui_state;
 
 pub(crate) use boundary_runner::{emit_boundary, run_to_boundary};
 pub(crate) use cli_args::{
@@ -29,6 +38,10 @@ pub(crate) use line_tui::{handle_line_cmd, handle_tui_command};
 pub(crate) use models::{
     BoundaryEvent, BoundaryResult, LoadedScenario, PlayerStateV3, TuiCommandAction,
     TuiCommandContext, PLAYER_STATE_SCHEMA,
+};
+pub(crate) use session_ops::{
+    create_engine_for_scenario, emit_boundary_with_saved_state, load_engine_from_state_for_ref,
+    load_engine_from_state_for_scenario, resume_engine_for_state, save_engine_state,
 };
 pub(crate) use source_loader::{load_source_by_ref, load_source_by_scripts_dir};
 pub(crate) use state_store::{load_player_state, save_player_state};
@@ -65,14 +78,7 @@ fn run_tui(args: TuiArgs) -> Result<i32, ScriptLangError> {
         .state_file
         .unwrap_or(".scriptlang/save.json".to_string());
     let scenario = load_source_by_scripts_dir(&args.scripts_dir, &entry_script)?;
-    let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
-        scripts_xml: scenario.scripts_xml.clone(),
-        entry_script: Some(entry_script.clone()),
-        entry_args: None,
-        host_functions: None,
-        random_seed: None,
-        compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
-    })?;
+    let mut engine = create_engine_for_scenario(&scenario, &entry_script)?;
 
     tui::run_tui_ratatui_mode(&state_file, &scenario, &entry_script, &mut engine)
 }

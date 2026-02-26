@@ -395,6 +395,32 @@ fn parse_var_declaration(
     })
 }
 
+fn parse_type_name_segment<'a>(
+    segment: &'a str,
+    parse_error_code: &'static str,
+    parse_error_label: &'static str,
+    span: &SourceSpan,
+) -> Result<(&'a str, &'a str), ScriptLangError> {
+    let Some(separator) = segment.find(':') else {
+        return Err(ScriptLangError::with_span(
+            parse_error_code,
+            format!("Invalid {} segment: \"{}\".", parse_error_label, segment),
+            span.clone(),
+        ));
+    };
+    if separator == 0 || separator + 1 >= segment.len() {
+        return Err(ScriptLangError::with_span(
+            parse_error_code,
+            format!("Invalid {} segment: \"{}\".", parse_error_label, segment),
+            span.clone(),
+        ));
+    }
+
+    let type_raw = segment[..separator].trim();
+    let name = segment[separator + 1..].trim();
+    Ok((type_raw, name))
+}
+
 fn parse_script_args(
     root: &XmlElementNode,
     visible_types: &BTreeMap<String, ScriptType>,
@@ -421,24 +447,12 @@ fn parse_script_args(
         } else {
             segment.as_str()
         };
-
-        let Some(separator) = normalized.find(':') else {
-            return Err(ScriptLangError::with_span(
-                "SCRIPT_ARGS_PARSE_ERROR",
-                format!("Invalid script args segment: \"{}\".", segment),
-                root.location.clone(),
-            ));
-        };
-        if separator == 0 || separator + 1 >= normalized.len() {
-            return Err(ScriptLangError::with_span(
-                "SCRIPT_ARGS_PARSE_ERROR",
-                format!("Invalid script args segment: \"{}\".", segment),
-                root.location.clone(),
-            ));
-        }
-
-        let type_raw = normalized[..separator].trim();
-        let name = normalized[separator + 1..].trim();
+        let (type_raw, name) = parse_type_name_segment(
+            normalized,
+            "SCRIPT_ARGS_PARSE_ERROR",
+            "script args",
+            &root.location,
+        )?;
 
         assert_name_not_reserved(name, "script arg", root.location.clone())?;
         if !names.insert(name.to_string()) {
@@ -484,23 +498,12 @@ fn parse_function_args(
                 node.location.clone(),
             ));
         }
-        let Some(separator) = segment.find(':') else {
-            return Err(ScriptLangError::with_span(
-                "FUNCTION_ARGS_PARSE_ERROR",
-                format!("Invalid function args segment: \"{}\".", segment),
-                node.location.clone(),
-            ));
-        };
-        if separator == 0 || separator + 1 >= segment.len() {
-            return Err(ScriptLangError::with_span(
-                "FUNCTION_ARGS_PARSE_ERROR",
-                format!("Invalid function args segment: \"{}\".", segment),
-                node.location.clone(),
-            ));
-        }
-
-        let type_raw = segment[..separator].trim();
-        let name = segment[separator + 1..].trim();
+        let (type_raw, name) = parse_type_name_segment(
+            &segment,
+            "FUNCTION_ARGS_PARSE_ERROR",
+            "function args",
+            &node.location,
+        )?;
         assert_name_not_reserved(name, "function arg", node.location.clone())?;
 
         if !names.insert(name.to_string()) {
@@ -532,24 +535,12 @@ fn parse_function_return(
             node.location.clone(),
         ));
     }
-
-    let Some(separator) = raw.find(':') else {
-        return Err(ScriptLangError::with_span(
-            "FUNCTION_RETURN_PARSE_ERROR",
-            format!("Invalid function return segment: \"{}\".", raw),
-            node.location.clone(),
-        ));
-    };
-    if separator == 0 || separator + 1 >= raw.len() {
-        return Err(ScriptLangError::with_span(
-            "FUNCTION_RETURN_PARSE_ERROR",
-            format!("Invalid function return segment: \"{}\".", raw),
-            node.location.clone(),
-        ));
-    }
-
-    let type_raw = raw[..separator].trim();
-    let name = raw[separator + 1..].trim();
+    let (type_raw, name) = parse_type_name_segment(
+        &raw,
+        "FUNCTION_RETURN_PARSE_ERROR",
+        "function return",
+        &node.location,
+    )?;
     assert_name_not_reserved(name, "function return", node.location.clone())?;
 
     Ok(ParsedFunctionParamDecl {

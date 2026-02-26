@@ -1,16 +1,12 @@
 use std::io::{self, BufRead, Write};
 use std::path::Path;
 
-use sl_api::{
-    create_engine_from_xml, resume_engine_from_xml, CreateEngineFromXmlOptions,
-    ResumeEngineFromXmlOptions,
-};
 use sl_core::{EngineOutput, ScriptLangError};
 use sl_runtime::DEFAULT_COMPILER_VERSION;
 
 use crate::{
-    load_player_state, load_source_by_ref, map_tui_io, save_player_state, LoadedScenario,
-    PlayerStateV3, TuiCommandAction, TuiCommandContext, PLAYER_STATE_SCHEMA,
+    create_engine_for_scenario, load_engine_from_state_for_ref, map_tui_io, save_engine_state,
+    LoadedScenario, TuiCommandAction, TuiCommandContext,
 };
 
 pub(crate) fn run_tui_line_mode(
@@ -128,39 +124,23 @@ pub(crate) fn handle_tui_command(
             Ok(TuiCommandAction::Continue)
         }
         ":save" => {
-            let snapshot = engine.snapshot()?;
-            let state = PlayerStateV3 {
-                schema_version: PLAYER_STATE_SCHEMA.to_string(),
-                scenario_id: scenario.id.clone(),
-                compiler_version: DEFAULT_COMPILER_VERSION.to_string(),
-                snapshot,
-            };
-            save_player_state(Path::new(state_file), &state)?;
+            save_engine_state(
+                Path::new(state_file),
+                engine,
+                &scenario.id,
+                DEFAULT_COMPILER_VERSION,
+            )?;
             emit(format!("saved: {}", state_file));
             Ok(TuiCommandAction::Continue)
         }
         ":load" => {
-            let state = load_player_state(Path::new(state_file))?;
-            let loaded = load_source_by_ref(&state.scenario_id)?;
-            let resumed = resume_engine_from_xml(ResumeEngineFromXmlOptions {
-                scripts_xml: loaded.scripts_xml,
-                snapshot: state.snapshot,
-                host_functions: None,
-                compiler_version: Some(state.compiler_version),
-            })?;
+            let (_, _, resumed) = load_engine_from_state_for_ref(Path::new(state_file))?;
             *engine = resumed;
             emit(format!("loaded: {}", state_file));
             Ok(TuiCommandAction::RefreshBoundary)
         }
         ":restart" => {
-            let mut restarted = create_engine_from_xml(CreateEngineFromXmlOptions {
-                scripts_xml: scenario.scripts_xml.clone(),
-                entry_script: Some(entry_script.to_string()),
-                entry_args: None,
-                host_functions: None,
-                random_seed: None,
-                compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
-            })?;
+            let mut restarted = create_engine_for_scenario(scenario, entry_script)?;
             std::mem::swap(engine, &mut restarted);
             emit("restarted".to_string());
             Ok(TuiCommandAction::RefreshBoundary)

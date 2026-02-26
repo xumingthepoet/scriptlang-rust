@@ -219,26 +219,25 @@ impl ScriptLangEngine {
                     options,
                     prompt_text,
                 } => {
-                    let visible_regular = options
-                        .iter()
-                        .filter(|option| !option.fall_over)
-                        .filter(|option| {
-                            self.is_choice_option_visible(&script_name, option)
-                                .unwrap_or(false)
-                        })
-                        .cloned()
-                        .collect::<Vec<_>>();
+                    let mut visible_regular = Vec::new();
+                    for option in options.iter().filter(|option| !option.fall_over) {
+                        if self.is_choice_option_visible(&script_name, option)? {
+                            visible_regular.push(option.clone());
+                        }
+                    }
 
                     let visible_options = if visible_regular.is_empty() {
-                        options
-                            .iter()
-                            .find(|option| option.fall_over)
-                            .filter(|option| {
-                                self.is_choice_option_visible(&script_name, option)
-                                    .unwrap_or(false)
-                            })
-                            .map(|option| vec![option.clone()])
-                            .unwrap_or_default()
+                        if let Some(fall_over_option) =
+                            options.iter().find(|option| option.fall_over)
+                        {
+                            if self.is_choice_option_visible(&script_name, fall_over_option)? {
+                                vec![fall_over_option.clone()]
+                            } else {
+                                Vec::new()
+                            }
+                        } else {
+                            Vec::new()
+                        }
                     } else {
                         visible_regular
                     };
@@ -447,6 +446,59 @@ mod step_tests {
         // Now go back to choice - both options have once=True and were used, should skip
         let output = engine.next_output().expect("next should pass");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "end"));
+    }
+
+    #[test]
+    fn choice_visibility_when_expr_error_is_not_swallowed() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <choice text="Pick">
+        <option text="A" when="missing > 0"><text>A</text></option>
+      </choice>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        let error = engine
+            .next_output()
+            .expect_err("invalid when expression should fail");
+        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
+    }
+
+    #[test]
+    fn choice_fall_over_invisible_path_is_covered() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <choice text="Pick">
+        <option text="A" when="false"><text>A</text></option>
+        <option text="F" fall_over="true" once="true"><text>F</text></option>
+      </choice>
+      <text>after</text>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        let script = engine.scripts.get("main").expect("main script");
+        let root = script.groups.get(&script.root_group_id).expect("root group");
+        let option_id = match root.nodes.first().expect("choice node") {
+            ScriptNode::Choice { options, .. } => options
+                .iter()
+                .find(|option| option.fall_over)
+                .expect("fall_over option")
+                .id
+                .clone(),
+            _ => panic!("expected choice node"),
+        };
+        engine.mark_once_state("main", &format!("option:{}", option_id));
+
+        let output = engine.next_output().expect("choice should be skipped");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "after"));
     }
 
     #[test]
