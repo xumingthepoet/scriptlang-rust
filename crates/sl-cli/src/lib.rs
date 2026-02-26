@@ -243,4 +243,49 @@ mod lib_tests {
         let invalid = serde_json::from_str::<serde_json::Value>("{").expect_err("invalid json");
         assert_eq!(map_cli_state_invalid(invalid).code, "CLI_STATE_INVALID");
     }
+
+    #[test]
+    fn run_cli_from_args_covers_success_and_runtime_error_paths() {
+        let state_out = temp_path("run-cli-start-state.json");
+        let scripts_dir = example_scripts_dir("01-text-code");
+
+        let ok_code = run_cli_from_args([
+            "sl-cli",
+            "agent",
+            "start",
+            "--scripts-dir",
+            &scripts_dir,
+            "--state-out",
+            state_out.to_string_lossy().as_ref(),
+        ]);
+        assert_eq!(ok_code, 0);
+
+        let error_code = run_cli_from_args([
+            "sl-cli",
+            "agent",
+            "start",
+            "--scripts-dir",
+            "examples/scripts-rhai/does-not-exist",
+            "--state-out",
+            state_out.to_string_lossy().as_ref(),
+        ]);
+        assert_ne!(error_code, 0);
+    }
+
+    #[test]
+    fn run_dispatches_tui_mode_via_cli_struct() {
+        let scripts_dir = example_scripts_dir("01-text-code");
+        let state_file = temp_path("run-cli-tui-state.json");
+
+        let code = run(Cli {
+            command: Mode::Tui(TuiArgs {
+                scripts_dir,
+                entry_script: None,
+                state_file: Some(state_file.to_string_lossy().to_string()),
+            }),
+        })
+        .expect("tui dispatch should pass");
+
+        assert_eq!(code, 0);
+    }
 }

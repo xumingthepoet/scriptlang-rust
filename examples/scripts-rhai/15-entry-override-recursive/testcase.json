@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "sl-tool-case.v1",
+  "entryScript": "main",
+  "actions": [],
+  "expectedEvents": [
+    { "kind": "text", "text": "Main entry main#2 @recursive" },
+    { "kind": "end" }
+  ]
+}

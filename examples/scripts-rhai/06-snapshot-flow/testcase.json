@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "sl-tool-case.v1",
+  "entryScript": "main",
+  "actions": [
+    { "kind": "choose", "index": 0 }
+  ],
+  "expectedEvents": [
+    { "kind": "text", "text": "before 10" },
+    { "kind": "choices", "promptText": "Choose", "choices": ["Heal", "Hit"] },
+    { "kind": "text", "text": "after 15" },
+    { "kind": "end" }
+  ]
+}

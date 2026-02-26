@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "sl-tool-case.v1",
+  "entryScript": "main",
+  "actions": [
+    { "kind": "choose", "index": 0 }
+  ],
+  "expectedEvents": [
+    { "kind": "text", "text": "Scenario 09: random builtin" },
+    { "kind": "text", "text": "weather roll=67" },
+    { "kind": "choices", "promptText": "Pick action (rng=1)", "choices": ["Attack (rng=3)", "Defend (rng=5)"] },
+    { "kind": "text", "text": "attack damage=4" },
+    { "kind": "text", "text": "done" },
+    { "kind": "end" }
+  ]
+}

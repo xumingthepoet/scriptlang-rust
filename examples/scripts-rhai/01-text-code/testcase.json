@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "sl-tool-case.v1",
+  "entryScript": "main",
+  "actions": [],
+  "expectedEvents": [
+    { "kind": "text", "text": "Scenario 01: text + code" },
+    { "kind": "text", "text": "count=2" },
+    { "kind": "end" }
+  ]
+}

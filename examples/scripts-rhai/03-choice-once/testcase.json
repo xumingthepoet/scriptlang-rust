@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "sl-tool-case.v1",
+  "entryScript": "main",
+  "actions": [
+    { "kind": "choose", "index": 0 },
+    { "kind": "choose", "index": 0 }
+  ],
+  "expectedEvents": [
+    { "kind": "choices", "promptText": "Choose", "choices": ["Pick", "Skip"] },
+    { "kind": "text", "text": "picked" },
+    { "kind": "choices", "promptText": "Choose", "choices": ["Pick", "Skip"] },
+    { "kind": "text", "text": "picked" },
+    { "kind": "text", "text": "done" },
+    { "kind": "end" }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "sl-tool-case.v1",
+  "entryScript": "main",
+  "actions": [
+    { "kind": "choose", "index": 0 },
+    { "kind": "choose", "index": 0 },
+    { "kind": "choose", "index": 0 }
+  ],
+  "expectedEvents": [
+    { "kind": "text", "text": "Battle start: Hero(12) vs Bandit(12)" },
+    { "kind": "text", "text": "Tip: if you keep using weak attacks, you will lose." },
+    { "kind": "text", "text": "== Round 1.0 ==" },
+    { "kind": "text", "text": "Hero hp=12, Bandit hp=12, potions=1" },
+    { "kind": "choices", "promptText": "Choose", "choices": ["Heavy Slash (4 dmg)", "Quick Jab (1 dmg)", "Drink Potion (+3 hp)"] },
+    { "kind": "text", "text": "You use Heavy Slash for 4." },
+    { "kind": "text", "text": "Bandit uses Wild Smash for 3." },
+    { "kind": "text", "text": "After enemy action: Hero hp=9, Bandit hp=8" },
+    { "kind": "text", "text": "== Round 2.0 ==" },
+    { "kind": "text", "text": "Hero hp=9, Bandit hp=8, potions=1" },
+    { "kind": "choices", "promptText": "Choose", "choices": ["Heavy Slash (4 dmg)", "Quick Jab (1 dmg)", "Drink Potion (+3 hp)"] },
+    { "kind": "text", "text": "You use Heavy Slash for 4." },
+    { "kind": "text", "text": "Bandit uses Wild Smash for 3." },
+    { "kind": "text", "text": "After enemy action: Hero hp=6, Bandit hp=4" },
+    { "kind": "text", "text": "== Round 3.0 ==" },
+    { "kind": "text", "text": "Hero hp=6, Bandit hp=4, potions=1" },
+    { "kind": "choices", "promptText": "Choose", "choices": ["Heavy Slash (4 dmg)", "Quick Jab (1 dmg)", "Drink Potion (+3 hp)"] },
+    { "kind": "text", "text": "You use Heavy Slash for 4." },
+    { "kind": "text", "text": "Bandit is down." },
+    { "kind": "text", "text": "Battle ended in 3 rounds." },
+    { "kind": "text", "text": "Result: Hero wins. hp=6" },
+    { "kind": "text", "text": "Ending: Victory" },
+    { "kind": "text", "text": "You chose enough pressure and won the duel." },
+    { "kind": "end" }
+  ]
+}

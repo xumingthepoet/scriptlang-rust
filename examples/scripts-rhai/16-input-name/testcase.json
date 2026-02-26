@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "sl-tool-case.v1",
+  "entryScript": "main",
+  "actions": [
+    { "kind": "input", "text": "" },
+    { "kind": "input", "text": "Guild" }
+  ],
+  "expectedEvents": [
+    { "kind": "input", "promptText": "Name your hero", "defaultText": "Traveler" },
+    { "kind": "text", "text": "Hero: Traveler" },
+    { "kind": "input", "promptText": "Name your guild", "defaultText": "Nameless Guild Mk2" },
+    { "kind": "text", "text": "Guild: Guild" },
+    { "kind": "end" }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "sl-tool-case.v1",
+  "entryScript": "main",
+  "actions": [],
+  "expectedEvents": [
+    { "kind": "text", "text": "before hp=1" },
+    { "kind": "text", "text": "after hp=4" },
+    { "kind": "end" }
+  ]
+}

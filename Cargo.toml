@@ -7,6 +7,8 @@ members = [
   "crates/sl-runtime",
   "crates/sl-api",
   "crates/sl-cli",
+  "crates/sl-tool",
+  "crates/sl-test-example",
 ]
 default-members = ["crates/sl-cli"]
 

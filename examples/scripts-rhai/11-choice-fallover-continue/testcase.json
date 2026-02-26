@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "sl-tool-case.v1",
+  "entryScript": "main",
+  "actions": [
+    { "kind": "choose", "index": 0 },
+    { "kind": "choose", "index": 0 }
+  ],
+  "expectedEvents": [
+    { "kind": "choices", "promptText": "Open the gate", "choices": ["Search nearby"] },
+    { "kind": "text", "text": "You keep searching..." },
+    { "kind": "choices", "promptText": "Open the gate", "choices": ["Leave for now"] },
+    { "kind": "text", "text": "Nothing else can be done here." },
+    { "kind": "end" }
+  ]
+}

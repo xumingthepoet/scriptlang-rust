@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "sl-tool-case.v1",
+  "entryScript": "main",
+  "actions": [
+    { "kind": "choose", "index": 0 },
+    { "kind": "choose", "index": 0 },
+    { "kind": "choose", "index": 0 }
+  ],
+  "expectedEvents": [
+    { "kind": "text", "text": "You step into the tavern for the first time." },
+    { "kind": "text", "text": "You watch around." },
+    { "kind": "choices", "promptText": "Talk to the bartender", "choices": ["Ask for rumors", "Order water"] },
+    { "kind": "text", "text": "You hear a secret route to the castle." },
+    { "kind": "text", "text": "You watch around." },
+    { "kind": "choices", "promptText": "Talk to the bartender", "choices": ["Order water"] },
+    { "kind": "text", "text": "A calm break." },
+    { "kind": "text", "text": "You watch around." },
+    { "kind": "choices", "promptText": "Talk to the bartender", "choices": ["Order water"] },
+    { "kind": "text", "text": "A calm break." },
+    { "kind": "end" }
+  ]
+}

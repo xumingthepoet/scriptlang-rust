@@ -64,3 +64,35 @@ fn run_state_transition(
         &state.compiler_version,
     )
 }
+
+#[cfg(test)]
+mod agent_tests {
+    use super::*;
+
+    use crate::cli_test_support::{example_scripts_dir, temp_path};
+
+    #[test]
+    fn run_agent_dispatches_input_command() {
+        let scripts_dir = example_scripts_dir("16-input-name");
+        let state_in = temp_path("agent-input-state-in.json");
+        let state_out = temp_path("agent-input-state-out.json");
+
+        run_start(StartArgs {
+            scripts_dir,
+            entry_script: Some("main".to_string()),
+            state_out: state_in.to_string_lossy().to_string(),
+        })
+        .expect("start should pass");
+
+        let code = run_agent(AgentArgs {
+            command: AgentCommand::Input(InputArgs {
+                state_in: state_in.to_string_lossy().to_string(),
+                text: "Guild".to_string(),
+                state_out: state_out.to_string_lossy().to_string(),
+            }),
+        })
+        .expect("input dispatch should pass");
+
+        assert_eq!(code, 0);
+    }
+}

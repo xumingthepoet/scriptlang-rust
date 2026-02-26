@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "sl-tool-case.v1",
+  "entryScript": "main",
+  "actions": [],
+  "expectedEvents": [
+    { "kind": "text", "text": "In group: Knight" },
+    { "kind": "text", "text": "In group: Mage" },
+    { "kind": "end" }
+  ]
+}

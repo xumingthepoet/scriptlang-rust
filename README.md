@@ -5,6 +5,7 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 ## Documentation
 - [SL Engine API usage](docs/sl-engine-api.md)
 - [ScriptLang syntax rules](docs/scriptlang-syntax.md)
+- [Example testing with sl-tool](docs/testing-examples.md)
 
 ## Workspace Crates
 - `crates/sl-core`: shared types, values, errors, snapshot/player schemas.
@@ -13,6 +14,8 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 - `crates/sl-runtime`: execution engine (`next/choose/submit_input/snapshot/resume`).
 - `crates/sl-api`: high-level create/compile/resume API.
 - `crates/sl-cli`: host-side CLI (`agent` and `tui` modes).
+- `crates/sl-tool`: reusable testing toolkit (`testcase.json` schema + case runner/assertion).
+- `crates/sl-test-example`: example integration tests using `sl-tool`.
 
 ## Internal Module Layout
 - `crates/sl-cli/src`:
@@ -49,6 +52,7 @@ This split keeps crate boundaries unchanged and enforces one-way internal depend
 - `cargo qa`: `cargo fmt --all -- --check`
 - `cargo qc`: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 - `cargo qt`: `cargo test --workspace --all-targets --all-features`
+- `cargo test -p sl-test-example --all-targets --all-features`: run example cases from `examples/scripts-rhai/*/testcase.json`
 - `make test`: runs `cargo qt` with `LLVM_PROFILE_FILE` unset (avoid transient `*.profraw` in project root).
 - `cargo tarpaulin --engine llvm --workspace --all-features --all-targets --rustflags=--cfg=coverage --out Stdout --fail-under 100`: coverage gate.
 - `make coverage`: runs tarpaulin in a temp working dir and redirects `LLVM_PROFILE_FILE` to temp dir (avoid transient `*.profraw` in project root).
@@ -122,3 +126,4 @@ You can override defaults with:
 
 ## Examples
 Rhai-authored smoke scenarios live in `examples/scripts-rhai`.
+Each example directory also carries a `testcase.json` consumed by `sl-tool`/`sl-test-example`.

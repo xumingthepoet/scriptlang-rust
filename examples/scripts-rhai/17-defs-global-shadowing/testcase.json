@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "sl-tool-case.v1",
+  "entryScript": "main",
+  "actions": [],
+  "expectedEvents": [
+    { "kind": "text", "text": "main.local.before=10" },
+    { "kind": "text", "text": "main.global.before=100" },
+    { "kind": "text", "text": "battle.local=35" },
+    { "kind": "text", "text": "battle.global=60" },
+    { "kind": "text", "text": "main.local.after=10" },
+    { "kind": "text", "text": "main.global.after=60" },
+    { "kind": "end" }
+  ]
+}
