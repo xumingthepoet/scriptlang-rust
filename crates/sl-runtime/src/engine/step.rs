@@ -604,15 +604,18 @@ mod step_tests {
 
         let script = engine.scripts.get("main").expect("main script");
         let root = script.groups.get(&script.root_group_id).expect("root group");
-        let Some(ScriptNode::Choice { options, .. }) = root.nodes.first() else {
-            unreachable!("expected choice node");
-        };
-        let option_id = options
-            .iter()
-            .find(|option| option.fall_over)
-            .expect("fall_over option")
-            .id
-            .clone();
+        assert!(matches!(
+            root.nodes.first(),
+            Some(ScriptNode::Choice { .. })
+        ));
+        let mut option_id = None;
+        if let Some(ScriptNode::Choice { options, .. }) = root.nodes.first() {
+            option_id = options
+                .iter()
+                .find(|option| option.fall_over)
+                .map(|option| option.id.clone());
+        }
+        let option_id = option_id.expect("fall_over option");
         engine.mark_once_state("main", &format!("option:{}", option_id));
 
         let output = engine.next_output().expect("choice should be skipped");
@@ -689,10 +692,10 @@ mod step_tests {
             .pending_boundary
             .as_mut()
             .expect("pending choice should exist");
-        let PendingBoundary::Choice { options, .. } = pending else {
-            unreachable!("pending boundary should be choice");
-        };
-        options[0].id = "missing-option".to_string();
+        assert!(matches!(pending, PendingBoundary::Choice { .. }));
+        if let PendingBoundary::Choice { options, .. } = pending {
+            options[0].id = "missing-option".to_string();
+        }
         let error = option_missing
             .choose(0)
             .expect_err("missing option should fail");

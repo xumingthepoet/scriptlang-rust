@@ -186,14 +186,18 @@ mod frame_stack_tests {
             .pending_boundary
             .clone()
             .expect("pending choice boundary should exist");
-        let PendingBoundary::Choice {
-            options: items,
-            prompt_text,
+        assert!(matches!(pending, PendingBoundary::Choice { .. }));
+        let mut items = Vec::new();
+        let mut prompt_text = None;
+        if let PendingBoundary::Choice {
+            options,
+            prompt_text: pending_prompt_text,
             ..
         } = pending
-        else {
-            unreachable!("pending boundary should be choice");
-        };
+        {
+            items = options;
+            prompt_text = pending_prompt_text;
+        }
         assert!(!items.is_empty());
         let frame_id = engine.frames.last().expect("frame").frame_id;
         engine.pending_boundary = Some(PendingBoundary::Choice {

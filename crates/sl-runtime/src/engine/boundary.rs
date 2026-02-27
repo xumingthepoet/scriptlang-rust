@@ -354,24 +354,12 @@ mod boundary_tests {
         ));
         let pending = option_missing
             .pending_boundary
-            .take()
+            .as_mut()
             .expect("pending choice should exist");
-        let PendingBoundary::Choice {
-            frame_id,
-            node_id,
-            mut options,
-            prompt_text,
-        } = pending
-        else {
-            unreachable!("pending boundary should be choice");
-        };
-        options[0].id = "missing".to_string();
-        option_missing.pending_boundary = Some(PendingBoundary::Choice {
-            frame_id,
-            node_id,
-            options,
-            prompt_text,
-        });
+        assert!(matches!(pending, PendingBoundary::Choice { .. }));
+        if let PendingBoundary::Choice { options, .. } = pending {
+            options[0].id = "missing".to_string();
+        }
         let error = option_missing
             .choose(0)
             .expect_err("option missing should keep boundary");
@@ -406,10 +394,12 @@ mod boundary_tests {
             .pending_boundary
             .as_ref()
             .expect("pending choice should exist");
-        let Some(PendingBoundary::Choice { options, .. }) = Some(pending) else {
-            unreachable!("pending boundary should be choice");
-        };
-        let once_key = format!("option:{}", options[0].id);
+        assert!(matches!(pending, PendingBoundary::Choice { .. }));
+        let mut once_key = None;
+        if let PendingBoundary::Choice { options, .. } = pending {
+            once_key = Some(format!("option:{}", options[0].id));
+        }
+        let once_key = once_key.expect("choice options should exist");
         assert!(!push_fail.has_once_state(&script_name, &once_key));
         for script in push_fail.scripts.values_mut() {
             for group in script.groups.values_mut() {
@@ -473,25 +463,12 @@ mod boundary_tests {
         ));
         let pending = write_fail
             .pending_boundary
-            .take()
+            .as_mut()
             .expect("pending input should exist");
-        let PendingBoundary::Input {
-            frame_id,
-            node_id,
-            target_var: _target_var,
-            prompt_text,
-            default_text,
-        } = pending
-        else {
-            unreachable!("pending boundary should be input");
-        };
-        write_fail.pending_boundary = Some(PendingBoundary::Input {
-            frame_id,
-            node_id,
-            target_var: "missingVar".to_string(),
-            prompt_text,
-            default_text,
-        });
+        assert!(matches!(pending, PendingBoundary::Input { .. }));
+        if let PendingBoundary::Input { target_var, .. } = pending {
+            *target_var = "missingVar".to_string();
+        }
         let error = write_fail
             .submit_input("Guild")
             .expect_err("write path should fail");

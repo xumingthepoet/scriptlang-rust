@@ -423,11 +423,14 @@ mod snapshot_tests {
         let first = engine.next_output().expect("next");
         assert!(matches!(first, EngineOutput::Choices { .. }));
         let mut snapshot = engine.snapshot().expect("snapshot");
-        let PendingBoundaryV3::Choice { node_id, .. } = &mut snapshot.pending_boundary else {
-            unreachable!("snapshot should contain choice boundary");
-        };
-        *node_id = "invalid-node-id".to_string();
-        assert_eq!(node_id, "invalid-node-id");
+        assert!(matches!(
+            snapshot.pending_boundary,
+            PendingBoundaryV3::Choice { .. }
+        ));
+        if let PendingBoundaryV3::Choice { node_id, .. } = &mut snapshot.pending_boundary {
+            *node_id = "invalid-node-id".to_string();
+            assert_eq!(node_id, "invalid-node-id");
+        }
     
         let mut resumed = engine_from_sources(sources);
         let error = resumed
@@ -499,10 +502,15 @@ mod snapshot_tests {
         let input_snapshot = input_engine.snapshot().expect("snapshot");
     
         let mut choice_on_input = input_snapshot.clone();
-        let PendingBoundaryV3::Input { node_id, .. } = &choice_on_input.pending_boundary else {
-            unreachable!("snapshot should contain input boundary");
-        };
-        let input_node_id = node_id.clone();
+        assert!(matches!(
+            choice_on_input.pending_boundary,
+            PendingBoundaryV3::Input { .. }
+        ));
+        let mut input_node_id = None;
+        if let PendingBoundaryV3::Input { node_id, .. } = &choice_on_input.pending_boundary {
+            input_node_id = Some(node_id.clone());
+        }
+        let input_node_id = input_node_id.expect("snapshot should contain input boundary");
         choice_on_input.pending_boundary = PendingBoundaryV3::Choice {
             node_id: input_node_id,
             items: Vec::new(),
@@ -537,10 +545,15 @@ mod snapshot_tests {
         let choice_snapshot = choice_engine.snapshot().expect("snapshot");
     
         let mut input_on_choice = choice_snapshot.clone();
-        let PendingBoundaryV3::Choice { node_id, .. } = &input_on_choice.pending_boundary else {
-            unreachable!("snapshot should contain choice boundary");
-        };
-        let choice_node_id = node_id.clone();
+        assert!(matches!(
+            input_on_choice.pending_boundary,
+            PendingBoundaryV3::Choice { .. }
+        ));
+        let mut choice_node_id = None;
+        if let PendingBoundaryV3::Choice { node_id, .. } = &input_on_choice.pending_boundary {
+            choice_node_id = Some(node_id.clone());
+        }
+        let choice_node_id = choice_node_id.expect("snapshot should contain choice boundary");
         input_on_choice.pending_boundary = PendingBoundaryV3::Input {
             node_id: choice_node_id,
             target_var: "name".to_string(),
@@ -563,11 +576,14 @@ mod snapshot_tests {
         assert_eq!(error.code, "SNAPSHOT_PENDING_BOUNDARY");
     
         let mut input_mismatch = input_snapshot.clone();
-        let PendingBoundaryV3::Input { node_id, .. } = &mut input_mismatch.pending_boundary else {
-            unreachable!("snapshot should contain input boundary");
-        };
-        *node_id = "missing-input-node".to_string();
-        assert_eq!(node_id, "missing-input-node");
+        assert!(matches!(
+            input_mismatch.pending_boundary,
+            PendingBoundaryV3::Input { .. }
+        ));
+        if let PendingBoundaryV3::Input { node_id, .. } = &mut input_mismatch.pending_boundary {
+            *node_id = "missing-input-node".to_string();
+            assert_eq!(node_id, "missing-input-node");
+        }
         let mut resume_mismatch = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
