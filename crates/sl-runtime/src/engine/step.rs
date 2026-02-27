@@ -609,12 +609,7 @@ mod step_tests {
             Some(ScriptNode::Choice { .. })
         ));
         let mut option_id = None;
-        if let Some(ScriptNode::Choice { options, .. }) = root.nodes.first() {
-            option_id = options
-                .iter()
-                .find(|option| option.fall_over)
-                .map(|option| option.id.clone());
-        }
+        if let Some(ScriptNode::Choice { options, .. }) = root.nodes.first() { option_id = options.iter().find(|option| option.fall_over).map(|option| option.id.clone()); }
         let option_id = option_id.expect("fall_over option");
         engine.mark_once_state("main", &format!("option:{}", option_id));
 

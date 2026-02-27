@@ -186,42 +186,35 @@ impl ScriptLangEngine {
             for function_name in script.visible_functions.keys() {
                 let symbol = rhai_function_symbol(function_name);
                 if let Some(existing) = symbol_to_public.get(&symbol) {
-                    if existing != function_name {
-                        return Err(ScriptLangError::new(
-                            "ENGINE_DEFS_FUNCTION_SYMBOL_CONFLICT",
-                            format!(
-                                "Defs function \"{}\" conflicts with \"{}\" after Rhai symbol normalization.",
-                                function_name, existing
-                            ),
-                        ));
-                    }
+                    return Err(ScriptLangError::new(
+                        "ENGINE_DEFS_FUNCTION_SYMBOL_CONFLICT",
+                        format!(
+                            "Defs function \"{}\" conflicts with \"{}\" after Rhai symbol normalization.",
+                            function_name, existing
+                        ),
+                    ));
                 }
                 symbol_to_public.insert(symbol.clone(), function_name.clone());
                 public_to_symbol.insert(function_name.clone(), symbol);
             }
             visible_function_symbols_by_script.insert(script_name.clone(), public_to_symbol);
         }
-
         let initial_random_seed = options.random_seed.unwrap_or(1);
         let shared_rng_state = Rc::new(RefCell::new(initial_random_seed));
         let mut rhai_engine = Engine::new();
         rhai_engine.set_strict_variables(true);
         let rng_for_builtin = Rc::clone(&shared_rng_state);
-        rhai_engine.register_fn(
-            "random",
-            move |bound: INT| -> Result<INT, Box<EvalAltResult>> {
+        rhai_engine.register_fn("random", move |bound: INT| -> Result<INT, Box<EvalAltResult>> {
                 if bound <= 0 {
                     return Err(Box::new(EvalAltResult::ErrorRuntime(
                         Dynamic::from("random(n) expects positive integer n."),
                         Position::NONE,
                     )));
                 }
-
                 let mut state = rng_for_builtin.borrow_mut();
                 let value = next_random_bounded(&mut state, bound as u32);
                 Ok(value as INT)
-            },
-        );
+            });
 
         let mut defs_globals_type = BTreeMap::new();
         for (qualified_name, decl) in &options.defs_global_declarations {
@@ -254,17 +247,12 @@ impl ScriptLangEngine {
             ended: false,
             frame_counter: 1,
             rng_state: initial_random_seed,
-            once_state_by_script: BTreeMap::new(),
-        })
+            once_state_by_script: BTreeMap::new() })
     }
 
-    pub fn compiler_version(&self) -> &str {
-        &self.compiler_version
-    }
+    pub fn compiler_version(&self) -> &str { &self.compiler_version }
 
-    pub fn waiting_choice(&self) -> bool {
-        self.waiting_choice
-    }
+    pub fn waiting_choice(&self) -> bool { self.waiting_choice }
 
     pub fn start(
         &mut self,
@@ -273,12 +261,12 @@ impl ScriptLangEngine {
     ) -> Result<(), ScriptLangError> {
         self.reset();
         self.initialize_defs_globals()?;
-        let Some(script) = self.scripts.get(entry_script_name) else {
-            return Err(ScriptLangError::new(
+        let Some(script) = self.scripts.get(entry_script_name) else { return Err(
+            ScriptLangError::new(
                 "ENGINE_SCRIPT_NOT_FOUND",
                 format!("Entry script \"{}\" is not registered.", entry_script_name),
-            ));
-        };
+            )
+        ) };
         let root_group_id = script.root_group_id.clone();
 
         let (scope, var_types) =
@@ -289,22 +277,18 @@ impl ScriptLangEngine {
 
     fn initialize_defs_globals(&mut self) -> Result<(), ScriptLangError> {
         self.defs_globals_value.clear();
-
         for qualified_name in self.defs_global_init_order.clone() {
             let decl = self
                 .defs_global_declarations
                 .get(&qualified_name)
                 .cloned()
-                .ok_or_else(|| {
-                    ScriptLangError::new(
+                .ok_or_else(|| ScriptLangError::new(
                         "ENGINE_DEFS_GLOBAL_DECL_MISSING",
                         format!(
                             "Defs global \"{}\" is present in init order but missing from declarations.",
                             qualified_name
                         ),
-                    )
-                })?;
-
+                    ))?;
             let mut value = default_value_from_type(&decl.r#type);
             if let Some(expr) = &decl.initial_value_expr {
                 value = self.eval_defs_global_initializer(expr)?;
@@ -320,7 +304,6 @@ impl ScriptLangEngine {
             }
             self.defs_globals_value.insert(qualified_name, value);
         }
-
         for (qualified_name, decl) in &self.defs_global_declarations {
             if self.defs_globals_value.contains_key(qualified_name) {
                 continue;
@@ -328,11 +311,8 @@ impl ScriptLangEngine {
             self.defs_globals_value
                 .insert(qualified_name.clone(), default_value_from_type(&decl.r#type));
         }
-
         Ok(())
     }
-
-
 }
 
 #[cfg(test)]
@@ -481,6 +461,65 @@ mod lifecycle_tests {
         };
         let value = registry.call("ok", &[]).expect("call should succeed");
         assert_eq!(value, SlValue::Bool(true));
+    }
+
+    #[test]
+    fn new_success_path_initializes_defs_and_function_symbols() {
+        let files = map(&[
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="main"><text>ok</text></script>
+"#,
+            ),
+            (
+                "shared.defs.xml",
+                r#"
+<defs name="shared">
+  <var name="hp" type="int">1</var>
+  <function name="addWithGameBonus" args="int:a1,int:a2" return="int:out">
+    out = a1 + a2;
+  </function>
+</defs>
+"#,
+            ),
+        ]);
+        let compiled = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_json: compiled.global_json,
+            defs_global_declarations: compiled.defs_global_declarations,
+            defs_global_init_order: compiled.defs_global_init_order,
+            host_functions: None,
+            random_seed: Some(7),
+            compiler_version: None,
+        })
+        .expect("new should succeed");
+
+        assert_eq!(engine.compiler_version(), DEFAULT_COMPILER_VERSION);
+        assert!(!engine.waiting_choice());
+        assert!(!engine.ended);
+        assert!(
+            engine
+                .defs_globals_type
+                .contains_key("shared.hp"),
+            "defs global type should be initialized"
+        );
+        assert_eq!(
+            engine
+                .visible_function_symbols_by_script
+                .get("main")
+                .and_then(|m| m.get("addWithGameBonus"))
+                .map(String::as_str),
+            Some("addWithGameBonus")
+        );
+
+        engine.start("main", None).expect("start");
+        assert_eq!(
+            engine.defs_globals_value.get("shared.hp"),
+            Some(&SlValue::Number(1.0))
+        );
     }
 
     #[test]

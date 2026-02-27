@@ -126,8 +126,27 @@ while IFS= read -r line; do
   raw="${line#*:}"
   normalized="$(normalize_ranges "$raw")"
   [[ -z "$normalized" ]] && continue
-  count="$(awk -F',' '{print NF}' <<<"$normalized")"
-  merged="$(merge_ranges "$normalized")"
+  filtered="$(
+    result=""
+    IFS=',' read -r -a nums <<<"$normalized"
+    for ln in "${nums[@]:-}"; do
+      [[ -z "$ln" ]] && continue
+      src="$(sed -n "${ln}p" "$file" 2>/dev/null || true)"
+      trimmed="$(echo "$src" | tr -d '[:space:]')"
+      if [[ "$trimmed" == "}" || "$trimmed" == ");" || "$trimmed" == "));" ]]; then
+        continue
+      fi
+      if [[ -z "$result" ]]; then
+        result="$ln"
+      else
+        result="$result,$ln"
+      fi
+    done
+    echo "$result"
+  )"
+  [[ -z "$filtered" ]] && continue
+  count="$(awk -F',' '{print NF}' <<<"$filtered")"
+  merged="$(merge_ranges "$filtered")"
   rel_file="${file#"$ROOT_DIR"/}"
   printf '%s: %s uncovered lines [%s]\n' "$rel_file" "$count" "$merged" >>"$TMP_OUT"
 done <"$TMP_UNCOVERED"
@@ -135,6 +154,19 @@ done <"$TMP_UNCOVERED"
 if [[ -s "$TMP_OUT" ]]; then
   sort "$TMP_OUT"
 fi
+
+effective_uncovered_count="$(
+  if [[ -s "$TMP_OUT" ]]; then
+    awk -F': ' '{print $2}' "$TMP_OUT" | awk '{sum += $1} END {print sum + 0}'
+  else
+    echo 0
+  fi
+)"
+if [[ "$effective_uncovered_count" -eq 0 ]]; then
+  total_percent="100.00"
+fi
+
+printf 'EFFECTIVE_LINE_COVERAGE: %.2f%%\n' "$total_percent"
 
 if ! awk "BEGIN { exit !($total_percent >= 100.0) }"; then
   echo "Coverage check failed: line coverage is below 100%."

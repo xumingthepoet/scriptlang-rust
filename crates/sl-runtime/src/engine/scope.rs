@@ -80,15 +80,16 @@ impl ScriptLangEngine {
         }
 
         let script_name = self.resolve_current_script_name();
-        if let Some(qualified_name) = self.resolve_defs_global_alias(script_name.as_deref(), name)
-        {
-            if let Some(declared_type) = self.defs_globals_type.get(&qualified_name) {
-                if !is_type_compatible(&value, declared_type) {
-                    return Err(ScriptLangError::new(
-                        "ENGINE_TYPE_MISMATCH",
-                        format!("Variable \"{}\" does not match declared type.", name),
-                    ));
-                }
+        if let Some(qualified_name) = self.resolve_defs_global_alias(script_name.as_deref(), name) {
+            if self
+                .defs_globals_type
+                .get(&qualified_name)
+                .is_some_and(|declared_type| !is_type_compatible(&value, declared_type))
+            {
+                return Err(ScriptLangError::new(
+                    "ENGINE_TYPE_MISMATCH",
+                    format!("Variable \"{}\" does not match declared type.", name),
+                ));
             }
             self.defs_globals_value.insert(qualified_name, value);
             return Ok(());
@@ -102,7 +103,6 @@ impl ScriptLangEngine {
                 ),
             ));
         }
-
         Err(ScriptLangError::new(
             "ENGINE_VAR_WRITE",
             format!("Variable \"{}\" is not defined.", name),
@@ -117,7 +117,6 @@ impl ScriptLangEngine {
                 format!("Invalid ref path \"{}\".", path),
             ));
         }
-
         let (root_name, nested_start_index) = self.resolve_path_root_alias(&parts);
         let mut current = self.read_variable(&root_name)?;
         for part in parts.iter().skip(nested_start_index) {
@@ -134,7 +133,6 @@ impl ScriptLangEngine {
                 )
             })?;
         }
-
         Ok(current)
     }
 
@@ -156,14 +154,13 @@ impl ScriptLangEngine {
             return self.write_variable(&root_name, value);
         }
         let mut root_value = self.read_variable(&root_name)?;
-        assign_nested_path(&mut root_value, &parts[nested_start_index..], value).map_err(
-            |message| {
+        assign_nested_path(&mut root_value, &parts[nested_start_index..], value)
+            .map_err(|message| {
             ScriptLangError::new(
                 "ENGINE_REF_PATH_WRITE",
                 format!("Cannot resolve write path \"{}\": {}", path, message),
             )
-        },
-        )?;
+        })?;
         self.write_variable(&root_name, root_value)
     }
 
@@ -178,10 +175,8 @@ impl ScriptLangEngine {
                 return (qualified, 2);
             }
         }
-
         (parts[0].clone(), 1)
     }
-
 }
 
 #[cfg(test)]
@@ -244,6 +239,81 @@ mod scope_tests {
             .next_output()
             .expect_err("write path should fail");
         assert!(error.code == "ENGINE_REF_PATH_WRITE" || error.code == "ENGINE_EVAL_ERROR");
+    }
+
+    #[test]
+    fn scope_private_read_write_path_branches_are_covered() {
+        let mut engine = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="main"><text>ok</text></script>
+"#,
+            ),
+            (
+                "shared.defs.xml",
+                r#"
+<defs name="shared">
+  <var name="hp" type="int">1</var>
+</defs>
+"#,
+            ),
+        ]));
+        engine.start("main", None).expect("start");
+
+        engine.global_json.insert("g".to_string(), SlValue::Number(1.0));
+        engine
+            .visible_json_by_script
+            .entry("main".to_string())
+            .or_default()
+            .insert("g".to_string());
+
+        let err = engine
+            .write_variable("shared.hp", SlValue::String("bad".to_string()))
+            .expect_err("defs global type mismatch should fail");
+        assert_eq!(err.code, "ENGINE_TYPE_MISMATCH");
+
+        let err = engine
+            .write_variable("g", SlValue::Number(2.0))
+            .expect_err("visible json is readonly");
+        assert_eq!(err.code, "ENGINE_GLOBAL_READONLY");
+
+        let err = engine
+            .write_variable("missing", SlValue::Bool(true))
+            .expect_err("missing variable should fail");
+        assert_eq!(err.code, "ENGINE_VAR_WRITE");
+
+        let err = engine.read_path("").expect_err("empty path should fail");
+        assert_eq!(err.code, "ENGINE_REF_PATH");
+
+        engine
+            .write_variable("x", SlValue::Number(1.0))
+            .expect_err("x should not exist");
+        engine.frames.last_mut().expect("frame").scope.insert(
+            "x".to_string(),
+            SlValue::Number(1.0),
+        );
+        let err = engine
+            .read_path("x.a")
+            .expect_err("reading nested field from scalar should fail");
+        assert_eq!(err.code, "ENGINE_REF_PATH_READ");
+
+        engine.frames.last_mut().expect("frame").scope.insert(
+            "m".to_string(),
+            SlValue::Map(BTreeMap::new()),
+        );
+        let err = engine
+            .read_path("m.k")
+            .expect_err("missing nested key should fail");
+        assert_eq!(err.code, "ENGINE_REF_PATH_READ");
+
+        engine
+            .write_path("shared.hp", SlValue::Number(9.0))
+            .expect("qualified alias write should succeed");
+
+        let (root, index) = engine.resolve_path_root_alias(&["plain".to_string()]);
+        assert_eq!((root, index), ("plain".to_string(), 1));
     }
 
     #[test]

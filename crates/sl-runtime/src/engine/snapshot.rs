@@ -427,10 +427,7 @@ mod snapshot_tests {
             snapshot.pending_boundary,
             PendingBoundaryV3::Choice { .. }
         ));
-        if let PendingBoundaryV3::Choice { node_id, .. } = &mut snapshot.pending_boundary {
-            *node_id = "invalid-node-id".to_string();
-            assert_eq!(node_id, "invalid-node-id");
-        }
+        if let PendingBoundaryV3::Choice { node_id, .. } = &mut snapshot.pending_boundary { *node_id = "invalid-node-id".to_string(); assert_eq!(node_id, "invalid-node-id"); }
     
         let mut resumed = engine_from_sources(sources);
         let error = resumed
@@ -580,10 +577,7 @@ mod snapshot_tests {
             input_mismatch.pending_boundary,
             PendingBoundaryV3::Input { .. }
         ));
-        if let PendingBoundaryV3::Input { node_id, .. } = &mut input_mismatch.pending_boundary {
-            *node_id = "missing-input-node".to_string();
-            assert_eq!(node_id, "missing-input-node");
-        }
+        if let PendingBoundaryV3::Input { node_id, .. } = &mut input_mismatch.pending_boundary { *node_id = "missing-input-node".to_string(); assert_eq!(node_id, "missing-input-node"); }
         let mut resume_mismatch = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
