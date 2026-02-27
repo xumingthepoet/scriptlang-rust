@@ -447,4 +447,31 @@ mod scope_tests {
         assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
     }
 
+    #[test]
+    fn write_defs_global_variable_succeeds() {
+        // Test successful write to defs global variable (covers scope.rs line 92)
+        let files = map(&[(
+            "shared.defs.xml",
+            r#"<defs name="shared"><var name="score" type="int">0</var></defs>"#,
+        ), (
+            "main.script.xml",
+            r#"<!-- include: shared.defs.xml -->
+<script name="main">
+  <code>shared.score = 100;</code>
+  <text>${shared.score}</text>
+</script>"#,
+        )]);
+        let mut engine = engine_from_sources(files);
+        engine.start("main", None).expect("start");
+
+        // Execute to get the text output
+        let output = engine.next_output().expect("next");
+        // Should output "100" from the text node
+        if let EngineOutput::Text { text, .. } = output {
+            assert_eq!(text, "100");
+        } else {
+            panic!("expected Text output");
+        }
+    }
+
 }

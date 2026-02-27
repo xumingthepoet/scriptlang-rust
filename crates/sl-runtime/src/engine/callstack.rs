@@ -757,4 +757,29 @@ mod callstack_tests {
         assert_eq!(call_value, SlValue::Bool(true));
     }
 
+    #[test]
+    fn defs_function_call_execution_is_covered() {
+        // Test actual defs function call to cover rhai_bridge.rs rewrite code
+        let mut engine = engine_from_sources(map(&[
+            (
+                "shared.defs.xml",
+                r#"<defs name="shared">
+  <function name="add" args="int:a,int:b" return="int:result">
+    result = a + b;
+  </function>
+</defs>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"<!-- include: shared.defs.xml -->
+<script name="main">
+  <text>${shared.add(1, 2)}</text>
+</script>"#,
+            ),
+        ]));
+        engine.start("main", None).expect("start");
+        let output = engine.next_output().expect("next");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "3"));
+    }
+
 }

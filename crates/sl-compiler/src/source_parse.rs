@@ -111,7 +111,7 @@ mod source_parse_tests {
             Some(SourceKind::Json)
         ));
         assert!(detect_source_kind("a.txt").is_none());
-    
+
         assert_eq!(
             resolve_include_path("nested/main.script.xml", "../shared.defs.xml"),
             "shared.defs.xml"
@@ -125,6 +125,16 @@ mod source_parse_tests {
             "a/c/d.script.xml"
         );
         assert_eq!(stable_base("a*b?c"), "a_b_c");
+
+        // Test .. path handling explicitly (covers line 87)
+        assert_eq!(
+            normalize_virtual_path("a/b/c/../d"),
+            "a/b/d"
+        );
+        assert_eq!(
+            normalize_virtual_path("../a"),
+            "a"
+        );
     }
 
 }

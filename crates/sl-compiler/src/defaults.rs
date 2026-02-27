@@ -52,5 +52,18 @@ mod defaults_tests {
         assert_eq!(defaults.get("hp"), Some(&SlValue::Number(0.0)));
         assert_eq!(defaults.get("name"), Some(&SlValue::String(String::new())));
     }
-    
+
+    #[test]
+    fn slvalue_from_json_handles_bool() {
+        let json_str = r#"{"active": true, "disabled": false}"#;
+        let json_value: JsonValue = serde_json::from_str(json_str).unwrap();
+        let sl_value = slvalue_from_json(json_value);
+        if let SlValue::Map(map) = sl_value {
+            assert_eq!(map.get("active"), Some(&SlValue::Bool(true)));
+            assert_eq!(map.get("disabled"), Some(&SlValue::Bool(false)));
+        } else {
+            panic!("expected Map");
+        }
+    }
+
 }

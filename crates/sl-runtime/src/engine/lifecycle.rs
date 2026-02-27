@@ -567,4 +567,21 @@ mod lifecycle_tests {
         assert!(engine.waiting_choice());
     }
 
+    #[test]
+    fn random_function_error_path_is_covered() {
+        // Test that random(n) with n <= 0 returns error (covers lifecycle.rs lines 218, 220-222)
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <code>let x = random(0);</code>
+      <text>done</text>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+        let error = engine.next_output().expect_err("random(0) should fail");
+        assert!(error.code == "ENGINE_EVAL_ERROR" || error.code == "ENGINE_RANDOM_ERROR");
+    }
+
 }

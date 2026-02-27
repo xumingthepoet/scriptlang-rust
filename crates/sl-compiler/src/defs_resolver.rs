@@ -920,4 +920,31 @@ mod defs_resolver_tests {
         assert_eq!(error.code, "TYPE_UNKNOWN");
     }
 
+    #[test]
+    fn defs_function_parsing_and_resolution_is_covered() {
+        // Test defs function parsing (covers line 40)
+        let files = map(&[
+            (
+                "shared.defs.xml",
+                r#"<defs name="shared">
+  <function name="add" args="int:a,int:b" return="int:result">
+    result = a + b;
+  </function>
+</defs>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="main">
+  <code>let x = shared.add(1, 2);</code>
+  <text>${x}</text>
+</script>
+"#,
+            ),
+        ]);
+        let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        assert!(bundle.scripts.contains_key("main"));
+    }
+
 }

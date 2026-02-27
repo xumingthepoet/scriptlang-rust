@@ -446,7 +446,55 @@ mod step_tests {
             ]
         );
     }
-    
+
+    #[test]
+    fn all_output_types_in_test_helper_are_covered() {
+        // Test to cover all branches in test helper: Choices and Input (lines 426-428, 430-431)
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A"><text>A</text></option>
+  </choice>
+  <var name="name" type="string">""</var>
+  <input var="name" text="Name"/>
+  <text>done</text>
+</script>"#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        let mut hit_choices = false;
+        let mut hit_input = false;
+
+        for _ in 0..10 {
+            match engine.next_output() {
+                Ok(EngineOutput::Text { text }) => {
+                    println!("Text: {}", text);
+                }
+                Ok(EngineOutput::Choices { items, .. }) => {
+                    println!("Choices: {} items", items.len());
+                    hit_choices = true;
+                    engine.choose(0).expect("choose");
+                }
+                Ok(EngineOutput::Input { .. }) => {
+                    println!("Input");
+                    hit_input = true;
+                    engine.submit_input("test").expect("input");
+                }
+                Ok(EngineOutput::End) => break,
+                Err(e) => {
+                    println!("Error: {}", e);
+                    break;
+                }
+            }
+        }
+
+        // Verify we hit both Choices and Input branches
+        assert!(hit_choices, "should have hit Choices branch");
+        assert!(hit_input, "should have hit Input branch");
+    }
+
     #[test]
     fn if_else_branch_covered_when_condition_false() {
         // Test else branch when condition evaluates to false
@@ -1103,6 +1151,186 @@ mod step_tests {
             .find_choice_continue_context()
             .expect("choice context lookup should still pass");
         assert!(missing.is_none());
+    }
+
+    #[test]
+    fn choice_option_when_expr_false_hides_option() {
+        // Test that when_expr returning false makes option invisible (covers once_state.rs line 10)
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <choice text="Pick">
+        <option text="A" when="false"><text>A</text></option>
+        <option text="B"><text>B</text></option>
+      </choice>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+        let output = engine.next_output().expect("next should pass");
+        // Option A with when="false" should be hidden, only B should be visible
+        if let EngineOutput::Choices { items, .. } = output {
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].text, "B");
+        } else {
+            panic!("expected Choices output");
+        }
+    }
+
+    #[test]
+    fn while_break_continue_execution_path_covered() {
+        // Test normal execution of break and continue in while loop
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="i" type="int">0</var>
+      <while when="i &lt; 5">
+        <code>i = i + 1;</code>
+        <if when="i == 2">
+          <continue/>
+        </if>
+        <if when="i == 4">
+          <break/>
+        </if>
+        <text>tick-${i}</text>
+      </while>
+      <text>done-${i}</text>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        let outputs: Vec<String> = (0..10).filter_map(|_| {
+            match engine.next_output().expect("next") {
+                EngineOutput::Text { text, .. } => Some(text),
+                EngineOutput::End => None,
+                _ => Some("skip".to_string()),
+            }
+        }).collect();
+
+        // Should see tick-1, tick-3, then done-4
+        // i=1: output tick-1
+        // i=2: continue (skip)
+        // i=3: output tick-3
+        // i=4: break
+        assert!(outputs.iter().any(|s| s.contains("tick-1")));
+        assert!(outputs.iter().any(|s| s.contains("tick-3")));
+        assert!(outputs.iter().any(|s| s.contains("done-4")));
+    }
+
+    #[test]
+    fn once_text_skipped_on_revisit() {
+        // Test that once text is skipped when revisited (covers step.rs lines 169-170)
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="i" type="int">0</var>
+      <while when="i &lt; 2">
+        <code>i = i + 1;</code>
+        <text once="true">only once</text>
+        <text>every time</text>
+      </while>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        // First iteration: "only once" and "every time"
+        let out1 = engine.next_output().expect("first");
+        assert!(matches!(out1, EngineOutput::Text { text, .. } if text == "only once"));
+
+        let out2 = engine.next_output().expect("second");
+        assert!(matches!(out2, EngineOutput::Text { text, .. } if text == "every time"));
+
+        // Second iteration: should skip "only once", only "every time"
+        let out3 = engine.next_output().expect("third");
+        assert!(matches!(out3, EngineOutput::Text { text, .. } if text == "every time"));
+
+        let out4 = engine.next_output().expect("fourth");
+        assert!(matches!(out4, EngineOutput::End));
+    }
+
+    #[test]
+    fn choice_continue_executes_successfully() {
+        // Test choice continue execution path (covers control_flow.rs lines 59-61)
+        // Note: continue in choice re-shows the choice, not advance to next node
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <choice text="Pick">
+        <option text="A"><continue/></option>
+        <option text="B"><text>B</text></option>
+      </choice>
+      <text>after</text>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        // Get choice
+        let out = engine.next_output().expect("choice");
+        assert!(matches!(out, EngineOutput::Choices { .. }));
+
+        // Choose option A with continue - this should re-show the choice
+        engine.choose(0).expect("choose");
+
+        // Continue in choice re-shows the choice (not advancing to "after")
+        let out2 = engine.next_output().expect("after choice");
+        // It should show choice again (since continue loops back)
+        assert!(matches!(out2, EngineOutput::Choices { .. }));
+
+        // Now choose B to exit the choice
+        engine.choose(1).expect("choose B");
+        let out3 = engine.next_output().expect("B text");
+        assert!(matches!(out3, EngineOutput::Text { text, .. } if text == "B"));
+    }
+
+    #[test]
+    fn choice_with_fallover_visible_when_regular_hidden() {
+        // Test choice where all regular options are hidden but fallover IS visible (covers line 234)
+        // Use while loop to revisit the choice multiple times
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="count" type="int">0</var>
+      <while when="count &lt; 3">
+        <code>count = count + 1;</code>
+        <choice text="Pick">
+          <option text="A" once="true"><text>A</text></option>
+          <option text="B" once="true"><text>B</text></option>
+          <option text="C" fall_over="true"><text>C</text></option>
+        </choice>
+      </while>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        // Iteration 1: A and B visible
+        let out1 = engine.next_output().expect("1");
+        assert!(matches!(out1, EngineOutput::Choices { .. }));
+        engine.choose(0).expect("choose A");
+        let _ = engine.next_output();
+
+        // Iteration 2: A hidden (once), B visible, still no fallover
+        let out2 = engine.next_output().expect("2");
+        assert!(matches!(out2, EngineOutput::Choices { .. }));
+        engine.choose(0).expect("choose B");
+        let _ = engine.next_output();
+
+        // Iteration 3: A and B hidden (both once), C as fallover visible -> line 234 covered
+        let out3 = engine.next_output().expect("3");
+        if let EngineOutput::Choices { items, .. } = &out3 {
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].text, "C");
+        } else {
+            panic!("expected Choices with fallover");
+        }
     }
 
 }
