@@ -37,6 +37,14 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 
 This split keeps crate boundaries unchanged and enforces one-way internal dependencies.
 
+## Testability Requirements (IMPORTANT)
+All code must be written with testability in mind:
+- **One-to-one test file mapping**: Each source file should have a corresponding test module in the same file (`#[cfg(test)] mod tests { ... }`).
+- **Test order**: Test functions must be defined in the same order as the functions they test within each file.
+- **100% coverage required**: All code paths must be covered by tests; `make gate` enforces this.
+- **Write tests first**: When fixing bugs or adding features, write the failing test first (TDD approach).
+- **Test support helpers**: Use the `*_test_support` modules provided by each crate for common test utilities.
+
 ## Runtime/Compiler Performance Notes
 - `sl-runtime` reuses a single internal `rhai::Engine` instance and keeps `random` builtin state in shared runtime storage, avoiding per-eval engine re-construction.
 - defs prelude generation is cached per script in runtime, so repeated expression/code evaluation does not rebuild identical prelude text.
