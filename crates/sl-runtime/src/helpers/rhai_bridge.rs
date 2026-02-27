@@ -82,9 +82,10 @@ fn replace_defs_global_symbol(source: &str, symbol: &str, replacement: &str) -> 
             continue;
         }
 
-        let Some(ch) = source[start..].chars().next() else {
-            break;
-        };
+        let ch = source[start..]
+            .chars()
+            .next()
+            .expect("non-empty suffix should have a char");
         let next = start + ch.len_utf8();
         out.push_str(&source[cursor..next]);
         cursor = next;
@@ -226,5 +227,78 @@ mod rhai_bridge_tests {
         assert!(rewritten.contains("shared.hp2 = 1;"));
         assert!(rewritten.contains("xshared.hp = 2;"));
         assert!(rewritten.contains("__sl_defs_ns_shared[\"hp\"] = 3;"));
+    }
+
+    #[test]
+    fn literal_helpers_cover_decimal_and_array_paths() {
+        assert_eq!(slvalue_to_text(&SlValue::Number(2.5)), "2.5");
+        assert_eq!(slvalue_to_rhai_literal(&SlValue::Number(2.5)), "2.5");
+        assert_eq!(
+            slvalue_to_rhai_literal(&SlValue::Array(vec![
+                SlValue::Number(1.0),
+                SlValue::Number(2.5),
+            ])),
+            "[1, 2.5]"
+        );
+    }
+
+    #[test]
+    fn bridge_helper_functions_cover_remaining_paths() {
+        assert_eq!(rhai_function_symbol("a.b-c"), "a_b_c");
+        assert_eq!(defs_namespace_symbol("shared.ns"), "__sl_defs_ns_shared_ns");
+        assert!(is_defs_identifier_char('a'));
+        assert!(is_defs_identifier_char('$'));
+        assert!(!is_defs_identifier_char('.'));
+        assert!(is_defs_global_left_boundary(None));
+        assert!(is_defs_global_left_boundary(Some(' ')));
+        assert!(!is_defs_global_left_boundary(Some('a')));
+        assert!(is_defs_global_right_boundary(None));
+        assert!(is_defs_global_right_boundary(Some(' ')));
+        assert!(!is_defs_global_right_boundary(Some(':')));
+
+        let rewritten = rewrite_function_calls(
+            "x = shared.add(1); y = add(2);",
+            &BTreeMap::from([
+                ("shared.add".to_string(), "__fn_shared_add".to_string()),
+                ("add".to_string(), "__fn_add".to_string()),
+            ]),
+        )
+        .expect("rewrite function calls");
+        assert!(rewritten.contains("__fn_shared_add("));
+        assert!(rewritten.contains("__fn_add("));
+
+        let rewritten_defs = rewrite_defs_global_qualified_access(
+            "x = shared.hp + other.hp;",
+            &BTreeMap::from([("shared.hp".to_string(), "__sl_defs_ns_shared.hp".to_string())]),
+        )
+        .expect("rewrite defs globals");
+        assert!(rewritten_defs.contains("__sl_defs_ns_shared.hp"));
+        assert!(rewritten_defs.contains("other.hp"));
+
+        assert_eq!(slvalue_to_text(&SlValue::Bool(true)), "true");
+        assert!(slvalue_to_text(&SlValue::Array(vec![SlValue::Number(1.0)])).contains("Array"));
+
+        let dynamic_map = slvalue_to_dynamic(&SlValue::Map(BTreeMap::from([(
+            "k".to_string(),
+            SlValue::Array(vec![SlValue::Bool(false)]),
+        )])))
+        .expect("to dynamic");
+        let roundtrip = dynamic_to_slvalue(dynamic_map).expect("roundtrip");
+        assert_eq!(
+            roundtrip,
+            SlValue::Map(BTreeMap::from([(
+                "k".to_string(),
+                SlValue::Array(vec![SlValue::Bool(false)]),
+            )]))
+        );
+
+        assert_eq!(slvalue_to_rhai_literal(&SlValue::String("A\"B".to_string())), "\"A\\\"B\"");
+        assert_eq!(
+            slvalue_to_rhai_literal(&SlValue::Map(BTreeMap::from([(
+                "k".to_string(),
+                SlValue::Number(1.0),
+            )]))),
+            "#{k: 1}"
+        );
     }
 }

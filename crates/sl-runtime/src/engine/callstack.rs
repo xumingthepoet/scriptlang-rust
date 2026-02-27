@@ -582,6 +582,82 @@ mod callstack_tests {
             .find_current_root_frame_index()
             .expect("root frame index should resolve");
         assert_eq!(root_index, engine.frames.len() - 1);
+
+        let mut no_inherited = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"<script name="main"><text>main</text></script>"#,
+            ),
+            (
+                "next.script.xml",
+                r#"<script name="next"><text>next</text></script>"#,
+            ),
+        ]));
+        let main_root = no_inherited
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        let next_root = no_inherited
+            .scripts
+            .get("next")
+            .expect("next script")
+            .root_group_id
+            .clone();
+        no_inherited.frames = vec![RuntimeFrame {
+            frame_id: 40,
+            group_id: main_root,
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::new(),
+        }];
+        no_inherited
+            .execute_return(Some("next".to_string()), &[])
+            .expect("return target should work without inherited continuation");
+        assert_eq!(no_inherited.frames.len(), 1);
+        assert_eq!(no_inherited.frames[0].group_id, next_root);
+        assert!(no_inherited.frames[0].return_continuation.is_none());
+
+        let mut root_lookup = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>x</text></script>"#,
+        )]));
+        let root_group = root_lookup
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        root_lookup.frames = vec![
+            RuntimeFrame {
+                frame_id: 50,
+                group_id: root_group.clone(),
+                node_index: 0,
+                scope: BTreeMap::new(),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: None,
+                var_types: BTreeMap::new(),
+            },
+            RuntimeFrame {
+                frame_id: 51,
+                group_id: root_group,
+                node_index: 0,
+                scope: BTreeMap::new(),
+                completion: CompletionKind::None,
+                script_root: false,
+                return_continuation: None,
+                var_types: BTreeMap::new(),
+            },
+        ];
+        let root_index = root_lookup
+            .find_current_root_frame_index()
+            .expect("root should be found after skipping non-root frame");
+        assert_eq!(root_index, 0);
     }
 
     #[test]

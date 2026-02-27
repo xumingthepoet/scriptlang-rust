@@ -108,6 +108,7 @@ impl ScriptLangEngine {
 
 #[cfg(test)]
 mod control_flow_tests {
+    use super::*;
     use super::runtime_test_support::*;
 
     #[test]
@@ -160,6 +161,47 @@ mod control_flow_tests {
             .next_output()
             .expect_err("extra return arg should fail");
         assert_eq!(error.code, "ENGINE_RETURN_ARG_UNKNOWN");
+    }
+
+    #[test]
+    fn choice_continue_context_skips_non_choice_predecessor_frames() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>x</text></script>"#,
+        )]));
+        let group_id = engine
+            .group_lookup
+            .keys()
+            .next()
+            .expect("group key")
+            .to_string();
+        engine.frames = vec![
+            RuntimeFrame {
+                frame_id: 1,
+                group_id: group_id.clone(),
+                node_index: 1,
+                scope: BTreeMap::new(),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: None,
+                var_types: BTreeMap::new(),
+            },
+            RuntimeFrame {
+                frame_id: 2,
+                group_id,
+                node_index: 0,
+                scope: BTreeMap::new(),
+                completion: CompletionKind::None,
+                script_root: false,
+                return_continuation: None,
+                var_types: BTreeMap::new(),
+            },
+        ];
+
+        let context = engine
+            .find_choice_continue_context()
+            .expect("context lookup should not fail");
+        assert!(context.is_none());
     }
 
 }

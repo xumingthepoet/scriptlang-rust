@@ -1234,4 +1234,37 @@ mod eval_tests {
         assert_eq!(error.code, "ENGINE_CHOICE_CONTINUE_TARGET_MISSING");
     }
 
+    #[test]
+    fn code_eval_with_defs_prelude_and_visible_json_is_covered() {
+        let mut engine = engine_from_sources(map(&[
+            ("game.json", r#"{ "bonus": 10 }"#),
+            (
+                "shared.defs.xml",
+                r#"
+<defs name="shared">
+  <function name="add_bonus" args="int:x" return="int:out">
+    out = x + game.bonus;
+  </function>
+</defs>
+"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<!-- include: game.json -->
+<script name="main">
+  <var name="hp" type="int">1</var>
+  <code>hp = shared.add_bonus(hp);</code>
+  <text>${hp}</text>
+</script>
+"#,
+            ),
+        ]));
+
+        engine.start("main", None).expect("start");
+        let output = engine.next_output().expect("text");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "11"));
+    }
+
 }

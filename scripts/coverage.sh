@@ -2,11 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-TMP_LCOV="$(mktemp)"
 TMP_LOG="$(mktemp)"
+TMP_UNCOVERED="$(mktemp)"
+TMP_OUT="$(mktemp)"
 
 cleanup() {
-  rm -f "$TMP_LCOV" "$TMP_LOG"
+  rm -f "$TMP_LOG" "$TMP_UNCOVERED" "$TMP_OUT"
 }
 trap cleanup EXIT
 
@@ -18,24 +19,31 @@ if ! cargo llvm-cov \
   --exclude sl-test-example \
   --all-features \
   --all-targets \
-  --lcov \
-  --output-path "$TMP_LCOV" >"$TMP_LOG" 2>&1; then
+  --show-missing-lines >"$TMP_LOG" 2>&1; then
   cat "$TMP_LOG"
   exit 1
 fi
 
-read -r covered_lines total_lines < <(
-  awk -F: '
-    /^LH:/ { covered += $2 }
-    /^LF:/ { total += $2 }
-    END { printf "%d %d\n", covered + 0, total + 0 }
-  ' "$TMP_LCOV"
-)
-if [[ "$total_lines" -eq 0 ]]; then
-  total_percent="100.00"
-else
-  total_percent="$(awk -v c="$covered_lines" -v t="$total_lines" 'BEGIN { printf "%.2f", (c * 100.0) / t }')"
+total_percent="$(
+  awk '
+    /TOTAL/ && /%/ {
+      for (i = NF; i >= 1; i--) {
+        if ($i ~ /^[0-9]+(\.[0-9]+)?%$/) {
+          gsub("%", "", $i)
+          print $i
+          exit
+        }
+      }
+    }
+  ' "$TMP_LOG"
+)"
+
+if [[ -z "${total_percent:-}" ]]; then
+  echo "Failed to parse total line coverage from llvm-cov output."
+  cat "$TMP_LOG"
+  exit 1
 fi
+
 printf 'LINE_COVERAGE: %.2f%%\n' "$total_percent"
 
 merge_ranges() {
@@ -73,60 +81,60 @@ merge_ranges() {
   (IFS=','; echo "${ranges[*]}")
 }
 
-awk -F: '
-  /^SF:/ { file = substr($0, 4); next }
-  /^DA:/ {
-    split($2, parts, ",")
-    print file "\t" (parts[1] + 0) "\t" (parts[2] + 0)
-    next
+normalize_ranges() {
+  local raw="$1"
+  local cleaned token start end n
+  local -a parts nums
+  cleaned="$(echo "$raw" | tr -d '[:space:]')"
+  [[ -z "$cleaned" ]] && { echo ""; return; }
+  IFS=',' read -r -a parts <<<"$cleaned"
+  for token in "${parts[@]}"; do
+    [[ -z "$token" ]] && continue
+    if [[ "$token" == *-* ]]; then
+      start="${token%-*}"
+      end="${token#*-}"
+      if [[ "$start" =~ ^[0-9]+$ && "$end" =~ ^[0-9]+$ && "$start" -le "$end" ]]; then
+        for ((n = start; n <= end; n++)); do
+          nums+=("$n")
+        done
+      fi
+    elif [[ "$token" =~ ^[0-9]+$ ]]; then
+      nums+=("$token")
+    fi
+  done
+  if [[ "${#nums[@]}" -eq 0 ]]; then
+    echo ""
+    return
+  fi
+  printf '%s\n' "${nums[@]}" | sort -n | uniq | paste -sd, -
+}
+
+awk '
+  BEGIN { in_uncovered = 0 }
+  /^Uncovered Lines:/ { in_uncovered = 1; next }
+  in_uncovered {
+    if ($0 ~ /^[[:space:]]*$/) next
+    if ($0 ~ /^[[:space:]]*[-=]+[[:space:]]*$/) next
+    if (index($0, ":") == 0) next
+    print
   }
-' "$TMP_LCOV" \
-  | sort -t $'\t' -k1,1 -k2,2n \
-  | awk -F'\t' '
-    function flush_file() {
-      if (current_file != "" && miss_count > 0) {
-        print current_file "\t" miss_count "\t" miss_csv
-      }
-    }
-    function flush_line() {
-      if (current_file != "" && current_line >= 0 && line_has_coverage == 0) {
-        miss_count++
-        miss_csv = miss_csv ((miss_csv == "") ? "" : ",") current_line
-      }
-    }
-    {
-      file = $1
-      line = $2 + 0
-      count = $3 + 0
+' "$TMP_LOG" >"$TMP_UNCOVERED"
 
-      if (current_file != file) {
-        flush_line()
-        flush_file()
-        current_file = file
-        current_line = -1
-        line_has_coverage = 0
-        miss_count = 0
-        miss_csv = ""
-      }
-
-      if (current_line != line) {
-        flush_line()
-        current_line = line
-        line_has_coverage = 0
-      }
-      if (count > 0) {
-        line_has_coverage = 1
-      }
-    }
-    END {
-      flush_line()
-      flush_file()
-    }
-  ' | while IFS=$'\t' read -r file missing_count missing_csv; do
+while IFS= read -r line; do
+  [[ -z "$line" ]] && continue
+  file="${line%%:*}"
+  raw="${line#*:}"
+  normalized="$(normalize_ranges "$raw")"
+  [[ -z "$normalized" ]] && continue
+  count="$(awk -F',' '{print NF}' <<<"$normalized")"
+  merged="$(merge_ranges "$normalized")"
   rel_file="${file#"$ROOT_DIR"/}"
-  merged="$(merge_ranges "$missing_csv")"
-  echo "$rel_file: $missing_count uncovered lines [$merged]"
-done
+  printf '%s: %s uncovered lines [%s]\n' "$rel_file" "$count" "$merged" >>"$TMP_OUT"
+done <"$TMP_UNCOVERED"
+
+if [[ -s "$TMP_OUT" ]]; then
+  sort "$TMP_OUT"
+fi
 
 if ! awk "BEGIN { exit !($total_percent >= 100.0) }"; then
   echo "Coverage check failed: line coverage is below 100%."
