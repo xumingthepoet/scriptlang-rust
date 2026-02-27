@@ -726,4 +726,43 @@ mod snapshot_tests {
             .expect_err("defs global type mismatch should fail");
         assert_eq!(error.code, "SNAPSHOT_DEFS_GLOBAL_TYPE");
     }
+
+    #[test]
+    pub(super) fn resume_allows_missing_defs_global_and_uses_type_default() {
+        let files = map(&[
+            (
+                "shared.defs.xml",
+                r#"
+    <defs name="shared">
+      <var name="hp" type="int">10</var>
+    </defs>
+    "#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: shared.defs.xml -->
+    <script name="main">
+      <choice text="Pick">
+        <option text="A"><text>${shared.hp}</text></option>
+      </choice>
+    </script>
+    "#,
+            ),
+        ]);
+
+        let mut engine = engine_from_sources(files.clone());
+        engine.start("main", None).expect("start");
+        let _ = engine.next_output().expect("choice");
+        let mut snapshot = engine.snapshot().expect("snapshot");
+        snapshot.defs_globals.remove("shared.hp");
+
+        let mut resumed = engine_from_sources(files);
+        resumed
+            .resume(snapshot)
+            .expect("resume should fill missing defs global with default");
+        resumed.choose(0).expect("choose");
+        let text = resumed.next_output().expect("text");
+        assert!(matches!(text, EngineOutput::Text { text, .. } if text == "0"));
+    }
 }

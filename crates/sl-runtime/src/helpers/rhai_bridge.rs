@@ -62,7 +62,7 @@ pub(crate) fn rewrite_defs_global_qualified_access(
     }
 
     let mut names = qualified_to_expr.iter().collect::<Vec<_>>();
-    names.sort_by_key(|(name, _)| Reverse(name.len()));
+    names.sort_by(|(left, _), (right, _)| right.len().cmp(&left.len()));
 
     let mut rewritten = source.to_string();
     for (qualified_name, target_expr) in names {
@@ -285,6 +285,23 @@ mod rhai_bridge_tests {
         .expect("rewrite defs globals");
         assert!(rewritten_defs.contains("__sl_defs_ns_shared.hp"));
         assert!(rewritten_defs.contains("other.hp"));
+
+        let rewritten_defs_multi = rewrite_defs_global_qualified_access(
+            "x = shared.hp + shared.hp.max;",
+            &BTreeMap::from([
+                (
+                    "shared.hp.max".to_string(),
+                    "__sl_defs_ns_shared.hp_max".to_string(),
+                ),
+                (
+                    "shared.hp".to_string(),
+                    "__sl_defs_ns_shared.hp".to_string(),
+                ),
+            ]),
+        )
+        .expect("rewrite defs globals with multiple symbols");
+        assert!(rewritten_defs_multi.contains("__sl_defs_ns_shared.hp_max"));
+        assert!(rewritten_defs_multi.contains("__sl_defs_ns_shared.hp"));
 
         assert_eq!(slvalue_to_text(&SlValue::Bool(true)), "true");
         assert!(slvalue_to_text(&SlValue::Array(vec![SlValue::Number(1.0)])).contains("Array"));
