@@ -1,4 +1,6 @@
-fn parse_ref_path(path: &str) -> Vec<String> {
+use sl_core::SlValue;
+
+pub(crate) fn parse_ref_path(path: &str) -> Vec<String> {
     path.split('.')
         .map(str::trim)
         .filter(|segment| !segment.is_empty())
@@ -6,7 +8,11 @@ fn parse_ref_path(path: &str) -> Vec<String> {
         .collect()
 }
 
-fn assign_nested_path(target: &mut SlValue, path: &[String], value: SlValue) -> Result<(), String> {
+pub(crate) fn assign_nested_path(
+    target: &mut SlValue,
+    path: &[String],
+    value: SlValue,
+) -> Result<(), String> {
     if path.is_empty() {
         *target = value;
         return Ok(());
@@ -28,4 +34,3 @@ fn assign_nested_path(target: &mut SlValue, path: &[String], value: SlValue) -> 
     };
     assign_nested_path(next, &path[1..], value)
 }
-

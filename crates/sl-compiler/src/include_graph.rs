@@ -1,4 +1,8 @@
-fn validate_include_graph(sources: &BTreeMap<String, SourceFile>) -> Result<(), ScriptLangError> {
+use crate::*;
+
+pub(crate) fn validate_include_graph(
+    sources: &BTreeMap<String, SourceFile>,
+) -> Result<(), ScriptLangError> {
     for (file_path, source) in sources {
         for include in &source.includes {
             if !sources.contains_key(include) {
@@ -60,7 +64,7 @@ fn validate_include_graph(sources: &BTreeMap<String, SourceFile>) -> Result<(), 
     Ok(())
 }
 
-fn collect_reachable_files(
+pub(crate) fn collect_reachable_files(
     start: &str,
     sources: &BTreeMap<String, SourceFile>,
 ) -> BTreeSet<String> {
@@ -80,4 +84,3 @@ fn collect_reachable_files(
 
     visited
 }
-

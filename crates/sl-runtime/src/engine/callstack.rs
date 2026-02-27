@@ -1,5 +1,8 @@
+use super::lifecycle::{CompletionKind, RuntimeFrame};
+use super::*;
+
 impl ScriptLangEngine {
-    fn execute_var_declaration(
+    pub(super) fn execute_var_declaration(
         &mut self,
         decl: &sl_core::VarDeclaration,
     ) -> Result<(), ScriptLangError> {
@@ -41,7 +44,7 @@ impl ScriptLangEngine {
         Ok(())
     }
 
-    fn execute_call(
+    pub(super) fn execute_call(
         &mut self,
         target_script: &str,
         args: &[sl_core::CallArgument],
@@ -131,7 +134,7 @@ impl ScriptLangEngine {
         Ok(())
     }
 
-    fn execute_return(
+    pub(super) fn execute_return(
         &mut self,
         target_script: Option<String>,
         args: &[sl_core::CallArgument],
@@ -222,7 +225,7 @@ impl ScriptLangEngine {
         Ok(())
     }
 
-    fn find_current_root_frame_index(&self) -> Result<usize, ScriptLangError> {
+    pub(super) fn find_current_root_frame_index(&self) -> Result<usize, ScriptLangError> {
         for (index, frame) in self.frames.iter().enumerate().rev() {
             if frame.script_root {
                 return Ok(index);
@@ -233,16 +236,15 @@ impl ScriptLangEngine {
             "No script root frame found.",
         ))
     }
-
 }
 
 #[cfg(test)]
 mod callstack_tests {
-    use super::*;
     use super::runtime_test_support::*;
+    use super::*;
 
     #[test]
-    fn nested_script_calls_covered() {
+    pub(super) fn nested_script_calls_covered() {
         // Test nested script calls
         let mut engine = engine_from_sources(map(&[
             (
@@ -259,13 +261,13 @@ mod callstack_tests {
             ),
         ]));
         engine.start("main", None).expect("start");
-    
+
         let output = engine.next_output().expect("next should pass");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "Hi"));
     }
 
     #[test]
-    fn runtime_errors_cover_call_argument_and_return_target_paths() {
+    pub(super) fn runtime_errors_cover_call_argument_and_return_target_paths() {
         let mut call_missing_target = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><call script="missing"/></script>"#,
@@ -275,7 +277,7 @@ mod callstack_tests {
             .next_output()
             .expect_err("missing call target should fail");
         assert_eq!(error.code, "ENGINE_CALL_TARGET");
-    
+
         let mut call_arg_mismatch = engine_from_sources(map(&[
             (
                 "main.script.xml",
@@ -297,7 +299,7 @@ mod callstack_tests {
             .next_output()
             .expect_err("ref mismatch should fail");
         assert_eq!(error.code, "ENGINE_CALL_REF_MISMATCH");
-    
+
         let mut return_target_missing = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><return script="missing"/></script>"#,
@@ -310,7 +312,7 @@ mod callstack_tests {
     }
 
     #[test]
-    fn finish_frame_and_return_paths_are_covered() {
+    pub(super) fn finish_frame_and_return_paths_are_covered() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><text>Hello</text></script>"#,
@@ -324,7 +326,7 @@ mod callstack_tests {
         let number_ty = ScriptType::Primitive {
             name: "int".to_string(),
         };
-    
+
         engine.frames = vec![RuntimeFrame {
             frame_id: 1,
             group_id: group_id.clone(),
@@ -341,7 +343,7 @@ mod callstack_tests {
         }];
         engine.finish_frame(1).expect("finish should pass");
         assert!(engine.ended);
-    
+
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><text>Hello</text></script>"#,
@@ -382,7 +384,7 @@ mod callstack_tests {
             .finish_frame(1)
             .expect_err("missing ref value should fail");
         assert_eq!(error.code, "ENGINE_REF_VALUE_MISSING");
-    
+
         let mut engine = engine_from_sources(map(&[
             (
                 "main.script.xml",
@@ -440,7 +442,7 @@ mod callstack_tests {
             Some(&SlValue::Number(7.0))
         );
         assert_eq!(engine.frames[1].group_id, next_root);
-    
+
         engine.frames = vec![RuntimeFrame {
             frame_id: 1,
             group_id: main_root.clone(),
@@ -455,7 +457,7 @@ mod callstack_tests {
             .execute_return(None, &[])
             .expect("return without continuation should pass");
         assert!(engine.ended);
-    
+
         engine.ended = false;
         engine.frames = vec![RuntimeFrame {
             frame_id: 1,
@@ -475,7 +477,7 @@ mod callstack_tests {
             .execute_return(None, &[])
             .expect("missing resume frame should end execution");
         assert!(engine.ended);
-    
+
         engine.ended = false;
         engine.frames = vec![
             RuntimeFrame {
@@ -515,7 +517,7 @@ mod callstack_tests {
     }
 
     #[test]
-    fn return_forwarding_and_root_index_success_paths_are_covered() {
+    pub(super) fn return_forwarding_and_root_index_success_paths_are_covered() {
         let mut engine = engine_from_sources(map(&[
             (
                 "main.script.xml",
@@ -661,7 +663,7 @@ mod callstack_tests {
     }
 
     #[test]
-    fn call_helpers_and_value_path_branches_are_covered() {
+    pub(super) fn call_helpers_and_value_path_branches_are_covered() {
         let mut no_frame = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><text>x</text></script>"#,
@@ -671,7 +673,7 @@ mod callstack_tests {
             .execute_call("main", &[])
             .expect_err("execute_call without frame should fail");
         assert_eq!(error.code, "ENGINE_CALL_NO_FRAME");
-    
+
         let mut ref_mismatch = engine_from_sources(map(&[
             (
                 "main.script.xml",
@@ -693,7 +695,7 @@ mod callstack_tests {
             .next_output()
             .expect_err("non-ref param with ref arg should fail");
         assert_eq!(error.code, "ENGINE_CALL_REF_MISMATCH");
-    
+
         let mut tail = engine_from_sources(map(&[
             (
                 "main.script.xml",
@@ -739,7 +741,7 @@ mod callstack_tests {
             )
             .expect_err("tail call with ref args should fail");
         assert_eq!(error.code, "ENGINE_TAIL_REF_UNSUPPORTED");
-    
+
         let mut tail_ok = engine_from_sources(map(&[
             (
                 "main.script.xml",
@@ -779,7 +781,7 @@ mod callstack_tests {
             )
             .expect("tail call optimization path should pass");
         assert_eq!(tail_ok.frames.len(), 1);
-    
+
         let mut globals = engine_from_sources(map(&[
             ("game.json", r#"{ "score": 10 }"#),
             (
@@ -800,7 +802,7 @@ mod callstack_tests {
         assert!(!globals.is_visible_json_global(None, "game"));
         assert!(!globals.is_visible_json_global(Some("missing"), "game"));
         assert!(globals.is_visible_json_global(Some("main"), "game"));
-    
+
         let value = globals
             .read_variable("game")
             .expect("visible json global should be readable");
@@ -815,7 +817,7 @@ mod callstack_tests {
             .read_variable("missing")
             .expect_err("missing variable should fail");
         assert_eq!(error.code, "ENGINE_VAR_READ");
-    
+
         let error = globals
             .write_variable("x", SlValue::String("bad".to_string()))
             .expect_err("type mismatch should fail");
@@ -828,7 +830,7 @@ mod callstack_tests {
             .write_variable("unknown", SlValue::Number(1.0))
             .expect_err("unknown variable should fail");
         assert_eq!(error.code, "ENGINE_VAR_WRITE");
-    
+
         let error = globals.read_path(" . ").expect_err("invalid path");
         assert_eq!(error.code, "ENGINE_REF_PATH");
         let error = globals
@@ -839,7 +841,7 @@ mod callstack_tests {
             .read_path("game.missing")
             .expect_err("missing nested key should fail");
         assert_eq!(error.code, "ENGINE_REF_PATH_READ");
-    
+
         let error = globals
             .write_path(" . ", SlValue::Number(1.0))
             .expect_err("invalid write path should fail");
@@ -851,7 +853,7 @@ mod callstack_tests {
             .write_path("x.y", SlValue::Number(1.0))
             .expect_err("nested write on non-map should fail");
         assert_eq!(error.code, "ENGINE_REF_PATH_WRITE");
-    
+
         assert!(slvalue_to_text(&SlValue::Array(vec![SlValue::Number(1.0)])).contains("Array"));
         assert_eq!(slvalue_to_rhai_literal(&SlValue::Bool(false)), "false");
         assert_eq!(slvalue_to_rhai_literal(&SlValue::Number(2.5)), "2.5");
@@ -859,7 +861,7 @@ mod callstack_tests {
             slvalue_to_rhai_literal(&SlValue::Array(vec![SlValue::Number(1.0)])),
             "[1]"
         );
-    
+
         let mut state = 1u32;
         let bounded = next_random_bounded_with(&mut state, 3, |state| {
             let candidate = if *state == 1 { u32::MAX } else { 7 };
@@ -867,7 +869,7 @@ mod callstack_tests {
             candidate
         });
         assert_eq!(bounded, 1);
-    
+
         let error = globals
             .create_script_root_scope("missing-script", BTreeMap::new())
             .expect_err("missing script should fail");
@@ -895,7 +897,7 @@ mod callstack_tests {
             .build_defs_prelude("main", &BTreeMap::new())
             .expect_err("missing symbol mapping should fail");
         assert_eq!(error.code, "ENGINE_DEFS_FUNCTION_SYMBOL_MISSING");
-    
+
         let registry = TestRegistry {
             names: vec!["f".to_string()],
         };
@@ -904,7 +906,7 @@ mod callstack_tests {
     }
 
     #[test]
-    fn defs_function_call_execution_is_covered() {
+    pub(super) fn defs_function_call_execution_is_covered() {
         // Test actual defs function call to cover rhai_bridge.rs rewrite code
         let mut engine = engine_from_sources(map(&[
             (
@@ -927,5 +929,4 @@ mod callstack_tests {
         let output = engine.next_output().expect("next");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "3"));
     }
-
 }

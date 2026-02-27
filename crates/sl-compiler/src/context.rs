@@ -1,20 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-
-use regex::Regex;
-use serde_json::Value as JsonValue;
-use sl_core::{
-    default_value_from_type, CallArgument, ChoiceOption, ContinueTarget, DefsGlobalVarDecl,
-    FunctionDecl, FunctionParam, FunctionReturn, ImplicitGroup, ScriptIr, ScriptLangError,
-    ScriptNode, ScriptParam, ScriptType, SlValue, SourceSpan, VarDeclaration,
-};
-use sl_parser::{
-    parse_include_directives, parse_xml_document, XmlElementNode, XmlNode, XmlTextNode,
-};
+use crate::*;
 
 pub const INTERNAL_RESERVED_NAME_PREFIX: &str = "__";
-const LOOP_TEMP_VAR_PREFIX: &str = "__sl_loop_";
+pub(crate) const LOOP_TEMP_VAR_PREFIX: &str = "__sl_loop_";
 
 #[derive(Debug, Clone)]
 pub struct CompileProjectBundleResult {
@@ -25,64 +12,64 @@ pub struct CompileProjectBundleResult {
 }
 
 #[derive(Debug, Clone)]
-enum SourceKind {
+pub(crate) enum SourceKind {
     ScriptXml,
     DefsXml,
     Json,
 }
 
 #[derive(Debug, Clone)]
-struct SourceFile {
-    kind: SourceKind,
-    includes: Vec<String>,
-    xml_root: Option<XmlElementNode>,
-    json_value: Option<SlValue>,
+pub(crate) struct SourceFile {
+    pub(crate) kind: SourceKind,
+    pub(crate) includes: Vec<String>,
+    pub(crate) xml_root: Option<XmlElementNode>,
+    pub(crate) json_value: Option<SlValue>,
 }
 
 #[derive(Debug, Clone)]
-struct ParsedTypeDecl {
-    name: String,
-    qualified_name: String,
-    fields: Vec<ParsedTypeFieldDecl>,
-    location: SourceSpan,
+pub(crate) struct ParsedTypeDecl {
+    pub(crate) name: String,
+    pub(crate) qualified_name: String,
+    pub(crate) fields: Vec<ParsedTypeFieldDecl>,
+    pub(crate) location: SourceSpan,
 }
 
 #[derive(Debug, Clone)]
-struct ParsedTypeFieldDecl {
-    name: String,
-    type_expr: ParsedTypeExpr,
-    location: SourceSpan,
+pub(crate) struct ParsedTypeFieldDecl {
+    pub(crate) name: String,
+    pub(crate) type_expr: ParsedTypeExpr,
+    pub(crate) location: SourceSpan,
 }
 
 #[derive(Debug, Clone)]
-struct ParsedFunctionDecl {
-    name: String,
-    qualified_name: String,
-    params: Vec<ParsedFunctionParamDecl>,
-    return_binding: ParsedFunctionParamDecl,
-    code: String,
-    location: SourceSpan,
+pub(crate) struct ParsedFunctionDecl {
+    pub(crate) name: String,
+    pub(crate) qualified_name: String,
+    pub(crate) params: Vec<ParsedFunctionParamDecl>,
+    pub(crate) return_binding: ParsedFunctionParamDecl,
+    pub(crate) code: String,
+    pub(crate) location: SourceSpan,
 }
 
 #[derive(Debug, Clone)]
-struct ParsedDefsGlobalVarDecl {
-    namespace: String,
-    name: String,
-    qualified_name: String,
-    type_expr: ParsedTypeExpr,
-    initial_value_expr: Option<String>,
-    location: SourceSpan,
+pub(crate) struct ParsedDefsGlobalVarDecl {
+    pub(crate) namespace: String,
+    pub(crate) name: String,
+    pub(crate) qualified_name: String,
+    pub(crate) type_expr: ParsedTypeExpr,
+    pub(crate) initial_value_expr: Option<String>,
+    pub(crate) location: SourceSpan,
 }
 
 #[derive(Debug, Clone)]
-struct ParsedFunctionParamDecl {
-    name: String,
-    type_expr: ParsedTypeExpr,
-    location: SourceSpan,
+pub(crate) struct ParsedFunctionParamDecl {
+    pub(crate) name: String,
+    pub(crate) type_expr: ParsedTypeExpr,
+    pub(crate) location: SourceSpan,
 }
 
 #[derive(Debug, Clone)]
-enum ParsedTypeExpr {
+pub(crate) enum ParsedTypeExpr {
     Primitive(String),
     Array(Box<ParsedTypeExpr>),
     Map(Box<ParsedTypeExpr>),
@@ -90,32 +77,32 @@ enum ParsedTypeExpr {
 }
 
 #[derive(Debug, Clone)]
-struct DefsDeclarations {
-    type_decls: Vec<ParsedTypeDecl>,
-    function_decls: Vec<ParsedFunctionDecl>,
-    defs_global_var_decls: Vec<ParsedDefsGlobalVarDecl>,
+pub(crate) struct DefsDeclarations {
+    pub(crate) type_decls: Vec<ParsedTypeDecl>,
+    pub(crate) function_decls: Vec<ParsedFunctionDecl>,
+    pub(crate) defs_global_var_decls: Vec<ParsedDefsGlobalVarDecl>,
 }
 
-type VisibleTypeMap = BTreeMap<String, ScriptType>;
-type VisibleFunctionMap = BTreeMap<String, FunctionDecl>;
+pub(crate) type VisibleTypeMap = BTreeMap<String, ScriptType>;
+pub(crate) type VisibleFunctionMap = BTreeMap<String, FunctionDecl>;
 
 #[derive(Debug, Clone)]
-struct MacroExpansionContext {
-    used_var_names: BTreeSet<String>,
-    loop_counter: usize,
+pub(crate) struct MacroExpansionContext {
+    pub(crate) used_var_names: BTreeSet<String>,
+    pub(crate) loop_counter: usize,
 }
 
 #[derive(Debug, Clone)]
-struct GroupBuilder {
-    script_path: String,
-    group_counter: usize,
-    node_counter: usize,
-    choice_counter: usize,
-    groups: BTreeMap<String, ImplicitGroup>,
+pub(crate) struct GroupBuilder {
+    pub(crate) script_path: String,
+    pub(crate) group_counter: usize,
+    pub(crate) node_counter: usize,
+    pub(crate) choice_counter: usize,
+    pub(crate) groups: BTreeMap<String, ImplicitGroup>,
 }
 
 impl GroupBuilder {
-    fn new(script_path: impl Into<String>) -> Self {
+    pub(crate) fn new(script_path: impl Into<String>) -> Self {
         Self {
             script_path: script_path.into(),
             group_counter: 0,
@@ -125,7 +112,7 @@ impl GroupBuilder {
         }
     }
 
-    fn next_group_id(&mut self) -> String {
+    pub(crate) fn next_group_id(&mut self) -> String {
         let id = format!(
             "{}::g{}",
             stable_base(&self.script_path),
@@ -135,7 +122,7 @@ impl GroupBuilder {
         id
     }
 
-    fn next_node_id(&mut self, kind: &str) -> String {
+    pub(crate) fn next_node_id(&mut self, kind: &str) -> String {
         let id = format!(
             "{}::n{}:{}",
             stable_base(&self.script_path),
@@ -146,7 +133,7 @@ impl GroupBuilder {
         id
     }
 
-    fn next_choice_id(&mut self) -> String {
+    pub(crate) fn next_choice_id(&mut self) -> String {
         let id = format!(
             "{}::c{}",
             stable_base(&self.script_path),

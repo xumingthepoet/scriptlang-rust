@@ -1,4 +1,6 @@
-fn parse_defs_files(
+use crate::*;
+
+pub(crate) fn parse_defs_files(
     sources: &BTreeMap<String, SourceFile>,
 ) -> Result<BTreeMap<String, DefsDeclarations>, ScriptLangError> {
     let mut defs_by_path = BTreeMap::new();
@@ -34,8 +36,11 @@ fn parse_defs_files(
                     child,
                     &collection_name,
                 )?),
-                "function" => function_decls
-                    .push(parse_function_declaration_node_with_namespace(child, &collection_name)?),
+                "function" => {
+                    let function_decl =
+                        parse_function_declaration_node_with_namespace(child, &collection_name)?;
+                    function_decls.push(function_decl);
+                }
                 "var" => defs_global_var_decls
                     .push(parse_defs_global_var_declaration(child, &collection_name)?),
                 _ => {
@@ -61,7 +66,7 @@ fn parse_defs_files(
     Ok(defs_by_path)
 }
 
-fn parse_defs_global_var_declaration(
+pub(crate) fn parse_defs_global_var_declaration(
     node: &XmlElementNode,
     namespace: &str,
 ) -> Result<ParsedDefsGlobalVarDecl, ScriptLangError> {
@@ -107,7 +112,7 @@ fn parse_defs_global_var_declaration(
     })
 }
 
-fn collect_global_json(
+pub(crate) fn collect_global_json(
     sources: &BTreeMap<String, SourceFile>,
 ) -> Result<BTreeMap<String, SlValue>, ScriptLangError> {
     let mut out = BTreeMap::new();
@@ -133,7 +138,7 @@ fn collect_global_json(
     Ok(out)
 }
 
-fn collect_visible_json_symbols(
+pub(crate) fn collect_visible_json_symbols(
     reachable: &BTreeSet<String>,
     sources: &BTreeMap<String, SourceFile>,
 ) -> Result<Vec<String>, ScriptLangError> {
@@ -162,7 +167,7 @@ fn collect_visible_json_symbols(
     Ok(symbols)
 }
 
-fn parse_json_global_symbol(file_path: &str) -> Result<String, ScriptLangError> {
+pub(crate) fn parse_json_global_symbol(file_path: &str) -> Result<String, ScriptLangError> {
     let path = Path::new(file_path);
     let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
         return Err(ScriptLangError::new(
@@ -182,14 +187,14 @@ fn parse_json_global_symbol(file_path: &str) -> Result<String, ScriptLangError> 
     Ok(stem.to_string())
 }
 
-fn json_symbol_regex() -> &'static Regex {
+pub(crate) fn json_symbol_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
         Regex::new(r"^[$A-Za-z_][$0-9A-Za-z_]*$").expect("json symbol regex must compile")
     })
 }
 
-fn resolve_visible_defs(
+pub(crate) fn resolve_visible_defs(
     reachable: &BTreeSet<String>,
     defs_by_path: &BTreeMap<String, DefsDeclarations>,
 ) -> Result<
@@ -237,13 +242,24 @@ fn resolve_visible_defs(
     let mut resolved_types: BTreeMap<String, ScriptType> = BTreeMap::new();
     let mut visiting = HashSet::new();
 
+    let mut resolve_visible_type = |type_name: &String| {
+        resolve_named_type_with_aliases(
+            type_name,
+            &type_decls_map,
+            &type_aliases,
+            &mut resolved_types,
+            &mut visiting,
+        )
+    };
     for type_name in type_decls_map.keys() {
-        resolve_named_type_with_aliases(type_name, &type_decls_map, &type_aliases, &mut resolved_types, &mut visiting)?;
+        resolve_visible_type(type_name)?;
     }
 
     let mut visible_types = resolved_types.clone();
     for (alias, qualified_name) in &type_aliases {
-        if let Some(ty) = resolved_types.get(qualified_name).cloned() { visible_types.insert(alias.clone(), ty); }
+        if let Some(ty) = resolved_types.get(qualified_name).cloned() {
+            visible_types.insert(alias.clone(), ty);
+        }
     }
 
     let mut functions: BTreeMap<String, FunctionDecl> = BTreeMap::new();
@@ -308,7 +324,15 @@ fn resolve_visible_defs(
             .get(qualified)
             .cloned()
             .expect("qualified function should exist in function map");
-        if !functions.contains_key(&alias) { functions.insert(alias.clone(), FunctionDecl { name: alias, ..decl }); }
+        if !functions.contains_key(&alias) {
+            functions.insert(
+                alias.clone(),
+                FunctionDecl {
+                    name: alias,
+                    ..decl
+                },
+            );
+        }
     }
 
     let mut defs_globals_qualified = BTreeMap::new();
@@ -363,7 +387,7 @@ fn resolve_visible_defs(
     Ok((visible_types, functions, defs_globals))
 }
 
-fn collect_defs_globals_for_bundle(
+pub(crate) fn collect_defs_globals_for_bundle(
     defs_by_path: &BTreeMap<String, DefsDeclarations>,
 ) -> Result<(BTreeMap<String, DefsGlobalVarDecl>, Vec<String>), ScriptLangError> {
     let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
@@ -411,7 +435,9 @@ fn collect_defs_globals_for_bundle(
 
     let mut visible_types = resolved_types.clone();
     for (alias, qualified_name) in &type_aliases {
-        if let Some(ty) = resolved_types.get(qualified_name).cloned() { visible_types.insert(alias.clone(), ty); }
+        if let Some(ty) = resolved_types.get(qualified_name).cloned() {
+            visible_types.insert(alias.clone(), ty);
+        }
     }
 
     let mut defs_globals = BTreeMap::new();
@@ -447,7 +473,7 @@ fn collect_defs_globals_for_bundle(
     Ok((defs_globals, init_order))
 }
 
-fn validate_defs_global_init_order(
+pub(crate) fn validate_defs_global_init_order(
     defs_globals: &BTreeMap<String, DefsGlobalVarDecl>,
     init_order: &[String],
 ) -> Result<(), ScriptLangError> {
@@ -538,10 +564,10 @@ mod defs_resolver_tests {
             }],
             defs_global_var_decls: Vec::new(),
         };
-    
+
         let reachable = BTreeSet::from(["shared.defs.xml".to_string()]);
         let defs_by_path = BTreeMap::from([("shared.defs.xml".to_string(), defs)]);
-    
+
         let (types, functions, defs_globals) =
             resolve_visible_defs(&reachable, &defs_by_path).expect("defs should resolve");
         assert!(types.contains_key("Obj"));
@@ -557,7 +583,7 @@ mod defs_resolver_tests {
     #[test]
     fn resolve_visible_defs_handles_namespace_collisions_and_alias_edges() {
         let span = SourceSpan::synthetic();
-    
+
         let duplicate_qualified = DefsDeclarations {
             type_decls: vec![ParsedTypeDecl {
                 name: "T".to_string(),
@@ -581,7 +607,7 @@ mod defs_resolver_tests {
         let duplicate_error = resolve_visible_defs(&duplicate_reachable, &duplicate_defs_by_path)
             .expect_err("duplicate qualified type should fail");
         assert_eq!(duplicate_error.code, "TYPE_DECL_DUPLICATE");
-    
+
         let defs_by_path = BTreeMap::from([
             (
                 "a.defs.xml".to_string(),
@@ -713,8 +739,8 @@ mod defs_resolver_tests {
             ),
         ]);
 
-        let error = compile_project_bundle_from_xml_map(&files)
-            .expect_err("forward reference should fail");
+        let error =
+            compile_project_bundle_from_xml_map(&files).expect_err("forward reference should fail");
         assert_eq!(error.code, "DEFS_GLOBAL_INIT_ORDER");
     }
 
@@ -739,7 +765,8 @@ mod defs_resolver_tests {
             ),
         ]);
 
-        let bundle = compile_project_bundle_from_xml_map(&files).expect("back reference should pass");
+        let bundle =
+            compile_project_bundle_from_xml_map(&files).expect("back reference should pass");
         assert!(bundle.defs_global_declarations.contains_key("shared.a"));
         assert!(bundle.defs_global_declarations.contains_key("shared.b"));
     }
@@ -807,8 +834,9 @@ mod defs_resolver_tests {
                 r#"<defs name="shared"><var name="hp" type="int">2</var></defs>"#,
             ),
         ]);
-        let duplicate_globals_error = compile_project_bundle_from_xml_map(&duplicate_globals_bundle)
-            .expect_err("bundle duplicate defs global should fail");
+        let duplicate_globals_error =
+            compile_project_bundle_from_xml_map(&duplicate_globals_bundle)
+                .expect_err("bundle duplicate defs global should fail");
         assert_eq!(duplicate_globals_error.code, "DEFS_GLOBAL_VAR_DUPLICATE");
 
         let empty_initializer = map(&[
@@ -885,7 +913,7 @@ mod defs_resolver_tests {
         let bad_defs = map(&[("x.defs.xml", "<script name=\"x\"></script>")]);
         let error = compile_project_bundle_from_xml_map(&bad_defs).expect_err("bad defs root");
         assert_eq!(error.code, "XML_ROOT_INVALID");
-    
+
         let duplicate_types = map(&[
             (
                 "a.defs.xml",
@@ -907,7 +935,7 @@ mod defs_resolver_tests {
         let error = compile_project_bundle_from_xml_map(&duplicate_types)
             .expect_err("ambiguous unqualified type should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
-    
+
         let recursive = map(&[
             (
                 "x.defs.xml",
@@ -953,4 +981,23 @@ mod defs_resolver_tests {
         assert!(bundle.scripts.contains_key("main"));
     }
 
+    #[test]
+    fn parse_defs_files_and_type_resolution_success_paths_are_covered() {
+        let files = map(&[(
+            "shared.defs.xml",
+            r#"<defs name="shared">
+  <type name="Obj"><field name="value" type="int"/></type>
+  <function name="make" args="int:seed" return="Obj:ret">
+    ret = #{ value: seed };
+  </function>
+</defs>"#,
+        )]);
+        let sources = parse_sources(&files).expect("parse sources");
+        let defs_by_path = parse_defs_files(&sources).expect("parse defs");
+        let reachable = BTreeSet::from(["shared.defs.xml".to_string()]);
+        let (types, functions, _) =
+            resolve_visible_defs(&reachable, &defs_by_path).expect("resolve defs");
+        assert!(types.contains_key("shared.Obj"));
+        assert!(functions.contains_key("shared.make"));
+    }
 }

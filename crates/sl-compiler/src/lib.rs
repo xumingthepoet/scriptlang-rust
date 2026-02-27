@@ -1,15 +1,45 @@
-include!("context.rs");
-include!("pipeline.rs");
-include!("source_parse.rs");
-include!("include_graph.rs");
-include!("defs_resolver.rs");
-include!("type_expr.rs");
-include!("json_symbols.rs");
-include!("sanitize.rs");
-include!("script_compile.rs");
-include!("xml_utils.rs");
-include!("macro_expand.rs");
-include!("defaults.rs");
+pub(crate) use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+pub(crate) use std::path::{Path, PathBuf};
+pub(crate) use std::sync::OnceLock;
+
+pub(crate) use regex::Regex;
+pub(crate) use serde_json::Value as JsonValue;
+pub(crate) use sl_core::{
+    default_value_from_type, CallArgument, ChoiceOption, ContinueTarget, DefsGlobalVarDecl,
+    FunctionDecl, FunctionParam, FunctionReturn, ImplicitGroup, ScriptIr, ScriptLangError,
+    ScriptNode, ScriptParam, ScriptType, SlValue, SourceSpan, VarDeclaration,
+};
+pub(crate) use sl_parser::{
+    parse_include_directives, parse_xml_document, XmlElementNode, XmlNode, XmlTextNode,
+};
+
+mod context;
+mod defaults;
+mod defs_resolver;
+mod include_graph;
+mod json_symbols;
+mod macro_expand;
+mod pipeline;
+mod sanitize;
+mod script_compile;
+mod source_parse;
+mod type_expr;
+mod xml_utils;
+
+pub use context::CompileProjectBundleResult;
+pub use pipeline::{compile_project_bundle_from_xml_map, compile_project_scripts_from_xml_map};
+
+pub(crate) use context::*;
+pub(crate) use defaults::*;
+pub(crate) use defs_resolver::*;
+pub(crate) use include_graph::*;
+pub(crate) use json_symbols::*;
+pub(crate) use macro_expand::*;
+pub(crate) use sanitize::*;
+pub(crate) use script_compile::*;
+pub(crate) use source_parse::*;
+pub(crate) use type_expr::*;
+pub(crate) use xml_utils::*;
 
 #[cfg(test)]
 pub(crate) mod compiler_test_support {

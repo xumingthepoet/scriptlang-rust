@@ -1,27 +1,48 @@
+#![allow(unused_imports)]
+
 mod rng;
 
+use std::cell::RefCell;
+use std::cmp::Reverse;
+use std::collections::BTreeMap;
+use std::collections::{BTreeSet, HashMap};
+use std::rc::Rc;
+use std::sync::{Arc, OnceLock};
+
+use crate::helpers::rhai_bridge::{
+    defs_namespace_symbol, dynamic_to_slvalue, replace_defs_global_symbol,
+    rewrite_defs_global_qualified_access, rewrite_function_calls, rhai_function_symbol,
+    slvalue_to_dynamic, slvalue_to_rhai_literal, slvalue_to_text,
+};
+use crate::helpers::value_path::{assign_nested_path, parse_ref_path};
+use regex::Regex;
+use rhai::{
+    Array, Dynamic, Engine, EvalAltResult, ImmutableString, Map, Position, Scope, FLOAT, INT,
+};
 use rng::next_random_bounded;
 #[cfg(test)]
 use rng::{next_random_bounded_with, next_random_u32};
+use sl_core::{
+    default_value_from_type, is_type_compatible, ChoiceItem, ContinuationFrame, ContinueTarget,
+    DefsGlobalVarDecl, EngineOutput, PendingBoundaryV3, ScriptIr, ScriptLangError, ScriptNode,
+    ScriptType, SlValue, SnapshotCompletion, SnapshotFrameV3, SnapshotV3,
+};
 
-include!("lifecycle.rs");
-include!("step.rs");
-include!("boundary.rs");
-include!("snapshot.rs");
-include!("frame_stack.rs");
-include!("callstack.rs");
-include!("control_flow.rs");
-include!("eval.rs");
-include!("scope.rs");
-include!("once_state.rs");
-include!("../helpers/value_path.rs");
-include!("../helpers/rhai_bridge.rs");
-#[cfg(test)]
-mod lifecycle_tests;
-#[cfg(test)]
-mod rhai_bridge_tests;
-#[cfg(test)]
-mod snapshot_tests;
+mod boundary;
+mod callstack;
+mod control_flow;
+mod eval;
+mod frame_stack;
+mod lifecycle;
+mod once_state;
+mod scope;
+mod snapshot;
+mod step;
+
+pub use lifecycle::{
+    EmptyHostFunctionRegistry, HostFunctionRegistry, ScriptLangEngine, ScriptLangEngineOptions,
+    DEFAULT_COMPILER_VERSION, SNAPSHOT_SCHEMA_V3,
+};
 
 #[cfg(test)]
 pub(super) mod runtime_test_support {

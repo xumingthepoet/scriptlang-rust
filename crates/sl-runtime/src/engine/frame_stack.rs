@@ -1,5 +1,8 @@
+use super::lifecycle::{CompletionKind, PendingBoundary, RuntimeFrame};
+use super::*;
+
 impl ScriptLangEngine {
-    fn reset(&mut self) {
+    pub(super) fn reset(&mut self) {
         self.frames.clear();
         self.pending_boundary = None;
         self.waiting_choice = false;
@@ -10,7 +13,7 @@ impl ScriptLangEngine {
         self.defs_globals_value.clear();
     }
 
-    fn boundary_output(&self, boundary: &PendingBoundary) -> EngineOutput {
+    pub(super) fn boundary_output(&self, boundary: &PendingBoundary) -> EngineOutput {
         match boundary {
             PendingBoundary::Choice {
                 options,
@@ -31,14 +34,14 @@ impl ScriptLangEngine {
         }
     }
 
-    fn top_frame_id(&self) -> Result<u64, ScriptLangError> {
+    pub(super) fn top_frame_id(&self) -> Result<u64, ScriptLangError> {
         self.frames
             .last()
             .map(|frame| frame.frame_id)
             .ok_or_else(|| ScriptLangError::new("ENGINE_NO_FRAME", "No runtime frame available."))
     }
 
-    fn bump_top_node_index(&mut self, amount: usize) -> Result<(), ScriptLangError> {
+    pub(super) fn bump_top_node_index(&mut self, amount: usize) -> Result<(), ScriptLangError> {
         let frame = self.frames.last_mut().ok_or_else(|| {
             ScriptLangError::new("ENGINE_NO_FRAME", "No runtime frame available.")
         })?;
@@ -46,13 +49,13 @@ impl ScriptLangEngine {
         Ok(())
     }
 
-    fn find_frame_index(&self, frame_id: u64) -> Option<usize> {
+    pub(super) fn find_frame_index(&self, frame_id: u64) -> Option<usize> {
         self.frames
             .iter()
             .position(|frame| frame.frame_id == frame_id)
     }
 
-    fn lookup_group(
+    pub(super) fn lookup_group(
         &self,
         group_id: &str,
     ) -> Result<(&str, &sl_core::ImplicitGroup), ScriptLangError> {
@@ -80,7 +83,7 @@ impl ScriptLangEngine {
         Ok((&lookup.script_name, group))
     }
 
-    fn push_root_frame(
+    pub(super) fn push_root_frame(
         &mut self,
         group_id: &str,
         scope: BTreeMap<String, SlValue>,
@@ -100,7 +103,7 @@ impl ScriptLangEngine {
         self.frame_counter += 1;
     }
 
-    fn push_group_frame(
+    pub(super) fn push_group_frame(
         &mut self,
         group_id: &str,
         completion: CompletionKind,
@@ -126,7 +129,7 @@ impl ScriptLangEngine {
         Ok(())
     }
 
-    fn finish_frame(&mut self, frame_id: u64) -> Result<(), ScriptLangError> {
+    pub(super) fn finish_frame(&mut self, frame_id: u64) -> Result<(), ScriptLangError> {
         let Some(index) = self.find_frame_index(frame_id) else {
             return Ok(());
         };
@@ -158,16 +161,15 @@ impl ScriptLangEngine {
         self.frames[resume_index].node_index = continuation.next_node_index;
         Ok(())
     }
-
 }
 
 #[cfg(test)]
 mod frame_stack_tests {
-    use super::*;
     use super::runtime_test_support::*;
+    use super::*;
 
     #[test]
-    fn internal_state_error_paths_are_covered() {
+    pub(super) fn internal_state_error_paths_are_covered() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
@@ -178,7 +180,7 @@ mod frame_stack_tests {
     </script>
     "#,
         )]));
-    
+
         engine.start("main", None).expect("start");
         let first = engine.next_output().expect("choice");
         assert!(matches!(first, EngineOutput::Choices { .. }));
@@ -208,12 +210,12 @@ mod frame_stack_tests {
         });
         let again = engine.next_output().expect("pending boundary should echo");
         assert!(matches!(again, EngineOutput::Choices { .. }));
-    
+
         engine.pending_boundary = None;
         engine.ended = true;
         let end = engine.next_output().expect("ended should return end");
         assert!(matches!(end, EngineOutput::End));
-    
+
         engine.pending_boundary = Some(PendingBoundary::Choice {
             frame_id: 999_999,
             node_id: "x".to_string(),
@@ -222,7 +224,7 @@ mod frame_stack_tests {
         });
         let error = engine.choose(0).expect_err("missing frame should fail");
         assert_eq!(error.code, "ENGINE_CHOICE_FRAME_MISSING");
-    
+
         engine.pending_boundary = Some(PendingBoundary::Input {
             frame_id: 999_999,
             node_id: "x".to_string(),
@@ -234,7 +236,7 @@ mod frame_stack_tests {
             .submit_input("abc")
             .expect_err("missing input frame should fail");
         assert_eq!(error.code, "ENGINE_INPUT_FRAME_MISSING");
-    
+
         let mut helper_engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><text>Hello</text></script>"#,
@@ -245,17 +247,16 @@ mod frame_stack_tests {
             .bump_top_node_index(1)
             .expect_err("no frame for bump");
         assert_eq!(err.code, "ENGINE_NO_FRAME");
-    
+
         let err = helper_engine
             .push_group_frame("missing-group", CompletionKind::ResumeAfterChild)
             .expect_err("missing group");
         assert_eq!(err.code, "ENGINE_GROUP_NOT_FOUND");
-    
+
         assert!(helper_engine.finish_frame(123).is_ok());
         let err = helper_engine
             .find_current_root_frame_index()
             .expect_err("no root frame");
         assert_eq!(err.code, "ENGINE_ROOT_FRAME");
     }
-
 }

@@ -1,4 +1,6 @@
-fn sanitize_rhai_source(source: &str) -> String {
+use crate::*;
+
+pub(crate) fn sanitize_rhai_source(source: &str) -> String {
     let without_line_comments = line_comment_regex().replace_all(source, " ");
     let without_block_comments = block_comment_regex().replace_all(&without_line_comments, " ");
     let without_double_quotes = double_quote_regex().replace_all(&without_block_comments, " ");
@@ -7,7 +9,7 @@ fn sanitize_rhai_source(source: &str) -> String {
         .into_owned()
 }
 
-fn contains_root_identifier(source: &str, symbol: &str) -> bool {
+pub(crate) fn contains_root_identifier(source: &str, symbol: &str) -> bool {
     if symbol.is_empty() {
         return false;
     }
@@ -27,38 +29,38 @@ fn contains_root_identifier(source: &str, symbol: &str) -> bool {
     false
 }
 
-fn line_comment_regex() -> &'static Regex {
+pub(crate) fn line_comment_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| Regex::new(r"//[^\n]*").expect("line comment regex"))
 }
 
-fn block_comment_regex() -> &'static Regex {
+pub(crate) fn block_comment_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| Regex::new(r"(?s)/\*.*?\*/").expect("block comment regex"))
 }
 
-fn double_quote_regex() -> &'static Regex {
+pub(crate) fn double_quote_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| Regex::new(r#""(?:\\.|[^"\\])*""#).expect("double quote regex"))
 }
 
-fn single_quote_regex() -> &'static Regex {
+pub(crate) fn single_quote_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| Regex::new(r#"'(?:\\.|[^'\\])*'"#).expect("single quote regex"))
 }
 
-fn is_identifier_char(ch: char) -> bool {
+pub(crate) fn is_identifier_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '$' || ch == '_'
 }
 
-fn is_left_boundary(left: Option<char>) -> bool {
+pub(crate) fn is_left_boundary(left: Option<char>) -> bool {
     match left {
         None => true,
         Some(ch) => !is_identifier_char(ch) && ch != '.',
     }
 }
 
-fn is_right_boundary(right: Option<char>) -> bool {
+pub(crate) fn is_right_boundary(right: Option<char>) -> bool {
     match right {
         None => true,
         Some(ch) => !is_identifier_char(ch) && ch != ':',

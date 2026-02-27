@@ -1,3 +1,5 @@
+use crate::*;
+
 pub fn compile_project_scripts_from_xml_map(
     xml_by_path: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<String, ScriptIr>, ScriptLangError> {
@@ -94,7 +96,7 @@ mod pipeline_tests {
     </script>
     "#,
         )]);
-    
+
         let result = compile_project_bundle_from_xml_map(&files).expect("project should compile");
         assert!(result.scripts.contains_key("main"));
         let main = result.scripts.get("main").expect("main script");
@@ -145,8 +147,14 @@ mod pipeline_tests {
     #[test]
     fn compile_scripts_from_xml_map_returns_script_only_bundle() {
         let files = map(&[
-            ("main.script.xml", r#"<script name="main"><text>Main</text></script>"#),
-            ("alt.script.xml", r#"<script name="alt"><text>Alt</text></script>"#),
+            (
+                "main.script.xml",
+                r#"<script name="main"><text>Main</text></script>"#,
+            ),
+            (
+                "alt.script.xml",
+                r#"<script name="alt"><text>Alt</text></script>"#,
+            ),
         ]);
         let scripts = compile_project_scripts_from_xml_map(&files).expect("compile should pass");
         assert!(scripts.contains_key("main"));
@@ -173,7 +181,7 @@ mod pipeline_tests {
         let missing = compile_project_bundle_from_xml_map(&missing_include)
             .expect_err("missing include should fail");
         assert_eq!(missing.code, "INCLUDE_NOT_FOUND");
-    
+
         let cycle = map(&[
             (
                 "a.script.xml",
@@ -201,7 +209,7 @@ mod pipeline_tests {
         let root_error =
             compile_project_bundle_from_xml_map(&invalid_root).expect_err("invalid root");
         assert_eq!(root_error.code, "XML_ROOT_INVALID");
-    
+
         let duplicate_script_name = map(&[
             ("a.script.xml", "<script name=\"main\"></script>"),
             ("b.script.xml", "<script name=\"main\"></script>"),
@@ -255,5 +263,4 @@ mod pipeline_tests {
         assert!(conflict_main.visible_defs_globals.contains_key("b.hp"));
         assert!(!conflict_main.visible_defs_globals.contains_key("hp"));
     }
-
 }

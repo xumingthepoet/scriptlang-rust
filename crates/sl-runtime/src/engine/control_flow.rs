@@ -1,5 +1,8 @@
+use super::lifecycle::{CompletionKind, PendingBoundary, RuntimeFrame};
+use super::*;
+
 impl ScriptLangEngine {
-    fn execute_break(&mut self) -> Result<(), ScriptLangError> {
+    pub(super) fn execute_break(&mut self) -> Result<(), ScriptLangError> {
         let while_body_index = self.find_nearest_while_body_frame_index().ok_or_else(|| {
             ScriptLangError::new(
                 "ENGINE_WHILE_CONTROL_TARGET_MISSING",
@@ -29,7 +32,7 @@ impl ScriptLangEngine {
         Ok(())
     }
 
-    fn execute_continue_while(&mut self) -> Result<(), ScriptLangError> {
+    pub(super) fn execute_continue_while(&mut self) -> Result<(), ScriptLangError> {
         let while_body_index = self.find_nearest_while_body_frame_index().ok_or_else(|| {
             ScriptLangError::new(
                 "ENGINE_WHILE_CONTROL_TARGET_MISSING",
@@ -47,7 +50,7 @@ impl ScriptLangEngine {
         Ok(())
     }
 
-    fn execute_continue_choice(&mut self) -> Result<(), ScriptLangError> {
+    pub(super) fn execute_continue_choice(&mut self) -> Result<(), ScriptLangError> {
         let Some((choice_frame_index, choice_node_index)) = self.find_choice_continue_context()?
         else {
             return Err(ScriptLangError::new(
@@ -61,7 +64,9 @@ impl ScriptLangEngine {
         Ok(())
     }
 
-    fn find_choice_continue_context(&self) -> Result<Option<(usize, usize)>, ScriptLangError> {
+    pub(super) fn find_choice_continue_context(
+        &self,
+    ) -> Result<Option<(usize, usize)>, ScriptLangError> {
         for frame_index in (0..self.frames.len()).rev() {
             let frame = &self.frames[frame_index];
             if frame.node_index == 0 {
@@ -90,7 +95,7 @@ impl ScriptLangEngine {
         Ok(None)
     }
 
-    fn find_nearest_while_body_frame_index(&self) -> Option<usize> {
+    pub(super) fn find_nearest_while_body_frame_index(&self) -> Option<usize> {
         for (index, frame) in self.frames.iter().enumerate().rev() {
             if frame.completion == CompletionKind::WhileBody {
                 return Some(index);
@@ -99,20 +104,19 @@ impl ScriptLangEngine {
         None
     }
 
-    fn end_execution(&mut self) {
+    pub(super) fn end_execution(&mut self) {
         self.ended = true;
         self.frames.clear();
     }
-
 }
 
 #[cfg(test)]
 mod control_flow_tests {
-    use super::*;
     use super::runtime_test_support::*;
+    use super::*;
 
     #[test]
-    fn runtime_errors_cover_break_continue_and_return_args() {
+    pub(super) fn runtime_errors_cover_break_continue_and_return_args() {
         let mut source = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
@@ -145,7 +149,7 @@ mod control_flow_tests {
             .resume(snapshot)
             .expect_err("missing group in snapshot should fail");
         assert_eq!(error.code, "ENGINE_GROUP_NOT_FOUND");
-    
+
         let mut return_arg_unknown = engine_from_sources(map(&[
             (
                 "main.script.xml",
@@ -164,7 +168,7 @@ mod control_flow_tests {
     }
 
     #[test]
-    fn choice_continue_context_skips_non_choice_predecessor_frames() {
+    pub(super) fn choice_continue_context_skips_non_choice_predecessor_frames() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><text>x</text></script>"#,
@@ -203,5 +207,4 @@ mod control_flow_tests {
             .expect("context lookup should not fail");
         assert!(context.is_none());
     }
-
 }

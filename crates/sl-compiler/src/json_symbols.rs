@@ -1,4 +1,6 @@
-fn compile_script(
+use crate::*;
+
+pub(crate) fn compile_script(
     script_path: &str,
     root: &XmlElementNode,
     visible_types: &BTreeMap<String, ScriptType>,
@@ -62,7 +64,7 @@ fn compile_script(
     Ok(ir)
 }
 
-fn validate_json_symbol_visibility(
+pub(crate) fn validate_json_symbol_visibility(
     script_ir: &ScriptIr,
     all_json_symbols: &BTreeSet<String>,
 ) -> Result<(), ScriptLangError> {
@@ -89,6 +91,16 @@ fn validate_json_symbol_visibility(
     script_allowed.extend(defs_global_roots.iter().cloned());
     script_allowed.extend(defs_global_short_aliases.iter().cloned());
     script_allowed.insert("random".to_string());
+    let ensure_script_node_safe = |expr: &str, context: &'static str, location: &SourceSpan| {
+        ensure_no_hidden_json_symbol(
+            expr,
+            &hidden_json,
+            &script_allowed,
+            &script_ir.script_name,
+            context,
+            location,
+        )
+    };
 
     for group in script_ir.groups.values() {
         for node in &group.nodes {
@@ -108,11 +120,11 @@ fn validate_json_symbol_visibility(
                     }
                 }
                 ScriptNode::Code { code, location, .. } => {
-                    ensure_no_hidden_json_symbol(code, &hidden_json, &script_allowed, &script_ir.script_name, "code block", location)?;
+                    ensure_script_node_safe(code, "code block", location)?;
                 }
                 ScriptNode::Var { declaration, .. } => {
                     for expr in declaration.initial_value_expr.iter() {
-                        ensure_no_hidden_json_symbol(expr, &hidden_json, &script_allowed, &script_ir.script_name, "var initializer", &declaration.location)?;
+                        ensure_script_node_safe(expr, "var initializer", &declaration.location)?;
                     }
                 }
                 ScriptNode::If {
@@ -120,27 +132,29 @@ fn validate_json_symbol_visibility(
                     location,
                     ..
                 } => {
-                    ensure_no_hidden_json_symbol(when_expr, &hidden_json, &script_allowed, &script_ir.script_name, "if condition", location)?;
+                    ensure_script_node_safe(when_expr, "if condition", location)?;
                 }
                 ScriptNode::While {
                     when_expr,
                     location,
                     ..
                 } => {
-                    ensure_no_hidden_json_symbol(when_expr, &hidden_json, &script_allowed, &script_ir.script_name, "while condition", location)?;
+                    ensure_script_node_safe(when_expr, "while condition", location)?;
                 }
                 ScriptNode::Choice { options, .. } => {
-                    for (when_expr, location) in options
-                        .iter()
-                        .filter_map(|option| option.when_expr.as_ref().map(|expr| (expr, &option.location)))
-                    {
-                        ensure_no_hidden_json_symbol(when_expr, &hidden_json, &script_allowed, &script_ir.script_name, "choice option condition", location)?;
+                    for (when_expr, location) in options.iter().filter_map(|option| {
+                        option
+                            .when_expr
+                            .as_ref()
+                            .map(|expr| (expr, &option.location))
+                    }) {
+                        ensure_script_node_safe(when_expr, "choice option condition", location)?;
                     }
                 }
                 ScriptNode::Call { args, location, .. }
                 | ScriptNode::Return { args, location, .. } => {
                     for arg in args {
-                        ensure_no_hidden_json_symbol(&arg.value_expr, &hidden_json, &script_allowed, &script_ir.script_name, "call/return argument", location)?;
+                        ensure_script_node_safe(&arg.value_expr, "call/return argument", location)?;
                     }
                 }
                 ScriptNode::Input { .. }
@@ -205,7 +219,7 @@ fn validate_json_symbol_visibility(
     Ok(())
 }
 
-fn collect_script_declared_names(script_ir: &ScriptIr) -> BTreeSet<String> {
+pub(crate) fn collect_script_declared_names(script_ir: &ScriptIr) -> BTreeSet<String> {
     let mut out = script_ir
         .params
         .iter()
@@ -222,7 +236,7 @@ fn collect_script_declared_names(script_ir: &ScriptIr) -> BTreeSet<String> {
     out
 }
 
-fn collect_visible_function_roots(
+pub(crate) fn collect_visible_function_roots(
     visible_functions: &BTreeMap<String, FunctionDecl>,
 ) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
@@ -233,7 +247,7 @@ fn collect_visible_function_roots(
     out
 }
 
-fn collect_visible_defs_global_roots(
+pub(crate) fn collect_visible_defs_global_roots(
     visible_defs_globals: &BTreeMap<String, DefsGlobalVarDecl>,
 ) -> BTreeSet<String> {
     visible_defs_globals
@@ -242,7 +256,7 @@ fn collect_visible_defs_global_roots(
         .collect()
 }
 
-fn collect_visible_defs_global_short_aliases(
+pub(crate) fn collect_visible_defs_global_short_aliases(
     visible_defs_globals: &BTreeMap<String, DefsGlobalVarDecl>,
 ) -> BTreeSet<String> {
     visible_defs_globals
@@ -252,7 +266,7 @@ fn collect_visible_defs_global_short_aliases(
         .collect()
 }
 
-fn extract_text_interpolations(template: &str) -> Vec<String> {
+pub(crate) fn extract_text_interpolations(template: &str) -> Vec<String> {
     text_interpolation_regex()
         .captures_iter(template)
         .filter_map(|caps| caps.get(1).map(|entry| entry.as_str().trim().to_string()))
@@ -260,28 +274,29 @@ fn extract_text_interpolations(template: &str) -> Vec<String> {
         .collect()
 }
 
-fn extract_local_bindings(source: &str) -> BTreeSet<String> {
+pub(crate) fn extract_local_bindings(source: &str) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     for caps in local_binding_regex().captures_iter(source) {
-        if let Some(name) = caps.get(1) { out.insert(name.as_str().to_string()); }
+        if let Some(name) = caps.get(1) {
+            out.insert(name.as_str().to_string());
+        }
     }
     out
 }
 
-fn text_interpolation_regex() -> &'static Regex {
+pub(crate) fn text_interpolation_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| Regex::new(r"\$\{([^{}]+)\}").expect("template regex must compile"))
 }
 
-fn local_binding_regex() -> &'static Regex {
+pub(crate) fn local_binding_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
-        Regex::new(r"\b(?:let|const)\s+([$A-Za-z_][$0-9A-Za-z_]*)")
-            .expect("local bind regex")
+        Regex::new(r"\b(?:let|const)\s+([$A-Za-z_][$0-9A-Za-z_]*)").expect("local bind regex")
     })
 }
 
-fn ensure_no_hidden_json_symbol(
+pub(crate) fn ensure_no_hidden_json_symbol(
     source: &str,
     hidden_json: &BTreeSet<String>,
     allowed_names: &BTreeSet<String>,
@@ -302,7 +317,7 @@ fn ensure_no_hidden_json_symbol(
     Ok(())
 }
 
-fn find_hidden_json_symbol(
+pub(crate) fn find_hidden_json_symbol(
     source: &str,
     hidden_json: &BTreeSet<String>,
     allowed_names: &BTreeSet<String>,
@@ -328,10 +343,10 @@ mod json_symbols_tests {
         );
         let invalid = parse_json_global_symbol("bad-name.json").expect_err("invalid");
         assert_eq!(invalid.code, "JSON_SYMBOL_INVALID");
-    
+
         let reserved = parse_json_global_symbol("__sl_reserved.json").expect_err("reserved");
         assert_eq!(reserved.code, "NAME_RESERVED_PREFIX");
-    
+
         let duplicate = compile_project_bundle_from_xml_map(&map(&[
             ("a/x.json", r#"{"v":1}"#),
             ("b/x.json", r#"{"v":2}"#),
@@ -346,7 +361,7 @@ mod json_symbols_tests {
         ]))
         .expect_err("duplicate symbol should fail");
         assert_eq!(duplicate.code, "JSON_SYMBOL_DUPLICATE");
-    
+
         let missing_sources = BTreeMap::from([(
             "broken.json".to_string(),
             SourceFile {
@@ -364,7 +379,7 @@ mod json_symbols_tests {
     fn json_symbol_visibility_helpers_cover_context_edges() {
         let hidden_json = BTreeSet::from(["game".to_string()]);
         let allowed = BTreeSet::new();
-    
+
         assert_eq!(
             find_hidden_json_symbol("value = game.hp;", &hidden_json, &allowed),
             Some("game".to_string())
@@ -385,11 +400,11 @@ mod json_symbols_tests {
             find_hidden_json_symbol("/* game */ value = 1;", &hidden_json, &allowed),
             None
         );
-    
+
         let locals = extract_local_bindings("let game = 1; const score = game + 1;");
         assert!(locals.contains("game"));
         assert!(locals.contains("score"));
-    
+
         let allowed_game = BTreeSet::from(["game".to_string()]);
         assert_eq!(
             find_hidden_json_symbol("value = game.hp;", &hidden_json, &allowed_game),
@@ -406,7 +421,7 @@ mod json_symbols_tests {
                 r#"<script name="main"><text>${game.hp}</text></script>"#,
             ),
         ]);
-    
+
         let error = compile_project_bundle_from_xml_map(&files)
             .expect_err("missing json include should fail at compile time");
         assert_eq!(error.code, "JSON_SYMBOL_NOT_VISIBLE");
@@ -437,7 +452,7 @@ mod json_symbols_tests {
     "#,
             ),
         ]);
-    
+
         let error = compile_project_bundle_from_xml_map(&files)
             .expect_err("defs code should fail when json is not visible");
         assert_eq!(error.code, "JSON_SYMBOL_NOT_VISIBLE");
@@ -547,6 +562,67 @@ mod json_symbols_tests {
     }
 
     #[test]
+    fn validate_json_visibility_covers_code_if_while_and_call_paths() {
+        let span = SourceSpan::synthetic();
+        let script_ir = ScriptIr {
+            script_path: "main.script.xml".to_string(),
+            script_name: "main".to_string(),
+            params: vec![ScriptParam {
+                name: "hp".to_string(),
+                r#type: ScriptType::Primitive {
+                    name: "int".to_string(),
+                },
+                is_ref: false,
+                location: span.clone(),
+            }],
+            root_group_id: "g0".to_string(),
+            groups: BTreeMap::from([(
+                "g0".to_string(),
+                ImplicitGroup {
+                    group_id: "g0".to_string(),
+                    parent_group_id: None,
+                    entry_node_id: None,
+                    nodes: vec![
+                        ScriptNode::Code {
+                            id: "code".to_string(),
+                            code: "let local = hp + 1;".to_string(),
+                            location: span.clone(),
+                        },
+                        ScriptNode::If {
+                            id: "if".to_string(),
+                            when_expr: "hp >= 0".to_string(),
+                            then_group_id: "g1".to_string(),
+                            else_group_id: Some("g2".to_string()),
+                            location: span.clone(),
+                        },
+                        ScriptNode::While {
+                            id: "while".to_string(),
+                            when_expr: "hp > 0".to_string(),
+                            body_group_id: "g3".to_string(),
+                            location: span.clone(),
+                        },
+                        ScriptNode::Call {
+                            id: "call".to_string(),
+                            target_script: "next".to_string(),
+                            args: vec![CallArgument {
+                                value_expr: "hp".to_string(),
+                                is_ref: false,
+                            }],
+                            location: span.clone(),
+                        },
+                    ],
+                },
+            )]),
+            visible_json_globals: Vec::new(),
+            visible_functions: BTreeMap::new(),
+            visible_defs_globals: BTreeMap::new(),
+        };
+        let all_json_symbols = BTreeSet::from(["secret".to_string()]);
+        validate_json_symbol_visibility(&script_ir, &all_json_symbols)
+            .expect("safe expressions should not trip hidden json check");
+    }
+
+    #[test]
     fn compile_bundle_allows_visible_or_shadowed_json_symbols() {
         let visible = map(&[
             ("game.json", r#"{ "hp": 5 }"#),
@@ -561,7 +637,7 @@ mod json_symbols_tests {
             ),
         ]);
         compile_project_bundle_from_xml_map(&visible).expect("visible json symbol should compile");
-    
+
         let shadowed = map(&[
             ("game.json", r#"{ "hp": 5 }"#),
             (
@@ -631,9 +707,8 @@ mod json_symbols_tests {
     "#,
             ),
         ]);
-    
+
         compile_project_bundle_from_xml_map(&files)
             .expect("validation should pass when hidden json is not referenced");
     }
-
 }

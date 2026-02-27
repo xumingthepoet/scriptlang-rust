@@ -1,11 +1,13 @@
+use crate::*;
+
 #[derive(Debug, Clone, Copy)]
-struct CompileGroupMode {
+pub(crate) struct CompileGroupMode {
     while_depth: usize,
     allow_option_direct_continue: bool,
 }
 
 impl CompileGroupMode {
-    fn new(while_depth: usize, allow_option_direct_continue: bool) -> Self {
+    pub(crate) fn new(while_depth: usize, allow_option_direct_continue: bool) -> Self {
         Self {
             while_depth,
             allow_option_direct_continue,
@@ -13,7 +15,7 @@ impl CompileGroupMode {
     }
 }
 
-fn compile_group(
+pub(crate) fn compile_group(
     group_id: &str,
     parent_group_id: Option<&str>,
     container: &XmlElementNode,
@@ -53,7 +55,27 @@ fn compile_group(
     Ok(())
 }
 
-fn compile_group_nodes(
+fn compile_child_group(
+    parent_group_id: &str,
+    child_group_id: &str,
+    child_container: &XmlElementNode,
+    builder: &mut GroupBuilder,
+    visible_types: &BTreeMap<String, ScriptType>,
+    local_var_types: &mut BTreeMap<String, ScriptType>,
+    mode: CompileGroupMode,
+) -> Result<(), ScriptLangError> {
+    compile_group(
+        child_group_id,
+        Some(parent_group_id),
+        child_container,
+        builder,
+        visible_types,
+        local_var_types,
+        mode,
+    )
+}
+
+pub(crate) fn compile_group_nodes(
     group_id: &str,
     container: &XmlElementNode,
     builder: &mut GroupBuilder,
@@ -144,10 +166,29 @@ fn compile_group_nodes(
                     location: child.location.clone(),
                 };
 
-                compile_group(&then_group_id, Some(group_id), &then_container, builder, visible_types, local_var_types, CompileGroupMode::new(mode.while_depth, false))?;
+                let group_mode = CompileGroupMode::new(mode.while_depth, false);
+                let then_result = compile_child_group(
+                    group_id,
+                    &then_group_id,
+                    &then_container,
+                    builder,
+                    visible_types,
+                    local_var_types,
+                    group_mode,
+                );
+                then_result?;
 
                 if let Some(else_child) = else_node {
-                    compile_group(&else_group_id, Some(group_id), else_child, builder, visible_types, local_var_types, CompileGroupMode::new(mode.while_depth, false))?;
+                    let else_result = compile_child_group(
+                        group_id,
+                        &else_group_id,
+                        else_child,
+                        builder,
+                        visible_types,
+                        local_var_types,
+                        group_mode,
+                    );
+                    else_result?;
                 } else {
                     builder.groups.insert(
                         else_group_id.clone(),
@@ -170,7 +211,17 @@ fn compile_group_nodes(
             }
             "while" => {
                 let body_group_id = builder.next_group_id();
-                compile_group(&body_group_id, Some(group_id), child, builder, visible_types, local_var_types, CompileGroupMode::new(mode.while_depth + 1, false))?;
+                let while_mode = CompileGroupMode::new(mode.while_depth + 1, false);
+                let while_result = compile_child_group(
+                    group_id,
+                    &body_group_id,
+                    child,
+                    builder,
+                    visible_types,
+                    local_var_types,
+                    while_mode,
+                );
+                while_result?;
                 ScriptNode::While {
                     id: builder.next_node_id("while"),
                     when_expr: get_required_non_empty_attr(child, "when")?,
@@ -207,7 +258,17 @@ fn compile_group_nodes(
                     }
 
                     let option_group_id = builder.next_group_id();
-                    compile_group(&option_group_id, Some(group_id), option, builder, visible_types, local_var_types, CompileGroupMode::new(mode.while_depth, true))?;
+                    let option_mode = CompileGroupMode::new(mode.while_depth, true);
+                    let option_result = compile_child_group(
+                        group_id,
+                        &option_group_id,
+                        option,
+                        builder,
+                        visible_types,
+                        local_var_types,
+                        option_mode,
+                    );
+                    option_result?;
 
                     options.push(ChoiceOption {
                         id: builder.next_choice_id(),
@@ -368,7 +429,7 @@ fn compile_group_nodes(
     Ok(())
 }
 
-fn node_id(node: &ScriptNode) -> &str {
+pub(crate) fn node_id(node: &ScriptNode) -> &str {
     match node {
         ScriptNode::Text { id, .. }
         | ScriptNode::Code { id, .. }
@@ -384,7 +445,7 @@ fn node_id(node: &ScriptNode) -> &str {
     }
 }
 
-fn parse_var_declaration(
+pub(crate) fn parse_var_declaration(
     node: &XmlElementNode,
     visible_types: &BTreeMap<String, ScriptType>,
 ) -> Result<VarDeclaration, ScriptLangError> {
@@ -428,7 +489,7 @@ fn parse_var_declaration(
     })
 }
 
-fn parse_type_name_segment<'a>(
+pub(crate) fn parse_type_name_segment<'a>(
     segment: &'a str,
     parse_error_code: &'static str,
     parse_error_label: &'static str,
@@ -454,7 +515,7 @@ fn parse_type_name_segment<'a>(
     Ok((type_raw, name))
 }
 
-fn parse_script_args(
+pub(crate) fn parse_script_args(
     root: &XmlElementNode,
     visible_types: &BTreeMap<String, ScriptType>,
 ) -> Result<Vec<ScriptParam>, ScriptLangError> {
@@ -510,7 +571,7 @@ fn parse_script_args(
     Ok(params)
 }
 
-fn parse_function_args(
+pub(crate) fn parse_function_args(
     node: &XmlElementNode,
 ) -> Result<Vec<ParsedFunctionParamDecl>, ScriptLangError> {
     let Some(raw) = get_optional_attr(node, "args") else {
@@ -557,7 +618,7 @@ fn parse_function_args(
     Ok(params)
 }
 
-fn parse_function_return(
+pub(crate) fn parse_function_return(
     node: &XmlElementNode,
 ) -> Result<ParsedFunctionParamDecl, ScriptLangError> {
     let raw = get_required_non_empty_attr(node, "return")?;
@@ -599,7 +660,7 @@ mod script_compile_tests {
         let value_error =
             parse_var_declaration(&with_value, &visible_types).expect_err("value attr forbidden");
         assert_eq!(value_error.code, "XML_ATTR_NOT_ALLOWED");
-    
+
         let with_child = xml_element(
             "var",
             &[("name", "x"), ("type", "int")],
@@ -628,15 +689,15 @@ mod script_compile_tests {
         let parsed = parse_script_args(&root_ok, &visible_types).expect("args parse");
         assert_eq!(parsed.len(), 2);
         assert!(parsed[1].is_ref);
-    
+
         let root_bad = xml_element("script", &[("args", "int")], Vec::new());
         let error = parse_script_args(&root_bad, &visible_types).expect_err("bad args");
         assert_eq!(error.code, "SCRIPT_ARGS_PARSE_ERROR");
-    
+
         let root_dup = xml_element("script", &[("args", "int:a,int:a")], Vec::new());
         let error = parse_script_args(&root_dup, &visible_types).expect_err("duplicate args");
         assert_eq!(error.code, "SCRIPT_ARGS_DUPLICATE");
-    
+
         let fn_node = xml_element(
             "function",
             &[("name", "f"), ("args", "ref:int:a"), ("return", "int:r")],
@@ -644,7 +705,7 @@ mod script_compile_tests {
         );
         let error = parse_function_declaration_node(&fn_node).expect_err("ref arg unsupported");
         assert_eq!(error.code, "XML_FUNCTION_ARGS_REF_UNSUPPORTED");
-    
+
         let fn_bad_return = xml_element(
             "function",
             &[("name", "f"), ("args", "int:a"), ("return", "ref:int:r")],
@@ -664,7 +725,7 @@ mod script_compile_tests {
         );
         let parsed_return = parse_function_return(&function_node).expect("return should parse");
         assert_eq!(parsed_return.name, "out");
-    
+
         let span = SourceSpan::synthetic();
         assert!(matches!(
             parse_type_expr("int[]", &span).expect("array should parse"),
@@ -724,7 +785,7 @@ mod script_compile_tests {
                 )),
             ],
         );
-    
+
         compile_group(
             &root_group,
             None,
@@ -735,7 +796,7 @@ mod script_compile_tests {
             CompileGroupMode::new(0, false),
         )
         .expect("group should compile");
-    
+
         let group = builder
             .groups
             .get(&root_group)
@@ -792,7 +853,13 @@ mod script_compile_tests {
 
         assert!(matches!(group.nodes[0], ScriptNode::If { .. }));
         let mut then_group_id = None;
-        if let ScriptNode::If { then_group_id: child_group_id, .. } = &group.nodes[0] { then_group_id = Some(child_group_id.clone()); }
+        if let ScriptNode::If {
+            then_group_id: child_group_id,
+            ..
+        } = &group.nodes[0]
+        {
+            then_group_id = Some(child_group_id.clone());
+        }
         let then_group_id = then_group_id.expect("group node should compile into an if wrapper");
         let scoped_group = builder
             .groups
@@ -807,7 +874,7 @@ mod script_compile_tests {
     fn compile_group_reports_script_structure_errors() {
         let visible_types = BTreeMap::new();
         let local_var_types = BTreeMap::new();
-    
+
         let bad_once = xml_element(
             "script",
             &[("name", "main")],
@@ -830,7 +897,7 @@ mod script_compile_tests {
         )
         .expect_err("once on code should fail");
         assert_eq!(error.code, "XML_ATTR_NOT_ALLOWED");
-    
+
         let bad_break = xml_element(
             "script",
             &[("name", "main")],
@@ -849,7 +916,7 @@ mod script_compile_tests {
         )
         .expect_err("break outside while should fail");
         assert_eq!(error.code, "XML_BREAK_OUTSIDE_WHILE");
-    
+
         let bad_continue = xml_element(
             "script",
             &[("name", "main")],
@@ -868,7 +935,7 @@ mod script_compile_tests {
         )
         .expect_err("continue outside while/option should fail");
         assert_eq!(error.code, "XML_CONTINUE_OUTSIDE_WHILE_OR_OPTION");
-    
+
         let bad_return = xml_element(
             "script",
             &[("name", "main")],
@@ -891,7 +958,7 @@ mod script_compile_tests {
         )
         .expect_err("return args without script should fail");
         assert_eq!(error.code, "XML_RETURN_ARGS_REQUIRE_SCRIPT");
-    
+
         let bad_node = xml_element(
             "script",
             &[("name", "main")],
@@ -1116,7 +1183,7 @@ mod script_compile_tests {
                     "XML_LOOP_TIMES_TEMPLATE_UNSUPPORTED",
                 ),
             ];
-    
+
         for (name, files, expected_code) in cases {
             let result = compile_project_bundle_from_xml_map(&files);
             assert!(result.is_err(), "case should fail: {}", name);
@@ -1133,14 +1200,14 @@ mod script_compile_tests {
         );
         let reachable = collect_reachable_files("missing.script.xml", &BTreeMap::new());
         assert!(reachable.contains("missing.script.xml"));
-    
+
         let visible_empty = collect_visible_json_symbols(
             &BTreeSet::from(["missing.json".to_string()]),
             &BTreeMap::new(),
         )
         .expect("missing reachable entries should be skipped");
         assert!(visible_empty.is_empty());
-    
+
         let mut sources = BTreeMap::new();
         sources.insert(
             "a/x.json".to_string(),
@@ -1166,10 +1233,10 @@ mod script_compile_tests {
         )
         .expect_err("duplicate visible json symbol should fail");
         assert_eq!(duplicate_visible.code, "JSON_SYMBOL_DUPLICATE");
-    
+
         let invalid_file_name = parse_json_global_symbol("/").expect_err("invalid file name");
         assert_eq!(invalid_file_name.code, "JSON_SYMBOL_INVALID");
-    
+
         let span = SourceSpan::synthetic();
         let field = ParsedTypeFieldDecl {
             name: "v".to_string(),
@@ -1190,7 +1257,7 @@ mod script_compile_tests {
         let _ = resolve_named_type("A", &type_map, &mut resolved, &mut visiting).expect("resolve");
         let _ = resolve_named_type("A", &type_map, &mut resolved, &mut visiting)
             .expect("resolved cache should be used");
-    
+
         let unknown = resolve_named_type(
             "Missing",
             &type_map,
@@ -1199,7 +1266,7 @@ mod script_compile_tests {
         )
         .expect_err("unknown type should fail");
         assert_eq!(unknown.code, "TYPE_UNKNOWN");
-    
+
         type_map.insert(
             "Dup".to_string(),
             ParsedTypeDecl {
@@ -1213,7 +1280,7 @@ mod script_compile_tests {
             resolve_named_type("Dup", &type_map, &mut BTreeMap::new(), &mut HashSet::new())
                 .expect_err("duplicate type field should fail");
         assert_eq!(duplicate_field.code, "TYPE_FIELD_DUPLICATE");
-    
+
         let mut resolved_for_lookup = BTreeMap::new();
         let mut visiting_for_lookup = HashSet::new();
         let array_ty = resolve_type_expr_with_lookup(
@@ -1234,7 +1301,7 @@ mod script_compile_tests {
         )
         .expect("map lookup should resolve");
         assert!(matches!(map_ty, ScriptType::Map { .. }));
-    
+
         let array = resolve_type_expr(
             &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Primitive("int".to_string()))),
             &BTreeMap::new(),
@@ -1249,7 +1316,7 @@ mod script_compile_tests {
         )
         .expect("map should resolve");
         assert!(matches!(map_resolved, ScriptType::Map { .. }));
-    
+
         let non_script_root = xml_element("defs", &[("name", "x")], Vec::new());
         let compile_root_error = compile_script(
             "x.script.xml",
@@ -1262,7 +1329,7 @@ mod script_compile_tests {
         )
         .expect_err("compile_script should require script root");
         assert_eq!(compile_root_error.code, "XML_ROOT_INVALID");
-    
+
         let rich_script = map(&[(
             "main.script.xml",
             r#"
@@ -1294,7 +1361,7 @@ mod script_compile_tests {
             .any(|node| matches!(node, ScriptNode::Input { .. })
                 || matches!(node, ScriptNode::Call { .. })
                 || matches!(node, ScriptNode::If { .. })));
-    
+
         let defs_resolution = map(&[
             (
                 "shared.defs.xml",
@@ -1321,7 +1388,7 @@ mod script_compile_tests {
         ]);
         let _ = compile_project_bundle_from_xml_map(&defs_resolution)
             .expect("defs return/field type resolution should pass");
-    
+
         let mut builder_ok = GroupBuilder::new("manual.script.xml");
         let root_ok = builder_ok.next_group_id();
         let complex_container = xml_element(
@@ -1378,7 +1445,7 @@ mod script_compile_tests {
             CompileGroupMode::new(0, false),
         )
         .expect("manual complex compile_group should pass");
-    
+
         let mut loop_builder = GroupBuilder::new("loop.script.xml");
         let loop_group = loop_builder.next_group_id();
         let loop_error = compile_group(
@@ -1404,7 +1471,7 @@ mod script_compile_tests {
         )
         .expect_err("loop should have been expanded");
         assert_eq!(loop_error.code, "XML_LOOP_INTERNAL");
-    
+
         let while_node = ScriptNode::While {
             id: "w1".to_string(),
             when_expr: "true".to_string(),
@@ -1482,7 +1549,7 @@ mod script_compile_tests {
             CompileGroupMode::new(0, false),
         )
         .expect("option continue and last fall_over should compile");
-    
+
         let empty_args = parse_script_args(
             &xml_element("script", &[("args", "   ")], Vec::new()),
             &BTreeMap::new(),
@@ -1513,7 +1580,7 @@ mod script_compile_tests {
         )
         .expect_err("empty script arg name should fail");
         assert_eq!(args_empty_name.code, "SCRIPT_ARGS_PARSE_ERROR");
-    
+
         let empty_fn_args = parse_function_args(&xml_element(
             "function",
             &[("name", "f"), ("args", "   "), ("return", "int:r")],
@@ -1549,7 +1616,7 @@ mod script_compile_tests {
         ))
         .expect_err("function arg without colon should fail");
         assert_eq!(fn_args_no_colon.code, "FUNCTION_ARGS_PARSE_ERROR");
-    
+
         let ret_no_colon = parse_function_return(&xml_element(
             "function",
             &[("name", "f"), ("return", "int")],
@@ -1564,30 +1631,30 @@ mod script_compile_tests {
         ))
         .expect_err("return parse should fail");
         assert_eq!(ret_bad_edge.code, "FUNCTION_RETURN_PARSE_ERROR");
-    
+
         let empty_call_args = parse_args(Some("   ".to_string())).expect("empty call args");
         assert!(empty_call_args.is_empty());
         let _ = parse_type_expr("int[]", &SourceSpan::synthetic()).expect("array parse");
         let _ = parse_type_expr("#{int}", &SourceSpan::synthetic()).expect("map parse");
         let _ =
             parse_type_expr("#{int[]}", &SourceSpan::synthetic()).expect("nested map/array parse");
-    
+
         let inline = inline_text_content(&xml_element(
             "x",
             &[],
             vec![XmlNode::Element(xml_element("y", &[], Vec::new()))],
         ));
         assert!(inline.is_empty());
-    
+
         let split = split_by_top_level_comma("'a,b',[1,2],{k:1}");
         assert_eq!(split.len(), 3);
-    
+
         assert!(has_any_child_content(&xml_element(
             "x",
             &[],
             vec![XmlNode::Element(xml_element("y", &[], Vec::new()))]
         )));
-    
+
         let mut declared = BTreeSet::new();
         collect_declared_var_names(
             &xml_element("var", &[("name", "")], Vec::new()),
@@ -1604,18 +1671,17 @@ mod script_compile_tests {
         .expect("empty var name should be ignored");
         validate_reserved_prefix_in_user_var_declarations(&xml_element("var", &[], Vec::new()))
             .expect("var without name should be ignored");
-    
+
         let mut context = MacroExpansionContext {
             used_var_names: BTreeSet::from([format!("{}{}_remaining", LOOP_TEMP_VAR_PREFIX, 0)]),
             loop_counter: 0,
         };
         let generated = next_loop_temp_var_name(&mut context);
         assert!(generated.ends_with("_remaining"));
-    
+
         assert_eq!(
             slvalue_from_json(JsonValue::Null),
             SlValue::String("null".to_string())
         );
     }
-
 }

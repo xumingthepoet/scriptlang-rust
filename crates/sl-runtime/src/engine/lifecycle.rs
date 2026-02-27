@@ -1,18 +1,4 @@
-use std::cell::RefCell;
-use std::cmp::Reverse;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::rc::Rc;
-use std::sync::{Arc, OnceLock};
-
-use regex::Regex;
-use rhai::{
-    Array, Dynamic, Engine, EvalAltResult, ImmutableString, Map, Position, Scope, FLOAT, INT,
-};
-use sl_core::{
-    default_value_from_type, is_type_compatible, ChoiceItem, ContinuationFrame, ContinueTarget,
-    DefsGlobalVarDecl, EngineOutput, PendingBoundaryV3, ScriptIr, ScriptLangError, ScriptNode,
-    ScriptType, SlValue, SnapshotCompletion, SnapshotFrameV3, SnapshotV3,
-};
+use super::*;
 
 pub const DEFAULT_COMPILER_VERSION: &str = "player.v1";
 pub const SNAPSHOT_SCHEMA_V3: &str = "snapshot.v3";
@@ -24,7 +10,7 @@ pub trait HostFunctionRegistry: Send + Sync {
 
 #[derive(Debug, Default)]
 pub struct EmptyHostFunctionRegistry {
-    names: Vec<String>,
+    pub(super) names: Vec<String>,
 }
 
 impl HostFunctionRegistry for EmptyHostFunctionRegistry {
@@ -52,26 +38,26 @@ pub struct ScriptLangEngineOptions {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CompletionKind {
+pub(super) enum CompletionKind {
     None,
     WhileBody,
     ResumeAfterChild,
 }
 
 #[derive(Debug, Clone)]
-struct RuntimeFrame {
-    frame_id: u64,
-    group_id: String,
-    node_index: usize,
-    scope: BTreeMap<String, SlValue>,
-    completion: CompletionKind,
-    script_root: bool,
-    return_continuation: Option<ContinuationFrame>,
-    var_types: BTreeMap<String, ScriptType>,
+pub(super) struct RuntimeFrame {
+    pub(super) frame_id: u64,
+    pub(super) group_id: String,
+    pub(super) node_index: usize,
+    pub(super) scope: BTreeMap<String, SlValue>,
+    pub(super) completion: CompletionKind,
+    pub(super) script_root: bool,
+    pub(super) return_continuation: Option<ContinuationFrame>,
+    pub(super) var_types: BTreeMap<String, ScriptType>,
 }
 
 #[derive(Debug, Clone)]
-enum PendingBoundary {
+pub(super) enum PendingBoundary {
     Choice {
         frame_id: u64,
         node_id: String,
@@ -88,39 +74,39 @@ enum PendingBoundary {
 }
 
 #[derive(Debug, Clone)]
-struct GroupLookup {
-    script_name: String,
-    group_id: String,
+pub(super) struct GroupLookup {
+    pub(super) script_name: String,
+    pub(super) group_id: String,
 }
 
-type ScopeInit = (BTreeMap<String, SlValue>, BTreeMap<String, ScriptType>);
+pub(super) type ScopeInit = (BTreeMap<String, SlValue>, BTreeMap<String, ScriptType>);
 
 pub struct ScriptLangEngine {
-    scripts: BTreeMap<String, ScriptIr>,
-    host_functions: Arc<dyn HostFunctionRegistry>,
-    compiler_version: String,
-    group_lookup: HashMap<String, GroupLookup>,
-    global_json: BTreeMap<String, SlValue>,
-    defs_global_declarations: BTreeMap<String, DefsGlobalVarDecl>,
-    defs_global_init_order: Vec<String>,
-    defs_globals_value: BTreeMap<String, SlValue>,
-    defs_globals_type: BTreeMap<String, ScriptType>,
-    visible_json_by_script: HashMap<String, BTreeSet<String>>,
-    visible_defs_by_script: HashMap<String, BTreeSet<String>>,
-    defs_global_alias_by_script: HashMap<String, BTreeMap<String, String>>,
-    visible_function_symbols_by_script: HashMap<String, BTreeMap<String, String>>,
-    defs_prelude_by_script: HashMap<String, String>,
-    initial_random_seed: u32,
-    rhai_engine: Engine,
-    shared_rng_state: Rc<RefCell<u32>>,
+    pub(super) scripts: BTreeMap<String, ScriptIr>,
+    pub(super) host_functions: Arc<dyn HostFunctionRegistry>,
+    pub(super) compiler_version: String,
+    pub(super) group_lookup: HashMap<String, GroupLookup>,
+    pub(super) global_json: BTreeMap<String, SlValue>,
+    pub(super) defs_global_declarations: BTreeMap<String, DefsGlobalVarDecl>,
+    pub(super) defs_global_init_order: Vec<String>,
+    pub(super) defs_globals_value: BTreeMap<String, SlValue>,
+    pub(super) defs_globals_type: BTreeMap<String, ScriptType>,
+    pub(super) visible_json_by_script: HashMap<String, BTreeSet<String>>,
+    pub(super) visible_defs_by_script: HashMap<String, BTreeSet<String>>,
+    pub(super) defs_global_alias_by_script: HashMap<String, BTreeMap<String, String>>,
+    pub(super) visible_function_symbols_by_script: HashMap<String, BTreeMap<String, String>>,
+    pub(super) defs_prelude_by_script: HashMap<String, String>,
+    pub(super) initial_random_seed: u32,
+    pub(super) rhai_engine: Engine,
+    pub(super) shared_rng_state: Rc<RefCell<u32>>,
 
-    frames: Vec<RuntimeFrame>,
-    pending_boundary: Option<PendingBoundary>,
-    waiting_choice: bool,
-    ended: bool,
-    frame_counter: u64,
-    rng_state: u32,
-    once_state_by_script: BTreeMap<String, BTreeSet<String>>,
+    pub(super) frames: Vec<RuntimeFrame>,
+    pub(super) pending_boundary: Option<PendingBoundary>,
+    pub(super) waiting_choice: bool,
+    pub(super) ended: bool,
+    pub(super) frame_counter: u64,
+    pub(super) rng_state: u32,
+    pub(super) once_state_by_script: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl ScriptLangEngine {
@@ -204,7 +190,9 @@ impl ScriptLangEngine {
         let mut rhai_engine = Engine::new();
         rhai_engine.set_strict_variables(true);
         let rng_for_builtin = Rc::clone(&shared_rng_state);
-        rhai_engine.register_fn("random", move |bound: INT| -> Result<INT, Box<EvalAltResult>> {
+        rhai_engine.register_fn(
+            "random",
+            move |bound: INT| -> Result<INT, Box<EvalAltResult>> {
                 if bound <= 0 {
                     return Err(Box::new(EvalAltResult::ErrorRuntime(
                         Dynamic::from("random(n) expects positive integer n."),
@@ -214,7 +202,8 @@ impl ScriptLangEngine {
                 let mut state = rng_for_builtin.borrow_mut();
                 let value = next_random_bounded(&mut state, bound as u32);
                 Ok(value as INT)
-            });
+            },
+        );
 
         let defs_globals_type = options
             .defs_global_declarations
@@ -247,12 +236,17 @@ impl ScriptLangEngine {
             ended: false,
             frame_counter: 1,
             rng_state: initial_random_seed,
-            once_state_by_script: BTreeMap::new() })
+            once_state_by_script: BTreeMap::new(),
+        })
     }
 
-    pub fn compiler_version(&self) -> &str { &self.compiler_version }
+    pub fn compiler_version(&self) -> &str {
+        &self.compiler_version
+    }
 
-    pub fn waiting_choice(&self) -> bool { self.waiting_choice }
+    pub fn waiting_choice(&self) -> bool {
+        self.waiting_choice
+    }
 
     pub fn start(
         &mut self,
@@ -261,12 +255,12 @@ impl ScriptLangEngine {
     ) -> Result<(), ScriptLangError> {
         self.reset();
         self.initialize_defs_globals()?;
-        let Some(script) = self.scripts.get(entry_script_name) else { return Err(
-            ScriptLangError::new(
+        let Some(script) = self.scripts.get(entry_script_name) else {
+            return Err(ScriptLangError::new(
                 "ENGINE_SCRIPT_NOT_FOUND",
                 format!("Entry script \"{}\" is not registered.", entry_script_name),
-            )
-        ) };
+            ));
+        };
         let root_group_id = script.root_group_id.clone();
         let (scope, var_types) =
             self.create_script_root_scope(entry_script_name, entry_args.unwrap_or_default())?;
@@ -274,7 +268,7 @@ impl ScriptLangEngine {
         Ok(())
     }
 
-    fn initialize_defs_globals(&mut self) -> Result<(), ScriptLangError> {
+    pub(super) fn initialize_defs_globals(&mut self) -> Result<(), ScriptLangError> {
         self.defs_globals_value.clear();
         for qualified_name in self.defs_global_init_order.clone() {
             let decl = self
@@ -302,12 +296,329 @@ impl ScriptLangEngine {
                 ));
             }
             self.defs_globals_value.insert(qualified_name, value);
-        } for (qualified_name, decl) in &self.defs_global_declarations {
+        }
+        for (qualified_name, decl) in &self.defs_global_declarations {
             if self.defs_globals_value.contains_key(qualified_name) {
                 continue;
             }
-            self.defs_globals_value
-                .insert(qualified_name.clone(), default_value_from_type(&decl.r#type));
-        } Ok(())
+            self.defs_globals_value.insert(
+                qualified_name.clone(),
+                default_value_from_type(&decl.r#type),
+            );
+        }
+        Ok(())
+    }
+}
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use crate::engine::runtime_test_support::*;
+
+    #[test]
+    pub(super) fn new_rejects_reserved_host_function_name_random() {
+        let files = map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]);
+        let compiled = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        let result = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_json: compiled.global_json,
+            defs_global_declarations: compiled.defs_global_declarations,
+            defs_global_init_order: compiled.defs_global_init_order,
+            host_functions: Some(Arc::new(TestRegistry {
+                names: vec!["random".to_string()],
+            })),
+            random_seed: Some(1),
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        });
+        assert!(result.is_err());
+        let error = result.err().expect("reserved random name should fail");
+        assert_eq!(error.code, "ENGINE_HOST_FUNCTION_RESERVED");
+    }
+
+    #[test]
+    pub(super) fn new_rejects_host_function_conflicting_with_defs_function() {
+        let files = map(&[
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: shared.defs.xml -->
+    <script name="main"><text>Hello</text></script>
+    "#,
+            ),
+            (
+                "shared.defs.xml",
+                r#"
+    <defs name="shared">
+      <function name="addWithGameBonus" args="int:a1,int:a2" return="int:out">
+        out = a1 + a2;
+      </function>
+    </defs>
+    "#,
+            ),
+        ]);
+        let compiled = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        let result = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_json: compiled.global_json,
+            defs_global_declarations: compiled.defs_global_declarations,
+            defs_global_init_order: compiled.defs_global_init_order,
+            host_functions: Some(Arc::new(TestRegistry {
+                names: vec!["addWithGameBonus".to_string()],
+            })),
+            random_seed: Some(1),
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        });
+        assert!(result.is_err());
+        let error = result.err().expect("conflicting defs function should fail");
+        assert_eq!(error.code, "ENGINE_HOST_FUNCTION_CONFLICT");
+    }
+
+    #[test]
+    pub(super) fn new_rejects_defs_function_symbol_conflict_after_normalization() {
+        let files = map(&[
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: a.defs.xml -->
+    <!-- include: x.defs.xml -->
+    <script name="main"><text>Hello</text></script>
+    "#,
+            ),
+            (
+                "a.defs.xml",
+                r#"
+    <defs name="a">
+      <function name="b" return="int:out">out = 1;</function>
+    </defs>
+    "#,
+            ),
+            (
+                "x.defs.xml",
+                r#"
+    <defs name="x">
+      <function name="a_b" return="int:out">out = 2;</function>
+    </defs>
+    "#,
+            ),
+        ]);
+        let compiled = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        let result = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_json: compiled.global_json,
+            defs_global_declarations: compiled.defs_global_declarations,
+            defs_global_init_order: compiled.defs_global_init_order,
+            host_functions: None,
+            random_seed: Some(1),
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        });
+        let error = result
+            .err()
+            .expect("normalized symbol conflict should fail");
+        assert_eq!(error.code, "ENGINE_DEFS_FUNCTION_SYMBOL_CONFLICT");
+    }
+
+    #[test]
+    pub(super) fn random_function_success_and_registry_call_path_are_covered() {
+        let files = map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="n" type="int">random(5)</var>
+      <text>${n}</text>
+    </script>
+    "#,
+        )]);
+        let mut engine = engine_from_sources(files);
+        engine.start("main", None).expect("start");
+        let output = engine.next_output().expect("next");
+        assert!(matches!(output, EngineOutput::Text { .. }));
+
+        let registry = TestRegistry {
+            names: vec!["ok".to_string()],
+        };
+        let value = registry.call("ok", &[]).expect("call should succeed");
+        assert_eq!(value, SlValue::Bool(true));
+    }
+
+    #[test]
+    pub(super) fn new_success_path_initializes_defs_and_function_symbols() {
+        let files = map(&[
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: shared.defs.xml -->
+    <script name="main"><text>ok</text></script>
+    "#,
+            ),
+            (
+                "shared.defs.xml",
+                r#"
+    <defs name="shared">
+      <var name="hp" type="int">1</var>
+      <function name="addWithGameBonus" args="int:a1,int:a2" return="int:out">
+    out = a1 + a2;
+      </function>
+    </defs>
+    "#,
+            ),
+        ]);
+        let compiled = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_json: compiled.global_json,
+            defs_global_declarations: compiled.defs_global_declarations,
+            defs_global_init_order: compiled.defs_global_init_order,
+            host_functions: None,
+            random_seed: Some(7),
+            compiler_version: None,
+        })
+        .expect("new should succeed");
+
+        assert_eq!(engine.compiler_version(), DEFAULT_COMPILER_VERSION);
+        assert!(!engine.waiting_choice());
+        assert!(!engine.ended);
+        assert!(
+            engine.defs_globals_type.contains_key("shared.hp"),
+            "defs global type should be initialized"
+        );
+        assert_eq!(
+            engine
+                .visible_function_symbols_by_script
+                .get("main")
+                .and_then(|m| m.get("addWithGameBonus"))
+                .map(String::as_str),
+            Some("addWithGameBonus")
+        );
+
+        engine.start("main", None).expect("start");
+        assert_eq!(
+            engine.defs_globals_value.get("shared.hp"),
+            Some(&SlValue::Number(1.0))
+        );
+    }
+
+    #[test]
+    pub(super) fn start_returns_error_for_missing_script() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]));
+        let error = engine
+            .start("missing", None)
+            .expect_err("unknown entry should fail");
+        assert_eq!(error.code, "ENGINE_SCRIPT_NOT_FOUND");
+    }
+
+    #[test]
+    pub(super) fn start_rejects_defs_global_initializer_type_mismatch() {
+        let mut engine = engine_from_sources(map(&[
+            (
+                "shared.defs.xml",
+                r#"
+    <defs name="shared">
+      <var name="hp" type="int">"bad"</var>
+    </defs>
+    "#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: shared.defs.xml -->
+    <script name="main"><text>ok</text></script>
+    "#,
+            ),
+        ]));
+
+        let error = engine
+            .start("main", None)
+            .expect_err("type mismatch should fail");
+        assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
+    }
+
+    #[test]
+    pub(super) fn start_rejects_missing_defs_global_decl_in_init_order() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>ok</text></script>"#,
+        )]));
+        engine.defs_global_init_order = vec!["shared.hp".to_string()];
+        let error = engine
+            .start("main", None)
+            .expect_err("missing decl in init order should fail");
+        assert_eq!(error.code, "ENGINE_DEFS_GLOBAL_DECL_MISSING");
+    }
+
+    #[test]
+    pub(super) fn start_fills_default_for_defs_global_not_present_in_init_order() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>ok</text></script>"#,
+        )]));
+        engine.defs_global_declarations.insert(
+            "shared.hp".to_string(),
+            DefsGlobalVarDecl {
+                namespace: "shared".to_string(),
+                name: "hp".to_string(),
+                qualified_name: "shared.hp".to_string(),
+                r#type: ScriptType::Primitive {
+                    name: "int".to_string(),
+                },
+                initial_value_expr: None,
+                location: sl_core::SourceSpan::synthetic(),
+            },
+        );
+        engine.defs_global_init_order.clear();
+
+        engine.start("main", None).expect("start");
+        assert_eq!(
+            engine.defs_globals_value.get("shared.hp"),
+            Some(&SlValue::Number(0.0))
+        );
+    }
+
+    #[test]
+    pub(super) fn public_state_accessors_and_empty_registry_are_covered() {
+        let registry = EmptyHostFunctionRegistry::default();
+        assert!(registry.names().is_empty());
+        let call_error = registry
+            .call("noop", &[])
+            .expect_err("empty registry call should fail");
+        assert_eq!(call_error.code, "ENGINE_HOST_FUNCTION_MISSING");
+
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <choice text="Pick">
+        <option text="A"><text>A</text></option>
+      </choice>
+    </script>
+    "#,
+        )]));
+        assert_eq!(engine.compiler_version(), DEFAULT_COMPILER_VERSION);
+        assert!(!engine.waiting_choice());
+        engine.start("main", None).expect("start");
+        let next = engine.next_output().expect("next");
+        assert!(matches!(next, EngineOutput::Choices { .. }));
+        assert!(engine.waiting_choice());
+    }
+
+    #[test]
+    pub(super) fn random_function_error_path_is_covered() {
+        // Test that random(n) with n <= 0 returns error (covers lifecycle.rs lines 218, 220-222)
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <code>let x = random(0);</code>
+      <text>done</text>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+        let error = engine.next_output().expect_err("random(0) should fail");
+        assert!(error.code == "ENGINE_EVAL_ERROR" || error.code == "ENGINE_RANDOM_ERROR");
     }
 }

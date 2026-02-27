@@ -1,5 +1,7 @@
+use crate::*;
+
 #[cfg(test)]
-fn resolve_named_type(
+pub(crate) fn resolve_named_type(
     name: &str,
     type_decls_map: &BTreeMap<String, ParsedTypeDecl>,
     resolved: &mut BTreeMap<String, ScriptType>,
@@ -9,7 +11,7 @@ fn resolve_named_type(
     resolve_named_type_with_aliases(name, type_decls_map, &empty_aliases, resolved, visiting)
 }
 
-fn resolve_named_type_with_aliases(
+pub(crate) fn resolve_named_type_with_aliases(
     name: &str,
     type_decls_map: &BTreeMap<String, ParsedTypeDecl>,
     type_aliases: &BTreeMap<String, String>,
@@ -78,7 +80,7 @@ fn resolve_named_type_with_aliases(
 }
 
 #[cfg(test)]
-fn resolve_type_expr_with_lookup(
+pub(crate) fn resolve_type_expr_with_lookup(
     expr: &ParsedTypeExpr,
     type_decls_map: &BTreeMap<String, ParsedTypeDecl>,
     resolved: &mut BTreeMap<String, ScriptType>,
@@ -96,7 +98,7 @@ fn resolve_type_expr_with_lookup(
     )
 }
 
-fn resolve_type_expr_with_lookup_with_aliases(
+pub(crate) fn resolve_type_expr_with_lookup_with_aliases(
     expr: &ParsedTypeExpr,
     type_decls_map: &BTreeMap<String, ParsedTypeDecl>,
     type_aliases: &BTreeMap<String, String>,
@@ -152,7 +154,7 @@ fn resolve_type_expr_with_lookup_with_aliases(
     }
 }
 
-fn resolve_type_expr(
+pub(crate) fn resolve_type_expr(
     expr: &ParsedTypeExpr,
     resolved_types: &BTreeMap<String, ScriptType>,
     span: &SourceSpan,
@@ -178,11 +180,13 @@ fn resolve_type_expr(
 }
 
 #[cfg(test)]
-fn parse_type_declaration_node(node: &XmlElementNode) -> Result<ParsedTypeDecl, ScriptLangError> {
+pub(crate) fn parse_type_declaration_node(
+    node: &XmlElementNode,
+) -> Result<ParsedTypeDecl, ScriptLangError> {
     parse_type_declaration_node_with_namespace(node, "defs")
 }
 
-fn parse_type_declaration_node_with_namespace(
+pub(crate) fn parse_type_declaration_node_with_namespace(
     node: &XmlElementNode,
     namespace: &str,
 ) -> Result<ParsedTypeDecl, ScriptLangError> {
@@ -230,13 +234,13 @@ fn parse_type_declaration_node_with_namespace(
 }
 
 #[cfg(test)]
-fn parse_function_declaration_node(
+pub(crate) fn parse_function_declaration_node(
     node: &XmlElementNode,
 ) -> Result<ParsedFunctionDecl, ScriptLangError> {
     parse_function_declaration_node_with_namespace(node, "defs")
 }
 
-fn parse_function_declaration_node_with_namespace(
+pub(crate) fn parse_function_declaration_node_with_namespace(
     node: &XmlElementNode,
     namespace: &str,
 ) -> Result<ParsedFunctionDecl, ScriptLangError> {
@@ -281,7 +285,7 @@ mod type_expr_tests {
                 location: span.clone(),
             },
         )]);
-    
+
         let array = resolve_type_expr_with_lookup(
             &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Custom("Obj".to_string()))),
             &type_map,
@@ -291,7 +295,7 @@ mod type_expr_tests {
         )
         .expect("array custom type should resolve");
         assert!(matches!(array, ScriptType::Array { .. }));
-    
+
         let map = resolve_type_expr_with_lookup(
             &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Custom("Obj".to_string()))),
             &type_map,
@@ -301,7 +305,7 @@ mod type_expr_tests {
         )
         .expect("map custom type should resolve");
         assert!(matches!(map, ScriptType::Map { .. }));
-    
+
         let array_err = resolve_type_expr_with_lookup(
             &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Custom("Missing".to_string()))),
             &type_map,
@@ -311,7 +315,7 @@ mod type_expr_tests {
         )
         .expect_err("unknown array element type should fail");
         assert_eq!(array_err.code, "TYPE_UNKNOWN");
-    
+
         let map_err = resolve_type_expr_with_lookup(
             &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Custom("Missing".to_string()))),
             &type_map,
@@ -321,10 +325,10 @@ mod type_expr_tests {
         )
         .expect_err("unknown map value type should fail");
         assert_eq!(map_err.code, "TYPE_UNKNOWN");
-    
+
         let nested = parse_type_expr("#{int[]}", &span).expect("type should parse");
         assert!(matches!(nested, ParsedTypeExpr::Map(_)));
-    
+
         let type_node = xml_element(
             "type",
             &[("name", "Bag")],
@@ -337,5 +341,4 @@ mod type_expr_tests {
         let parsed = parse_type_declaration_node(&type_node).expect("type node should parse");
         assert_eq!(parsed.fields.len(), 1);
     }
-
 }

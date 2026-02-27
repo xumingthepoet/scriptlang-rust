@@ -1,3 +1,6 @@
+use super::lifecycle::{CompletionKind, PendingBoundary, RuntimeFrame};
+use super::*;
+
 impl ScriptLangEngine {
     pub fn next_output(&mut self) -> Result<EngineOutput, ScriptLangError> {
         if let Some(boundary) = &self.pending_boundary {
@@ -321,31 +324,30 @@ impl ScriptLangEngine {
             "Execution guard exceeded 10000 iterations.",
         ))
     }
-
 }
 
 #[cfg(test)]
 mod step_tests {
-    use super::*;
     use super::runtime_test_support::*;
+    use super::*;
 
     #[test]
-    fn next_text_and_end() {
+    pub(super) fn next_text_and_end() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><text>Hello</text></script>"#,
         )]));
         engine.start("main", None).expect("start");
-    
+
         let first = engine.next_output().expect("next");
         assert!(matches!(first, EngineOutput::Text { .. }));
-    
+
         let second = engine.next_output().expect("next");
         assert!(matches!(second, EngineOutput::End));
     }
 
     #[test]
-    fn drives_complex_flow_to_end() {
+    pub(super) fn drives_complex_flow_to_end() {
         let files = map(&[
             (
                 "main.script.xml",
@@ -377,7 +379,7 @@ mod step_tests {
     }
 
     #[test]
-    fn defs_global_shadowing_example_behaves_as_expected() {
+    pub(super) fn defs_global_shadowing_example_behaves_as_expected() {
         let files = map(&[
             (
                 "shared.defs.xml",
@@ -444,7 +446,7 @@ mod step_tests {
     }
 
     #[test]
-    fn all_output_types_in_test_helper_are_covered() {
+    pub(super) fn all_output_types_in_test_helper_are_covered() {
         // Test to cover all branches in test helper: Choices and Input (lines 426-428, 430-431)
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
@@ -489,7 +491,7 @@ mod step_tests {
     }
 
     #[test]
-    fn if_else_branch_covered_when_condition_false() {
+    pub(super) fn if_else_branch_covered_when_condition_false() {
         // Test else branch when condition evaluates to false
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
@@ -506,13 +508,13 @@ mod step_tests {
     "#,
         )]));
         engine.start("main", None).expect("start");
-    
+
         let output = engine.next_output().expect("next should pass");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "weak"));
     }
 
     #[test]
-    fn while_loop_condition_false_covered() {
+    pub(super) fn while_loop_condition_false_covered() {
         // Test while loop when condition is initially false
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
@@ -527,14 +529,14 @@ mod step_tests {
     "#,
         )]));
         engine.start("main", None).expect("start");
-    
+
         // Should skip while loop and go directly to "done"
         let output = engine.next_output().expect("next should pass");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "done"));
     }
 
     #[test]
-    fn choice_with_no_visible_options_covered() {
+    pub(super) fn choice_with_no_visible_options_covered() {
         // Test choice when all options have once=True and have been used
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
@@ -549,25 +551,25 @@ mod step_tests {
     "#,
         )]));
         engine.start("main", None).expect("start");
-    
+
         // First time: show choice
         let first = engine.next_output().expect("next should pass");
         assert!(matches!(first, EngineOutput::Choices { .. }));
-    
+
         // Choose option A
         engine.choose(0).expect("choose should pass");
-    
+
         // After choice, should output A then move to end
         let output = engine.next_output().expect("next should pass");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "A"));
-    
+
         // Now go back to choice - both options have once=True and were used, should skip
         let output = engine.next_output().expect("next should pass");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "end"));
     }
 
     #[test]
-    fn choice_visibility_when_expr_error_is_not_swallowed() {
+    pub(super) fn choice_visibility_when_expr_error_is_not_swallowed() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
@@ -587,11 +589,12 @@ mod step_tests {
     }
 
     #[test]
-    fn choice_fall_over_invisible_path_is_covered() {
+    pub(super) fn choice_fall_over_invisible_path_is_covered() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
     <script name="main">
+      <code>let x = 1;</code>
       <choice text="Pick">
         <option text="A" when="false"><text>A</text></option>
         <option text="F" fall_over="true" once="true"><text>F</text></option>
@@ -603,14 +606,25 @@ mod step_tests {
         engine.start("main", None).expect("start");
 
         let script = engine.scripts.get("main").expect("main script");
-        let root = script.groups.get(&script.root_group_id).expect("root group");
-        assert!(matches!(
-            root.nodes.first(),
-            Some(ScriptNode::Choice { .. })
-        ));
-        let mut option_id = None;
-        if let Some(ScriptNode::Choice { options, .. }) = root.nodes.first() { option_id = options.iter().find(|option| option.fall_over).map(|option| option.id.clone()); }
-        let option_id = option_id.expect("fall_over option");
+        let root = script
+            .groups
+            .get(&script.root_group_id)
+            .expect("root group");
+        assert!(root
+            .nodes
+            .iter()
+            .any(|node| matches!(node, ScriptNode::Choice { .. })));
+        let option_id = root
+            .nodes
+            .iter()
+            .find_map(|node| match node {
+                ScriptNode::Choice { options, .. } => options
+                    .iter()
+                    .find(|option| option.fall_over)
+                    .map(|option| option.id.clone()),
+                _ => None,
+            })
+            .expect("fall_over option");
         engine.mark_once_state("main", &format!("option:{}", option_id));
 
         let output = engine.next_output().expect("choice should be skipped");
@@ -618,7 +632,7 @@ mod step_tests {
     }
 
     #[test]
-    fn guard_and_choice_error_paths_are_covered() {
+    pub(super) fn guard_and_choice_error_paths_are_covered() {
         let mut infinite = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
@@ -632,7 +646,7 @@ mod step_tests {
         infinite.start("main", None).expect("start");
         let error = infinite.next_output().expect_err("guard should exceed");
         assert_eq!(error.code, "ENGINE_GUARD_EXCEEDED");
-    
+
         let mut skip_choice = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
@@ -647,7 +661,7 @@ mod step_tests {
         skip_choice.start("main", None).expect("start");
         let output = skip_choice.next_output().expect("next");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "after"));
-    
+
         let mut choice_node_missing = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
@@ -670,7 +684,7 @@ mod step_tests {
             .choose(0)
             .expect_err("pending choice node mismatch should fail");
         assert_eq!(error.code, "ENGINE_CHOICE_NODE_MISSING");
-    
+
         let mut option_missing = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
@@ -698,7 +712,7 @@ mod step_tests {
     }
 
     #[test]
-    fn runtime_remaining_branch_paths_are_covered() {
+    pub(super) fn runtime_remaining_branch_paths_are_covered() {
         let mut if_without_else = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><if when="false"><text>x</text></if><text>done</text></script>"#,
@@ -706,7 +720,7 @@ mod step_tests {
         if_without_else.start("main", None).expect("start");
         let output = if_without_else.next_output().expect("next");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "done"));
-    
+
         let mut with_choice = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><choice text="Pick"><option text="A"><text>A</text></option></choice></script>"#,
@@ -750,7 +764,7 @@ mod step_tests {
         with_choice
             .finish_frame(frame_id)
             .expect("finish should write ref and update continuation");
-    
+
         let mut no_frame = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><text>x</text></script>"#,
@@ -768,7 +782,7 @@ mod step_tests {
             .execute_var_declaration(&decl)
             .expect_err("execute var without frame should fail");
         assert_eq!(error.code, "ENGINE_VAR_FRAME");
-    
+
         let mut return_engine = engine_from_sources(map(&[
             (
                 "main.script.xml",
@@ -843,7 +857,7 @@ mod step_tests {
         return_engine
             .execute_return(None, &[])
             .expect("return should pass even when value missing");
-    
+
         let mut while_control = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><text>x</text></script>"#,
@@ -894,7 +908,7 @@ mod step_tests {
         assert!(while_control
             .find_nearest_while_body_frame_index()
             .is_none());
-    
+
         let mut choice_ctx = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
@@ -914,7 +928,7 @@ mod step_tests {
             .expect("context lookup");
         assert!(found.is_some());
         assert_eq!(choice_ctx.find_frame_index(9999), None);
-    
+
         let mut expr_engine = engine_from_sources(map(&[
             ("game.json", r#"{ "score": 5 }"#),
             (
@@ -946,7 +960,7 @@ mod step_tests {
             .write_path("x", SlValue::Number(3.0))
             .expect("write path should pass");
         assert!(slvalue_to_text(&global).contains("score"));
-    
+
         let mut snapshot_engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
@@ -973,7 +987,7 @@ mod step_tests {
     }
 
     #[test]
-    fn runtime_last_missing_lines_are_covered() {
+    pub(super) fn runtime_last_missing_lines_are_covered() {
         let mut finisher = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><text>x</text></script>"#,
@@ -1018,7 +1032,7 @@ mod step_tests {
             Some(&SlValue::Number(9.0))
         );
         assert_eq!(finisher.frames[0].node_index, 5);
-    
+
         let mut globals = engine_from_sources(map(&[
             ("game.json", r#"{ "score": 5 }"#),
             (
@@ -1053,7 +1067,7 @@ mod step_tests {
             globals.read_path("obj.n").expect("nested read"),
             SlValue::Number(8.0)
         );
-    
+
         let mut return_skip = engine_from_sources(map(&[
             (
                 "main.script.xml",
@@ -1121,7 +1135,7 @@ mod step_tests {
         return_skip
             .execute_return(Some("next".to_string()), &[])
             .expect("return should pass when resume frame is missing");
-    
+
         let mut find_ctx = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
@@ -1152,7 +1166,7 @@ mod step_tests {
     }
 
     #[test]
-    fn choice_option_when_expr_false_hides_option() {
+    pub(super) fn choice_option_when_expr_false_hides_option() {
         // Test that when_expr returning false makes option invisible (covers once_state.rs line 10)
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
@@ -1168,11 +1182,13 @@ mod step_tests {
         engine.start("main", None).expect("start");
         let output = engine.next_output().expect("next should pass");
         // Option A with when="false" should be hidden, only B should be visible
-        assert!(matches!(output, EngineOutput::Choices { ref items, .. } if items.len() == 1 && items[0].text == "B"));
+        assert!(
+            matches!(output, EngineOutput::Choices { ref items, .. } if items.len() == 1 && items[0].text == "B")
+        );
     }
 
     #[test]
-    fn while_break_continue_execution_path_covered() {
+    pub(super) fn while_break_continue_execution_path_covered() {
         // Test normal execution of break and continue in while loop
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
@@ -1217,7 +1233,7 @@ mod step_tests {
     }
 
     #[test]
-    fn once_text_skipped_on_revisit() {
+    pub(super) fn once_text_skipped_on_revisit() {
         // Test that once text is skipped when revisited (covers step.rs lines 169-170)
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
@@ -1250,7 +1266,7 @@ mod step_tests {
     }
 
     #[test]
-    fn choice_continue_executes_successfully() {
+    pub(super) fn choice_continue_executes_successfully() {
         // Test choice continue execution path (covers control_flow.rs lines 59-61)
         // Note: continue in choice re-shows the choice, not advance to next node
         let mut engine = engine_from_sources(map(&[(
@@ -1286,7 +1302,7 @@ mod step_tests {
     }
 
     #[test]
-    fn choice_with_fallover_visible_when_regular_hidden() {
+    pub(super) fn choice_with_fallover_visible_when_regular_hidden() {
         // Test choice where all regular options are hidden but fallover IS visible (covers line 234)
         // Use while loop to revisit the choice multiple times
         let mut engine = engine_from_sources(map(&[(
@@ -1321,11 +1337,13 @@ mod step_tests {
 
         // Iteration 3: A and B hidden (both once), C as fallover visible -> line 234 covered
         let out3 = engine.next_output().expect("3");
-        assert!(matches!(&out3, EngineOutput::Choices { items, .. } if items.len() == 1 && items[0].text == "C"));
+        assert!(
+            matches!(&out3, EngineOutput::Choices { items, .. } if items.len() == 1 && items[0].text == "C")
+        );
     }
 
     #[test]
-    fn choice_option_when_expr_true_continues() {
+    pub(super) fn choice_option_when_expr_true_continues() {
         // Test that when_expr returning true continues to check once state (covers once_state.rs line 10)
         // when_expr = true, once = false -> option should be visible
         let mut engine = engine_from_sources(map(&[(
@@ -1341,7 +1359,8 @@ mod step_tests {
         engine.start("main", None).expect("start");
         let output = engine.next_output().expect("next should pass");
         // Option A with when="true" and once="false" should be visible
-        assert!(matches!(output, EngineOutput::Choices { ref items, .. } if items.len() == 1 && items[0].text == "A"));
+        assert!(
+            matches!(output, EngineOutput::Choices { ref items, .. } if items.len() == 1 && items[0].text == "A")
+        );
     }
-
 }

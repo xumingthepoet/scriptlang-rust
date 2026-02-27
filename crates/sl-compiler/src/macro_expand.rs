@@ -1,4 +1,6 @@
-fn stable_base(script_path: &str) -> String {
+use crate::*;
+
+pub(crate) fn stable_base(script_path: &str) -> String {
     script_path
         .chars()
         .map(|ch| {
@@ -11,7 +13,7 @@ fn stable_base(script_path: &str) -> String {
         .collect()
 }
 
-fn expand_script_macros(
+pub(crate) fn expand_script_macros(
     root: &XmlElementNode,
     reserved_var_names: &[String],
 ) -> Result<XmlElementNode, ScriptLangError> {
@@ -34,7 +36,7 @@ fn expand_script_macros(
     })
 }
 
-fn collect_declared_var_names(node: &XmlElementNode, names: &mut BTreeSet<String>) {
+pub(crate) fn collect_declared_var_names(node: &XmlElementNode, names: &mut BTreeSet<String>) {
     if node.name == "var" {
         if let Some(name) = node.attributes.get("name") {
             if !name.is_empty() {
@@ -48,7 +50,7 @@ fn collect_declared_var_names(node: &XmlElementNode, names: &mut BTreeSet<String
     }
 }
 
-fn validate_reserved_prefix_in_user_var_declarations(
+pub(crate) fn validate_reserved_prefix_in_user_var_declarations(
     node: &XmlElementNode,
 ) -> Result<(), ScriptLangError> {
     if node.name == "var" {
@@ -66,7 +68,7 @@ fn validate_reserved_prefix_in_user_var_declarations(
     Ok(())
 }
 
-fn expand_children(
+pub(crate) fn expand_children(
     children: &[XmlNode],
     context: &mut MacroExpansionContext,
 ) -> Result<Vec<XmlNode>, ScriptLangError> {
@@ -84,7 +86,7 @@ fn expand_children(
     Ok(out)
 }
 
-fn expand_element_with_macros(
+pub(crate) fn expand_element_with_macros(
     node: &XmlElementNode,
     context: &mut MacroExpansionContext,
 ) -> Result<Vec<XmlElementNode>, ScriptLangError> {
@@ -142,7 +144,7 @@ fn expand_element_with_macros(
     Ok(vec![loop_var, loop_while])
 }
 
-fn parse_loop_times_expr(node: &XmlElementNode) -> Result<String, ScriptLangError> {
+pub(crate) fn parse_loop_times_expr(node: &XmlElementNode) -> Result<String, ScriptLangError> {
     let raw = get_required_non_empty_attr(node, "times")?;
     let trimmed = raw.trim();
     if trimmed.starts_with("${") && trimmed.ends_with('}') {
@@ -155,7 +157,7 @@ fn parse_loop_times_expr(node: &XmlElementNode) -> Result<String, ScriptLangErro
     Ok(raw)
 }
 
-fn next_loop_temp_var_name(context: &mut MacroExpansionContext) -> String {
+pub(crate) fn next_loop_temp_var_name(context: &mut MacroExpansionContext) -> String {
     loop {
         let candidate = format!("{}{}_remaining", LOOP_TEMP_VAR_PREFIX, context.loop_counter);
         context.loop_counter += 1;
@@ -183,7 +185,7 @@ mod macro_expand_tests {
     </script>
     "#,
         )]);
-    
+
         let result = compile_project_bundle_from_xml_map(&files).expect("project should compile");
         let main = result.scripts.get("main").expect("main script");
         let root = main.groups.get(&main.root_group_id).expect("root group");
@@ -196,5 +198,4 @@ mod macro_expand_tests {
             .iter()
             .any(|node| matches!(node, ScriptNode::While { .. })));
     }
-    
 }

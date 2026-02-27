@@ -1,10 +1,15 @@
+use super::lifecycle::ScopeInit;
+use super::lifecycle::{CompletionKind, RuntimeFrame};
+use super::once_state::BindingOwner;
+use super::*;
+
 fn text_interpolation_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| Regex::new(r"\$\{([^{}]+)\}").expect("template regex must compile"))
 }
 
 impl ScriptLangEngine {
-    fn create_script_root_scope(
+    pub(super) fn create_script_root_scope(
         &self,
         script_name: &str,
         arg_values: BTreeMap<String, SlValue>,
@@ -50,7 +55,7 @@ impl ScriptLangEngine {
         Ok((scope, var_types))
     }
 
-    fn render_text(&mut self, template: &str) -> Result<String, ScriptLangError> {
+    pub(super) fn render_text(&mut self, template: &str) -> Result<String, ScriptLangError> {
         let mut output = String::new();
         let mut last_index = 0usize;
         for captures in text_interpolation_regex().captures_iter(template) {
@@ -69,7 +74,7 @@ impl ScriptLangEngine {
         Ok(output)
     }
 
-    fn eval_boolean(&mut self, expr: &str) -> Result<bool, ScriptLangError> {
+    pub(super) fn eval_boolean(&mut self, expr: &str) -> Result<bool, ScriptLangError> {
         let value = self.eval_expression(expr)?;
         match value {
             SlValue::Bool(value) => Ok(value),
@@ -80,15 +85,18 @@ impl ScriptLangEngine {
         }
     }
 
-    fn run_code(&mut self, code: &str) -> Result<(), ScriptLangError> {
+    pub(super) fn run_code(&mut self, code: &str) -> Result<(), ScriptLangError> {
         self.execute_rhai(code, false).map(|_| ())
     }
 
-    fn eval_expression(&mut self, expr: &str) -> Result<SlValue, ScriptLangError> {
+    pub(super) fn eval_expression(&mut self, expr: &str) -> Result<SlValue, ScriptLangError> {
         self.execute_rhai(expr, true)
     }
 
-    fn eval_defs_global_initializer(&mut self, expr: &str) -> Result<SlValue, ScriptLangError> {
+    pub(super) fn eval_defs_global_initializer(
+        &mut self,
+        expr: &str,
+    ) -> Result<SlValue, ScriptLangError> {
         if !self.host_functions.names().is_empty() {
             return Err(ScriptLangError::new(
                 "ENGINE_HOST_FUNCTION_UNSUPPORTED",
@@ -165,7 +173,7 @@ impl ScriptLangEngine {
         result
     }
 
-    fn execute_rhai(
+    pub(super) fn execute_rhai(
         &mut self,
         script: &str,
         is_expression: bool,
@@ -349,7 +357,10 @@ impl ScriptLangEngine {
             let SlValue::Map(entries) = after else {
                 return Err(ScriptLangError::new(
                     "ENGINE_DEFS_GLOBAL_NAMESPACE_TYPE",
-                    format!("Defs global namespace \"{}\" is not a map value.", namespace),
+                    format!(
+                        "Defs global namespace \"{}\" is not a map value.",
+                        namespace
+                    ),
                 ));
             };
 
@@ -358,15 +369,16 @@ impl ScriptLangEngine {
                 if !visible_defs.contains(&qualified_name) {
                     continue;
                 }
-                let declared_type = self.defs_globals_type.get(&qualified_name).ok_or_else(|| {
-                    ScriptLangError::new(
-                        "ENGINE_DEFS_GLOBAL_DECL_MISSING",
-                        format!(
-                            "Defs global \"{}\" is visible but declaration is missing.",
-                            qualified_name
-                        ),
-                    )
-                })?;
+                let declared_type =
+                    self.defs_globals_type.get(&qualified_name).ok_or_else(|| {
+                        ScriptLangError::new(
+                            "ENGINE_DEFS_GLOBAL_DECL_MISSING",
+                            format!(
+                                "Defs global \"{}\" is visible but declaration is missing.",
+                                qualified_name
+                            ),
+                        )
+                    })?;
                 if !is_type_compatible(&value, declared_type) {
                     return Err(ScriptLangError::new(
                         "ENGINE_TYPE_MISMATCH",
@@ -400,7 +412,10 @@ impl ScriptLangEngine {
             if !is_type_compatible(&after, declared_type) {
                 return Err(ScriptLangError::new(
                     "ENGINE_TYPE_MISMATCH",
-                    format!("Defs global \"{}\" does not match declared type.", qualified_name),
+                    format!(
+                        "Defs global \"{}\" does not match declared type.",
+                        qualified_name
+                    ),
                 ));
             }
             self.defs_globals_value.insert(qualified_name, after);
@@ -409,7 +424,7 @@ impl ScriptLangEngine {
         run_result
     }
 
-    fn get_or_build_defs_prelude(
+    pub(super) fn get_or_build_defs_prelude(
         &mut self,
         script_name: &str,
         function_symbol_map: &BTreeMap<String, String>,
@@ -426,7 +441,7 @@ impl ScriptLangEngine {
             .expect("defs prelude should be cached"))
     }
 
-    fn build_defs_prelude(
+    pub(super) fn build_defs_prelude(
         &self,
         script_name: &str,
         function_symbol_map: &BTreeMap<String, String>,
@@ -489,7 +504,10 @@ impl ScriptLangEngine {
         Ok(out)
     }
 
-    fn build_defs_global_qualified_rewrite_map(&self, script_name: &str) -> BTreeMap<String, String> {
+    pub(super) fn build_defs_global_qualified_rewrite_map(
+        &self,
+        script_name: &str,
+    ) -> BTreeMap<String, String> {
         let mut out = BTreeMap::new();
         let Some(visible_defs) = self.visible_defs_by_script.get(script_name) else {
             return out;
@@ -508,7 +526,7 @@ impl ScriptLangEngine {
         out
     }
 
-    fn collect_bundle_defs_short_aliases(&self) -> BTreeMap<String, String> {
+    pub(super) fn collect_bundle_defs_short_aliases(&self) -> BTreeMap<String, String> {
         let mut candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for decl in self.defs_global_declarations.values() {
             candidates
@@ -529,7 +547,7 @@ impl ScriptLangEngine {
             .collect()
     }
 
-    fn collect_mutable_bindings(&self) -> (BTreeMap<String, BindingOwner>, Vec<String>) {
+    pub(super) fn collect_mutable_bindings(&self) -> (BTreeMap<String, BindingOwner>, Vec<String>) {
         let mut map = BTreeMap::new();
         let mut order = Vec::new();
         for frame in self.frames.iter().rev() {
@@ -548,16 +566,15 @@ impl ScriptLangEngine {
         }
         (map, order)
     }
-
 }
 
 #[cfg(test)]
 mod eval_tests {
-    use super::*;
     use super::runtime_test_support::*;
+    use super::*;
 
     #[test]
-    fn global_json_is_readonly_during_code_execution() {
+    pub(super) fn global_json_is_readonly_during_code_execution() {
         let mut engine = engine_from_sources(map(&[
             ("game.json", r#"{ "bonus": 10 }"#),
             (
@@ -578,7 +595,7 @@ mod eval_tests {
     }
 
     #[test]
-    fn helper_functions_cover_paths_values_and_rng() {
+    pub(super) fn helper_functions_cover_paths_values_and_rng() {
         assert_eq!(
             parse_ref_path(" player . hp . current "),
             vec![
@@ -588,7 +605,7 @@ mod eval_tests {
             ]
         );
         assert!(parse_ref_path(" . ").is_empty());
-    
+
         let mut root = SlValue::Map(BTreeMap::from([(
             "player".to_string(),
             SlValue::Map(BTreeMap::from([("hp".to_string(), SlValue::Number(10.0))])),
@@ -606,17 +623,17 @@ mod eval_tests {
                 SlValue::Map(BTreeMap::from([("hp".to_string(), SlValue::Number(9.0))]))
             )]))
         );
-    
+
         let mut replacement = SlValue::String("old".to_string());
         assign_nested_path(&mut replacement, &[], SlValue::String("new".to_string()))
             .expect("empty path should replace root");
         assert_eq!(replacement, SlValue::String("new".to_string()));
-    
+
         let mut not_map = SlValue::Number(1.0);
         let error = assign_nested_path(&mut not_map, &["x".to_string()], SlValue::Number(2.0))
             .expect_err("non-map should fail");
         assert_eq!(error, "target is not an object/map");
-    
+
         let mut missing = SlValue::Map(BTreeMap::new());
         let error = assign_nested_path(
             &mut missing,
@@ -625,11 +642,11 @@ mod eval_tests {
         )
         .expect_err("missing key should fail");
         assert!(error.contains("missing key"));
-    
+
         assert_eq!(slvalue_to_text(&SlValue::Number(3.0)), "3");
         assert_eq!(slvalue_to_text(&SlValue::Number(3.5)), "3.5");
         assert_eq!(slvalue_to_text(&SlValue::Bool(true)), "true");
-    
+
         let value = SlValue::Map(BTreeMap::from([
             ("a".to_string(), SlValue::Number(1.0)),
             (
@@ -640,23 +657,23 @@ mod eval_tests {
         let dynamic = slvalue_to_dynamic(&value).expect("to dynamic");
         let roundtrip = dynamic_to_slvalue(dynamic).expect("from dynamic");
         assert_eq!(roundtrip, value);
-    
+
         let unsupported = dynamic_to_slvalue(Dynamic::UNIT).expect_err("unsupported type");
         assert_eq!(unsupported.code, "ENGINE_VALUE_UNSUPPORTED");
-    
+
         let literal = slvalue_to_rhai_literal(&SlValue::Map(BTreeMap::from([(
             "name".to_string(),
             SlValue::String("A\"B".to_string()),
         )])));
         assert_eq!(literal, "#{name: \"A\\\"B\"}");
-    
+
         let mut state = 1u32;
         let a = next_random_u32(&mut state);
         let b = next_random_u32(&mut state);
         assert_ne!(a, b);
         let bounded = next_random_bounded(&mut state, 7);
         assert!(bounded < 7);
-    
+
         let mut deterministic_state = 0u32;
         let mut sequence = [u32::MAX, 3u32].into_iter();
         let bounded_retry = next_random_bounded_with(&mut deterministic_state, 10, |_| {
@@ -668,7 +685,7 @@ mod eval_tests {
     }
 
     #[test]
-    fn runtime_errors_cover_input_boolean_random_and_host_unsupported() {
+    pub(super) fn runtime_errors_cover_input_boolean_random_and_host_unsupported() {
         let mut input_type = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
@@ -683,7 +700,7 @@ mod eval_tests {
             .next_output()
             .expect_err("input on non-string should fail");
         assert_eq!(error.code, "ENGINE_INPUT_VAR_TYPE");
-    
+
         let mut if_non_bool = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><if when="1"><text>A</text></if></script>"#,
@@ -693,7 +710,7 @@ mod eval_tests {
             .next_output()
             .expect_err("non-boolean if should fail");
         assert_eq!(error.code, "ENGINE_BOOLEAN_EXPECTED");
-    
+
         let mut random_bad = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><var name="x" type="int">random(0)</var></script>"#,
@@ -701,7 +718,7 @@ mod eval_tests {
         random_bad.start("main", None).expect("start");
         let error = random_bad.next_output().expect_err("random(0) should fail");
         assert_eq!(error.code, "ENGINE_EVAL_ERROR");
-    
+
         let files = map(&[(
             "main.script.xml",
             r#"
@@ -732,7 +749,7 @@ mod eval_tests {
     }
 
     #[test]
-    fn defs_global_eval_and_internal_error_paths_are_covered() {
+    pub(super) fn defs_global_eval_and_internal_error_paths_are_covered() {
         let host_blocked_files = map(&[
             (
                 "shared.defs.xml",
@@ -858,10 +875,9 @@ mod eval_tests {
 
         let mut invalid_visible_defs = engine_from_sources(defs_files.clone());
         invalid_visible_defs.start("main", None).expect("start");
-        invalid_visible_defs.visible_defs_by_script.insert(
-            "main".to_string(),
-            BTreeSet::from(["bad".to_string()]),
-        );
+        invalid_visible_defs
+            .visible_defs_by_script
+            .insert("main".to_string(), BTreeSet::from(["bad".to_string()]));
         invalid_visible_defs.defs_global_alias_by_script.insert(
             "main".to_string(),
             BTreeMap::from([("hp".to_string(), "bad".to_string())]),
@@ -907,7 +923,9 @@ mod eval_tests {
             ),
         ]);
         let mut namespace_type_error_engine = engine_from_sources(namespace_type_error);
-        namespace_type_error_engine.start("main", None).expect("start");
+        namespace_type_error_engine
+            .start("main", None)
+            .expect("start");
         let error = namespace_type_error_engine
             .next_output()
             .expect_err("namespace type should fail");
@@ -981,7 +999,9 @@ mod eval_tests {
             ),
         ]);
         let mut missing_short_decl_engine = engine_from_sources(short_alias_files.clone());
-        missing_short_decl_engine.start("main", None).expect("start");
+        missing_short_decl_engine
+            .start("main", None)
+            .expect("start");
         missing_short_decl_engine.defs_globals_type.clear();
         let error = missing_short_decl_engine
             .next_output()
@@ -1017,10 +1037,9 @@ mod eval_tests {
         assert!(map_helpers_engine
             .build_defs_global_qualified_rewrite_map("missing")
             .is_empty());
-        map_helpers_engine.visible_defs_by_script.insert(
-            "main".to_string(),
-            BTreeSet::from(["bad".to_string()]),
-        );
+        map_helpers_engine
+            .visible_defs_by_script
+            .insert("main".to_string(), BTreeSet::from(["bad".to_string()]));
         let rewritten = map_helpers_engine.build_defs_global_qualified_rewrite_map("main");
         assert!(rewritten.is_empty());
 
@@ -1074,7 +1093,9 @@ mod eval_tests {
         ]);
         invalid_initializer_engine.defs_global_init_order =
             vec!["bad".to_string(), "shared.ok".to_string()];
-        invalid_initializer_engine.start("main", None).expect("start");
+        invalid_initializer_engine
+            .start("main", None)
+            .expect("start");
 
         let mut alias_visibility_engine = engine_from_sources(map(&[
             (
@@ -1105,15 +1126,18 @@ mod eval_tests {
             "main.script.xml",
             r#"<script name="main"><text>ok</text></script>"#,
         )]));
-        short_decl_missing_engine.start("main", None).expect("start");
-        short_decl_missing_engine.visible_defs_by_script.insert(
-            "main".to_string(),
-            BTreeSet::from(["bad".to_string()]),
-        );
-        short_decl_missing_engine.defs_global_alias_by_script.insert(
-            "main".to_string(),
-            BTreeMap::from([("hp".to_string(), "bad".to_string())]),
-        );
+        short_decl_missing_engine
+            .start("main", None)
+            .expect("start");
+        short_decl_missing_engine
+            .visible_defs_by_script
+            .insert("main".to_string(), BTreeSet::from(["bad".to_string()]));
+        short_decl_missing_engine
+            .defs_global_alias_by_script
+            .insert(
+                "main".to_string(),
+                BTreeMap::from([("hp".to_string(), "bad".to_string())]),
+            );
         short_decl_missing_engine
             .defs_globals_value
             .insert("bad".to_string(), SlValue::Number(1.0));
@@ -1124,13 +1148,13 @@ mod eval_tests {
     }
 
     #[test]
-    fn runtime_private_helpers_cover_additional_error_paths() {
+    pub(super) fn runtime_private_helpers_cover_additional_error_paths() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><text>Hello</text></script>"#,
         )]));
         engine.start("main", None).expect("start");
-    
+
         // lookup_group: script missing
         let key = engine
             .group_lookup
@@ -1147,7 +1171,7 @@ mod eval_tests {
             .lookup_group(&key)
             .expect_err("script should be missing");
         assert_eq!(error.code, "ENGINE_SCRIPT_NOT_FOUND");
-    
+
         // restore engine for following checks
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
@@ -1169,7 +1193,7 @@ mod eval_tests {
             .lookup_group(&key)
             .expect_err("group should be missing");
         assert_eq!(error.code, "ENGINE_GROUP_NOT_FOUND");
-    
+
         // execute_continue_while: while body at index 0 has no owner
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
@@ -1189,7 +1213,7 @@ mod eval_tests {
             .execute_continue_while()
             .expect_err("no owning while frame");
         assert_eq!(error.code, "ENGINE_WHILE_CONTROL_TARGET_MISSING");
-    
+
         // execute_break: owner exists but node is not while
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
@@ -1221,7 +1245,7 @@ mod eval_tests {
             .execute_break()
             .expect_err("while owner node missing");
         assert_eq!(error.code, "ENGINE_WHILE_CONTROL_TARGET_MISSING");
-    
+
         // execute_continue_choice without choice context
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
@@ -1235,7 +1259,7 @@ mod eval_tests {
     }
 
     #[test]
-    fn code_eval_with_defs_prelude_and_visible_json_is_covered() {
+    pub(super) fn code_eval_with_defs_prelude_and_visible_json_is_covered() {
         let mut engine = engine_from_sources(map(&[
             ("game.json", r#"{ "bonus": 10 }"#),
             (
@@ -1266,5 +1290,4 @@ mod eval_tests {
         let output = engine.next_output().expect("text");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "11"));
     }
-
 }

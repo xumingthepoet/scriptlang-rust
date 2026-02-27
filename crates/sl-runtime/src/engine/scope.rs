@@ -1,12 +1,14 @@
+use super::*;
+
 impl ScriptLangEngine {
-    fn resolve_current_script_name(&self) -> Option<String> {
+    pub(super) fn resolve_current_script_name(&self) -> Option<String> {
         let top = self.frames.last()?;
         self.group_lookup
             .get(&top.group_id)
             .map(|entry| entry.script_name.clone())
     }
 
-    fn is_visible_json_global(&self, script_name: Option<&str>, name: &str) -> bool {
+    pub(super) fn is_visible_json_global(&self, script_name: Option<&str>, name: &str) -> bool {
         let Some(script_name) = script_name else {
             return false;
         };
@@ -16,7 +18,7 @@ impl ScriptLangEngine {
         visible.contains(name) && self.global_json.contains_key(name)
     }
 
-    fn resolve_defs_global_alias(
+    pub(super) fn resolve_defs_global_alias(
         &self,
         script_name: Option<&str>,
         alias: &str,
@@ -28,7 +30,7 @@ impl ScriptLangEngine {
             .cloned()
     }
 
-    fn read_variable(&self, name: &str) -> Result<SlValue, ScriptLangError> {
+    pub(super) fn read_variable(&self, name: &str) -> Result<SlValue, ScriptLangError> {
         for frame in self.frames.iter().rev() {
             if let Some(value) = frame.scope.get(name) {
                 return Ok(value.clone());
@@ -36,8 +38,7 @@ impl ScriptLangEngine {
         }
 
         let script_name = self.resolve_current_script_name();
-        if let Some(qualified_name) = self.resolve_defs_global_alias(script_name.as_deref(), name)
-        {
+        if let Some(qualified_name) = self.resolve_defs_global_alias(script_name.as_deref(), name) {
             return self
                 .defs_globals_value
                 .get(&qualified_name)
@@ -63,7 +64,11 @@ impl ScriptLangEngine {
         ))
     }
 
-    fn write_variable(&mut self, name: &str, value: SlValue) -> Result<(), ScriptLangError> {
+    pub(super) fn write_variable(
+        &mut self,
+        name: &str,
+        value: SlValue,
+    ) -> Result<(), ScriptLangError> {
         for frame in self.frames.iter_mut().rev() {
             if frame.scope.contains_key(name) {
                 if let Some(declared_type) = frame.var_types.get(name) {
@@ -109,7 +114,7 @@ impl ScriptLangEngine {
         ))
     }
 
-    fn read_path(&self, path: &str) -> Result<SlValue, ScriptLangError> {
+    pub(super) fn read_path(&self, path: &str) -> Result<SlValue, ScriptLangError> {
         let parts = parse_ref_path(path);
         if parts.is_empty() {
             return Err(ScriptLangError::new(
@@ -136,7 +141,7 @@ impl ScriptLangEngine {
         Ok(current)
     }
 
-    fn write_path(&mut self, path: &str, value: SlValue) -> Result<(), ScriptLangError> {
+    pub(super) fn write_path(&mut self, path: &str, value: SlValue) -> Result<(), ScriptLangError> {
         let parts = parse_ref_path(path);
         if parts.is_empty() {
             return Err(ScriptLangError::new(
@@ -154,17 +159,18 @@ impl ScriptLangEngine {
             return self.write_variable(&root_name, value);
         }
         let mut root_value = self.read_variable(&root_name)?;
-        assign_nested_path(&mut root_value, &parts[nested_start_index..], value)
-            .map_err(|message| {
-            ScriptLangError::new(
-                "ENGINE_REF_PATH_WRITE",
-                format!("Cannot resolve write path \"{}\": {}", path, message),
-            )
-        })?;
+        assign_nested_path(&mut root_value, &parts[nested_start_index..], value).map_err(
+            |message| {
+                ScriptLangError::new(
+                    "ENGINE_REF_PATH_WRITE",
+                    format!("Cannot resolve write path \"{}\": {}", path, message),
+                )
+            },
+        )?;
         self.write_variable(&root_name, root_value)
     }
 
-    fn resolve_path_root_alias(&self, parts: &[String]) -> (String, usize) {
+    pub(super) fn resolve_path_root_alias(&self, parts: &[String]) -> (String, usize) {
         if parts.len() >= 2 {
             let script_name = self.resolve_current_script_name();
             let qualified = format!("{}.{}", parts[0], parts[1]);
@@ -181,11 +187,11 @@ impl ScriptLangEngine {
 
 #[cfg(test)]
 mod scope_tests {
-    use super::*;
     use super::runtime_test_support::*;
+    use super::*;
 
     #[test]
-    fn runtime_errors_cover_var_and_ref_path_failures() {
+    pub(super) fn runtime_errors_cover_var_and_ref_path_failures() {
         let mut duplicate_var = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
@@ -200,7 +206,7 @@ mod scope_tests {
             .next_output()
             .expect_err("duplicate var should fail");
         assert_eq!(error.code, "ENGINE_VAR_DUPLICATE");
-    
+
         let mut bad_type = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><var name="x" type="int">&quot;str&quot;</var></script>"#,
@@ -210,7 +216,7 @@ mod scope_tests {
             .next_output()
             .expect_err("type mismatch should fail");
         assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
-    
+
         let mut bad_ref_read = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><text>${missing.value}</text></script>"#,
@@ -224,7 +230,7 @@ mod scope_tests {
                 || error.code == "ENGINE_REF_PATH_READ"
                 || error.code == "ENGINE_EVAL_ERROR"
         );
-    
+
         let mut bad_ref_write = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
@@ -242,7 +248,7 @@ mod scope_tests {
     }
 
     #[test]
-    fn scope_private_read_write_path_branches_are_covered() {
+    pub(super) fn scope_private_read_write_path_branches_are_covered() {
         let mut engine = engine_from_sources(map(&[
             (
                 "main.script.xml",
@@ -262,7 +268,9 @@ mod scope_tests {
         ]));
         engine.start("main", None).expect("start");
 
-        engine.global_json.insert("g".to_string(), SlValue::Number(1.0));
+        engine
+            .global_json
+            .insert("g".to_string(), SlValue::Number(1.0));
         engine
             .visible_json_by_script
             .entry("main".to_string())
@@ -290,19 +298,23 @@ mod scope_tests {
         engine
             .write_variable("x", SlValue::Number(1.0))
             .expect_err("x should not exist");
-        engine.frames.last_mut().expect("frame").scope.insert(
-            "x".to_string(),
-            SlValue::Number(1.0),
-        );
+        engine
+            .frames
+            .last_mut()
+            .expect("frame")
+            .scope
+            .insert("x".to_string(), SlValue::Number(1.0));
         let err = engine
             .read_path("x.a")
             .expect_err("reading nested field from scalar should fail");
         assert_eq!(err.code, "ENGINE_REF_PATH_READ");
 
-        engine.frames.last_mut().expect("frame").scope.insert(
-            "m".to_string(),
-            SlValue::Map(BTreeMap::new()),
-        );
+        engine
+            .frames
+            .last_mut()
+            .expect("frame")
+            .scope
+            .insert("m".to_string(), SlValue::Map(BTreeMap::new()));
         let err = engine
             .read_path("m.k")
             .expect_err("missing nested key should fail");
@@ -317,7 +329,7 @@ mod scope_tests {
     }
 
     #[test]
-    fn group_scope_allows_redeclaring_same_var_name_in_separate_groups() {
+    pub(super) fn group_scope_allows_redeclaring_same_var_name_in_separate_groups() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
@@ -344,7 +356,7 @@ mod scope_tests {
     }
 
     #[test]
-    fn call_and_scope_validation_error_paths_are_covered() {
+    pub(super) fn call_and_scope_validation_error_paths_are_covered() {
         // create_script_root_scope unknown arg / type mismatch
         let engine = engine_from_sources(map(&[(
             "main.script.xml",
@@ -357,7 +369,7 @@ mod scope_tests {
             )
             .expect_err("unknown arg should fail");
         assert_eq!(error.code, "ENGINE_CALL_ARG_UNKNOWN");
-    
+
         let error = engine
             .create_script_root_scope(
                 "main",
@@ -365,7 +377,7 @@ mod scope_tests {
             )
             .expect_err("type mismatch should fail");
         assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
-    
+
         // execute_call arg unknown
         let mut engine = engine_from_sources(map(&[
             (
@@ -385,7 +397,7 @@ mod scope_tests {
         engine.start("main", None).expect("start");
         let error = engine.next_output().expect_err("arg unknown should fail");
         assert_eq!(error.code, "ENGINE_CALL_ARG_UNKNOWN");
-    
+
         // execute_call arg type mismatch at scope creation
         let mut engine = engine_from_sources(map(&[
             (
@@ -410,7 +422,7 @@ mod scope_tests {
     }
 
     #[test]
-    fn defs_globals_support_shadowing_short_name_and_qualified_paths() {
+    pub(super) fn defs_globals_support_shadowing_short_name_and_qualified_paths() {
         let mut engine = engine_from_sources(map(&[
             (
                 "shared.defs.xml",
@@ -448,13 +460,15 @@ mod scope_tests {
             .write_path("shared.hp", SlValue::Number(110.0))
             .expect("qualified write");
         assert_eq!(
-            engine.read_variable("shared.hp").expect("qualified variable read"),
+            engine
+                .read_variable("shared.hp")
+                .expect("qualified variable read"),
             SlValue::Number(110.0)
         );
     }
 
     #[test]
-    fn defs_global_short_alias_writes_back_when_not_shadowed() {
+    pub(super) fn defs_global_short_alias_writes_back_when_not_shadowed() {
         let mut engine = engine_from_sources(map(&[
             (
                 "shared.defs.xml",
@@ -486,7 +500,7 @@ mod scope_tests {
     }
 
     #[test]
-    fn defs_global_missing_and_type_mismatch_paths_are_covered() {
+    pub(super) fn defs_global_missing_and_type_mismatch_paths_are_covered() {
         let files = map(&[
             (
                 "shared.defs.xml",
@@ -518,19 +532,22 @@ mod scope_tests {
     }
 
     #[test]
-    fn write_defs_global_variable_succeeds() {
+    pub(super) fn write_defs_global_variable_succeeds() {
         // Test successful write to defs global variable (covers scope.rs line 92)
-        let files = map(&[(
-            "shared.defs.xml",
-            r#"<defs name="shared"><var name="score" type="int">0</var></defs>"#,
-        ), (
-            "main.script.xml",
-            r#"<!-- include: shared.defs.xml -->
+        let files = map(&[
+            (
+                "shared.defs.xml",
+                r#"<defs name="shared"><var name="score" type="int">0</var></defs>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"<!-- include: shared.defs.xml -->
 <script name="main">
   <code>shared.score = 100;</code>
   <text>${shared.score}</text>
 </script>"#,
-        )]);
+            ),
+        ]);
         let mut engine = engine_from_sources(files);
         engine.start("main", None).expect("start");
 
@@ -541,25 +558,31 @@ mod scope_tests {
     }
 
     #[test]
-    fn write_defs_global_variable_type_compatible_covered() {
+    pub(super) fn write_defs_global_variable_type_compatible_covered() {
         // Direct test for type compatible branch (covers scope.rs line 92)
-        let files = map(&[(
-            "shared.defs.xml",
-            r#"<defs name="shared"><var name="hp" type="int">10</var></defs>"#,
-        ), (
-            "main.script.xml",
-            r#"<!-- include: shared.defs.xml -->
+        let files = map(&[
+            (
+                "shared.defs.xml",
+                r#"<defs name="shared"><var name="hp" type="int">10</var></defs>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"<!-- include: shared.defs.xml -->
 <script name="main"><text>${shared.hp}</text></script>"#,
-        )]);
+            ),
+        ]);
         let mut engine = engine_from_sources(files);
         engine.start("main", None).expect("start");
 
         // Directly call write_variable with compatible type
-        engine.write_variable("shared.hp", SlValue::Number(20.0)).expect("write should succeed");
+        engine
+            .write_variable("shared.hp", SlValue::Number(20.0))
+            .expect("write should succeed");
 
         // Verify the value was written
-        let value = engine.read_variable("shared.hp").expect("read should succeed");
+        let value = engine
+            .read_variable("shared.hp")
+            .expect("read should succeed");
         assert_eq!(value, SlValue::Number(20.0));
     }
-
 }

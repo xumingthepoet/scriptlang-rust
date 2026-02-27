@@ -1,4 +1,6 @@
-fn slvalue_from_json(value: JsonValue) -> SlValue {
+use crate::*;
+
+pub(crate) fn slvalue_from_json(value: JsonValue) -> SlValue {
     match value {
         JsonValue::Null => SlValue::String("null".to_string()),
         JsonValue::Bool(value) => SlValue::Bool(value),
@@ -16,6 +18,7 @@ fn slvalue_from_json(value: JsonValue) -> SlValue {
     }
 }
 
+#[allow(dead_code)]
 pub fn default_values_from_script_params(params: &[ScriptParam]) -> BTreeMap<String, SlValue> {
     let mut defaults = BTreeMap::new();
     for param in params {
@@ -58,9 +61,13 @@ mod defaults_tests {
         let json_str = r#"{"active": true, "disabled": false}"#;
         let json_value: JsonValue = serde_json::from_str(json_str).unwrap();
         let sl_value = slvalue_from_json(json_value);
-        let SlValue::Map(map) = sl_value else { panic!("expected Map") };
-        assert_eq!(map.get("active"), Some(&SlValue::Bool(true)));
-        assert_eq!(map.get("disabled"), Some(&SlValue::Bool(false)));
+        assert_eq!(
+            sl_value,
+            SlValue::Map(BTreeMap::from([
+                ("active".to_string(), SlValue::Bool(true)),
+                ("disabled".to_string(), SlValue::Bool(false)),
+            ]))
+        );
     }
 
     #[test]
@@ -84,11 +91,14 @@ mod defaults_tests {
         let json_str = r#"[1, 2, 3]"#;
         let json_value: JsonValue = serde_json::from_str(json_str).unwrap();
         let sl_value = slvalue_from_json(json_value);
-        let SlValue::Array(arr) = sl_value else { panic!("expected Array") };
-        assert_eq!(arr.len(), 3);
-        assert_eq!(arr[0], SlValue::Number(1.0));
-        assert_eq!(arr[1], SlValue::Number(2.0));
-        assert_eq!(arr[2], SlValue::Number(3.0));
+        assert_eq!(
+            sl_value,
+            SlValue::Array(vec![
+                SlValue::Number(1.0),
+                SlValue::Number(2.0),
+                SlValue::Number(3.0),
+            ])
+        );
     }
 
     #[test]
@@ -96,9 +106,12 @@ mod defaults_tests {
         let json_str = r#"{"name": "hero", "hp": 100}"#;
         let json_value: JsonValue = serde_json::from_str(json_str).unwrap();
         let sl_value = slvalue_from_json(json_value);
-        let SlValue::Map(map) = sl_value else { panic!("expected Map") };
-        assert_eq!(map.get("name"), Some(&SlValue::String("hero".to_string())));
-        assert_eq!(map.get("hp"), Some(&SlValue::Number(100.0)));
+        assert_eq!(
+            sl_value,
+            SlValue::Map(BTreeMap::from([
+                ("name".to_string(), SlValue::String("hero".to_string())),
+                ("hp".to_string(), SlValue::Number(100.0)),
+            ]))
+        );
     }
-
 }

@@ -1,4 +1,6 @@
-fn parse_sources(
+use crate::*;
+
+pub(crate) fn parse_sources(
     xml_by_path: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<String, SourceFile>, ScriptLangError> {
     let mut sources = BTreeMap::new();
@@ -50,7 +52,7 @@ fn parse_sources(
     Ok(sources)
 }
 
-fn detect_source_kind(path: &str) -> Option<SourceKind> {
+pub(crate) fn detect_source_kind(path: &str) -> Option<SourceKind> {
     if path.ends_with(".script.xml") {
         Some(SourceKind::ScriptXml)
     } else if path.ends_with(".defs.xml") {
@@ -62,7 +64,7 @@ fn detect_source_kind(path: &str) -> Option<SourceKind> {
     }
 }
 
-fn resolve_include_path(current_path: &str, include: &str) -> String {
+pub(crate) fn resolve_include_path(current_path: &str, include: &str) -> String {
     let parent = match Path::new(current_path).parent() {
         Some(parent) => parent,
         None => Path::new(""),
@@ -75,7 +77,7 @@ fn resolve_include_path(current_path: &str, include: &str) -> String {
     normalize_virtual_path(joined.to_string_lossy().as_ref())
 }
 
-fn normalize_virtual_path(path: &str) -> String {
+pub(crate) fn normalize_virtual_path(path: &str) -> String {
     let mut stack: Vec<String> = Vec::new();
     for part in path.replace('\\', "/").split('/') {
         if part.is_empty() || part == "." {
@@ -127,14 +129,7 @@ mod source_parse_tests {
         assert_eq!(stable_base("a*b?c"), "a_b_c");
 
         // Test .. path handling explicitly (covers line 87)
-        assert_eq!(
-            normalize_virtual_path("a/b/c/../d"),
-            "a/b/d"
-        );
-        assert_eq!(
-            normalize_virtual_path("../a"),
-            "a"
-        );
+        assert_eq!(normalize_virtual_path("a/b/c/../d"), "a/b/d");
+        assert_eq!(normalize_virtual_path("../a"), "a");
     }
-
 }

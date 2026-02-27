@@ -1,3 +1,6 @@
+use super::lifecycle::{CompletionKind, PendingBoundary, RuntimeFrame};
+use super::*;
+
 impl ScriptLangEngine {
     pub fn choose(&mut self, index: usize) -> Result<(), ScriptLangError> {
         let Some(pending) = self.pending_boundary.take() else {
@@ -104,7 +107,8 @@ impl ScriptLangEngine {
             .node_index
             .checked_add(1)
             .expect("node index should not overflow");
-        if let Err(error) = self.push_group_frame(&option.group_id, CompletionKind::ResumeAfterChild)
+        if let Err(error) =
+            self.push_group_frame(&option.group_id, CompletionKind::ResumeAfterChild)
         {
             self.pending_boundary = Some(PendingBoundary::Choice {
                 frame_id,
@@ -182,22 +186,21 @@ impl ScriptLangEngine {
         self.waiting_choice = false;
         Ok(())
     }
-
 }
 
 #[cfg(test)]
 mod boundary_tests {
-    use super::*;
     use super::runtime_test_support::*;
+    use super::*;
 
     #[test]
-    fn choose_and_input_validate_pending_boundary_state() {
+    pub(super) fn choose_and_input_validate_pending_boundary_state() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><text>Hello</text></script>"#,
         )]));
         engine.start("main", None).expect("start");
-    
+
         let choose_error = engine.choose(0).expect_err("no pending choice");
         assert_eq!(choose_error.code, "ENGINE_NO_PENDING_CHOICE");
         let input_error = engine.submit_input("x").expect_err("no pending input");
@@ -205,7 +208,7 @@ mod boundary_tests {
     }
 
     #[test]
-    fn choose_rejects_out_of_range_index() {
+    pub(super) fn choose_rejects_out_of_range_index() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
@@ -224,7 +227,7 @@ mod boundary_tests {
     }
 
     #[test]
-    fn submit_input_uses_default_value_for_blank_input() {
+    pub(super) fn submit_input_uses_default_value_for_blank_input() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
@@ -244,7 +247,7 @@ mod boundary_tests {
     }
 
     #[test]
-    fn submit_input_uses_provided_non_empty_value() {
+    pub(super) fn submit_input_uses_provided_non_empty_value() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
@@ -264,7 +267,7 @@ mod boundary_tests {
     }
 
     #[test]
-    fn choose_restores_pending_boundary_on_internal_failures() {
+    pub(super) fn choose_restores_pending_boundary_on_internal_failures() {
         let mut wrong_kind = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><text>Hello</text></script>"#,
@@ -276,7 +279,9 @@ mod boundary_tests {
             prompt_text: "p".to_string(),
             default_text: "d".to_string(),
         });
-        let error = wrong_kind.choose(0).expect_err("wrong boundary kind should fail");
+        let error = wrong_kind
+            .choose(0)
+            .expect_err("wrong boundary kind should fail");
         assert_eq!(error.code, "ENGINE_NO_PENDING_CHOICE");
         assert!(matches!(
             wrong_kind.pending_boundary,
@@ -298,7 +303,8 @@ mod boundary_tests {
             lookup_fail.next_output().expect("choice"),
             EngineOutput::Choices { .. }
         ));
-        let frame_index = lookup_fail.find_frame_index(lookup_fail.top_frame_id().expect("frame"))
+        let frame_index = lookup_fail
+            .find_frame_index(lookup_fail.top_frame_id().expect("frame"))
             .expect("frame index");
         lookup_fail.frames[frame_index].group_id = "missing-group".to_string();
         let error = lookup_fail
@@ -325,7 +331,8 @@ mod boundary_tests {
             node_missing.next_output().expect("choice"),
             EngineOutput::Choices { .. }
         ));
-        let frame_index = node_missing.find_frame_index(node_missing.top_frame_id().expect("frame"))
+        let frame_index = node_missing
+            .find_frame_index(node_missing.top_frame_id().expect("frame"))
             .expect("frame index");
         node_missing.frames[frame_index].node_index = 99;
         let error = node_missing
@@ -357,7 +364,9 @@ mod boundary_tests {
             .as_mut()
             .expect("pending choice should exist");
         assert!(matches!(pending, PendingBoundary::Choice { .. }));
-        if let PendingBoundary::Choice { options, .. } = pending { options[0].id = "missing".to_string(); }
+        if let PendingBoundary::Choice { options, .. } = pending {
+            options[0].id = "missing".to_string();
+        }
         let error = option_missing
             .choose(0)
             .expect_err("option missing should keep boundary");
@@ -394,7 +403,9 @@ mod boundary_tests {
             .expect("pending choice should exist");
         assert!(matches!(pending, PendingBoundary::Choice { .. }));
         let mut once_key = None;
-        if let PendingBoundary::Choice { options, .. } = pending { once_key = Some(format!("option:{}", options[0].id)); }
+        if let PendingBoundary::Choice { options, .. } = pending {
+            once_key = Some(format!("option:{}", options[0].id));
+        }
         let once_key = once_key.expect("choice options should exist");
         assert!(!push_fail.has_once_state(&script_name, &once_key));
         for script in push_fail.scripts.values_mut() {
@@ -419,7 +430,7 @@ mod boundary_tests {
     }
 
     #[test]
-    fn submit_input_restores_pending_boundary_on_internal_failures() {
+    pub(super) fn submit_input_restores_pending_boundary_on_internal_failures() {
         let mut wrong_kind = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><text>Hello</text></script>"#,
@@ -462,7 +473,9 @@ mod boundary_tests {
             .as_mut()
             .expect("pending input should exist");
         assert!(matches!(pending, PendingBoundary::Input { .. }));
-        if let PendingBoundary::Input { target_var, .. } = pending { *target_var = "missingVar".to_string(); }
+        if let PendingBoundary::Input { target_var, .. } = pending {
+            *target_var = "missingVar".to_string();
+        }
         let error = write_fail
             .submit_input("Guild")
             .expect_err("write path should fail");
@@ -472,5 +485,4 @@ mod boundary_tests {
             Some(PendingBoundary::Input { .. })
         ));
     }
-
 }

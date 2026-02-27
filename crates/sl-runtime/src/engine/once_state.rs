@@ -1,5 +1,7 @@
+use super::*;
+
 impl ScriptLangEngine {
-    fn is_choice_option_visible(
+    pub(super) fn is_choice_option_visible(
         &mut self,
         script_name: &str,
         option: &sl_core::ChoiceOption,
@@ -17,14 +19,14 @@ impl ScriptLangEngine {
         Ok(!self.has_once_state(script_name, &format!("option:{}", option.id)))
     }
 
-    fn has_once_state(&self, script_name: &str, key: &str) -> bool {
+    pub(super) fn has_once_state(&self, script_name: &str, key: &str) -> bool {
         self.once_state_by_script
             .get(script_name)
             .map(|set| set.contains(key))
             .unwrap_or(false)
     }
 
-    fn mark_once_state(&mut self, script_name: &str, key: &str) {
+    pub(super) fn mark_once_state(&mut self, script_name: &str, key: &str) {
         self.once_state_by_script
             .entry(script_name.to_string())
             .or_default()
@@ -32,7 +34,6 @@ impl ScriptLangEngine {
     }
 }
 #[derive(Debug, Clone)]
-struct BindingOwner {
-    value: SlValue,
+pub(crate) struct BindingOwner {
+    pub(crate) value: SlValue,
 }
-

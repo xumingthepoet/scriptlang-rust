@@ -1,4 +1,9 @@
-fn parse_type_expr(raw: &str, span: &SourceSpan) -> Result<ParsedTypeExpr, ScriptLangError> {
+use crate::*;
+
+pub(crate) fn parse_type_expr(
+    raw: &str,
+    span: &SourceSpan,
+) -> Result<ParsedTypeExpr, ScriptLangError> {
     let source = raw.trim();
     if source == "int" || source == "float" || source == "string" || source == "boolean" {
         return Ok(ParsedTypeExpr::Primitive(source.to_string()));
@@ -35,7 +40,7 @@ fn parse_type_expr(raw: &str, span: &SourceSpan) -> Result<ParsedTypeExpr, Scrip
     ))
 }
 
-fn type_name_regex() -> &'static Regex {
+pub(crate) fn type_name_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
         Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
@@ -43,7 +48,7 @@ fn type_name_regex() -> &'static Regex {
     })
 }
 
-fn parse_args(raw: Option<String>) -> Result<Vec<CallArgument>, ScriptLangError> {
+pub(crate) fn parse_args(raw: Option<String>) -> Result<Vec<CallArgument>, ScriptLangError> {
     let Some(raw) = raw else {
         return Ok(Vec::new());
     };
@@ -75,7 +80,7 @@ fn parse_args(raw: Option<String>) -> Result<Vec<CallArgument>, ScriptLangError>
     Ok(args)
 }
 
-fn parse_inline_required(node: &XmlElementNode) -> Result<String, ScriptLangError> {
+pub(crate) fn parse_inline_required(node: &XmlElementNode) -> Result<String, ScriptLangError> {
     if has_attr(node, "value") {
         return Err(ScriptLangError::with_span(
             "XML_ATTR_NOT_ALLOWED",
@@ -99,7 +104,7 @@ fn parse_inline_required(node: &XmlElementNode) -> Result<String, ScriptLangErro
     Ok(content.trim().to_string())
 }
 
-fn parse_inline_required_no_element_children(
+pub(crate) fn parse_inline_required_no_element_children(
     node: &XmlElementNode,
 ) -> Result<String, ScriptLangError> {
     if let Some(element) = element_children(node).next() {
@@ -116,7 +121,7 @@ fn parse_inline_required_no_element_children(
     parse_inline_required(node)
 }
 
-fn inline_text_content(node: &XmlElementNode) -> String {
+pub(crate) fn inline_text_content(node: &XmlElementNode) -> String {
     node.children
         .iter()
         .filter_map(|entry| match entry {
@@ -127,7 +132,7 @@ fn inline_text_content(node: &XmlElementNode) -> String {
         .join("\n")
 }
 
-fn parse_bool_attr(
+pub(crate) fn parse_bool_attr(
     node: &XmlElementNode,
     name: &str,
     default: bool,
@@ -150,7 +155,7 @@ fn parse_bool_attr(
     }
 }
 
-fn split_by_top_level_comma(raw: &str) -> Vec<String> {
+pub(crate) fn split_by_top_level_comma(raw: &str) -> Vec<String> {
     let mut parts = Vec::new();
     let mut current = String::new();
     let mut paren_depth = 0usize;
@@ -198,7 +203,7 @@ fn split_by_top_level_comma(raw: &str) -> Vec<String> {
     parts
 }
 
-fn assert_name_not_reserved(
+pub(crate) fn assert_name_not_reserved(
     name: &str,
     label: &str,
     span: SourceSpan,
@@ -217,14 +222,14 @@ fn assert_name_not_reserved(
     ))
 }
 
-fn element_children(node: &XmlElementNode) -> impl Iterator<Item = &XmlElementNode> {
+pub(crate) fn element_children(node: &XmlElementNode) -> impl Iterator<Item = &XmlElementNode> {
     node.children.iter().filter_map(|entry| match entry {
         XmlNode::Element(element) => Some(element),
         _ => None,
     })
 }
 
-fn has_any_child_content(node: &XmlElementNode) -> bool {
+pub(crate) fn has_any_child_content(node: &XmlElementNode) -> bool {
     for entry in &node.children {
         match entry {
             XmlNode::Element(_) => return true,
@@ -235,11 +240,11 @@ fn has_any_child_content(node: &XmlElementNode) -> bool {
     false
 }
 
-fn get_optional_attr(node: &XmlElementNode, name: &str) -> Option<String> {
+pub(crate) fn get_optional_attr(node: &XmlElementNode, name: &str) -> Option<String> {
     node.attributes.get(name).cloned()
 }
 
-fn get_required_non_empty_attr(
+pub(crate) fn get_required_non_empty_attr(
     node: &XmlElementNode,
     name: &str,
 ) -> Result<String, ScriptLangError> {
@@ -265,7 +270,7 @@ fn get_required_non_empty_attr(
     Ok(raw.to_string())
 }
 
-fn has_attr(node: &XmlElementNode, name: &str) -> bool {
+pub(crate) fn has_attr(node: &XmlElementNode, name: &str) -> bool {
     node.attributes.contains_key(name)
 }
 
@@ -297,11 +302,11 @@ mod xml_utils_tests {
         assert_eq!(invalid_type.code, "TYPE_PARSE_ERROR");
         let empty_map_type = parse_type_expr("#{   }", &span).expect_err("empty map type");
         assert_eq!(empty_map_type.code, "TYPE_PARSE_ERROR");
-    
+
         let args = parse_args(Some("1, ref:hp, a + 1".to_string())).expect("args");
         assert_eq!(args.len(), 3);
         assert!(args[1].is_ref);
-    
+
         let bad_args = parse_args(Some("ref:   ".to_string())).expect_err("bad args");
         assert_eq!(bad_args.code, "CALL_ARGS_PARSE_ERROR");
     }
@@ -311,7 +316,10 @@ mod xml_utils_tests {
         // This specifically tests the code path at line 196
         // that handles the last part after all commas are processed
         let result = split_by_top_level_comma("a,b,c");
-        assert_eq!(result, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+        assert_eq!(
+            result,
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
 
         // Edge case: single element (no comma)
         let single = split_by_top_level_comma("only");
@@ -327,11 +335,11 @@ mod xml_utils_tests {
         let node = xml_element("text", &[("value", "x")], vec![xml_text("ignored")]);
         let error = parse_inline_required(&node).expect_err("value attr forbidden");
         assert_eq!(error.code, "XML_ATTR_NOT_ALLOWED");
-    
+
         let empty = xml_element("text", &[], vec![xml_text("   ")]);
         let error = parse_inline_required(&empty).expect_err("empty inline forbidden");
         assert_eq!(error.code, "XML_EMPTY_NODE_CONTENT");
-    
+
         let with_child = xml_element(
             "function",
             &[],
@@ -340,11 +348,11 @@ mod xml_utils_tests {
         let error = parse_inline_required_no_element_children(&with_child)
             .expect_err("child element forbidden");
         assert_eq!(error.code, "XML_FUNCTION_CHILD_NODE_INVALID");
-    
+
         let bool_node = xml_element("text", &[("once", "maybe")], vec![xml_text("x")]);
         let error = parse_bool_attr(&bool_node, "once", false).expect_err("invalid bool attr");
         assert_eq!(error.code, "XML_ATTR_BOOL_INVALID");
-    
+
         let miss_attr = get_required_non_empty_attr(&xml_element("x", &[], vec![]), "name")
             .expect_err("missing attr");
         assert_eq!(miss_attr.code, "XML_MISSING_ATTR");
@@ -352,7 +360,7 @@ mod xml_utils_tests {
             get_required_non_empty_attr(&xml_element("x", &[("name", " ")], vec![]), "name")
                 .expect_err("empty attr");
         assert_eq!(empty_attr.code, "XML_EMPTY_ATTR");
-    
+
         assert!(has_any_child_content(&xml_element(
             "x",
             &[],
@@ -364,12 +372,14 @@ mod xml_utils_tests {
             vec![xml_text("   ")]
         )));
         assert!(split_by_top_level_comma("a, f(1,2), #{int}, #{a:1,b:2}").len() >= 4);
-        assert_eq!(split_by_top_level_comma("a,b"), vec!["a".to_string(), "b".to_string()]);
+        assert_eq!(
+            split_by_top_level_comma("a,b"),
+            vec!["a".to_string(), "b".to_string()]
+        );
         // Test case without trailing comma - covers line 196
         assert_eq!(
             split_by_top_level_comma("a,b,c"),
             vec!["a".to_string(), "b".to_string(), "c".to_string()]
         );
     }
-
 }
