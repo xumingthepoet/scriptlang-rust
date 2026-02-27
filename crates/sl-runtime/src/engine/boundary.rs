@@ -357,9 +357,7 @@ mod boundary_tests {
             .as_mut()
             .expect("pending choice should exist");
         assert!(matches!(pending, PendingBoundary::Choice { .. }));
-        if let PendingBoundary::Choice { options, .. } = pending {
-            options[0].id = "missing".to_string();
-        }
+        if let PendingBoundary::Choice { options, .. } = pending { options[0].id = "missing".to_string(); }
         let error = option_missing
             .choose(0)
             .expect_err("option missing should keep boundary");
@@ -396,9 +394,7 @@ mod boundary_tests {
             .expect("pending choice should exist");
         assert!(matches!(pending, PendingBoundary::Choice { .. }));
         let mut once_key = None;
-        if let PendingBoundary::Choice { options, .. } = pending {
-            once_key = Some(format!("option:{}", options[0].id));
-        }
+        if let PendingBoundary::Choice { options, .. } = pending { once_key = Some(format!("option:{}", options[0].id)); }
         let once_key = once_key.expect("choice options should exist");
         assert!(!push_fail.has_once_state(&script_name, &once_key));
         for script in push_fail.scripts.values_mut() {
@@ -466,9 +462,7 @@ mod boundary_tests {
             .as_mut()
             .expect("pending input should exist");
         assert!(matches!(pending, PendingBoundary::Input { .. }));
-        if let PendingBoundary::Input { target_var, .. } = pending {
-            *target_var = "missingVar".to_string();
-        }
+        if let PendingBoundary::Input { target_var, .. } = pending { *target_var = "missingVar".to_string(); }
         let error = write_fail
             .submit_input("Guild")
             .expect_err("write path should fail");

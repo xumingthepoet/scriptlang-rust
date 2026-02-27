@@ -46,10 +46,9 @@ fn compile_group(
     )?;
 
     let entry_node_id = nodes.first().map(|node| node_id(node).to_string());
-    if let Some(group) = builder.groups.get_mut(group_id) {
-        group.entry_node_id = entry_node_id;
-        group.nodes = nodes;
-    }
+    let group = builder.groups.get_mut(group_id).expect("group must exist");
+    group.entry_node_id = entry_node_id;
+    group.nodes = nodes;
 
     Ok(())
 }
@@ -145,26 +144,10 @@ fn compile_group_nodes(
                     location: child.location.clone(),
                 };
 
-                compile_group(
-                    &then_group_id,
-                    Some(group_id),
-                    &then_container,
-                    builder,
-                    visible_types,
-                    local_var_types,
-                    CompileGroupMode::new(mode.while_depth, false),
-                )?;
+                compile_group(&then_group_id, Some(group_id), &then_container, builder, visible_types, local_var_types, CompileGroupMode::new(mode.while_depth, false))?;
 
                 if let Some(else_child) = else_node {
-                    compile_group(
-                        &else_group_id,
-                        Some(group_id),
-                        else_child,
-                        builder,
-                        visible_types,
-                        local_var_types,
-                        CompileGroupMode::new(mode.while_depth, false),
-                    )?;
+                    compile_group(&else_group_id, Some(group_id), else_child, builder, visible_types, local_var_types, CompileGroupMode::new(mode.while_depth, false))?;
                 } else {
                     builder.groups.insert(
                         else_group_id.clone(),
@@ -187,15 +170,7 @@ fn compile_group_nodes(
             }
             "while" => {
                 let body_group_id = builder.next_group_id();
-                compile_group(
-                    &body_group_id,
-                    Some(group_id),
-                    child,
-                    builder,
-                    visible_types,
-                    local_var_types,
-                    CompileGroupMode::new(mode.while_depth + 1, false),
-                )?;
+                compile_group(&body_group_id, Some(group_id), child, builder, visible_types, local_var_types, CompileGroupMode::new(mode.while_depth + 1, false))?;
                 ScriptNode::While {
                     id: builder.next_node_id("while"),
                     when_expr: get_required_non_empty_attr(child, "when")?,
@@ -232,15 +207,7 @@ fn compile_group_nodes(
                     }
 
                     let option_group_id = builder.next_group_id();
-                    compile_group(
-                        &option_group_id,
-                        Some(group_id),
-                        option,
-                        builder,
-                        visible_types,
-                        local_var_types,
-                        CompileGroupMode::new(mode.while_depth, true),
-                    )?;
+                    compile_group(&option_group_id, Some(group_id), option, builder, visible_types, local_var_types, CompileGroupMode::new(mode.while_depth, true))?;
 
                     options.push(ChoiceOption {
                         id: builder.next_choice_id(),
@@ -823,13 +790,9 @@ mod script_compile_tests {
         assert_eq!(group.nodes.len(), 2);
         assert!(matches!(group.nodes[1], ScriptNode::Input { .. }));
 
-        let then_group_id = match &group.nodes[0] {
-            ScriptNode::If {
-                then_group_id: child_group_id,
-                ..
-            } => Some(child_group_id.clone()),
-            _ => None,
-        };
+        assert!(matches!(group.nodes[0], ScriptNode::If { .. }));
+        let mut then_group_id = None;
+        if let ScriptNode::If { then_group_id: child_group_id, .. } = &group.nodes[0] { then_group_id = Some(child_group_id.clone()); }
         let then_group_id = then_group_id.expect("group node should compile into an if wrapper");
         let scoped_group = builder
             .groups

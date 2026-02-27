@@ -515,6 +515,76 @@ mod callstack_tests {
     }
 
     #[test]
+    fn return_forwarding_and_root_index_success_paths_are_covered() {
+        let mut engine = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"<script name="main"><text>main</text></script>"#,
+            ),
+            (
+                "next.script.xml",
+                r#"<script name="next"><text>next</text></script>"#,
+            ),
+        ]));
+        let main_root = engine
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+
+        engine.frames = vec![
+            RuntimeFrame {
+                frame_id: 30,
+                group_id: main_root.clone(),
+                node_index: 0,
+                scope: BTreeMap::from([("caller".to_string(), SlValue::Number(1.0))]),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: None,
+                var_types: BTreeMap::from([(
+                    "caller".to_string(),
+                    ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                )]),
+            },
+            RuntimeFrame {
+                frame_id: 31,
+                group_id: main_root,
+                node_index: 0,
+                scope: BTreeMap::new(),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: Some(ContinuationFrame {
+                    resume_frame_id: 30,
+                    next_node_index: 2,
+                    ref_bindings: BTreeMap::from([("x".to_string(), "caller".to_string())]),
+                }),
+                var_types: BTreeMap::new(),
+            },
+        ];
+
+        engine
+            .execute_return(Some("next".to_string()), &[])
+            .expect("return to target script should pass");
+
+        let continuation = engine
+            .frames
+            .last()
+            .expect("target root frame")
+            .return_continuation
+            .as_ref()
+            .expect("forwarded continuation should exist");
+        assert!(continuation.ref_bindings.is_empty());
+
+        let root_index = engine
+            .find_current_root_frame_index()
+            .expect("root frame index should resolve");
+        assert_eq!(root_index, engine.frames.len() - 1);
+    }
+
+    #[test]
     fn call_helpers_and_value_path_branches_are_covered() {
         let mut no_frame = engine_from_sources(map(&[(
             "main.script.xml",

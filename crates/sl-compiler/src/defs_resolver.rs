@@ -34,10 +34,8 @@ fn parse_defs_files(
                     child,
                     &collection_name,
                 )?),
-                "function" => function_decls.push(parse_function_declaration_node_with_namespace(
-                    child,
-                    &collection_name,
-                )?),
+                "function" => function_decls
+                    .push(parse_function_declaration_node_with_namespace(child, &collection_name)?),
                 "var" => defs_global_var_decls
                     .push(parse_defs_global_var_declaration(child, &collection_name)?),
                 _ => {
@@ -240,20 +238,12 @@ fn resolve_visible_defs(
     let mut visiting = HashSet::new();
 
     for type_name in type_decls_map.keys() {
-        resolve_named_type_with_aliases(
-            type_name,
-            &type_decls_map,
-            &type_aliases,
-            &mut resolved_types,
-            &mut visiting,
-        )?;
+        resolve_named_type_with_aliases(type_name, &type_decls_map, &type_aliases, &mut resolved_types, &mut visiting)?;
     }
 
     let mut visible_types = resolved_types.clone();
     for (alias, qualified_name) in &type_aliases {
-        if let Some(ty) = resolved_types.get(qualified_name).cloned() {
-            visible_types.insert(alias.clone(), ty);
-        }
+        if let Some(ty) = resolved_types.get(qualified_name).cloned() { visible_types.insert(alias.clone(), ty); }
     }
 
     let mut functions: BTreeMap<String, FunctionDecl> = BTreeMap::new();
@@ -318,15 +308,7 @@ fn resolve_visible_defs(
             .get(qualified)
             .cloned()
             .expect("qualified function should exist in function map");
-        if !functions.contains_key(&alias) {
-            functions.insert(
-                alias.clone(),
-                FunctionDecl {
-                    name: alias,
-                    ..decl
-                },
-            );
-        }
+        if !functions.contains_key(&alias) { functions.insert(alias.clone(), FunctionDecl { name: alias, ..decl }); }
     }
 
     let mut defs_globals_qualified = BTreeMap::new();
@@ -429,9 +411,7 @@ fn collect_defs_globals_for_bundle(
 
     let mut visible_types = resolved_types.clone();
     for (alias, qualified_name) in &type_aliases {
-        if let Some(ty) = resolved_types.get(qualified_name).cloned() {
-            visible_types.insert(alias.clone(), ty);
-        }
+        if let Some(ty) = resolved_types.get(qualified_name).cloned() { visible_types.insert(alias.clone(), ty); }
     }
 
     let mut defs_globals = BTreeMap::new();
@@ -736,6 +716,32 @@ mod defs_resolver_tests {
         let error = compile_project_bundle_from_xml_map(&files)
             .expect_err("forward reference should fail");
         assert_eq!(error.code, "DEFS_GLOBAL_INIT_ORDER");
+    }
+
+    #[test]
+    fn compile_bundle_allows_defs_global_reference_to_initialized_symbol() {
+        let files = map(&[
+            (
+                "shared.defs.xml",
+                r#"
+<defs name="shared">
+  <var name="b" type="int">1</var>
+  <var name="a" type="int">b + 1</var>
+</defs>
+"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="main"><text>ok</text></script>
+"#,
+            ),
+        ]);
+
+        let bundle = compile_project_bundle_from_xml_map(&files).expect("back reference should pass");
+        assert!(bundle.defs_global_declarations.contains_key("shared.a"));
+        assert!(bundle.defs_global_declarations.contains_key("shared.b"));
     }
 
     #[test]

@@ -108,25 +108,11 @@ fn validate_json_symbol_visibility(
                     }
                 }
                 ScriptNode::Code { code, location, .. } => {
-                    ensure_no_hidden_json_symbol(
-                        code,
-                        &hidden_json,
-                        &script_allowed,
-                        &script_ir.script_name,
-                        "code block",
-                        location,
-                    )?;
+                    ensure_no_hidden_json_symbol(code, &hidden_json, &script_allowed, &script_ir.script_name, "code block", location)?;
                 }
                 ScriptNode::Var { declaration, .. } => {
-                    if let Some(expr) = &declaration.initial_value_expr {
-                        ensure_no_hidden_json_symbol(
-                            expr,
-                            &hidden_json,
-                            &script_allowed,
-                            &script_ir.script_name,
-                            "var initializer",
-                            &declaration.location,
-                        )?;
+                    for expr in declaration.initial_value_expr.iter() {
+                        ensure_no_hidden_json_symbol(expr, &hidden_json, &script_allowed, &script_ir.script_name, "var initializer", &declaration.location)?;
                     }
                 }
                 ScriptNode::If {
@@ -134,54 +120,27 @@ fn validate_json_symbol_visibility(
                     location,
                     ..
                 } => {
-                    ensure_no_hidden_json_symbol(
-                        when_expr,
-                        &hidden_json,
-                        &script_allowed,
-                        &script_ir.script_name,
-                        "if condition",
-                        location,
-                    )?;
+                    ensure_no_hidden_json_symbol(when_expr, &hidden_json, &script_allowed, &script_ir.script_name, "if condition", location)?;
                 }
                 ScriptNode::While {
                     when_expr,
                     location,
                     ..
                 } => {
-                    ensure_no_hidden_json_symbol(
-                        when_expr,
-                        &hidden_json,
-                        &script_allowed,
-                        &script_ir.script_name,
-                        "while condition",
-                        location,
-                    )?;
+                    ensure_no_hidden_json_symbol(when_expr, &hidden_json, &script_allowed, &script_ir.script_name, "while condition", location)?;
                 }
                 ScriptNode::Choice { options, .. } => {
-                    for option in options {
-                        if let Some(when_expr) = &option.when_expr {
-                            ensure_no_hidden_json_symbol(
-                                when_expr,
-                                &hidden_json,
-                                &script_allowed,
-                                &script_ir.script_name,
-                                "choice option condition",
-                                &option.location,
-                            )?;
-                        }
+                    for (when_expr, location) in options
+                        .iter()
+                        .filter_map(|option| option.when_expr.as_ref().map(|expr| (expr, &option.location)))
+                    {
+                        ensure_no_hidden_json_symbol(when_expr, &hidden_json, &script_allowed, &script_ir.script_name, "choice option condition", location)?;
                     }
                 }
                 ScriptNode::Call { args, location, .. }
                 | ScriptNode::Return { args, location, .. } => {
                     for arg in args {
-                        ensure_no_hidden_json_symbol(
-                            &arg.value_expr,
-                            &hidden_json,
-                            &script_allowed,
-                            &script_ir.script_name,
-                            "call/return argument",
-                            location,
-                        )?;
+                        ensure_no_hidden_json_symbol(&arg.value_expr, &hidden_json, &script_allowed, &script_ir.script_name, "call/return argument", location)?;
                     }
                 }
                 ScriptNode::Input { .. }
@@ -304,9 +263,7 @@ fn extract_text_interpolations(template: &str) -> Vec<String> {
 fn extract_local_bindings(source: &str) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     for caps in local_binding_regex().captures_iter(source) {
-        if let Some(name) = caps.get(1) {
-            out.insert(name.as_str().to_string());
-        }
+        if let Some(name) = caps.get(1) { out.insert(name.as_str().to_string()); }
     }
     out
 }
@@ -533,6 +490,60 @@ mod json_symbols_tests {
 
         compile_project_bundle_from_xml_map(&files)
             .expect("defs var without initializer should skip hidden-json checks");
+    }
+
+    #[test]
+    fn validate_json_visibility_handles_var_initializer_and_choice_when_expr() {
+        let span = SourceSpan::synthetic();
+        let script_ir = ScriptIr {
+            script_path: "main.script.xml".to_string(),
+            script_name: "main".to_string(),
+            params: Vec::new(),
+            root_group_id: "g0".to_string(),
+            groups: BTreeMap::from([(
+                "g0".to_string(),
+                ImplicitGroup {
+                    group_id: "g0".to_string(),
+                    parent_group_id: None,
+                    entry_node_id: None,
+                    nodes: vec![
+                        ScriptNode::Var {
+                            id: "v1".to_string(),
+                            declaration: VarDeclaration {
+                                name: "hp".to_string(),
+                                r#type: ScriptType::Primitive {
+                                    name: "int".to_string(),
+                                },
+                                initial_value_expr: Some("1".to_string()),
+                                location: span.clone(),
+                            },
+                            location: span.clone(),
+                        },
+                        ScriptNode::Choice {
+                            id: "c1".to_string(),
+                            prompt_text: "pick".to_string(),
+                            options: vec![ChoiceOption {
+                                id: "o1".to_string(),
+                                text: "A".to_string(),
+                                when_expr: Some("hp > 0".to_string()),
+                                once: false,
+                                fall_over: false,
+                                group_id: "g1".to_string(),
+                                location: span.clone(),
+                            }],
+                            location: span.clone(),
+                        },
+                    ],
+                },
+            )]),
+            visible_json_globals: Vec::new(),
+            visible_functions: BTreeMap::new(),
+            visible_defs_globals: BTreeMap::new(),
+        };
+        let all_json_symbols = BTreeSet::from(["secret".to_string()]);
+
+        validate_json_symbol_visibility(&script_ir, &all_json_symbols)
+            .expect("non-hidden expressions should pass");
     }
 
     #[test]
