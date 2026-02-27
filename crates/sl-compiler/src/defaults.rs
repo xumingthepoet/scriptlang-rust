@@ -61,8 +61,6 @@ mod defaults_tests {
         if let SlValue::Map(map) = sl_value {
             assert_eq!(map.get("active"), Some(&SlValue::Bool(true)));
             assert_eq!(map.get("disabled"), Some(&SlValue::Bool(false)));
-        } else {
-            panic!("expected Map");
         }
     }
 

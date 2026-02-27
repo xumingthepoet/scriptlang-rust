@@ -144,6 +144,41 @@ pub fn place_order(repo: &mut dyn OrderRepo, id: &str, amount: u32) -> Result<Or
 
 `domain` tests use `InMemoryRepo` fake; no SQL, no network.
 
+### 4.1 File-Level Defense Rule (No Incidental Coverage Credit)
+
+If tests for file `A` execute lines in file `B`, that is only incidental coverage.
+It does not replace direct tests for `B`.
+
+Policy:
+
+1. Each non-trivial source file must have direct tests for its own functions.
+2. Each non-trivial function in that file must be exercised by at least one test that targets it intentionally.
+3. Cross-file coverage is useful, but it is integration confidence, not unit defense.
+4. Keep a one-to-one test file mapping for unit tests: one source file, one corresponding unit-test file.
+5. Do not merge unit tests for multiple source files into a single unit-test file.
+
+Example:
+
+```text
+src/a.rs
+src/b.rs
+
+tests/a_tests.rs   # tests A behavior, may touch B indirectly
+tests/b_tests.rs   # required: directly tests B's functions and branches
+```
+
+Do not do this for unit tests:
+
+```text
+tests/domain_all_tests.rs  # mixes unit tests for a.rs, b.rs, c.rs together
+```
+
+Practical rule:
+- If `b.rs` lines are covered only by `a_tests.rs`, `b.rs` is still under-defended.
+- Add explicit tests in `b_tests.rs` for each branch/error path in `b.rs`.
+- Use `a_tests.rs` to verify integration contracts between A and B.
+- Keep integration scenarios in separate integration test files; do not replace per-file unit tests.
+
 ## 5. External Environment Dependencies
 
 Never access external environment directly inside core logic.
@@ -285,6 +320,12 @@ For each function, define cases before coding:
 
 For each `match` or `if`, map at least one test case to each arm.
 
+Also enforce a file/function mapping:
+
+1. For every touched file, list its functions.
+2. For each function, list direct test cases that target it.
+3. Do not mark a function as defended only because another file's tests executed its lines.
+
 ## 9. Error Modeling for Better Tests
 
 Prefer:
@@ -333,6 +374,20 @@ cargo test --all-targets --all-features
 cargo llvm-cov --all-targets --all-features --summary-only
 ```
 
+### 11.1 Coverage Integrity Rule (No Bypass by Default)
+
+Do not bypass coverage requirements.
+
+Default policy:
+
+1. Do not disable, skip, or weaken coverage checks to make the gate pass.
+2. Do not hide untested logic behind conditional compilation or test-only shortcuts.
+3. Do not exclude files/functions from coverage unless the requirement explicitly allows it.
+4. Do not replace missing tests with comments, TODOs, or relaxed assertions.
+
+Only exception:
+- You may skip or relax coverage/testing only when the requirement explicitly states that tests are optional for that scope.
+
 Important:
 - 100% line coverage is a gate, not the goal.
 - The goal is behavior confidence and regression resistance.
@@ -344,6 +399,9 @@ Important:
 3. Do tests assert exact outputs/errors/state transitions?
 4. Are fake/mock choices justified?
 5. Is every new function defended by direct tests?
-6. Does coverage show no uncovered lines in touched files?
+6. Does each touched source file have its own dedicated unit-test file (no multi-file unit-test merging)?
+7. Does each touched file have direct tests (not only indirect execution from other files)?
+8. Does coverage show no uncovered lines in touched files?
+9. Did I avoid bypassing/weakening coverage checks (unless explicitly allowed by requirements)?
 
 If any answer is "no", revise design before adding more tests.

@@ -120,6 +120,19 @@ fn resolve_entry_script(
 mod tests {
     use super::*;
     use sl_core::EngineOutput;
+    use std::sync::Arc;
+
+    #[derive(Debug)]
+    struct ReservedRegistry;
+
+    impl HostFunctionRegistry for ReservedRegistry {
+        fn call(&self, _name: &str, _args: &[sl_core::SlValue]) -> Result<sl_core::SlValue, sl_core::ScriptLangError> { Ok(sl_core::SlValue::Bool(true)) }
+
+        fn names(&self) -> &[String] {
+            static NAMES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+            NAMES.get_or_init(|| vec!["random".to_string()])
+        }
+    }
 
     fn map(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
         entries
@@ -132,7 +145,14 @@ mod tests {
     fn compile_scripts_from_xml_map_compiles_single_script() {
         let scripts = map(&[(
             "main.script.xml",
-            r#"<script name="main"><text>Hello</text></script>"#,
+            r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A"><text>A</text></option>
+    <option text="B"><text>B</text></option>
+  </choice>
+</script>
+"#,
         )]);
         let compiled = compile_scripts_from_xml_map(&scripts).expect("compile should pass");
         assert!(compiled.contains_key("main"));
@@ -142,7 +162,14 @@ mod tests {
     fn compile_project_from_xml_map_uses_default_main_entry() {
         let scripts = map(&[(
             "main.script.xml",
-            r#"<script name="main"><text>Hello</text></script>"#,
+            r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A"><text>A</text></option>
+    <option text="B"><text>B</text></option>
+  </choice>
+</script>
+"#,
         )]);
         let project = compile_project_from_xml_map(&scripts, None).expect("compile should pass");
         assert_eq!(project.entry_script, "main");
@@ -193,7 +220,14 @@ mod tests {
     fn create_engine_from_xml_starts_engine() {
         let scripts = map(&[(
             "main.script.xml",
-            r#"<script name="main"><text>Hello</text></script>"#,
+            r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A"><text>A</text></option>
+    <option text="B"><text>B</text></option>
+  </choice>
+</script>
+"#,
         )]);
         let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
             scripts_xml: scripts,
@@ -206,7 +240,7 @@ mod tests {
         .expect("engine should build");
 
         let first = engine.next_output().expect("next should succeed");
-        assert!(matches!(first, EngineOutput::Text { .. }));
+        assert!(matches!(first, EngineOutput::Choices { .. }));
     }
 
     #[test]
@@ -245,5 +279,57 @@ mod tests {
         resumed.choose(0).expect("choose should succeed");
         let next = resumed.next_output().expect("next should succeed");
         assert!(matches!(next, EngineOutput::Text { .. }));
+    }
+
+    #[test]
+    fn create_and_resume_engine_from_xml_propagate_engine_new_errors() {
+        let scripts = map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A"><text>A</text></option>
+    <option text="B"><text>B</text></option>
+  </choice>
+</script>
+"#,
+        )]);
+        let error = create_engine_from_xml(CreateEngineFromXmlOptions {
+            scripts_xml: scripts.clone(),
+            entry_script: None,
+            entry_args: None,
+            host_functions: Some(Arc::new(ReservedRegistry)),
+            random_seed: Some(1),
+            compiler_version: Some("player.v1".to_string()),
+        })
+        .err()
+        .expect("reserved host function should fail create");
+        assert_eq!(error.code, "ENGINE_HOST_FUNCTION_RESERVED");
+
+        let mut ok_engine = create_engine_from_xml(CreateEngineFromXmlOptions {
+            scripts_xml: scripts.clone(),
+            entry_script: None,
+            entry_args: None,
+            host_functions: None,
+            random_seed: Some(1),
+            compiler_version: Some("player.v1".to_string()),
+        })
+        .expect("engine should build");
+        let output = ok_engine.next_output().expect("choice output");
+        assert!(
+            matches!(output, EngineOutput::Choices { .. }),
+            "unexpected output: {:?}",
+            output
+        );
+        let snapshot = ok_engine.snapshot().expect("snapshot should succeed");
+        let error = resume_engine_from_xml(ResumeEngineFromXmlOptions {
+            scripts_xml: scripts,
+            snapshot,
+            host_functions: Some(Arc::new(ReservedRegistry)),
+            compiler_version: Some("player.v1".to_string()),
+        })
+        .err()
+        .expect("reserved host function should fail resume");
+        assert_eq!(error.code, "ENGINE_HOST_FUNCTION_RESERVED");
     }
 }

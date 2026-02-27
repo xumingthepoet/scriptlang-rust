@@ -125,9 +125,11 @@ mod control_flow_tests {
         source.start("main", None).expect("start");
         let _ = source.next_output().expect("choice");
         let mut snapshot = source.snapshot().expect("snapshot");
-        if let Some(frame) = snapshot.runtime_frames.last_mut() {
-            frame.group_id = "missing-group".to_string();
-        }
+        let frame = snapshot
+            .runtime_frames
+            .last_mut()
+            .expect("snapshot should contain runtime frame");
+        frame.group_id = "missing-group".to_string();
         let mut resumed = engine_from_sources(map(&[(
             "main.script.xml",
             r#"

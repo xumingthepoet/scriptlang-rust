@@ -1138,9 +1138,11 @@ mod eval_tests {
             .next()
             .expect("group key")
             .to_string();
-        if let Some(lookup) = engine.group_lookup.get_mut(&key) {
-            lookup.script_name = "missing".to_string();
-        }
+        let lookup = engine
+            .group_lookup
+            .get_mut(&key)
+            .expect("group lookup entry should exist");
+        lookup.script_name = "missing".to_string();
         let error = engine
             .lookup_group(&key)
             .expect_err("script should be missing");
@@ -1158,9 +1160,11 @@ mod eval_tests {
             .next()
             .expect("group key")
             .to_string();
-        if let Some(lookup) = engine.group_lookup.get_mut(&key) {
-            lookup.group_id = "missing-group".to_string();
-        }
+        let lookup = engine
+            .group_lookup
+            .get_mut(&key)
+            .expect("group lookup entry should exist");
+        lookup.group_id = "missing-group".to_string();
         let error = engine
             .lookup_group(&key)
             .expect_err("group should be missing");

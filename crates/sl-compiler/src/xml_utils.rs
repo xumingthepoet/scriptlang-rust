@@ -348,6 +348,7 @@ mod xml_utils_tests {
             vec![xml_text("   ")]
         )));
         assert!(split_by_top_level_comma("a, f(1,2), #{int}, #{a:1,b:2}").len() >= 4);
+        assert_eq!(split_by_top_level_comma("a,b"), vec!["a".to_string(), "b".to_string()]);
     }
 
 }

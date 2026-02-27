@@ -467,11 +467,7 @@ mod scope_tests {
         // Execute to get the text output
         let output = engine.next_output().expect("next");
         // Should output "100" from the text node
-        if let EngineOutput::Text { text, .. } = output {
-            assert_eq!(text, "100");
-        } else {
-            panic!("expected Text output");
-        }
+        assert!(matches!(output, EngineOutput::Text { ref text, .. } if text == "100"));
     }
 
 }

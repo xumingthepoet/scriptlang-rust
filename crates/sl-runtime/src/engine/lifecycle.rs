@@ -454,11 +454,33 @@ mod lifecycle_tests {
             random_seed: Some(1),
             compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
         });
-        let error = match result {
-            Ok(_) => panic!("normalized symbol conflict should fail"),
-            Err(error) => error,
-        };
+        let error = result
+            .err()
+            .expect("normalized symbol conflict should fail");
         assert_eq!(error.code, "ENGINE_DEFS_FUNCTION_SYMBOL_CONFLICT");
+    }
+
+    #[test]
+    fn random_function_success_and_registry_call_path_are_covered() {
+        let files = map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <var name="n" type="int">random(5)</var>
+  <text>${n}</text>
+</script>
+"#,
+        )]);
+        let mut engine = engine_from_sources(files);
+        engine.start("main", None).expect("start");
+        let output = engine.next_output().expect("next");
+        assert!(matches!(output, EngineOutput::Text { .. }));
+
+        let registry = TestRegistry {
+            names: vec!["ok".to_string()],
+        };
+        let value = registry.call("ok", &[]).expect("call should succeed");
+        assert_eq!(value, SlValue::Bool(true));
     }
 
     #[test]

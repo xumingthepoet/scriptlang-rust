@@ -88,9 +88,8 @@ mod source_tests {
     }
 
     fn write_file(path: &Path, content: &str) {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).expect("parent dir should be created");
-        }
+        let parent = path.parent().expect("path should have parent");
+        fs::create_dir_all(parent).expect("parent dir should be created");
         fs::write(path, content).expect("file should be written");
     }
 

@@ -240,11 +240,7 @@ mod boundary_tests {
         assert!(matches!(first, EngineOutput::Input { .. }));
         engine.submit_input("   ").expect("submit input");
         let second = engine.next_output().expect("next");
-        let mut text = String::new();
-        if let EngineOutput::Text { text: output } = second {
-            text = output;
-        }
-        assert_eq!(text, "Hello Traveler");
+        assert!(matches!(second, EngineOutput::Text { ref text } if text == "Hello Traveler"));
     }
 
     #[test]
@@ -264,11 +260,7 @@ mod boundary_tests {
         assert!(matches!(first, EngineOutput::Input { .. }));
         engine.submit_input("Guild").expect("submit input");
         let second = engine.next_output().expect("next");
-        let mut text = String::new();
-        if let EngineOutput::Text { text: output } = second {
-            text = output;
-        }
-        assert_eq!(text, "Hello Guild");
+        assert!(matches!(second, EngineOutput::Text { ref text } if text == "Hello Guild"));
     }
 
     #[test]
@@ -360,10 +352,26 @@ mod boundary_tests {
             option_missing.next_output().expect("choice"),
             EngineOutput::Choices { .. }
         ));
-        if let Some(PendingBoundary::Choice { options, .. }) = option_missing.pending_boundary.as_mut()
-        {
-            options[0].id = "missing".to_string();
-        }
+        let pending = option_missing
+            .pending_boundary
+            .take()
+            .expect("pending choice should exist");
+        let PendingBoundary::Choice {
+            frame_id,
+            node_id,
+            mut options,
+            prompt_text,
+        } = pending
+        else {
+            unreachable!("pending boundary should be choice");
+        };
+        options[0].id = "missing".to_string();
+        option_missing.pending_boundary = Some(PendingBoundary::Choice {
+            frame_id,
+            node_id,
+            options,
+            prompt_text,
+        });
         let error = option_missing
             .choose(0)
             .expect_err("option missing should keep boundary");
@@ -394,10 +402,14 @@ mod boundary_tests {
         let script_name = push_fail
             .resolve_current_script_name()
             .expect("script name should resolve");
-        let once_key = match push_fail.pending_boundary.as_ref() {
-            Some(PendingBoundary::Choice { options, .. }) => format!("option:{}", options[0].id),
-            _ => panic!("pending choice should exist"),
+        let pending = push_fail
+            .pending_boundary
+            .as_ref()
+            .expect("pending choice should exist");
+        let Some(PendingBoundary::Choice { options, .. }) = Some(pending) else {
+            unreachable!("pending boundary should be choice");
         };
+        let once_key = format!("option:{}", options[0].id);
         assert!(!push_fail.has_once_state(&script_name, &once_key));
         for script in push_fail.scripts.values_mut() {
             for group in script.groups.values_mut() {
@@ -459,9 +471,27 @@ mod boundary_tests {
             write_fail.next_output().expect("input"),
             EngineOutput::Input { .. }
         ));
-        if let Some(PendingBoundary::Input { target_var, .. }) = write_fail.pending_boundary.as_mut() {
-            *target_var = "missingVar".to_string();
-        }
+        let pending = write_fail
+            .pending_boundary
+            .take()
+            .expect("pending input should exist");
+        let PendingBoundary::Input {
+            frame_id,
+            node_id,
+            target_var: _target_var,
+            prompt_text,
+            default_text,
+        } = pending
+        else {
+            unreachable!("pending boundary should be input");
+        };
+        write_fail.pending_boundary = Some(PendingBoundary::Input {
+            frame_id,
+            node_id,
+            target_var: "missingVar".to_string(),
+            prompt_text,
+            default_text,
+        });
         let error = write_fail
             .submit_input("Guild")
             .expect_err("write path should fail");

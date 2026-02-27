@@ -823,12 +823,17 @@ mod script_compile_tests {
         assert_eq!(group.nodes.len(), 2);
         assert!(matches!(group.nodes[1], ScriptNode::Input { .. }));
 
-        let ScriptNode::If { then_group_id, .. } = &group.nodes[0] else {
-            panic!("group node should compile into an if wrapper");
+        let then_group_id = match &group.nodes[0] {
+            ScriptNode::If {
+                then_group_id: child_group_id,
+                ..
+            } => Some(child_group_id.clone()),
+            _ => None,
         };
+        let then_group_id = then_group_id.expect("group node should compile into an if wrapper");
         let scoped_group = builder
             .groups
-            .get(then_group_id)
+            .get(&then_group_id)
             .expect("group child should exist");
         assert_eq!(scoped_group.nodes.len(), 2);
         assert!(matches!(scoped_group.nodes[0], ScriptNode::Var { .. }));

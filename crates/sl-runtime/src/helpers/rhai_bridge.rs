@@ -214,3 +214,17 @@ fn slvalue_to_rhai_literal(value: &SlValue) -> String {
         }
     }
 }
+
+#[cfg(test)]
+mod rhai_bridge_tests {
+    use super::*;
+
+    #[test]
+    fn replace_defs_global_symbol_skips_non_boundary_matches() {
+        let source = "shared.hp2 = 1; xshared.hp = 2; shared.hp = 3;";
+        let rewritten = replace_defs_global_symbol(source, "shared.hp", "__sl_defs_ns_shared[\"hp\"]");
+        assert!(rewritten.contains("shared.hp2 = 1;"));
+        assert!(rewritten.contains("xshared.hp = 2;"));
+        assert!(rewritten.contains("__sl_defs_ns_shared[\"hp\"] = 3;"));
+    }
+}

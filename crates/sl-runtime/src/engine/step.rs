@@ -421,16 +421,12 @@ mod step_tests {
 
         let mut texts = Vec::new();
         for _ in 0..64usize {
-            match engine.next_output().expect("next should pass") {
-                EngineOutput::Text { text } => texts.push(text),
-                EngineOutput::Choices { items, .. } => {
-                    let index = items.first().map(|item| item.index).unwrap_or(0);
-                    engine.choose(index).expect("choose should pass");
-                }
-                EngineOutput::Input { .. } => {
-                    engine.submit_input("").expect("input should pass");
-                }
-                EngineOutput::End => break,
+            let output = engine.next_output().expect("next should pass");
+            if let EngineOutput::Text { text } = &output {
+                texts.push(text.clone());
+            }
+            if matches!(output, EngineOutput::End) {
+                break;
             }
         }
 
@@ -468,25 +464,22 @@ mod step_tests {
         let mut hit_input = false;
 
         for _ in 0..10 {
-            match engine.next_output() {
-                Ok(EngineOutput::Text { text }) => {
+            let output = engine.next_output().expect("next should succeed");
+            match output {
+                EngineOutput::Text { text } => {
                     println!("Text: {}", text);
                 }
-                Ok(EngineOutput::Choices { items, .. }) => {
+                EngineOutput::Choices { items, .. } => {
                     println!("Choices: {} items", items.len());
                     hit_choices = true;
                     engine.choose(0).expect("choose");
                 }
-                Ok(EngineOutput::Input { .. }) => {
+                EngineOutput::Input { .. } => {
                     println!("Input");
                     hit_input = true;
                     engine.submit_input("test").expect("input");
                 }
-                Ok(EngineOutput::End) => break,
-                Err(e) => {
-                    println!("Error: {}", e);
-                    break;
-                }
+                EngineOutput::End => break,
             }
         }
 
@@ -611,15 +604,15 @@ mod step_tests {
 
         let script = engine.scripts.get("main").expect("main script");
         let root = script.groups.get(&script.root_group_id).expect("root group");
-        let option_id = match root.nodes.first().expect("choice node") {
-            ScriptNode::Choice { options, .. } => options
-                .iter()
-                .find(|option| option.fall_over)
-                .expect("fall_over option")
-                .id
-                .clone(),
-            _ => panic!("expected choice node"),
+        let Some(ScriptNode::Choice { options, .. }) = root.nodes.first() else {
+            unreachable!("expected choice node");
         };
+        let option_id = options
+            .iter()
+            .find(|option| option.fall_over)
+            .expect("fall_over option")
+            .id
+            .clone();
         engine.mark_once_state("main", &format!("option:{}", option_id));
 
         let output = engine.next_output().expect("choice should be skipped");
@@ -670,9 +663,11 @@ mod step_tests {
         )]));
         choice_node_missing.start("main", None).expect("start");
         let _ = choice_node_missing.next_output().expect("choice boundary");
-        if let Some(frame) = choice_node_missing.frames.last_mut() {
-            frame.node_index += 1;
-        }
+        let frame = choice_node_missing
+            .frames
+            .last_mut()
+            .expect("engine should have frame");
+        frame.node_index += 1;
         let error = choice_node_missing
             .choose(0)
             .expect_err("pending choice node mismatch should fail");
@@ -694,9 +689,10 @@ mod step_tests {
             .pending_boundary
             .as_mut()
             .expect("pending choice should exist");
-        if let PendingBoundary::Choice { options, .. } = pending {
-            options[0].id = "missing-option".to_string();
-        }
+        let PendingBoundary::Choice { options, .. } = pending else {
+            unreachable!("pending boundary should be choice");
+        };
+        options[0].id = "missing-option".to_string();
         let error = option_missing
             .choose(0)
             .expect_err("missing option should fail");
@@ -748,9 +744,11 @@ mod step_tests {
             }],
             prompt_text: None,
         });
-        if let Some(frame) = with_choice.frames.last_mut() {
-            frame.scope.insert("id0".to_string(), SlValue::Number(9.0));
-        }
+        let frame = with_choice
+            .frames
+            .last_mut()
+            .expect("engine should have frame");
+        frame.scope.insert("id0".to_string(), SlValue::Number(9.0));
         with_choice
             .finish_frame(frame_id)
             .expect("finish should write ref and update continuation");
@@ -1143,9 +1141,11 @@ mod step_tests {
             .find_choice_continue_context()
             .expect("choice context");
         assert!(found.is_some());
-        if let Some(frame) = find_ctx.frames.first_mut() {
-            frame.node_index = 1;
-        }
+        let frame = find_ctx
+            .frames
+            .first_mut()
+            .expect("engine should have frame");
+        frame.node_index = 1;
         find_ctx.frames.truncate(1);
         let missing = find_ctx
             .find_choice_continue_context()
@@ -1170,12 +1170,7 @@ mod step_tests {
         engine.start("main", None).expect("start");
         let output = engine.next_output().expect("next should pass");
         // Option A with when="false" should be hidden, only B should be visible
-        if let EngineOutput::Choices { items, .. } = output {
-            assert_eq!(items.len(), 1);
-            assert_eq!(items[0].text, "B");
-        } else {
-            panic!("expected Choices output");
-        }
+        assert!(matches!(output, EngineOutput::Choices { ref items, .. } if items.len() == 1 && items[0].text == "B"));
     }
 
     #[test]
@@ -1202,13 +1197,16 @@ mod step_tests {
         )]));
         engine.start("main", None).expect("start");
 
-        let outputs: Vec<String> = (0..10).filter_map(|_| {
-            match engine.next_output().expect("next") {
-                EngineOutput::Text { text, .. } => Some(text),
-                EngineOutput::End => None,
-                _ => Some("skip".to_string()),
+        let mut outputs = Vec::new();
+        for _ in 0..10 {
+            let output = engine.next_output().expect("next");
+            if let EngineOutput::Text { text, .. } = &output {
+                outputs.push(text.clone());
             }
-        }).collect();
+            if matches!(output, EngineOutput::End) {
+                break;
+            }
+        }
 
         // Should see tick-1, tick-3, then done-4
         // i=1: output tick-1
@@ -1325,12 +1323,7 @@ mod step_tests {
 
         // Iteration 3: A and B hidden (both once), C as fallover visible -> line 234 covered
         let out3 = engine.next_output().expect("3");
-        if let EngineOutput::Choices { items, .. } = &out3 {
-            assert_eq!(items.len(), 1);
-            assert_eq!(items[0].text, "C");
-        } else {
-            panic!("expected Choices with fallover");
-        }
+        assert!(matches!(&out3, EngineOutput::Choices { items, .. } if items.len() == 1 && items[0].text == "C"));
     }
 
 }
