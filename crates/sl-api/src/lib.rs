@@ -5,8 +5,11 @@ use sl_compiler::{
     compile_project_bundle_from_xml_map, compile_project_scripts_from_xml_map,
     CompileProjectBundleResult,
 };
-use sl_core::{CompileProjectResult, ScriptLangError, SlValue, SnapshotV3};
-use sl_runtime::{HostFunctionRegistry, ScriptLangEngine, ScriptLangEngineOptions};
+use sl_core::{CompileProjectResult, SlValue, SnapshotV3};
+use sl_runtime::{HostFunctionRegistry, ScriptLangEngineOptions};
+
+pub use sl_core::{ChoiceItem, EngineOutput, ScriptLangError};
+pub use sl_runtime::ScriptLangEngine;
 
 #[derive(Clone)]
 pub struct CreateEngineFromXmlOptions {
