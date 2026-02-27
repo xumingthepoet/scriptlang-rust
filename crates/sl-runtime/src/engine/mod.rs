@@ -16,6 +16,12 @@ include!("scope.rs");
 include!("once_state.rs");
 include!("../helpers/value_path.rs");
 include!("../helpers/rhai_bridge.rs");
+#[cfg(test)]
+mod lifecycle_tests;
+#[cfg(test)]
+mod rhai_bridge_tests;
+#[cfg(test)]
+mod snapshot_tests;
 
 #[cfg(test)]
 pub(super) mod runtime_test_support {

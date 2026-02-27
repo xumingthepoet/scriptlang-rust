@@ -1429,6 +1429,59 @@ mod script_compile_tests {
         };
         let call_id = node_id(&call_node);
         assert_eq!(call_id, "c1");
+        let choice_node = ScriptNode::Choice {
+            id: "ch1".to_string(),
+            prompt_text: "Pick".to_string(),
+            options: Vec::new(),
+            location: SourceSpan::synthetic(),
+        };
+        let choice_id = node_id(&choice_node);
+        assert_eq!(choice_id, "ch1");
+        let break_node = ScriptNode::Break {
+            id: "b1".to_string(),
+            location: SourceSpan::synthetic(),
+        };
+        let break_id = node_id(&break_node);
+        assert_eq!(break_id, "b1");
+        let continue_node = ScriptNode::Continue {
+            id: "k1".to_string(),
+            target: ContinueTarget::Choice,
+            location: SourceSpan::synthetic(),
+        };
+        let continue_id = node_id(&continue_node);
+        assert_eq!(continue_id, "k1");
+
+        let mut choice_builder = GroupBuilder::new("choice.script.xml");
+        let choice_group = choice_builder.next_group_id();
+        compile_group(
+            &choice_group,
+            None,
+            &xml_element(
+                "script",
+                &[("name", "main")],
+                vec![XmlNode::Element(xml_element(
+                    "choice",
+                    &[("text", "Pick")],
+                    vec![
+                        XmlNode::Element(xml_element(
+                            "option",
+                            &[("text", "A")],
+                            vec![XmlNode::Element(xml_element("continue", &[], Vec::new()))],
+                        )),
+                        XmlNode::Element(xml_element(
+                            "option",
+                            &[("text", "B"), ("fall_over", "true")],
+                            Vec::new(),
+                        )),
+                    ],
+                ))],
+            ),
+            &mut choice_builder,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            CompileGroupMode::new(0, false),
+        )
+        .expect("option continue and last fall_over should compile");
     
         let empty_args = parse_script_args(
             &xml_element("script", &[("args", "   ")], Vec::new()),

@@ -62,7 +62,7 @@ All code must be written with testability in mind:
 - `make lint`: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
 - `make test`: `cargo test --workspace --all-targets --all-features` with `LLVM_PROFILE_FILE` unset
 - `cargo test -p sl-test-example --all-targets --all-features`: run example cases from `crates/sl-test-example/examples/*/testcase.json`
-- `make coverage`: runs `scripts/coverage.sh` (uses `cargo llvm-cov --json`) and prints:
+- `make coverage`: runs `scripts/coverage.sh` (uses `cargo llvm-cov --workspace --exclude sl-cli --exclude sl-test-example  --all-features --all-targets --show-missing-lines` inside) and prints:
   - total line coverage percent
   - uncovered line count + merged ranges per file (for example `1-2,7-9`)
 - `make gate`: runs `check + fmt + lint + test + coverage`.

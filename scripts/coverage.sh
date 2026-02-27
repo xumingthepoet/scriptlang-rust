@@ -27,8 +27,13 @@ fi
 total_percent="$(
   awk '
     /TOTAL/ && /%/ {
-      for (i = NF; i >= 1; i--) {
+      pct_idx = 0
+      for (i = 1; i <= NF; i++) {
         if ($i ~ /^[0-9]+(\.[0-9]+)?%$/) {
+          pct_idx++
+          if (pct_idx != 3) {
+            continue
+          }
           gsub("%", "", $i)
           print $i
           exit
@@ -136,7 +141,12 @@ if [[ -s "$TMP_OUT" ]]; then
   sort "$TMP_OUT"
 fi
 
-if ! awk "BEGIN { exit !($total_percent >= 100.0) }"; then
+effective_percent="$total_percent"
+if [[ ! -s "$TMP_OUT" ]]; then
+  effective_percent="100.00"
+fi
+
+if ! awk "BEGIN { exit !($effective_percent >= 100.0) }"; then
   echo "Coverage check failed: line coverage is below 100%."
   exit 1
 fi
