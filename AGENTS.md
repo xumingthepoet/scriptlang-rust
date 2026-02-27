@@ -7,7 +7,6 @@
 ### 顶层目录
 - `crates/`: Rust workspace 主体代码（核心实现都在这里）。
 - `crates/sl-test-example/examples/`: 可运行的脚本样例与 smoke 场景。
-- TypeScript 参考实现仓库：`https://github.com/xumingthepoet/scriptlang`（用于对齐行为，不直接参与 Rust 构建）。
 - `Cargo.toml`: workspace 成员与共享依赖声明。
 - `Makefile`: 统一质量门禁入口（`make gate`）。
 
@@ -37,15 +36,7 @@
 6. 同一文件内，函数测试顺序必须与源代码中的函数定义顺序一致。
 7. 每次代码改动后都要根据变更影响同步更新相关文档（如 `README.md`、设计说明、接口说明等）。
 
-## 质量门禁
-- `cargo fmt --all -- --check`
-- `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo test --all-targets --all-features`
-- `make coverage`（调用 `scripts/coverage.sh`，基于 `cargo llvm-cov --json`，仅输出 line 覆盖率和每文件未覆盖行区间）
-- `make gate`
-
 ## 完成定义（DoD）
 - 变更位于正确分层，未破坏 crate 边界。
 - 相关示例/测试已覆盖新增或修复行为，且满足文件级一对一防守。
-- 覆盖率必须达到 `100%`，否则不得通过门禁。
-- `make gate` 通过。
+- `make gate` 通过(覆盖率必须达到 `100%`）。

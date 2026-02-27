@@ -49,16 +49,15 @@ This split keeps crate boundaries unchanged and enforces one-way internal depend
 - when short names conflict across namespaces, only fully-qualified `ns.var` remains available.
 
 ## Commands
-- `cargo qk`: `cargo check --workspace --all-targets --all-features`
-- `cargo qa`: `cargo fmt --all -- --check`
-- `cargo qc`: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-- `cargo qt`: `cargo test --workspace --all-targets --all-features`
+- `make check`: `cargo check --workspace --all-targets --all-features`
+- `make fmt`: `cargo fmt --all -- --check`
+- `make lint`: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+- `make test`: `cargo test --workspace --all-targets --all-features` with `LLVM_PROFILE_FILE` unset
 - `cargo test -p sl-test-example --all-targets --all-features`: run example cases from `crates/sl-test-example/examples/*/testcase.json`
-- `make test`: runs `cargo qt` with `LLVM_PROFILE_FILE` unset.
 - `make coverage`: runs `scripts/coverage.sh` (uses `cargo llvm-cov --json`) and prints:
   - total line coverage percent
   - uncovered line count + merged ranges per file (for example `1-2,7-9`)
-- `make gate`: `check + fmt + clippy + test + coverage`.
+- `make gate`: runs `check + fmt + lint + test + coverage`.
 
 ## CLI Usage
 
