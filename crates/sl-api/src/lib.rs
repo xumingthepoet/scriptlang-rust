@@ -134,6 +134,15 @@ mod tests {
         }
     }
 
+    #[test]
+    fn host_function_registry_mock_covers_all_methods() {
+        let registry = ReservedRegistry;
+        // Cover the names() method
+        let _names = registry.names();
+        // Cover the call() method
+        let _result = registry.call("test", &[]);
+    }
+
     fn map(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
         entries
             .iter()

@@ -307,6 +307,22 @@ mod xml_utils_tests {
     }
 
     #[test]
+    fn split_by_top_level_comma_covers_trailing_part() {
+        // This specifically tests the code path at line 196
+        // that handles the last part after all commas are processed
+        let result = split_by_top_level_comma("a,b,c");
+        assert_eq!(result, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+
+        // Edge case: single element (no comma)
+        let single = split_by_top_level_comma("only");
+        assert_eq!(single, vec!["only".to_string()]);
+
+        // Edge case: empty string
+        let empty = split_by_top_level_comma("");
+        assert!(empty.is_empty());
+    }
+
+    #[test]
     fn inline_bool_and_attr_helpers_cover_errors() {
         let node = xml_element("text", &[("value", "x")], vec![xml_text("ignored")]);
         let error = parse_inline_required(&node).expect_err("value attr forbidden");
@@ -349,6 +365,11 @@ mod xml_utils_tests {
         )));
         assert!(split_by_top_level_comma("a, f(1,2), #{int}, #{a:1,b:2}").len() >= 4);
         assert_eq!(split_by_top_level_comma("a,b"), vec!["a".to_string(), "b".to_string()]);
+        // Test case without trailing comma - covers line 196
+        assert_eq!(
+            split_by_top_level_comma("a,b,c"),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
     }
 
 }

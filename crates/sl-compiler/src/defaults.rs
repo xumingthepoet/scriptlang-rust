@@ -58,10 +58,47 @@ mod defaults_tests {
         let json_str = r#"{"active": true, "disabled": false}"#;
         let json_value: JsonValue = serde_json::from_str(json_str).unwrap();
         let sl_value = slvalue_from_json(json_value);
-        if let SlValue::Map(map) = sl_value {
-            assert_eq!(map.get("active"), Some(&SlValue::Bool(true)));
-            assert_eq!(map.get("disabled"), Some(&SlValue::Bool(false)));
-        }
+        let SlValue::Map(map) = sl_value else { panic!("expected Map") };
+        assert_eq!(map.get("active"), Some(&SlValue::Bool(true)));
+        assert_eq!(map.get("disabled"), Some(&SlValue::Bool(false)));
+    }
+
+    #[test]
+    fn slvalue_from_json_handles_null() {
+        let json_str = r#"null"#;
+        let json_value: JsonValue = serde_json::from_str(json_str).unwrap();
+        let sl_value = slvalue_from_json(json_value);
+        assert_eq!(sl_value, SlValue::String("null".to_string()));
+    }
+
+    #[test]
+    fn slvalue_from_json_handles_number() {
+        let json_str = r#"42.5"#;
+        let json_value: JsonValue = serde_json::from_str(json_str).unwrap();
+        let sl_value = slvalue_from_json(json_value);
+        assert_eq!(sl_value, SlValue::Number(42.5));
+    }
+
+    #[test]
+    fn slvalue_from_json_handles_array() {
+        let json_str = r#"[1, 2, 3]"#;
+        let json_value: JsonValue = serde_json::from_str(json_str).unwrap();
+        let sl_value = slvalue_from_json(json_value);
+        let SlValue::Array(arr) = sl_value else { panic!("expected Array") };
+        assert_eq!(arr.len(), 3);
+        assert_eq!(arr[0], SlValue::Number(1.0));
+        assert_eq!(arr[1], SlValue::Number(2.0));
+        assert_eq!(arr[2], SlValue::Number(3.0));
+    }
+
+    #[test]
+    fn slvalue_from_json_handles_object() {
+        let json_str = r#"{"name": "hero", "hp": 100}"#;
+        let json_value: JsonValue = serde_json::from_str(json_str).unwrap();
+        let sl_value = slvalue_from_json(json_value);
+        let SlValue::Map(map) = sl_value else { panic!("expected Map") };
+        assert_eq!(map.get("name"), Some(&SlValue::String("hero".to_string())));
+        assert_eq!(map.get("hp"), Some(&SlValue::Number(100.0)));
     }
 
 }
