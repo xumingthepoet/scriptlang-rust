@@ -6,6 +6,7 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 - [SL Engine API usage](docs/sl-engine-api.md)
 - [ScriptLang syntax rules](docs/scriptlang-syntax.md)
 - [Example testing with sl-tool](docs/testing-examples.md)
+- [Rust testability playbook for 100% coverage](docs/rust-testability-playbook.md)
 
 ## Workspace Crates
 - `crates/sl-core`: shared types, values, errors, snapshot/player schemas.
