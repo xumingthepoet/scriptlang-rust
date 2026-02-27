@@ -126,7 +126,13 @@ mod tests {
     struct ReservedRegistry;
 
     impl HostFunctionRegistry for ReservedRegistry {
-        fn call(&self, _name: &str, _args: &[sl_core::SlValue]) -> Result<sl_core::SlValue, sl_core::ScriptLangError> { Ok(sl_core::SlValue::Bool(true)) }
+        fn call(
+            &self,
+            _name: &str,
+            _args: &[sl_core::SlValue],
+        ) -> Result<sl_core::SlValue, sl_core::ScriptLangError> {
+            Ok(sl_core::SlValue::Bool(true))
+        }
 
         fn names(&self) -> &[String] {
             static NAMES: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();

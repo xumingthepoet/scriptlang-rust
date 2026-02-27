@@ -1329,4 +1329,24 @@ mod step_tests {
         assert!(matches!(&out3, EngineOutput::Choices { items, .. } if items.len() == 1 && items[0].text == "C"));
     }
 
+    #[test]
+    fn choice_option_when_expr_true_continues() {
+        // Test that when_expr returning true continues to check once state (covers once_state.rs line 10)
+        // when_expr = true, once = false -> option should be visible
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <choice text="Pick">
+        <option text="A" when="true" once="false"><text>A</text></option>
+      </choice>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+        let output = engine.next_output().expect("next should pass");
+        // Option A with when="true" and once="false" should be visible
+        assert!(matches!(output, EngineOutput::Choices { ref items, .. } if items.len() == 1 && items[0].text == "A"));
+    }
+
 }

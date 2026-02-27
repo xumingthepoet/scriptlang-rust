@@ -470,4 +470,26 @@ mod scope_tests {
         assert!(matches!(output, EngineOutput::Text { ref text, .. } if text == "100"));
     }
 
+    #[test]
+    fn write_defs_global_variable_type_compatible_covered() {
+        // Direct test for type compatible branch (covers scope.rs line 92)
+        let files = map(&[(
+            "shared.defs.xml",
+            r#"<defs name="shared"><var name="hp" type="int">10</var></defs>"#,
+        ), (
+            "main.script.xml",
+            r#"<!-- include: shared.defs.xml -->
+<script name="main"><text>${shared.hp}</text></script>"#,
+        )]);
+        let mut engine = engine_from_sources(files);
+        engine.start("main", None).expect("start");
+
+        // Directly call write_variable with compatible type
+        engine.write_variable("shared.hp", SlValue::Number(20.0)).expect("write should succeed");
+
+        // Verify the value was written
+        let value = engine.read_variable("shared.hp").expect("read should succeed");
+        assert_eq!(value, SlValue::Number(20.0));
+    }
+
 }
