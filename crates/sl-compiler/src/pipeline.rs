@@ -46,9 +46,10 @@ pub fn compile_project_bundle_from_xml_map(
             .entry(file_path.clone())
             .or_insert_with(|| collect_reachable_files(file_path, &sources));
         let (visible_types, visible_functions, visible_defs_globals) =
-            resolve_visible_defs(reachable, &defs_by_path)?;
-        let visible_json_symbols = collect_visible_json_symbols(reachable, &sources)?;
-
+            resolve_visible_defs(reachable, &defs_by_path)
+                .map_err(|error| with_file_context(error, file_path))?;
+        let visible_json_symbols = collect_visible_json_symbols(reachable, &sources)
+            .expect("collect_visible_json_symbols should be infallible after collect_global_json");
         let ir = compile_script(
             file_path,
             script_root,
@@ -57,8 +58,8 @@ pub fn compile_project_bundle_from_xml_map(
             &visible_defs_globals,
             &visible_json_symbols,
             &all_json_symbols,
-        )?;
-
+        )
+        .map_err(|error| with_file_context(error, file_path))?;
         if scripts.contains_key(&ir.script_name) {
             return Err(ScriptLangError::with_span(
                 "SCRIPT_NAME_DUPLICATE",
@@ -78,10 +79,18 @@ pub fn compile_project_bundle_from_xml_map(
     })
 }
 
+pub(crate) fn with_file_context(error: ScriptLangError, file_path: &str) -> ScriptLangError {
+    let code = error.code;
+    let message = format!("In file \"{}\": {}", file_path, error.message);
+    let span = error.span.unwrap_or(SourceSpan::synthetic());
+    ScriptLangError::with_span(code, message, span)
+}
+
 #[cfg(test)]
 mod pipeline_tests {
     use super::*;
     use crate::compiler_test_support::*;
+    use sl_core::SourceLocation;
 
     #[test]
     fn compile_basic_script_project() {
@@ -162,6 +171,14 @@ mod pipeline_tests {
     }
 
     #[test]
+    fn compile_scripts_from_xml_map_propagates_errors() {
+        let files = map(&[("bad.script.xml", "<script>")]);
+        let error =
+            compile_project_scripts_from_xml_map(&files).expect_err("invalid xml should fail");
+        assert_eq!(error.code, "XML_PARSE_ERROR");
+    }
+
+    #[test]
     fn compile_bundle_rejects_unsupported_source_extension() {
         let files = BTreeMap::from([("x.txt".to_string(), "bad".to_string())]);
         let error = compile_project_bundle_from_xml_map(&files)
@@ -220,6 +237,22 @@ mod pipeline_tests {
     }
 
     #[test]
+    fn compile_bundle_errors_include_file_context() {
+        let xml_parse = map(&[("bad.script.xml", "<script>")]);
+        let parse_error =
+            compile_project_bundle_from_xml_map(&xml_parse).expect_err("xml parse should fail");
+        assert!(parse_error.message.contains("bad.script.xml"));
+
+        let compile_error_case = map(&[(
+            "broken.script.xml",
+            r#"<script name="main"><break/></script>"#,
+        )]);
+        let compile_error = compile_project_bundle_from_xml_map(&compile_error_case)
+            .expect_err("break outside while should fail");
+        assert!(compile_error.message.contains("broken.script.xml"));
+    }
+
+    #[test]
     fn compile_bundle_exposes_defs_globals_with_short_alias_rules() {
         let unique = map(&[
             (
@@ -262,5 +295,39 @@ mod pipeline_tests {
         assert!(conflict_main.visible_defs_globals.contains_key("a.hp"));
         assert!(conflict_main.visible_defs_globals.contains_key("b.hp"));
         assert!(!conflict_main.visible_defs_globals.contains_key("hp"));
+    }
+
+    #[test]
+    fn with_file_context_adds_file_name_and_preserves_or_synthesizes_span() {
+        let with_span = ScriptLangError::with_span(
+            "SOME_CODE",
+            "boom",
+            SourceSpan {
+                start: SourceLocation { line: 7, column: 9 },
+                end: SourceLocation { line: 7, column: 9 },
+            },
+        );
+        let wrapped_with_span = with_file_context(with_span, "main.script.xml");
+        assert!(wrapped_with_span
+            .message
+            .contains("In file \"main.script.xml\": boom"));
+        let span = wrapped_with_span.span.expect("span should be preserved");
+        assert_eq!(span.start.line, 7);
+        assert_eq!(span.start.column, 9);
+        assert_eq!(span.end.line, 7);
+        assert_eq!(span.end.column, 9);
+
+        let without_span = ScriptLangError::new("SOME_CODE", "no-span");
+        let wrapped_without_span = with_file_context(without_span, "other.script.xml");
+        assert!(wrapped_without_span
+            .message
+            .contains("In file \"other.script.xml\": no-span"));
+        let synthetic = wrapped_without_span
+            .span
+            .expect("missing span should become synthetic");
+        assert_eq!(synthetic.start.line, 1);
+        assert_eq!(synthetic.start.column, 1);
+        assert_eq!(synthetic.end.line, 1);
+        assert_eq!(synthetic.end.column, 1);
     }
 }

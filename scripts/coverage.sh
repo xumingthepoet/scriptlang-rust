@@ -13,6 +13,13 @@ trap cleanup EXIT
 
 cd "$ROOT_DIR"
 
+# Avoid stale profile/target artifacts causing mismatched coverage mapping.
+cargo llvm-cov clean --workspace >/dev/null 2>&1 || true
+rm -rf target/llvm-cov-target
+if [[ -d target ]]; then
+  find target -name "*.profraw" -delete
+fi
+
 if ! cargo llvm-cov \
   --workspace \
   --exclude sl-cli \

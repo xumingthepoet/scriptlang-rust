@@ -23,8 +23,10 @@ pub(crate) fn parse_defs_files(
             ));
         }
 
-        let collection_name = get_required_non_empty_attr(root, "name")?;
-        assert_name_not_reserved(&collection_name, "defs", root.location.clone())?;
+        let collection_name = get_required_non_empty_attr(root, "name")
+            .map_err(|error| with_file_context(error, file_path))?;
+        assert_name_not_reserved(&collection_name, "defs", root.location.clone())
+            .map_err(|error| with_file_context(error, file_path))?;
 
         let mut type_decls = Vec::new();
         let mut function_decls = Vec::new();
@@ -32,22 +34,28 @@ pub(crate) fn parse_defs_files(
 
         for child in element_children(root) {
             match child.name.as_str() {
-                "type" => type_decls.push(parse_type_declaration_node_with_namespace(
-                    child,
-                    &collection_name,
-                )?),
+                "type" => type_decls.push(
+                    parse_type_declaration_node_with_namespace(child, &collection_name)
+                        .map_err(|error| with_file_context(error, file_path))?,
+                ),
                 "function" => {
                     let function_decl =
-                        parse_function_declaration_node_with_namespace(child, &collection_name)?;
+                        parse_function_declaration_node_with_namespace(child, &collection_name)
+                            .map_err(|error| with_file_context(error, file_path))?;
                     function_decls.push(function_decl);
                 }
-                "var" => defs_global_var_decls
-                    .push(parse_defs_global_var_declaration(child, &collection_name)?),
+                "var" => defs_global_var_decls.push(
+                    parse_defs_global_var_declaration(child, &collection_name)
+                        .map_err(|error| with_file_context(error, file_path))?,
+                ),
                 _ => {
-                    return Err(ScriptLangError::with_span(
-                        "XML_DEFS_CHILD_INVALID",
-                        format!("Unsupported child <{}> under <defs>.", child.name),
-                        child.location.clone(),
+                    return Err(with_file_context(
+                        ScriptLangError::with_span(
+                            "XML_DEFS_CHILD_INVALID",
+                            format!("Unsupported child <{}> under <defs>.", child.name),
+                            child.location.clone(),
+                        ),
+                        file_path,
                     ))
                 }
             }
@@ -64,6 +72,15 @@ pub(crate) fn parse_defs_files(
     }
 
     Ok(defs_by_path)
+}
+
+fn with_file_context(error: ScriptLangError, file_path: &str) -> ScriptLangError {
+    let message = format!("In file \"{}\": {}", file_path, error.message);
+    ScriptLangError::with_span(
+        error.code,
+        message,
+        error.span.unwrap_or(SourceSpan::synthetic()),
+    )
 }
 
 pub(crate) fn parse_defs_global_var_declaration(
@@ -999,5 +1016,68 @@ mod defs_resolver_tests {
             resolve_visible_defs(&reachable, &defs_by_path).expect("resolve defs");
         assert!(types.contains_key("shared.Obj"));
         assert!(functions.contains_key("shared.make"));
+    }
+
+    #[test]
+    fn parse_defs_files_attaches_file_path_for_defs_errors() {
+        let files = map(&[(
+            "bad.defs.xml",
+            r#"<defs name="shared">
+  <oops/>
+</defs>"#,
+        )]);
+        let sources = parse_sources(&files).expect("parse sources");
+        let error = parse_defs_files(&sources).expect_err("defs parse should fail");
+        assert_eq!(error.code, "XML_DEFS_CHILD_INVALID");
+        assert!(error.message.contains("In file \"bad.defs.xml\":"));
+    }
+
+    #[test]
+    fn with_file_context_preserves_file_name_and_sets_synthetic_span_when_missing() {
+        let error = ScriptLangError::new("SOME_CODE", "boom");
+        let wrapped = with_file_context(error, "broken.defs.xml");
+        assert_eq!(wrapped.code, "SOME_CODE");
+        assert!(wrapped
+            .message
+            .contains("In file \"broken.defs.xml\": boom"));
+        let span = wrapped.span.expect("span should be present");
+        assert_eq!(span.start.line, 1);
+        assert_eq!(span.start.column, 1);
+        assert_eq!(span.end.line, 1);
+        assert_eq!(span.end.column, 1);
+    }
+
+    #[test]
+    fn parse_defs_files_wraps_attr_reserved_and_function_parse_errors_with_file_context() {
+        let missing_name = map(&[("missing-name.defs.xml", r#"<defs></defs>"#)]);
+        let missing_name_sources = parse_sources(&missing_name).expect("parse sources");
+        let missing_name_error =
+            parse_defs_files(&missing_name_sources).expect_err("missing name should fail");
+        assert!(missing_name_error
+            .message
+            .contains("In file \"missing-name.defs.xml\":"));
+
+        let reserved_name = map(&[("reserved.defs.xml", r#"<defs name="__sl_bad"></defs>"#)]);
+        let reserved_name_sources = parse_sources(&reserved_name).expect("parse sources");
+        let reserved_name_error =
+            parse_defs_files(&reserved_name_sources).expect_err("reserved name should fail");
+        assert!(reserved_name_error
+            .message
+            .contains("In file \"reserved.defs.xml\":"));
+
+        let bad_function = map(&[(
+            "bad-function.defs.xml",
+            r#"<defs name="shared">
+  <function name="bad" args="int:a" return="int">
+    a = a + 1;
+  </function>
+</defs>"#,
+        )]);
+        let bad_function_sources = parse_sources(&bad_function).expect("parse sources");
+        let bad_function_error =
+            parse_defs_files(&bad_function_sources).expect_err("bad function should fail");
+        assert!(bad_function_error
+            .message
+            .contains("In file \"bad-function.defs.xml\":"));
     }
 }

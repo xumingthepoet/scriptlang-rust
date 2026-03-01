@@ -31,7 +31,8 @@ pub(crate) fn parse_sources(
                 }
             }
             SourceKind::ScriptXml | SourceKind::DefsXml => {
-                let document = parse_xml_document(source_text)?;
+                let document = parse_xml_document(source_text)
+                    .map_err(|error| with_file_context(error, &file_path))?;
                 let includes = parse_include_directives(source_text)
                     .into_iter()
                     .map(|include| resolve_include_path(&file_path, &include))
@@ -50,6 +51,15 @@ pub(crate) fn parse_sources(
     }
 
     Ok(sources)
+}
+
+fn with_file_context(error: ScriptLangError, file_path: &str) -> ScriptLangError {
+    let message = format!("In file \"{}\": {}", file_path, error.message);
+    ScriptLangError::with_span(
+        error.code,
+        message,
+        error.span.unwrap_or(SourceSpan::synthetic()),
+    )
 }
 
 pub(crate) fn detect_source_kind(path: &str) -> Option<SourceKind> {
@@ -131,5 +141,17 @@ mod source_parse_tests {
         // Test .. path handling explicitly (covers line 87)
         assert_eq!(normalize_virtual_path("a/b/c/../d"), "a/b/d");
         assert_eq!(normalize_virtual_path("../a"), "a");
+    }
+
+    #[test]
+    fn parse_sources_attaches_file_path_for_xml_parse_error() {
+        let files = BTreeMap::from([("bad.script.xml".to_string(), "<script>".to_string())]);
+        let error = parse_sources(&files).expect_err("invalid xml should fail");
+        assert_eq!(error.code, "XML_PARSE_ERROR");
+        assert!(
+            error.message.contains("bad.script.xml"),
+            "message should include file path: {}",
+            error.message
+        );
     }
 }
