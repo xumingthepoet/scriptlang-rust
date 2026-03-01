@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::value::SlValue;
 
+pub const COMPILED_PROJECT_SCHEMA_V1: &str = "compiled-project.v1";
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceLocation {
     pub line: usize,
@@ -298,4 +300,53 @@ pub struct CompileProjectResult {
     pub global_json: BTreeMap<String, SlValue>,
     pub defs_global_declarations: BTreeMap<String, DefsGlobalVarDecl>,
     pub defs_global_init_order: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompiledProjectArtifactV1 {
+    pub schema_version: String,
+    pub compiler_version: String,
+    pub entry_script: String,
+    pub scripts: BTreeMap<String, ScriptIr>,
+    pub global_json: BTreeMap<String, SlValue>,
+    pub defs_global_declarations: BTreeMap<String, DefsGlobalVarDecl>,
+    pub defs_global_init_order: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn source_span_synthetic_uses_1_based_defaults() {
+        let span = SourceSpan::synthetic();
+        assert_eq!(span.start.line, 1);
+        assert_eq!(span.start.column, 1);
+        assert_eq!(span.end.line, 1);
+        assert_eq!(span.end.column, 1);
+    }
+
+    #[test]
+    fn compiled_project_schema_constant_matches_v1() {
+        assert_eq!(COMPILED_PROJECT_SCHEMA_V1, "compiled-project.v1");
+    }
+
+    #[test]
+    fn compiled_project_artifact_roundtrip_json() {
+        let artifact = CompiledProjectArtifactV1 {
+            schema_version: COMPILED_PROJECT_SCHEMA_V1.to_string(),
+            compiler_version: "player.v1".to_string(),
+            entry_script: "main".to_string(),
+            scripts: BTreeMap::new(),
+            global_json: BTreeMap::new(),
+            defs_global_declarations: BTreeMap::new(),
+            defs_global_init_order: Vec::new(),
+        };
+
+        let encoded = serde_json::to_string(&artifact).expect("artifact serialize");
+        let decoded: CompiledProjectArtifactV1 =
+            serde_json::from_str(&encoded).expect("artifact deserialize");
+        assert_eq!(decoded, artifact);
+    }
 }

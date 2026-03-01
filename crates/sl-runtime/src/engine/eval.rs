@@ -728,7 +728,7 @@ mod eval_tests {
 </script>
 "#,
         )]);
-        let compiled = compile_project_bundle_from_xml_map(&files).expect("compile");
+        let compiled = compile_project_from_sources(files);
         let mut host_unsupported = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
@@ -763,8 +763,7 @@ mod eval_tests {
 "#,
             ),
         ]);
-        let host_blocked_compiled =
-            compile_project_bundle_from_xml_map(&host_blocked_files).expect("compile");
+        let host_blocked_compiled = compile_project_from_sources(host_blocked_files);
         let mut host_blocked = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: host_blocked_compiled.scripts,
             global_json: host_blocked_compiled.global_json,

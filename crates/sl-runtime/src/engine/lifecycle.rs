@@ -320,7 +320,7 @@ mod lifecycle_tests {
             "main.script.xml",
             r#"<script name="main"><text>Hello</text></script>"#,
         )]);
-        let compiled = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        let compiled = compile_project_from_sources(files);
         let result = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
@@ -358,7 +358,7 @@ mod lifecycle_tests {
     "#,
             ),
         ]);
-        let compiled = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        let compiled = compile_project_from_sources(files);
         let result = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
@@ -403,7 +403,7 @@ mod lifecycle_tests {
     "#,
             ),
         ]);
-        let compiled = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        let compiled = compile_project_from_sources(files);
         let result = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
@@ -464,7 +464,7 @@ mod lifecycle_tests {
     "#,
             ),
         ]);
-        let compiled = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        let compiled = compile_project_from_sources(files);
         let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,

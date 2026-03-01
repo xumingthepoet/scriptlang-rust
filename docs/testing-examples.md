@@ -42,6 +42,7 @@ This workspace uses `sl-test-example` to validate all examples under `crates/sl-
 
 ## Runtime Defaults
 - `entryScript`: defaults to `main` if omitted.
+- 运行链路：`xml -> compile artifact -> create engine from artifact`
 - Random seed: fixed to `1` inside `sl-test-example` runner for deterministic outputs.
 - Guard: max `5000` engine steps per case.
 

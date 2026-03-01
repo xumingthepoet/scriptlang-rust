@@ -5,14 +5,16 @@ pub(crate) use std::sync::OnceLock;
 pub(crate) use regex::Regex;
 pub(crate) use serde_json::Value as JsonValue;
 pub(crate) use sl_core::{
-    default_value_from_type, CallArgument, ChoiceOption, ContinueTarget, DefsGlobalVarDecl,
-    FunctionDecl, FunctionParam, FunctionReturn, ImplicitGroup, ScriptIr, ScriptLangError,
-    ScriptNode, ScriptParam, ScriptType, SlValue, SourceSpan, VarDeclaration,
+    default_value_from_type, CallArgument, ChoiceOption, CompiledProjectArtifactV1, ContinueTarget,
+    DefsGlobalVarDecl, FunctionDecl, FunctionParam, FunctionReturn, ImplicitGroup, ScriptIr,
+    ScriptLangError, ScriptNode, ScriptParam, ScriptType, SlValue, SourceSpan, VarDeclaration,
+    COMPILED_PROJECT_SCHEMA_V1,
 };
 pub(crate) use sl_parser::{
     parse_include_directives, parse_xml_document, XmlElementNode, XmlNode, XmlTextNode,
 };
 
+mod artifact;
 mod context;
 mod defaults;
 mod defs_resolver;
@@ -26,6 +28,10 @@ mod source_parse;
 mod type_expr;
 mod xml_utils;
 
+pub use artifact::{
+    compile_artifact_from_xml_map, read_artifact_json, write_artifact_json,
+    DEFAULT_COMPILER_VERSION,
+};
 pub use context::CompileProjectBundleResult;
 pub use pipeline::{compile_project_bundle_from_xml_map, compile_project_scripts_from_xml_map};
 

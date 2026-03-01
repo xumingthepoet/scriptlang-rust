@@ -2,10 +2,11 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use sl_compiler::{
+    compile_artifact_from_xml_map as compile_compiled_artifact_from_xml_map,
     compile_project_bundle_from_xml_map, compile_project_scripts_from_xml_map,
-    CompileProjectBundleResult,
+    CompileProjectBundleResult, DEFAULT_COMPILER_VERSION,
 };
-use sl_core::{CompileProjectResult, SlValue, SnapshotV3};
+use sl_core::{CompileProjectResult, CompiledProjectArtifactV1, SlValue, SnapshotV3};
 use sl_runtime::{HostFunctionRegistry, ScriptLangEngineOptions};
 
 pub use sl_core::{ChoiceItem, EngineOutput, ScriptLangError};
@@ -22,8 +23,25 @@ pub struct CreateEngineFromXmlOptions {
 }
 
 #[derive(Clone)]
+pub struct CreateEngineFromArtifactOptions {
+    pub artifact: CompiledProjectArtifactV1,
+    pub entry_args: Option<BTreeMap<String, SlValue>>,
+    pub host_functions: Option<Arc<dyn HostFunctionRegistry>>,
+    pub random_seed: Option<u32>,
+    pub compiler_version: Option<String>,
+}
+
+#[derive(Clone)]
 pub struct ResumeEngineFromXmlOptions {
     pub scripts_xml: BTreeMap<String, String>,
+    pub snapshot: SnapshotV3,
+    pub host_functions: Option<Arc<dyn HostFunctionRegistry>>,
+    pub compiler_version: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct ResumeEngineFromArtifactOptions {
+    pub artifact: CompiledProjectArtifactV1,
     pub snapshot: SnapshotV3,
     pub host_functions: Option<Arc<dyn HostFunctionRegistry>>,
     pub compiler_version: Option<String>,
@@ -57,42 +75,100 @@ pub fn compile_project_from_xml_map(
     })
 }
 
+pub fn compile_artifact_from_xml_map(
+    xml_by_path: &BTreeMap<String, String>,
+    entry_script: Option<String>,
+) -> Result<CompiledProjectArtifactV1, ScriptLangError> {
+    compile_compiled_artifact_from_xml_map(xml_by_path, entry_script)
+}
+
+pub fn create_engine_from_artifact(
+    options: CreateEngineFromArtifactOptions,
+) -> Result<ScriptLangEngine, ScriptLangError> {
+    if !options
+        .artifact
+        .scripts
+        .contains_key(&options.artifact.entry_script)
+    {
+        return Err(ScriptLangError::new(
+            "API_ARTIFACT_ENTRY_NOT_FOUND",
+            format!(
+                "Artifact entry script \"{}\" is not registered.",
+                options.artifact.entry_script
+            ),
+        ));
+    }
+
+    let compiler_version = options
+        .compiler_version
+        .or_else(|| Some(options.artifact.compiler_version.clone()));
+
+    let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
+        scripts: options.artifact.scripts,
+        global_json: options.artifact.global_json,
+        defs_global_declarations: options.artifact.defs_global_declarations,
+        defs_global_init_order: options.artifact.defs_global_init_order,
+        host_functions: options.host_functions,
+        random_seed: options.random_seed,
+        compiler_version,
+    })?;
+
+    engine.start(&options.artifact.entry_script, options.entry_args)?;
+    Ok(engine)
+}
+
+pub fn resume_engine_from_artifact(
+    options: ResumeEngineFromArtifactOptions,
+) -> Result<ScriptLangEngine, ScriptLangError> {
+    let compiler_version = options
+        .compiler_version
+        .or_else(|| Some(options.artifact.compiler_version.clone()));
+
+    let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
+        scripts: options.artifact.scripts,
+        global_json: options.artifact.global_json,
+        defs_global_declarations: options.artifact.defs_global_declarations,
+        defs_global_init_order: options.artifact.defs_global_init_order,
+        host_functions: options.host_functions,
+        random_seed: None,
+        compiler_version,
+    })?;
+
+    engine.resume(options.snapshot)?;
+    Ok(engine)
+}
+
 pub fn create_engine_from_xml(
     options: CreateEngineFromXmlOptions,
 ) -> Result<ScriptLangEngine, ScriptLangError> {
-    let compiled = compile_project_from_xml_map(&options.scripts_xml, options.entry_script)?;
-
-    let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
-        scripts: compiled.scripts,
-        global_json: compiled.global_json,
-        defs_global_declarations: compiled.defs_global_declarations,
-        defs_global_init_order: compiled.defs_global_init_order,
+    let artifact = compile_artifact_from_xml_map(&options.scripts_xml, options.entry_script)?;
+    create_engine_from_artifact(CreateEngineFromArtifactOptions {
+        artifact,
+        entry_args: options.entry_args,
         host_functions: options.host_functions,
         random_seed: options.random_seed,
         compiler_version: options.compiler_version,
-    })?;
-
-    engine.start(&compiled.entry_script, options.entry_args)?;
-    Ok(engine)
+    })
 }
 
 pub fn resume_engine_from_xml(
     options: ResumeEngineFromXmlOptions,
 ) -> Result<ScriptLangEngine, ScriptLangError> {
     let compiled = compile_project_bundle_from_xml_map(&options.scripts_xml)?;
-
-    let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
-        scripts: compiled.scripts,
-        global_json: compiled.global_json,
-        defs_global_declarations: compiled.defs_global_declarations,
-        defs_global_init_order: compiled.defs_global_init_order,
+    resume_engine_from_artifact(ResumeEngineFromArtifactOptions {
+        artifact: CompiledProjectArtifactV1 {
+            schema_version: sl_core::COMPILED_PROJECT_SCHEMA_V1.to_string(),
+            compiler_version: DEFAULT_COMPILER_VERSION.to_string(),
+            entry_script: "main".to_string(),
+            scripts: compiled.scripts,
+            global_json: compiled.global_json,
+            defs_global_declarations: compiled.defs_global_declarations,
+            defs_global_init_order: compiled.defs_global_init_order,
+        },
+        snapshot: options.snapshot,
         host_functions: options.host_functions,
-        random_seed: None,
         compiler_version: options.compiler_version,
-    })?;
-
-    engine.resume(options.snapshot)?;
-    Ok(engine)
+    })
 }
 
 fn resolve_entry_script(
@@ -232,6 +308,102 @@ mod tests {
         let error =
             compile_project_from_xml_map(&scripts, None).expect_err("default main should fail");
         assert_eq!(error.code, "API_ENTRY_MAIN_NOT_FOUND");
+    }
+
+    #[test]
+    fn compile_artifact_from_xml_map_builds_v1_artifact() {
+        let scripts = map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Main</text></script>"#,
+        )]);
+        let artifact = compile_artifact_from_xml_map(&scripts, None).expect("compile artifact");
+        assert_eq!(artifact.schema_version, sl_core::COMPILED_PROJECT_SCHEMA_V1);
+        assert_eq!(artifact.entry_script, "main");
+    }
+
+    #[test]
+    fn create_engine_from_artifact_starts_engine_and_validates_entry() {
+        let scripts = map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <choice text="Pick"><option text="A"><text>A</text></option></choice>
+</script>
+"#,
+        )]);
+        let artifact = compile_artifact_from_xml_map(&scripts, None).expect("compile artifact");
+        let mut engine = create_engine_from_artifact(CreateEngineFromArtifactOptions {
+            artifact,
+            entry_args: None,
+            host_functions: None,
+            random_seed: Some(1),
+            compiler_version: None,
+        })
+        .expect("engine should build");
+        assert!(matches!(
+            engine.next_output().expect("next output"),
+            EngineOutput::Choices { .. }
+        ));
+
+        let bad_artifact = CompiledProjectArtifactV1 {
+            schema_version: sl_core::COMPILED_PROJECT_SCHEMA_V1.to_string(),
+            compiler_version: "player.v1".to_string(),
+            entry_script: "missing".to_string(),
+            scripts: BTreeMap::new(),
+            global_json: BTreeMap::new(),
+            defs_global_declarations: BTreeMap::new(),
+            defs_global_init_order: Vec::new(),
+        };
+        let error = create_engine_from_artifact(CreateEngineFromArtifactOptions {
+            artifact: bad_artifact,
+            entry_args: None,
+            host_functions: None,
+            random_seed: Some(1),
+            compiler_version: None,
+        })
+        .err()
+        .expect("missing artifact entry should fail");
+        assert_eq!(error.code, "API_ARTIFACT_ENTRY_NOT_FOUND");
+    }
+
+    #[test]
+    fn resume_engine_from_artifact_resumes_from_snapshot() {
+        let scripts = map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <choice text="Pick"><option text="A"><text>A</text></option></choice>
+</script>
+"#,
+        )]);
+
+        let artifact = compile_artifact_from_xml_map(&scripts, None).expect("compile artifact");
+        let mut engine = create_engine_from_artifact(CreateEngineFromArtifactOptions {
+            artifact: artifact.clone(),
+            entry_args: None,
+            host_functions: None,
+            random_seed: Some(1),
+            compiler_version: None,
+        })
+        .expect("engine should build");
+        assert!(matches!(
+            engine.next_output().expect("next output"),
+            EngineOutput::Choices { .. }
+        ));
+        let snapshot = engine.snapshot().expect("snapshot should succeed");
+
+        let mut resumed = resume_engine_from_artifact(ResumeEngineFromArtifactOptions {
+            artifact,
+            snapshot,
+            host_functions: None,
+            compiler_version: None,
+        })
+        .expect("resume from artifact");
+        resumed.choose(0).expect("choose should succeed");
+        assert!(matches!(
+            resumed.next_output().expect("next output"),
+            EngineOutput::Text { .. }
+        ));
     }
 
     #[test]

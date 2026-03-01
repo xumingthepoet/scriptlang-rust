@@ -5,7 +5,7 @@
 ## 1. 分层与推荐入口
 
 - 推荐入口：`crates/sl-api`
-  - 负责 `xml -> compile -> engine start/resume` 的一站式流程。
+  - 负责 `xml -> compile artifact -> engine start/resume` 的一站式流程。
 - 底层入口：`crates/sl-runtime`
   - 直接操作 `ScriptLangEngine`，适合自定义集成。
 
@@ -38,6 +38,13 @@
 - 统一错误类型：`ScriptLangError`
   - 字段：`code`, `message`, `span`
   - 宿主侧建议以 `code` 做稳定分支处理。
+
+### 2.5 编译产物
+
+- `CompiledProjectArtifactV1`（来自 `sl-core`）：
+  - `schemaVersion` 固定为 `compiled-project.v1`
+  - 包含 `entryScript / scripts / globalJson / defsGlobalDeclarations / defsGlobalInitOrder`
+  - 可作为“离线编译后运行”的稳定输入
 
 ## 3. `sl-api` 高层 API
 
@@ -79,7 +86,8 @@ assert_eq!(project.entry_script, "main");
 
 ## 3.3 `create_engine_from_xml`
 
-创建并自动 `start()` 引擎，常用于新会话。
+创建并自动 `start()` 引擎，常用于新会话。  
+该接口为便捷入口，内部走 `compile artifact -> create from artifact`。
 
 参数：`CreateEngineFromXmlOptions`
 - `scripts_xml`: 源文件映射
@@ -161,6 +169,55 @@ resumed.choose(0)?;
 assert!(matches!(resumed.next_output()?, EngineOutput::Text { .. }));
 # Ok::<(), sl_core::ScriptLangError>(())
 ```
+
+## 3.5 `compile_artifact_from_xml_map`
+
+编译并返回 `CompiledProjectArtifactV1`，用于把编译与运行拆成两段。
+
+```rust
+use std::collections::BTreeMap;
+use sl_api::compile_artifact_from_xml_map;
+use sl_core::COMPILED_PROJECT_SCHEMA_V1;
+
+let files = BTreeMap::from([
+    ("main.script.xml".to_string(), r#"<script name="main"><text>Hello</text></script>"#.to_string())
+]);
+
+let artifact = compile_artifact_from_xml_map(&files, None)?;
+assert_eq!(artifact.schema_version, COMPILED_PROJECT_SCHEMA_V1);
+# Ok::<(), sl_core::ScriptLangError>(())
+```
+
+## 3.6 `create_engine_from_artifact`
+
+使用编译产物直接创建并 `start()` 引擎。
+
+```rust
+use std::collections::BTreeMap;
+use sl_api::{
+    compile_artifact_from_xml_map, create_engine_from_artifact, CreateEngineFromArtifactOptions
+};
+use sl_core::EngineOutput;
+
+let files = BTreeMap::from([
+    ("main.script.xml".to_string(), r#"<script name="main"><text>Hello</text></script>"#.to_string())
+]);
+let artifact = compile_artifact_from_xml_map(&files, None)?;
+
+let mut engine = create_engine_from_artifact(CreateEngineFromArtifactOptions {
+    artifact,
+    entry_args: None,
+    host_functions: None,
+    random_seed: Some(1),
+    compiler_version: None,
+})?;
+assert!(matches!(engine.next_output()?, EngineOutput::Text { .. }));
+# Ok::<(), sl_core::ScriptLangError>(())
+```
+
+## 3.7 `resume_engine_from_artifact`
+
+使用编译产物 + 快照直接恢复引擎。
 
 ## 4. `sl-runtime` 直接 API（底层）
 

@@ -11,11 +11,10 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 ## Workspace Crates
 - `crates/sl-core`: shared types, values, errors, snapshot/player schemas.
 - `crates/sl-parser`: XML parser + include directive extraction.
-- `crates/sl-compiler`: include graph validation + defs/json/script compilation to IR.
+- `crates/sl-compiler`: include graph validation + defs/json/script compilation to compiled artifact.
 - `crates/sl-runtime`: execution engine (`next/choose/submit_input/snapshot/resume`).
 - `crates/sl-api`: high-level create/compile/resume API.
 - `crates/sl-cli`: host-side CLI (`agent` and `tui` modes).
-- `crates/sl-tool`: reusable testing toolkit (`testcase.json` schema + case runner/assertion).
 - `crates/sl-test-example`: example integration tests + in-crate testcase runner/assertion.
 
 ## Internal Module Layout
@@ -31,7 +30,7 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
   `callstack.rs`, `control_flow.rs`, `eval.rs`, `scope.rs`, `once_state.rs`, `rng.rs`;
   helpers are in `helpers/value_path.rs` and `helpers/rhai_bridge.rs`.
 - `crates/sl-compiler/src`:
-  compile pipeline is split into `context.rs`, `pipeline.rs`, `source_parse.rs`,
+  compile pipeline is split into `artifact.rs`, `context.rs`, `pipeline.rs`, `source_parse.rs`,
   `include_graph.rs`, `defs_resolver.rs`, `type_expr.rs`, `json_symbols.rs`,
   `sanitize.rs`, `script_compile.rs`, `xml_utils.rs`, `macro_expand.rs`, `defaults.rs`.
 

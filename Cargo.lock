@@ -774,6 +774,7 @@ name = "sl-core"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "serde_json",
  "thiserror",
 ]
 
@@ -792,25 +793,12 @@ version = "0.1.0"
 dependencies = [
  "regex",
  "rhai",
- "sl-compiler",
+ "sl-api",
  "sl-core",
 ]
 
 [[package]]
 name = "sl-test-example"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "sl-api",
- "sl-core",
- "sl-runtime",
- "thiserror",
- "walkdir",
-]
-
-[[package]]
-name = "sl-tool"
 version = "0.1.0"
 dependencies = [
  "serde",

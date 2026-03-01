@@ -11,4 +11,4 @@ rhai.workspace = true
 sl-core = { path = "../sl-core" }
 
 [dev-dependencies]
-sl-compiler = { path = "../sl-compiler" }
+sl-api = { path = "../sl-api" }

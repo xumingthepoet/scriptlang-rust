@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use sl_api::{create_engine_from_xml, CreateEngineFromXmlOptions};
+use sl_api::{
+    compile_artifact_from_xml_map, create_engine_from_artifact, CreateEngineFromArtifactOptions,
+};
 use sl_runtime::DEFAULT_COMPILER_VERSION;
 
 use crate::source::{read_scripts_xml_from_dir, read_test_case};
@@ -17,9 +19,10 @@ pub struct RunReport {
 
 pub fn run_case(example_dir: &Path, case: &TestCase) -> Result<RunReport, SlTestExampleError> {
     let scripts_xml = read_scripts_xml_from_dir(example_dir)?;
-    let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
-        scripts_xml,
-        entry_script: Some(case.entry_script.clone()),
+    let artifact = compile_artifact_from_xml_map(&scripts_xml, Some(case.entry_script.clone()))
+        .map_err(SlTestExampleError::Engine)?;
+    let mut engine = create_engine_from_artifact(CreateEngineFromArtifactOptions {
+        artifact,
         entry_args: None,
         host_functions: None,
         random_seed: Some(1),

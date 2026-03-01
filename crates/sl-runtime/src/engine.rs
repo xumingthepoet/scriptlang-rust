@@ -47,7 +47,7 @@ pub use lifecycle::{
 #[cfg(test)]
 pub(super) mod runtime_test_support {
     use super::*;
-    pub(super) use sl_compiler::compile_project_bundle_from_xml_map;
+    pub(super) use sl_api::compile_project_from_xml_map;
 
     #[derive(Debug)]
     pub(super) struct TestRegistry {
@@ -72,7 +72,8 @@ pub(super) mod runtime_test_support {
     }
 
     pub(super) fn engine_from_sources(files: BTreeMap<String, String>) -> ScriptLangEngine {
-        let compiled = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        let compiled =
+            compile_project_from_xml_map(&files, None).expect("compile project should pass");
         ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
@@ -83,6 +84,12 @@ pub(super) mod runtime_test_support {
             compiler_version: None,
         })
         .expect("engine should build")
+    }
+
+    pub(super) fn compile_project_from_sources(
+        files: BTreeMap<String, String>,
+    ) -> sl_core::CompileProjectResult {
+        compile_project_from_xml_map(&files, None).expect("compile project should pass")
     }
 
     pub(super) fn drive_engine_to_end(engine: &mut ScriptLangEngine) {
