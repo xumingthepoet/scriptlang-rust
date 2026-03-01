@@ -4,6 +4,7 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 
 ## Documentation
 - [SL Engine API usage](docs/sl-engine-api.md)
+- [SL CLI usage](docs/sl-cli-usage.md)
 - [ScriptLang syntax rules](docs/scriptlang-syntax.md)
 - [Example testing with sl-test-example runner](docs/testing-examples.md)
 - [Rust testability playbook for 100% coverage](docs/rust-testability-playbook.md)
@@ -86,87 +87,19 @@ If you need artifact file persistence, use `sl-compiler` helpers:
 
 ## CLI Usage
 
-### Agent mode
+详细 CLI 文档见 [docs/sl-cli-usage.md](docs/sl-cli-usage.md)。
+
+### Quick Start
+
 ```bash
 cargo run -p sl-cli -- agent start --scripts-dir crates/sl-test-example/examples/06-snapshot-flow --state-out /tmp/sl-state.json
 cargo run -p sl-cli -- agent choose --state-in /tmp/sl-state.json --choice 0 --state-out /tmp/sl-next.json
 cargo run -p sl-cli -- agent input --state-in /tmp/sl-next.json --text "Rin" --state-out /tmp/sl-next2.json
 cargo run -p sl-cli -- agent replay --scripts-dir crates/sl-test-example/examples/16-input-name --step input:Rin
-cargo run -p sl-cli -- agent replay --scripts-dir crates/sl-test-example/examples/06-snapshot-flow --entry-script main --step choose:0
-```
-
-`agent start/choose/input` print line-based machine-readable output:
-- `RESULT:OK|ERROR`
-- `EVENT:CHOICES|INPUT|END`
-- `TEXT_JSON:...`
-- `PROMPT_JSON:...`
-- `CHOICE:<index>|<json_text>`
-- `INPUT_DEFAULT_JSON:...`
-- `STATE_OUT:<path|NONE>`
-- `ERROR_CODE:...` (only when `RESULT:ERROR`)
-- `ERROR_MSG_JSON:...` (only when `RESULT:ERROR`)
-
-`agent replay` runs from a fresh engine start and consumes `--step` actions in order:
-- step syntax:
-  - `--step choose:<index>`
-  - `--step input:<text>`
-- replay output is human-readable event stream:
-  - `RESULT:OK`
-  - `MODE:REPLAY`
-  - `TEXT: ...`
-  - `CHOICES: ...` then `- [index] text`
-  - `INPUT: ...` and `DEFAULT: ...`
-  - `APPLY: choose:...` / `APPLY: input:...`
-  - `END`
-  - `ACTIONS_USED: ...`
-  - `ACTIONS_TOTAL: ...`
-  - `STOP_AT: CHOICES|INPUT|END`
-
-### TUI mode
-```bash
 cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/06-snapshot-flow
 ```
 
-`tui` mode uses a `ratatui + crossterm` full-screen interface on real terminals:
-- `Up/Down` to select choices
-- typing + `Backspace` to edit input text
-- `Enter` to submit choice/input
-- `s` save snapshot, `l` load snapshot, `r` restart, `h` help, `q`/`Esc` quit
-
-When stdin/stdout is not a TTY (for example, piped in tests), it automatically falls back to the previous line-based interactive mode.
-When running under Rust test harness (unit-test build or `RUST_TEST_THREADS` is present), it also forces line mode to avoid entering full-screen TUI in tests.
-Fallback line mode supports command input:
-- `:help`
-- `:save`
-- `:load`
-- `:restart`
-- `:quit`
-
-All example entry commands:
-```bash
-cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/01-text-code
-cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/02-if-while
-cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/03-choice-once
-cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/04-call-ref-return
-cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/05-return-transfer
-cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/06-snapshot-flow
-cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/07-battle-duel
-cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/08-json-globals
-cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/09-random
-cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/10-once-static
-cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/11-choice-fallover-continue
-cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/12-while-break-continue
-cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/13-loop-times
-cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/14-defs-functions
-cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/15-entry-override-recursive
-cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/16-input-name
-cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/17-defs-global-shadowing
-cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/18-group-container
-```
-
-You can override defaults with:
-- `--entry-script <name>` (default: `main`)
-- `--state-file <path>` (default: `.scriptlang/save.json`)
+更多参数、输出协议、回放语法和完整流程说明，请查看 [docs/sl-cli-usage.md](docs/sl-cli-usage.md)。
 
 ## Examples
 Rhai-authored smoke scenarios live in `crates/sl-test-example/examples`.
