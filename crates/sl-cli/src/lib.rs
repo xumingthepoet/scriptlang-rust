@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 
-use clap::Parser;
+use clap::{Command, CommandFactory, Parser};
 #[cfg(test)]
 use sl_api::{create_engine_from_xml, CreateEngineFromXmlOptions};
 use sl_core::ScriptLangError;
@@ -48,13 +48,79 @@ where
     I: IntoIterator<Item = T>,
     T: Into<OsString> + Clone,
 {
-    let cli = match Cli::try_parse_from(args) {
+    let argv = collect_args(args);
+    if is_top_level_help_request(&argv) {
+        print_full_help();
+        return 0;
+    }
+
+    let cli = match Cli::try_parse_from(argv) {
         Ok(cli) => cli,
-        Err(error) => return error.exit_code(),
+        Err(error) => {
+            let code = error.exit_code();
+            let _ = error.print();
+            return code;
+        }
     };
     match run(cli) {
         Ok(code) => code,
         Err(error) => emit_error(error),
+    }
+}
+
+fn collect_args<I, T>(args: I) -> Vec<OsString>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<OsString> + Clone,
+{
+    args.into_iter().map(Into::into).collect()
+}
+
+fn is_top_level_help_request(argv: &[OsString]) -> bool {
+    if argv.len() != 2 {
+        return false;
+    }
+    let arg = argv[1].to_string_lossy();
+    arg == "--help" || arg == "-h"
+}
+
+fn render_help(mut command: Command) -> String {
+    let mut buffer = Vec::new();
+    let _ = command.write_long_help(&mut buffer);
+    String::from_utf8_lossy(&buffer).into_owned()
+}
+
+fn print_full_help() {
+    let root = Cli::command();
+    println!("{}", render_help(root.clone()));
+
+    let agent = root
+        .get_subcommands()
+        .find(|cmd| cmd.get_name() == "agent")
+        .cloned();
+    if let Some(agent) = agent {
+        println!();
+        println!("---");
+        println!();
+        println!("{}", render_help(agent.clone()));
+
+        for sub in agent.get_subcommands() {
+            println!();
+            println!("---");
+            println!();
+            println!("{}", render_help(sub.clone()));
+        }
+    }
+
+    let tui = root
+        .get_subcommands()
+        .find(|cmd| cmd.get_name() == "tui")
+        .cloned();
+    if let Some(tui) = tui {
+        println!();
+        println!("---");
+        println!();
+        println!("{}", render_help(tui.clone()));
     }
 }
 
@@ -335,6 +401,12 @@ mod lib_tests {
             "bad",
         ]);
         assert_ne!(replay_error, 0);
+    }
+
+    #[test]
+    fn run_cli_from_args_returns_zero_on_top_level_help() {
+        let code = run_cli_from_args(["sl-cli", "--help"]);
+        assert_eq!(code, 0);
     }
 
     #[test]

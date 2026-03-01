@@ -17,6 +17,12 @@ mod main_tests {
     use super::run_with_args;
 
     #[test]
+    fn run_with_args_returns_zero_on_help() {
+        let code = run_with_args(["sl-cli", "--help"]);
+        assert_eq!(code, 0);
+    }
+
+    #[test]
     fn run_with_args_returns_non_zero_on_parse_error() {
         let code = run_with_args(["sl-cli", "invalid"]);
         assert_ne!(code, 0);

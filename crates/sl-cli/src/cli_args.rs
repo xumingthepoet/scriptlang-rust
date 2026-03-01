@@ -2,7 +2,8 @@ use clap::{Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
 #[command(name = "scriptlang-player")]
-#[command(about = "ScriptLang Rust agent CLI")]
+#[command(about = "ScriptLang CLI for scripted runs and interactive debugging")]
+#[command(long_about = "ScriptLang CLI for scripted runs and interactive debugging.\n\nUse `agent` for automation-friendly workflows (`start/choose/input/replay`), and `tui` for manual interactive playtesting.")]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Mode,
@@ -22,58 +23,80 @@ pub(crate) struct AgentArgs {
 
 #[derive(Debug, Subcommand)]
 pub(crate) enum AgentCommand {
+    #[command(about = "Start a new session from scripts and stop at first boundary")]
     Start(StartArgs),
+    #[command(about = "Resume from state and submit a choice index")]
     Choose(ChooseArgs),
+    #[command(about = "Resume from state and submit input text")]
     Input(InputArgs),
+    #[command(about = "Run from a fresh start with queued --step actions")]
+    #[command(long_about = "Run from a fresh start with queued --step actions.\n\nEach `--step` is consumed when a matching boundary appears:\n- choose:<index>\n- input:<text>\n\nWhen steps are exhausted, replay continues until the next boundary (CHOICES/INPUT/END), then exits successfully with a summary.")]
     Replay(ReplayArgs),
 }
 
 #[derive(Debug, Args)]
 pub(crate) struct StartArgs {
     #[arg(long = "scripts-dir")]
+    #[arg(help = "Directory containing *.script.xml / *.defs.xml / *.json")]
     pub(crate) scripts_dir: String,
     #[arg(long = "entry-script")]
+    #[arg(help = "Entry script name (default: main)")]
     pub(crate) entry_script: Option<String>,
     #[arg(long = "state-out")]
+    #[arg(help = "Path to write player state json")]
     pub(crate) state_out: String,
 }
 
 #[derive(Debug, Args)]
 pub(crate) struct ChooseArgs {
     #[arg(long = "state-in")]
+    #[arg(help = "Path to input player state json")]
     pub(crate) state_in: String,
     #[arg(long = "choice")]
+    #[arg(help = "Visible choice index to submit")]
     pub(crate) choice: usize,
     #[arg(long = "state-out")]
+    #[arg(help = "Path to output player state json")]
     pub(crate) state_out: String,
 }
 
 #[derive(Debug, Args)]
 pub(crate) struct InputArgs {
     #[arg(long = "state-in")]
+    #[arg(help = "Path to input player state json")]
     pub(crate) state_in: String,
     #[arg(long = "text")]
+    #[arg(help = "Input text to submit")]
     pub(crate) text: String,
     #[arg(long = "state-out")]
+    #[arg(help = "Path to output player state json")]
     pub(crate) state_out: String,
 }
 
 #[derive(Debug, Args)]
+#[command(after_help = "Examples:\n  sl-cli agent replay --scripts-dir crates/sl-test-example/examples/16-input-name --step input:Rin\n  sl-cli agent replay --scripts-dir crates/sl-test-example/examples/07-battle-duel --step choose:0 --step choose:1 --step input:Rin")]
 pub(crate) struct ReplayArgs {
     #[arg(long = "scripts-dir")]
+    #[arg(help = "Directory containing *.script.xml / *.defs.xml / *.json")]
     pub(crate) scripts_dir: String,
     #[arg(long = "entry-script")]
+    #[arg(help = "Entry script name (default: main)")]
     pub(crate) entry_script: Option<String>,
     #[arg(long = "step")]
+    #[arg(help = "Replay action: choose:<index> or input:<text>. Repeat to build a queue")]
     pub(crate) step: Vec<String>,
 }
 
 #[derive(Debug, Args)]
+#[command(about = "Interactive TUI mode (auto-fallback to line mode in non-TTY/test env)")]
 pub(crate) struct TuiArgs {
     #[arg(long = "scripts-dir")]
+    #[arg(help = "Directory containing *.script.xml / *.defs.xml / *.json")]
     pub(crate) scripts_dir: String,
     #[arg(long = "entry-script")]
+    #[arg(help = "Entry script name (default: main)")]
     pub(crate) entry_script: Option<String>,
     #[arg(long = "state-file")]
+    #[arg(help = "Path to save/load state (default: .scriptlang/save.json)")]
     pub(crate) state_file: Option<String>,
 }
