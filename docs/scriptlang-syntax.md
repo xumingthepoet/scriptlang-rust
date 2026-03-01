@@ -6,13 +6,22 @@
 
 ## 1.1 `*.script.xml`（可执行脚本）
 
-要求根节点是 `<script>`。
+要求根节点是 `<script>`，且**一个文件只能有一个 `<script>` 节点**（即只能有一个文档根元素）。
 
 ```xml
 <script name="main">
   <text>Hello</text>
 </script>
 ```
+
+错误示例（单文件放了两个 `<script>`）：
+
+```xml
+<script name="main"><text>A</text></script>
+<script name="side"><text>B</text></script>
+```
+
+上面会触发 XML 解析错误（常见报错是“根节点后仍有内容”）。
 
 ## 1.2 `*.defs.xml`（类型/函数/全局变量声明）
 
@@ -460,12 +469,38 @@ JSON 全局符号必须在 include 闭包内可见，否则编译失败。
 
 ## 10.3 XML 转义
 
-属性中出现 `<` 需写 `&lt;`。
+为避免“写完后编译才发现 XML 解析错误”，建议按下面规则检查：
+
+- 在属性值里（统一使用双引号）：
+- `<` 必须写 `&lt;`
+- `&` 必须写 `&amp;`（如 `a && b` 要写成 `a &amp;&amp; b`）
+- `>` 不需要转义（保持原样即可）
+
+文本节点中同样要注意：
+- 出现 `<` 必须写 `&lt;`
+- 出现 `&` 必须写 `&amp;`
+- 需要保留原始文本时可用 `<![CDATA[...]]>`
+
+当前约定下，属性值内不会再嵌套引号内容，因此不展开 `&quot;` / `&apos;` 用法。
+
+示例 1：`<if when="...">` 中的比较和逻辑表达式
 
 ```xml
 <if when="hp &lt; 10">
   <text>danger</text>
 </if>
+```
+
+```xml
+<if when="hp &lt;= 10 &amp;&amp; name == 'Rin'">
+  <text>danger</text>
+</if>
+```
+
+示例 2：文本节点里显示尖括号/`&`
+
+```xml
+<text>使用 &lt;tag&gt; 语法，并用 A &amp; B 连接。</text>
 ```
 
 ## 11. 综合示例
