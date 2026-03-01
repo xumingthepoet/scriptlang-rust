@@ -48,6 +48,15 @@
 
 ## 3. `sl-api` 高层 API
 
+### 3.0 推荐主流程（先编译，再运行）
+
+推荐把宿主流程固定为两步：
+
+1. `XML/JSON/DEFS -> CompiledProjectArtifactV1`
+2. `CompiledProjectArtifactV1 -> Engine start/resume`
+
+这样可以在“运行前”尽早暴露编译错误，并支持产物缓存、分发和复用。
+
 ## 3.1 `compile_scripts_from_xml_map`
 
 仅编译并返回 `scripts`（不返回 entry/global_json）。
@@ -218,6 +227,70 @@ assert!(matches!(engine.next_output()?, EngineOutput::Text { .. }));
 ## 3.7 `resume_engine_from_artifact`
 
 使用编译产物 + 快照直接恢复引擎。
+
+```rust
+use std::collections::BTreeMap;
+use sl_api::{
+    compile_artifact_from_xml_map, create_engine_from_artifact, resume_engine_from_artifact,
+    CreateEngineFromArtifactOptions, ResumeEngineFromArtifactOptions
+};
+use sl_core::EngineOutput;
+
+let files = BTreeMap::from([
+    ("main.script.xml".to_string(), r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A"><text>A</text></option>
+  </choice>
+</script>
+"#.to_string())
+]);
+
+let artifact = compile_artifact_from_xml_map(&files, None)?;
+let mut engine = create_engine_from_artifact(CreateEngineFromArtifactOptions {
+    artifact: artifact.clone(),
+    entry_args: None,
+    host_functions: None,
+    random_seed: Some(1),
+    compiler_version: None,
+})?;
+
+assert!(matches!(engine.next_output()?, EngineOutput::Choices { .. }));
+let snapshot = engine.snapshot()?;
+
+let mut resumed = resume_engine_from_artifact(ResumeEngineFromArtifactOptions {
+    artifact,
+    snapshot,
+    host_functions: None,
+    compiler_version: None,
+})?;
+resumed.choose(0)?;
+assert!(matches!(resumed.next_output()?, EngineOutput::Text { .. }));
+# Ok::<(), sl_core::ScriptLangError>(())
+```
+
+## 3.8 编译产物落盘/读盘（`sl-compiler`）
+
+如果宿主需要离线分发或缓存编译结果，可使用：
+
+- `sl_compiler::write_artifact_json(path, &artifact)`
+- `sl_compiler::read_artifact_json(path)`
+
+```rust
+use std::collections::BTreeMap;
+use sl_api::compile_artifact_from_xml_map;
+use sl_compiler::{write_artifact_json, read_artifact_json};
+
+let files = BTreeMap::from([
+    ("main.script.xml".to_string(), r#"<script name="main"><text>Hello</text></script>"#.to_string())
+]);
+
+let artifact = compile_artifact_from_xml_map(&files, None)?;
+write_artifact_json("/tmp/project.artifact.json", &artifact)?;
+let loaded = read_artifact_json("/tmp/project.artifact.json")?;
+assert_eq!(artifact.schema_version, loaded.schema_version);
+# Ok::<(), sl_core::ScriptLangError>(())
+```
 
 ## 4. `sl-runtime` 直接 API（底层）
 

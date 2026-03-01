@@ -66,6 +66,24 @@ All code must be written with testability in mind:
   - uncovered line count + merged ranges per file (for example `1-2,7-9`)
 - `make gate`: runs `check + fmt + lint + test + coverage`.
 
+## Compile Then Run (Recommended)
+
+ScriptLang now supports a clear two-step host flow:
+
+1. Compile source files (`*.script.xml` / `*.defs.xml` / `*.json`) into `CompiledProjectArtifactV1`.
+2. Run or resume engine from that artifact.
+
+Recommended API entry points are in `sl-api`:
+- compile: `compile_artifact_from_xml_map`
+- run: `create_engine_from_artifact`
+- resume: `resume_engine_from_artifact`
+
+If you need artifact file persistence, use `sl-compiler` helpers:
+- `write_artifact_json(path, &artifact)`
+- `read_artifact_json(path)`
+
+`create_engine_from_xml` is still available as a compatibility convenience path, but it internally does `compile -> artifact -> run`.
+
 ## CLI Usage
 
 ### Agent mode
