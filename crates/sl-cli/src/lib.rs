@@ -23,7 +23,7 @@ mod tui_state;
 
 pub(crate) use boundary_runner::{emit_boundary, run_to_boundary};
 pub(crate) use cli_args::{
-    AgentArgs, AgentCommand, ChooseArgs, Cli, InputArgs, Mode, StartArgs, TuiArgs,
+    AgentArgs, AgentCommand, ChooseArgs, Cli, InputArgs, Mode, ReplayArgs, StartArgs, TuiArgs,
 };
 pub(crate) use error_map::{
     emit_error, map_cli_source_path, map_cli_source_read, map_cli_source_scan,
@@ -205,6 +205,16 @@ mod lib_tests {
         .expect("agent input should pass");
         assert_eq!(input_code, 0);
 
+        let replay_code = run_agent(AgentArgs {
+            command: AgentCommand::Replay(ReplayArgs {
+                scripts_dir: input_scenario.clone(),
+                entry_script: Some("main".to_string()),
+                step: vec!["input:Guild".to_string()],
+            }),
+        })
+        .expect("agent replay should pass");
+        assert_eq!(replay_code, 0);
+
         let tui_code = run_tui(TuiArgs {
             scripts_dir: text_scenario,
             entry_script: Some("main".to_string()),
@@ -280,6 +290,7 @@ mod lib_tests {
     fn run_cli_from_args_covers_success_and_runtime_error_paths() {
         let state_out = temp_path("run-cli-start-state.json");
         let scripts_dir = example_scripts_dir("01-text-code");
+        let choice_scripts_dir = example_scripts_dir("06-snapshot-flow");
 
         let ok_code = run_cli_from_args([
             "sl-cli",
@@ -302,6 +313,28 @@ mod lib_tests {
             state_out.to_string_lossy().as_ref(),
         ]);
         assert_ne!(error_code, 0);
+
+        let replay_ok = run_cli_from_args([
+            "sl-cli",
+            "agent",
+            "replay",
+            "--scripts-dir",
+            &choice_scripts_dir,
+            "--step",
+            "choose:0",
+        ]);
+        assert_eq!(replay_ok, 0);
+
+        let replay_error = run_cli_from_args([
+            "sl-cli",
+            "agent",
+            "replay",
+            "--scripts-dir",
+            &scripts_dir,
+            "--step",
+            "bad",
+        ]);
+        assert_ne!(replay_error, 0);
     }
 
     #[test]

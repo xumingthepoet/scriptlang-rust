@@ -91,9 +91,11 @@ If you need artifact file persistence, use `sl-compiler` helpers:
 cargo run -p sl-cli -- agent start --scripts-dir crates/sl-test-example/examples/06-snapshot-flow --state-out /tmp/sl-state.json
 cargo run -p sl-cli -- agent choose --state-in /tmp/sl-state.json --choice 0 --state-out /tmp/sl-next.json
 cargo run -p sl-cli -- agent input --state-in /tmp/sl-next.json --text "Rin" --state-out /tmp/sl-next2.json
+cargo run -p sl-cli -- agent replay --scripts-dir crates/sl-test-example/examples/16-input-name --step input:Rin
+cargo run -p sl-cli -- agent replay --scripts-dir crates/sl-test-example/examples/06-snapshot-flow --entry-script main --step choose:0
 ```
 
-`agent` mode prints line-based machine-readable output:
+`agent start/choose/input` print line-based machine-readable output:
 - `RESULT:OK|ERROR`
 - `EVENT:CHOICES|INPUT|END`
 - `TEXT_JSON:...`
@@ -103,6 +105,22 @@ cargo run -p sl-cli -- agent input --state-in /tmp/sl-next.json --text "Rin" --s
 - `STATE_OUT:<path|NONE>`
 - `ERROR_CODE:...` (only when `RESULT:ERROR`)
 - `ERROR_MSG_JSON:...` (only when `RESULT:ERROR`)
+
+`agent replay` runs from a fresh engine start and consumes `--step` actions in order:
+- step syntax:
+  - `--step choose:<index>`
+  - `--step input:<text>`
+- replay output is human-readable event stream:
+  - `RESULT:OK`
+  - `MODE:REPLAY`
+  - `TEXT: ...`
+  - `CHOICES: ...` then `- [index] text`
+  - `INPUT: ...` and `DEFAULT: ...`
+  - `APPLY: choose:...` / `APPLY: input:...`
+  - `END`
+  - `ACTIONS_USED: ...`
+  - `ACTIONS_TOTAL: ...`
+  - `STOP_AT: CHOICES|INPUT|END`
 
 ### TUI mode
 ```bash

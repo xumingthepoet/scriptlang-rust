@@ -25,6 +25,7 @@ pub(crate) enum AgentCommand {
     Start(StartArgs),
     Choose(ChooseArgs),
     Input(InputArgs),
+    Replay(ReplayArgs),
 }
 
 #[derive(Debug, Args)]
@@ -55,6 +56,16 @@ pub(crate) struct InputArgs {
     pub(crate) text: String,
     #[arg(long = "state-out")]
     pub(crate) state_out: String,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ReplayArgs {
+    #[arg(long = "scripts-dir")]
+    pub(crate) scripts_dir: String,
+    #[arg(long = "entry-script")]
+    pub(crate) entry_script: Option<String>,
+    #[arg(long = "step")]
+    pub(crate) step: Vec<String>,
 }
 
 #[derive(Debug, Args)]
