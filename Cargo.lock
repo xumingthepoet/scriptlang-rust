@@ -800,7 +800,13 @@ dependencies = [
 name = "sl-test-example"
 version = "0.1.0"
 dependencies = [
- "sl-tool",
+ "serde",
+ "serde_json",
+ "sl-api",
+ "sl-core",
+ "sl-runtime",
+ "thiserror",
+ "walkdir",
 ]
 
 [[package]]

@@ -1,10 +1,10 @@
-# Example Testing with `sl-tool`
+# Example Testing with `sl-test-example`
 
-This workspace uses `sl-tool` + `sl-test-example` to validate all examples under `crates/sl-test-example/examples`.
+This workspace uses `sl-test-example` to validate all examples under `crates/sl-test-example/examples`.
 
 ## Layout
 - Case file path: `crates/sl-test-example/examples/<example>/testcase.json`
-- Runner API: `sl_tool::run_case(...)` and `sl_tool::assert_case(...)`
+- Runner API: `sl_test_example::run_case(...)` and `sl_test_example::assert_case(...)`
 - Integration tests: `crates/sl-test-example/tests/*_it.rs`
 
 ## Case Schema (`sl-tool-case.v1`)
@@ -42,7 +42,7 @@ This workspace uses `sl-tool` + `sl-test-example` to validate all examples under
 
 ## Runtime Defaults
 - `entryScript`: defaults to `main` if omitted.
-- Random seed: fixed to `1` inside `sl-tool` runner for deterministic outputs.
+- Random seed: fixed to `1` inside `sl-test-example` runner for deterministic outputs.
 - Guard: max `5000` engine steps per case.
 
 ## Commands

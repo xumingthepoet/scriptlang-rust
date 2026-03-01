@@ -5,7 +5,7 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 ## Documentation
 - [SL Engine API usage](docs/sl-engine-api.md)
 - [ScriptLang syntax rules](docs/scriptlang-syntax.md)
-- [Example testing with sl-tool](docs/testing-examples.md)
+- [Example testing with sl-test-example runner](docs/testing-examples.md)
 - [Rust testability playbook for 100% coverage](docs/rust-testability-playbook.md)
 
 ## Workspace Crates
@@ -16,7 +16,7 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 - `crates/sl-api`: high-level create/compile/resume API.
 - `crates/sl-cli`: host-side CLI (`agent` and `tui` modes).
 - `crates/sl-tool`: reusable testing toolkit (`testcase.json` schema + case runner/assertion).
-- `crates/sl-test-example`: example integration tests using `sl-tool`.
+- `crates/sl-test-example`: example integration tests + in-crate testcase runner/assertion.
 
 ## Internal Module Layout
 - `crates/sl-cli/src`:
@@ -135,4 +135,4 @@ You can override defaults with:
 
 ## Examples
 Rhai-authored smoke scenarios live in `crates/sl-test-example/examples`.
-Each example directory also carries a `testcase.json` consumed by `sl-tool`/`sl-test-example`.
+Each example directory also carries a `testcase.json` consumed by `sl-test-example`.
