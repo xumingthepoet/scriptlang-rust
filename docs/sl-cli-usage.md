@@ -89,6 +89,14 @@ cargo run -p sl-cli -- agent replay \
   --step choose:0
 ```
 
+```bash
+cargo run -p sl-cli -- agent replay \
+  --scripts-dir crates/sl-test-example/examples/07-battle-duel \
+  --step choose:0 \
+  --step choose:1 \
+  --step input:Rin
+```
+
 参数：
 - `--scripts-dir <path>`：脚本目录（必填）
 - `--entry-script <name>`：入口脚本，默认 `main`
