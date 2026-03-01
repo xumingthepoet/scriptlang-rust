@@ -14,6 +14,15 @@ cargo run -p sl-cli -- <mode> ...
 - `agent`: 面向脚本化调用/自动化测试
 - `tui`: 面向人工交互调试（全屏 TUI，必要时自动降级到行模式）
 
+查看帮助：
+
+```bash
+cargo run -p sl-cli -- --help
+cargo run -p sl-cli -- agent --help
+cargo run -p sl-cli -- agent replay --help
+cargo run -p sl-cli -- tui --help
+```
+
 ---
 
 ## 2. Agent 模式

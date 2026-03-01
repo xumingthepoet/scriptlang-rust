@@ -92,6 +92,9 @@ If you need artifact file persistence, use `sl-compiler` helpers:
 ### Quick Start
 
 ```bash
+cargo run -p sl-cli -- --help
+cargo run -p sl-cli -- agent --help
+cargo run -p sl-cli -- tui --help
 cargo run -p sl-cli -- agent start --scripts-dir crates/sl-test-example/examples/06-snapshot-flow --state-out /tmp/sl-state.json
 cargo run -p sl-cli -- agent choose --state-in /tmp/sl-state.json --choice 0 --state-out /tmp/sl-next.json
 cargo run -p sl-cli -- agent input --state-in /tmp/sl-next.json --text "Rin" --state-out /tmp/sl-next2.json
