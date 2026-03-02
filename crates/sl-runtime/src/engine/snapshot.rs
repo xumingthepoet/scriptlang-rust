@@ -1,4 +1,4 @@
-use super::lifecycle::{CompletionKind, PendingBoundary, RuntimeFrame};
+use super::lifecycle::{CompletionKind, PendingBoundary, RuntimeFrame, RuntimeRandomState};
 use super::*;
 
 impl ScriptLangEngine {
@@ -68,7 +68,7 @@ impl ScriptLangEngine {
             schema_version: SNAPSHOT_SCHEMA_V3.to_string(),
             compiler_version: self.compiler_version.clone(),
             runtime_frames,
-            rng_state: self.rng_state,
+            rng_state: self.current_seeded_rng_state(),
             pending_boundary,
             defs_globals: self.defs_globals_value.clone(),
             once_state_by_script,
@@ -97,8 +97,10 @@ impl ScriptLangEngine {
         }
 
         self.reset();
-        self.rng_state = snapshot.rng_state;
-        *self.shared_rng_state.borrow_mut() = snapshot.rng_state;
+        self.seeded_rng_state = snapshot.rng_state;
+        if self.initial_random_sequence.is_none() {
+            *self.shared_rng_state.borrow_mut() = RuntimeRandomState::Seeded(snapshot.rng_state);
+        }
 
         for qualified_name in snapshot.defs_globals.keys() {
             if !self.defs_global_declarations.contains_key(qualified_name) {

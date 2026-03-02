@@ -26,6 +26,8 @@ pub fn run_case(example_dir: &Path, case: &TestCase) -> Result<RunReport, SlTest
         entry_args: None,
         host_functions: None,
         random_seed: Some(1),
+        random_sequence: None,
+        random_sequence_index: None,
         compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
     })
     .map_err(SlTestExampleError::Engine)?;

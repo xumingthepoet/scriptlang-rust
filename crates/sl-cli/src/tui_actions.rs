@@ -7,7 +7,7 @@ use sl_api::DEFAULT_COMPILER_VERSION;
 use crate::tui_state::TuiUiState;
 use crate::{
     create_engine_for_scenario, load_engine_from_state_for_scenario, run_to_boundary,
-    save_engine_state, LoadedScenario,
+    save_engine_state, LoadedScenario, RandConfig,
 };
 
 const CHOICE_VIEWPORT_ROWS: usize = 5;
@@ -16,6 +16,7 @@ pub(crate) struct TuiActionContext<'a> {
     pub(crate) state_file: &'a str,
     pub(crate) scenario: &'a LoadedScenario,
     pub(crate) entry_script: &'a str,
+    pub(crate) random_sequence: Option<Vec<u32>>,
 }
 
 pub(crate) fn handle_key(
@@ -37,7 +38,15 @@ pub(crate) fn handle_key(
             return Ok(false);
         }
         KeyCode::Char('r') => {
-            let next = create_engine_for_scenario(context.scenario, context.entry_script)?;
+            let next = create_engine_for_scenario(
+                context.scenario,
+                context.entry_script,
+                RandConfig {
+                    sequence: context.random_sequence.clone(),
+                    sequence_index: Some(0),
+                    seed_state: None,
+                },
+            )?;
             *engine = next;
             let boundary = run_to_boundary(engine)?;
             ui.replace_boundary(boundary);

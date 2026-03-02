@@ -141,7 +141,6 @@ impl ScriptLangEngine {
         }
 
         let rewritten = rewrite_defs_global_qualified_access(expr, &qualified_rewrite_map)?;
-        *self.shared_rng_state.borrow_mut() = self.rng_state;
         let result = self
             .rhai_engine
             .eval_with_scope::<Dynamic>(&mut scope, &format!("({})", rewritten))
@@ -152,8 +151,6 @@ impl ScriptLangEngine {
                 )
             })
             .and_then(dynamic_to_slvalue);
-        self.rng_state = *self.shared_rng_state.borrow();
-
         for (name, before) in global_snapshot {
             let after_dynamic = scope
                 .get_value::<Dynamic>(&name)
@@ -300,7 +297,6 @@ impl ScriptLangEngine {
             }
         };
 
-        *self.shared_rng_state.borrow_mut() = self.rng_state;
         let run_result = if is_expression {
             self.rhai_engine
                 .eval_with_scope::<Dynamic>(&mut scope, &source)
@@ -322,8 +318,6 @@ impl ScriptLangEngine {
                 })
                 .map(|_| SlValue::Bool(true))
         };
-
-        self.rng_state = *self.shared_rng_state.borrow();
 
         for (name, before) in global_snapshot {
             let after_dynamic = scope
@@ -738,6 +732,8 @@ mod eval_tests {
                 names: vec!["ext_fn".to_string()],
             })),
             random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
             compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
         })
         .expect("engine should build");
@@ -773,6 +769,8 @@ mod eval_tests {
                 names: vec!["ext_fn".to_string()],
             })),
             random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
             compiler_version: None,
         })
         .expect("engine");

@@ -33,12 +33,13 @@ pub(crate) use line_tui::run_tui_line_mode;
 #[cfg(test)]
 pub(crate) use line_tui::{handle_line_cmd, handle_tui_command};
 pub(crate) use models::{
-    BoundaryEvent, BoundaryResult, LoadedScenario, PlayerStateV3, TuiCommandAction,
-    TuiCommandContext, PLAYER_STATE_SCHEMA,
+    BoundaryEvent, BoundaryResult, LoadedScenario, PlayerRandomMode, PlayerStateV4,
+    TuiCommandAction, TuiCommandContext, PLAYER_STATE_SCHEMA,
 };
 pub(crate) use session_ops::{
     create_engine_for_scenario, emit_boundary_with_saved_state, load_engine_from_state_for_ref,
-    load_engine_from_state_for_scenario, resume_engine_for_state, save_engine_state,
+    load_engine_from_state_for_scenario, parse_rand_sequence, resume_engine_for_state,
+    save_engine_state, RandConfig,
 };
 pub(crate) use source_loader::{load_source_by_ref, load_source_by_scripts_dir};
 pub(crate) use state_store::{load_player_state, save_player_state};
@@ -140,10 +141,25 @@ fn run_tui(args: TuiArgs) -> Result<i32, ScriptLangError> {
     let state_file = args
         .state_file
         .unwrap_or(".scriptlang/save.json".to_string());
+    let random_sequence = parse_rand_sequence(args.rand.as_deref())?;
     let scenario = load_source_by_scripts_dir(&args.scripts_dir, &entry_script)?;
-    let mut engine = create_engine_for_scenario(&scenario, &entry_script)?;
+    let mut engine = create_engine_for_scenario(
+        &scenario,
+        &entry_script,
+        RandConfig {
+            sequence: random_sequence.clone(),
+            sequence_index: Some(0),
+            seed_state: None,
+        },
+    )?;
 
-    tui::run_tui_ratatui_mode(&state_file, &scenario, &entry_script, &mut engine)
+    tui::run_tui_ratatui_mode(
+        &state_file,
+        &scenario,
+        &entry_script,
+        random_sequence,
+        &mut engine,
+    )
 }
 
 #[cfg(test)]
@@ -239,6 +255,7 @@ mod lib_tests {
                     scripts_dir: choice_scenario.clone(),
                     entry_script: Some("main".to_string()),
                     state_out: start_state.to_string_lossy().to_string(),
+                    rand: None,
                 }),
             }),
         })
@@ -250,6 +267,7 @@ mod lib_tests {
                 state_in: start_state.to_string_lossy().to_string(),
                 choice: 0,
                 state_out: choose_state.to_string_lossy().to_string(),
+                rand: None,
             }),
         })
         .expect("agent choose should pass");
@@ -259,6 +277,7 @@ mod lib_tests {
             scripts_dir: input_scenario.clone(),
             entry_script: Some("main".to_string()),
             state_out: input_state_1.to_string_lossy().to_string(),
+            rand: None,
         })
         .expect("input scenario start should pass");
         assert_eq!(input_start_code, 0);
@@ -267,6 +286,7 @@ mod lib_tests {
             state_in: input_state_1.to_string_lossy().to_string(),
             text: "Guild".to_string(),
             state_out: input_state_2.to_string_lossy().to_string(),
+            rand: None,
         })
         .expect("agent input should pass");
         assert_eq!(input_code, 0);
@@ -276,6 +296,7 @@ mod lib_tests {
                 scripts_dir: input_scenario.clone(),
                 entry_script: Some("main".to_string()),
                 step: vec!["input:Guild".to_string()],
+                rand: None,
             }),
         })
         .expect("agent replay should pass");
@@ -285,6 +306,7 @@ mod lib_tests {
             scripts_dir: text_scenario,
             entry_script: Some("main".to_string()),
             state_file: Some(tui_state_str.clone()),
+            rand: None,
         })
         .expect("tui should pass in line mode");
         assert_eq!(tui_code, 0);
@@ -296,6 +318,8 @@ mod lib_tests {
             entry_args: None,
             host_functions: None,
             random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
             compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
         })
         .expect("engine should build");
@@ -308,6 +332,7 @@ mod lib_tests {
             &tui_state_str,
             &loaded,
             "main",
+            None,
             &mut engine,
             &mut emit,
         )
@@ -317,6 +342,7 @@ mod lib_tests {
             state_file: &tui_state_str,
             scenario: &loaded,
             entry_script: "main",
+            random_sequence: None,
         };
         let action = handle_line_cmd(":quit", &context, &mut engine, &mut emit)
             .expect("line command should pass");
@@ -419,6 +445,7 @@ mod lib_tests {
                 scripts_dir,
                 entry_script: None,
                 state_file: Some(state_file.to_string_lossy().to_string()),
+                rand: None,
             }),
         })
         .expect("tui dispatch should pass");

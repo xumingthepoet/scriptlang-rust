@@ -7,8 +7,9 @@ use sl_api::DEFAULT_COMPILER_VERSION;
 
 use crate::{
     create_engine_for_scenario, emit_boundary_with_saved_state, load_player_state,
-    load_source_by_ref, load_source_by_scripts_dir, resume_engine_for_state, run_to_boundary,
-    AgentArgs, AgentCommand, ChooseArgs, InputArgs, ReplayArgs, StartArgs,
+    load_source_by_ref, load_source_by_scripts_dir, parse_rand_sequence, resume_engine_for_state,
+    run_to_boundary, AgentArgs, AgentCommand, ChooseArgs, InputArgs, RandConfig, ReplayArgs,
+    StartArgs,
 };
 
 pub(super) fn run_agent(args: AgentArgs) -> Result<i32, ScriptLangError> {
@@ -25,7 +26,16 @@ pub(super) fn run_start(args: StartArgs) -> Result<i32, ScriptLangError> {
         &args.scripts_dir,
         args.entry_script.as_deref().unwrap_or("main"),
     )?;
-    let mut engine = create_engine_for_scenario(&scenario, &scenario.entry_script)?;
+    let random_sequence = parse_rand_sequence(args.rand.as_deref())?;
+    let mut engine = create_engine_for_scenario(
+        &scenario,
+        &scenario.entry_script,
+        RandConfig {
+            sequence: random_sequence,
+            sequence_index: Some(0),
+            seed_state: None,
+        },
+    )?;
 
     let boundary = run_to_boundary(&mut engine)?;
     emit_boundary_with_saved_state(
@@ -38,13 +48,15 @@ pub(super) fn run_start(args: StartArgs) -> Result<i32, ScriptLangError> {
 }
 
 pub(super) fn run_choose(args: ChooseArgs) -> Result<i32, ScriptLangError> {
-    run_state_transition(&args.state_in, &args.state_out, |engine| {
+    let random_sequence = parse_rand_sequence(args.rand.as_deref())?;
+    run_state_transition(&args.state_in, &args.state_out, random_sequence, |engine| {
         engine.choose(args.choice)
     })
 }
 
 pub(super) fn run_input(args: InputArgs) -> Result<i32, ScriptLangError> {
-    run_state_transition(&args.state_in, &args.state_out, |engine| {
+    let random_sequence = parse_rand_sequence(args.rand.as_deref())?;
+    run_state_transition(&args.state_in, &args.state_out, random_sequence, |engine| {
         engine.submit_input(&args.text)
     })
 }
@@ -83,7 +95,16 @@ struct ReplayResult {
 pub(super) fn run_replay(args: ReplayArgs) -> Result<i32, ScriptLangError> {
     let entry_script = args.entry_script.unwrap_or("main".to_string());
     let scenario = load_source_by_scripts_dir(&args.scripts_dir, &entry_script)?;
-    let mut engine = create_engine_for_scenario(&scenario, &entry_script)?;
+    let random_sequence = parse_rand_sequence(args.rand.as_deref())?;
+    let mut engine = create_engine_for_scenario(
+        &scenario,
+        &entry_script,
+        RandConfig {
+            sequence: random_sequence,
+            sequence_index: Some(0),
+            seed_state: None,
+        },
+    )?;
     let actions = parse_replay_steps(&args.step)?;
     let result = run_replay_sequence(&mut engine, &actions)?;
 
@@ -234,11 +255,12 @@ fn run_replay_sequence(
 fn run_state_transition(
     state_in: &str,
     state_out: &str,
+    random_sequence: Option<Vec<u32>>,
     transition: impl FnOnce(&mut sl_api::ScriptLangEngine) -> Result<(), ScriptLangError>,
 ) -> Result<i32, ScriptLangError> {
     let state = load_player_state(Path::new(state_in))?;
     let scenario = load_source_by_ref(&state.scenario_id)?;
-    let mut engine = resume_engine_for_state(&scenario, &state)?;
+    let mut engine = resume_engine_for_state(&scenario, &state, random_sequence)?;
     transition(&mut engine)?;
     let boundary = run_to_boundary(&mut engine)?;
     emit_boundary_with_saved_state(
@@ -267,6 +289,7 @@ mod agent_tests {
             scripts_dir,
             entry_script: Some("main".to_string()),
             state_out: state_in.to_string_lossy().to_string(),
+            rand: None,
         })
         .expect("start should pass");
 
@@ -275,6 +298,7 @@ mod agent_tests {
                 state_in: state_in.to_string_lossy().to_string(),
                 text: "Guild".to_string(),
                 state_out: state_out.to_string_lossy().to_string(),
+                rand: None,
             }),
         })
         .expect("input dispatch should pass");
@@ -289,6 +313,7 @@ mod agent_tests {
             scripts_dir,
             entry_script: Some("main".to_string()),
             step: Vec::new(),
+            rand: None,
         };
         let code = run_replay(args).expect("replay should pass");
         assert_eq!(code, 0);
@@ -316,6 +341,7 @@ mod agent_tests {
             &load_source_by_scripts_dir(root.to_string_lossy().as_ref(), "main")
                 .expect("scenario should load"),
             "main",
+            RandConfig::default(),
         )
         .expect("engine should create");
         let actions = parse_replay_steps(&["choose:0".to_string(), "input:Guild".to_string()])
@@ -347,7 +373,8 @@ mod agent_tests {
         );
         let scenario =
             load_source_by_scripts_dir(root.to_string_lossy().as_ref(), "main").expect("scenario");
-        let mut engine = create_engine_for_scenario(&scenario, "main").expect("engine");
+        let mut engine =
+            create_engine_for_scenario(&scenario, "main", RandConfig::default()).expect("engine");
         let actions = parse_replay_steps(&["choose:0".to_string()]).expect("steps should parse");
         let result = run_replay_sequence(&mut engine, &actions).expect("replay should pass");
         assert_eq!(result.actions_used, 1);
@@ -369,7 +396,8 @@ mod agent_tests {
     fn run_replay_reports_action_kind_mismatch() {
         let scripts_dir = example_scripts_dir("16-input-name");
         let scenario = load_source_by_scripts_dir(&scripts_dir, "main").expect("scenario");
-        let mut engine = create_engine_for_scenario(&scenario, "main").expect("engine");
+        let mut engine =
+            create_engine_for_scenario(&scenario, "main", RandConfig::default()).expect("engine");
         let actions = parse_replay_steps(&["choose:0".to_string()]).expect("steps should parse");
         let error = run_replay_sequence(&mut engine, &actions).expect_err("mismatch should fail");
         assert_eq!(error.code, "CLI_REPLAY_ACTION_KIND_MISMATCH");
@@ -379,9 +407,98 @@ mod agent_tests {
     fn run_replay_reports_unused_actions_if_end_reached_early() {
         let scripts_dir = example_scripts_dir("01-text-code");
         let scenario = load_source_by_scripts_dir(&scripts_dir, "main").expect("scenario");
-        let mut engine = create_engine_for_scenario(&scenario, "main").expect("engine");
+        let mut engine =
+            create_engine_for_scenario(&scenario, "main", RandConfig::default()).expect("engine");
         let actions = parse_replay_steps(&["input:Guild".to_string()]).expect("steps should parse");
         let error = run_replay_sequence(&mut engine, &actions).expect_err("unused should fail");
         assert_eq!(error.code, "CLI_REPLAY_UNUSED_ACTIONS");
+    }
+
+    #[test]
+    fn start_choose_keeps_rand_sequence_progress_in_state() {
+        let root = temp_path("agent-rand-sequence-progress");
+        fs::create_dir_all(&root).expect("root should be created");
+        write_file(
+            &root.join("main.script.xml"),
+            r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A">
+      <var name="r" type="int">random(10)</var>
+      <text>${r}</text>
+      <var name="name" type="string">"Traveler"</var>
+      <input var="name" text="Name"/>
+    </option>
+  </choice>
+</script>
+"#,
+        );
+
+        let state_1 = temp_path("agent-rand-state-1.json");
+        run_start(StartArgs {
+            scripts_dir: root.to_string_lossy().to_string(),
+            entry_script: Some("main".to_string()),
+            state_out: state_1.to_string_lossy().to_string(),
+            rand: Some("12,3".to_string()),
+        })
+        .expect("start should pass");
+
+        let state_2 = temp_path("agent-rand-state-2.json");
+        run_choose(ChooseArgs {
+            state_in: state_1.to_string_lossy().to_string(),
+            choice: 0,
+            state_out: state_2.to_string_lossy().to_string(),
+            rand: None,
+        })
+        .expect("choose should pass");
+
+        let state = load_player_state(state_2.as_path()).expect("state should load");
+        assert_eq!(state.random_mode, crate::PlayerRandomMode::Sequence);
+        assert_eq!(state.random_sequence, vec![12, 3]);
+        assert_eq!(state.random_sequence_index, Some(1));
+    }
+
+    #[test]
+    fn choose_rand_argument_overrides_state_random_sequence() {
+        let root = temp_path("agent-rand-override");
+        fs::create_dir_all(&root).expect("root should be created");
+        write_file(
+            &root.join("main.script.xml"),
+            r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A">
+      <var name="r" type="int">random(10)</var>
+      <text>${r}</text>
+      <var name="name" type="string">"Traveler"</var>
+      <input var="name" text="Name"/>
+    </option>
+  </choice>
+</script>
+"#,
+        );
+
+        let state_1 = temp_path("agent-rand-override-state-1.json");
+        run_start(StartArgs {
+            scripts_dir: root.to_string_lossy().to_string(),
+            entry_script: Some("main".to_string()),
+            state_out: state_1.to_string_lossy().to_string(),
+            rand: Some("12,3".to_string()),
+        })
+        .expect("start should pass");
+
+        let state_2 = temp_path("agent-rand-override-state-2.json");
+        run_choose(ChooseArgs {
+            state_in: state_1.to_string_lossy().to_string(),
+            choice: 0,
+            state_out: state_2.to_string_lossy().to_string(),
+            rand: Some("9,8,7".to_string()),
+        })
+        .expect("choose should pass");
+
+        let state = load_player_state(state_2.as_path()).expect("state should load");
+        assert_eq!(state.random_mode, crate::PlayerRandomMode::Sequence);
+        assert_eq!(state.random_sequence, vec![9, 8, 7]);
+        assert_eq!(state.random_sequence_index, Some(1));
     }
 }

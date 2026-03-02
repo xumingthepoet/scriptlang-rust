@@ -50,6 +50,7 @@ mod rich {
         state_file: &str,
         scenario: &LoadedScenario,
         entry_script: &str,
+        random_sequence: Option<Vec<u32>>,
         engine: &mut sl_api::ScriptLangEngine,
     ) -> Result<i32, ScriptLangError> {
         let mut terminal = TuiTerminal::new()?;
@@ -66,6 +67,7 @@ mod rich {
             state_file,
             scenario,
             entry_script,
+            random_sequence,
         };
 
         loop {
@@ -113,6 +115,7 @@ pub(super) fn run_tui_ratatui_mode(
     state_file: &str,
     scenario: &super::LoadedScenario,
     entry_script: &str,
+    random_sequence: Option<Vec<u32>>,
     engine: &mut sl_api::ScriptLangEngine,
 ) -> Result<i32, sl_api::ScriptLangError> {
     use std::io::IsTerminal;
@@ -121,7 +124,13 @@ pub(super) fn run_tui_ratatui_mode(
         || !std::io::stdin().is_terminal()
         || !std::io::stdout().is_terminal()
     {
-        return super::run_tui_line_mode(state_file, scenario, entry_script, engine);
+        return super::run_tui_line_mode(
+            state_file,
+            scenario,
+            entry_script,
+            random_sequence,
+            engine,
+        );
     }
-    rich::run_tui_ratatui_mode(state_file, scenario, entry_script, engine)
+    rich::run_tui_ratatui_mode(state_file, scenario, entry_script, random_sequence, engine)
 }

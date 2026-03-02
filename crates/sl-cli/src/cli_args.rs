@@ -49,6 +49,9 @@ pub(crate) struct StartArgs {
     #[arg(long = "state-out")]
     #[arg(help = "Path to write player state json")]
     pub(crate) state_out: String,
+    #[arg(long = "rand")]
+    #[arg(help = "Comma-separated random sequence, e.g. 12,3,1")]
+    pub(crate) rand: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -62,6 +65,9 @@ pub(crate) struct ChooseArgs {
     #[arg(long = "state-out")]
     #[arg(help = "Path to output player state json")]
     pub(crate) state_out: String,
+    #[arg(long = "rand")]
+    #[arg(help = "Comma-separated random sequence override, e.g. 12,3,1")]
+    pub(crate) rand: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -75,6 +81,9 @@ pub(crate) struct InputArgs {
     #[arg(long = "state-out")]
     #[arg(help = "Path to output player state json")]
     pub(crate) state_out: String,
+    #[arg(long = "rand")]
+    #[arg(help = "Comma-separated random sequence override, e.g. 12,3,1")]
+    pub(crate) rand: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -91,6 +100,9 @@ pub(crate) struct ReplayArgs {
     #[arg(long = "step")]
     #[arg(help = "Replay action: choose:<index> or input:<text>. Repeat to build a queue")]
     pub(crate) step: Vec<String>,
+    #[arg(long = "rand")]
+    #[arg(help = "Comma-separated random sequence, e.g. 12,3,1")]
+    pub(crate) rand: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -105,4 +117,7 @@ pub(crate) struct TuiArgs {
     #[arg(long = "state-file")]
     #[arg(help = "Path to save/load state (default: .scriptlang/save.json)")]
     pub(crate) state_file: Option<String>,
+    #[arg(long = "rand")]
+    #[arg(help = "Comma-separated random sequence, e.g. 12,3,1")]
+    pub(crate) rand: Option<String>,
 }

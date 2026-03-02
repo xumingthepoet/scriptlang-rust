@@ -13,7 +13,7 @@ pub use sl_compiler::DEFAULT_COMPILER_VERSION;
 pub use sl_core::{
     ChoiceItem, EngineOutput, PendingBoundaryV3, ScriptLangError, SlValue, SnapshotV3,
 };
-pub use sl_runtime::ScriptLangEngine;
+pub use sl_runtime::{RandomStateView, ScriptLangEngine};
 
 #[derive(Clone)]
 pub struct CreateEngineFromXmlOptions {
@@ -22,6 +22,8 @@ pub struct CreateEngineFromXmlOptions {
     pub entry_args: Option<BTreeMap<String, SlValue>>,
     pub host_functions: Option<Arc<dyn HostFunctionRegistry>>,
     pub random_seed: Option<u32>,
+    pub random_sequence: Option<Vec<u32>>,
+    pub random_sequence_index: Option<usize>,
     pub compiler_version: Option<String>,
 }
 
@@ -31,6 +33,8 @@ pub struct CreateEngineFromArtifactOptions {
     pub entry_args: Option<BTreeMap<String, SlValue>>,
     pub host_functions: Option<Arc<dyn HostFunctionRegistry>>,
     pub random_seed: Option<u32>,
+    pub random_sequence: Option<Vec<u32>>,
+    pub random_sequence_index: Option<usize>,
     pub compiler_version: Option<String>,
 }
 
@@ -39,6 +43,8 @@ pub struct ResumeEngineFromXmlOptions {
     pub scripts_xml: BTreeMap<String, String>,
     pub snapshot: SnapshotV3,
     pub host_functions: Option<Arc<dyn HostFunctionRegistry>>,
+    pub random_sequence: Option<Vec<u32>>,
+    pub random_sequence_index: Option<usize>,
     pub compiler_version: Option<String>,
 }
 
@@ -47,6 +53,8 @@ pub struct ResumeEngineFromArtifactOptions {
     pub artifact: CompiledProjectArtifactV1,
     pub snapshot: SnapshotV3,
     pub host_functions: Option<Arc<dyn HostFunctionRegistry>>,
+    pub random_sequence: Option<Vec<u32>>,
+    pub random_sequence_index: Option<usize>,
     pub compiler_version: Option<String>,
 }
 
@@ -113,6 +121,8 @@ pub fn create_engine_from_artifact(
         defs_global_init_order: options.artifact.defs_global_init_order,
         host_functions: options.host_functions,
         random_seed: options.random_seed,
+        random_sequence: options.random_sequence,
+        random_sequence_index: options.random_sequence_index,
         compiler_version,
     })?;
 
@@ -134,6 +144,8 @@ pub fn resume_engine_from_artifact(
         defs_global_init_order: options.artifact.defs_global_init_order,
         host_functions: options.host_functions,
         random_seed: None,
+        random_sequence: options.random_sequence,
+        random_sequence_index: options.random_sequence_index,
         compiler_version,
     })?;
 
@@ -150,6 +162,8 @@ pub fn create_engine_from_xml(
         entry_args: options.entry_args,
         host_functions: options.host_functions,
         random_seed: options.random_seed,
+        random_sequence: options.random_sequence,
+        random_sequence_index: options.random_sequence_index,
         compiler_version: options.compiler_version,
     })
 }
@@ -170,6 +184,8 @@ pub fn resume_engine_from_xml(
         },
         snapshot: options.snapshot,
         host_functions: options.host_functions,
+        random_sequence: options.random_sequence,
+        random_sequence_index: options.random_sequence_index,
         compiler_version: options.compiler_version,
     })
 }
@@ -340,6 +356,8 @@ mod tests {
             entry_args: None,
             host_functions: None,
             random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
             compiler_version: None,
         })
         .expect("engine should build");
@@ -362,6 +380,8 @@ mod tests {
             entry_args: None,
             host_functions: None,
             random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
             compiler_version: None,
         })
         .err()
@@ -386,6 +406,8 @@ mod tests {
             entry_args: None,
             host_functions: None,
             random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
             compiler_version: None,
         })
         .expect("engine should build");
@@ -399,6 +421,8 @@ mod tests {
             artifact,
             snapshot,
             host_functions: None,
+            random_sequence: None,
+            random_sequence_index: None,
             compiler_version: None,
         })
         .expect("resume from artifact");
@@ -428,12 +452,53 @@ mod tests {
             entry_args: None,
             host_functions: None,
             random_seed: Some(7),
+            random_sequence: None,
+            random_sequence_index: None,
             compiler_version: Some("player.v1".to_string()),
         })
         .expect("engine should build");
 
         let first = engine.next_output().expect("next should succeed");
         assert!(matches!(first, EngineOutput::Choices { .. }));
+    }
+
+    #[test]
+    fn create_engine_from_xml_supports_random_sequence_override() {
+        let scripts = map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <var name="a" type="int">random(5)</var>
+  <text>${a}</text>
+  <var name="b" type="int">random(5)</var>
+  <text>${b}</text>
+</script>
+"#,
+        )]);
+        let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
+            scripts_xml: scripts,
+            entry_script: None,
+            entry_args: None,
+            host_functions: None,
+            random_seed: Some(7),
+            random_sequence: Some(vec![12]),
+            random_sequence_index: Some(0),
+            compiler_version: Some("player.v1".to_string()),
+        })
+        .expect("engine should build");
+
+        assert_eq!(
+            engine.next_output().expect("first output"),
+            EngineOutput::Text {
+                text: "2".to_string()
+            }
+        );
+        assert_eq!(
+            engine.next_output().expect("second output"),
+            EngineOutput::Text {
+                text: "0".to_string()
+            }
+        );
     }
 
     #[test]
@@ -455,6 +520,8 @@ mod tests {
             entry_args: None,
             host_functions: None,
             random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
             compiler_version: Some("player.v1".to_string()),
         })
         .expect("engine should build");
@@ -466,6 +533,8 @@ mod tests {
             scripts_xml: scripts,
             snapshot,
             host_functions: None,
+            random_sequence: None,
+            random_sequence_index: None,
             compiler_version: Some("player.v1".to_string()),
         })
         .expect("resume should succeed");
@@ -493,6 +562,8 @@ mod tests {
             entry_args: None,
             host_functions: Some(Arc::new(ReservedRegistry)),
             random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
             compiler_version: Some("player.v1".to_string()),
         })
         .err()
@@ -505,6 +576,8 @@ mod tests {
             entry_args: None,
             host_functions: None,
             random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
             compiler_version: Some("player.v1".to_string()),
         })
         .expect("engine should build");
@@ -519,6 +592,8 @@ mod tests {
             scripts_xml: scripts,
             snapshot,
             host_functions: Some(Arc::new(ReservedRegistry)),
+            random_sequence: None,
+            random_sequence_index: None,
             compiler_version: Some("player.v1".to_string()),
         })
         .err()

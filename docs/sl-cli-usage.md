@@ -47,6 +47,7 @@ cargo run -p sl-cli -- agent start \
 - `--scripts-dir <path>`：脚本目录（必填）
 - `--entry-script <name>`：入口脚本，默认 `main`
 - `--state-out <path>`：状态输出文件（必填）
+- `--rand <csv>`：可选随机序列（例如 `12,3,1,4`）
 
 ### 2.2 `agent choose`
 
@@ -63,6 +64,7 @@ cargo run -p sl-cli -- agent choose \
 - `--state-in <path>`：输入状态文件（必填）
 - `--choice <index>`：选择索引（必填）
 - `--state-out <path>`：新状态输出文件（必填）
+- `--rand <csv>`：可选随机序列覆盖（命令行优先于 state）
 
 ### 2.3 `agent input`
 
@@ -79,6 +81,7 @@ cargo run -p sl-cli -- agent input \
 - `--state-in <path>`：输入状态文件（必填）
 - `--text <text>`：输入文本（必填）
 - `--state-out <path>`：新状态输出文件（必填）
+- `--rand <csv>`：可选随机序列覆盖（命令行优先于 state）
 
 ### 2.4 `agent replay`
 
@@ -110,10 +113,16 @@ cargo run -p sl-cli -- agent replay \
 - `--scripts-dir <path>`：脚本目录（必填）
 - `--entry-script <name>`：入口脚本，默认 `main`
 - `--step <action>`：可重复，按出现顺序消费
+- `--rand <csv>`：可选随机序列（例如 `12,3,1,4`）
 
 `--step` 语法：
 - `choose:<index>`（例：`choose:0`）
 - `input:<text>`（例：`input:Rin`，`text` 可为空）
+
+`--rand` 语义：
+- 传入后会覆盖脚本中的 `random(n)` 输出。
+- 按序列依次返回 `value % n`。
+- 序列耗尽后固定返回 `0`。
 
 ---
 
@@ -164,6 +173,7 @@ cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/06-snap
 - `--scripts-dir <path>`：脚本目录（必填）
 - `--entry-script <name>`：入口脚本，默认 `main`
 - `--state-file <path>`：状态文件，默认 `.scriptlang/save.json`
+- `--rand <csv>`：可选随机序列（例如 `12,3,1,4`）
 
 全屏模式快捷键：
 - `Up/Down`：选择选项

@@ -1,4 +1,4 @@
-use super::lifecycle::{CompletionKind, PendingBoundary, RuntimeFrame};
+use super::lifecycle::{CompletionKind, PendingBoundary, RuntimeFrame, RuntimeRandomState};
 use super::*;
 
 impl ScriptLangEngine {
@@ -8,8 +8,14 @@ impl ScriptLangEngine {
         self.waiting_choice = false;
         self.ended = false;
         self.frame_counter = 1;
-        self.rng_state = self.initial_random_seed;
-        *self.shared_rng_state.borrow_mut() = self.initial_random_seed;
+        self.seeded_rng_state = self.initial_random_seed;
+        *self.shared_rng_state.borrow_mut() = match &self.initial_random_sequence {
+            Some(values) => RuntimeRandomState::Sequence {
+                values: values.clone(),
+                index: 0,
+            },
+            None => RuntimeRandomState::Seeded(self.initial_random_seed),
+        };
         self.defs_globals_value.clear();
     }
 

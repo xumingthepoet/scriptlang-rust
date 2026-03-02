@@ -104,6 +104,8 @@ assert_eq!(project.entry_script, "main");
 - `entry_args`: 入口脚本参数（`BTreeMap<String, SlValue>`）
 - `host_functions`: 宿主函数注册表（当前 runtime 构建暂不支持真正调用）
 - `random_seed`: 随机种子（决定 `random(n)` 序列）
+- `random_sequence`: 可选随机序列；存在时覆盖 `random_seed`
+- `random_sequence_index`: 随机序列起始下标（仅 `random_sequence` 存在时生效）
 - `compiler_version`: 快照版本兼容用
 
 ```rust
@@ -121,6 +123,8 @@ let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
     entry_args: None,
     host_functions: None,
     random_seed: Some(1),
+    random_sequence: None,
+    random_sequence_index: None,
     compiler_version: Some("player.v1".to_string()),
 })?;
 
@@ -136,6 +140,8 @@ assert!(matches!(engine.next_output()?, EngineOutput::Text { .. }));
 - `scripts_xml`
 - `snapshot`
 - `host_functions`
+- `random_sequence`
+- `random_sequence_index`
 - `compiler_version`
 
 ```rust
@@ -172,6 +178,8 @@ let mut resumed = resume_engine_from_xml(ResumeEngineFromXmlOptions {
     scripts_xml: files,
     snapshot,
     host_functions: None,
+    random_sequence: None,
+    random_sequence_index: None,
     compiler_version: Some("player.v1".to_string()),
 })?;
 resumed.choose(0)?;
@@ -218,6 +226,8 @@ let mut engine = create_engine_from_artifact(CreateEngineFromArtifactOptions {
     entry_args: None,
     host_functions: None,
     random_seed: Some(1),
+    random_sequence: None,
+    random_sequence_index: None,
     compiler_version: None,
 })?;
 assert!(matches!(engine.next_output()?, EngineOutput::Text { .. }));
@@ -252,6 +262,8 @@ let mut engine = create_engine_from_artifact(CreateEngineFromArtifactOptions {
     entry_args: None,
     host_functions: None,
     random_seed: Some(1),
+    random_sequence: None,
+    random_sequence_index: None,
     compiler_version: None,
 })?;
 
@@ -262,6 +274,8 @@ let mut resumed = resume_engine_from_artifact(ResumeEngineFromArtifactOptions {
     artifact,
     snapshot,
     host_functions: None,
+    random_sequence: None,
+    random_sequence_index: None,
     compiler_version: None,
 })?;
 resumed.choose(0)?;
@@ -348,6 +362,7 @@ loop {
 4. `random(n)` 要求 `n > 0`。  
 5. JSON 全局变量在 runtime 只读。  
 6. 传 `random_seed` 可保证可复现实验。  
+7. 若传 `random_sequence`，`random(n)` 会按序列返回 `value % n`，序列耗尽后固定返回 `0`。
 
 ## 6. 宿主函数现状
 

@@ -3,7 +3,14 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use sl_api::SnapshotV3;
 
-pub(crate) const PLAYER_STATE_SCHEMA: &str = "player-state.v3";
+pub(crate) const PLAYER_STATE_SCHEMA: &str = "player-state.v4";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum PlayerRandomMode {
+    Seeded,
+    Sequence,
+}
 
 #[derive(Debug, Clone)]
 pub(crate) struct LoadedScenario {
@@ -15,11 +22,16 @@ pub(crate) struct LoadedScenario {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct PlayerStateV3 {
+pub(crate) struct PlayerStateV4 {
     pub(crate) schema_version: String,
     pub(crate) scenario_id: String,
     pub(crate) compiler_version: String,
     pub(crate) snapshot: SnapshotV3,
+    pub(crate) random_mode: PlayerRandomMode,
+    pub(crate) random_seed_state: Option<u32>,
+    #[serde(default)]
+    pub(crate) random_sequence: Vec<u32>,
+    pub(crate) random_sequence_index: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,4 +63,5 @@ pub(crate) struct TuiCommandContext<'a> {
     pub(crate) state_file: &'a str,
     pub(crate) scenario: &'a LoadedScenario,
     pub(crate) entry_script: &'a str,
+    pub(crate) random_sequence: Option<Vec<u32>>,
 }

@@ -3,6 +3,18 @@ use super::*;
 pub const DEFAULT_COMPILER_VERSION: &str = "player.v1";
 pub const SNAPSHOT_SCHEMA_V3: &str = "snapshot.v3";
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RandomStateView {
+    Seeded { state: u32 },
+    Sequence { values: Vec<u32>, index: usize },
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum RuntimeRandomState {
+    Seeded(u32),
+    Sequence { values: Vec<u32>, index: usize },
+}
+
 pub trait HostFunctionRegistry: Send + Sync {
     fn call(&self, name: &str, args: &[SlValue]) -> Result<SlValue, ScriptLangError>;
     fn names(&self) -> &[String];
@@ -34,6 +46,8 @@ pub struct ScriptLangEngineOptions {
     pub defs_global_init_order: Vec<String>,
     pub host_functions: Option<Arc<dyn HostFunctionRegistry>>,
     pub random_seed: Option<u32>,
+    pub random_sequence: Option<Vec<u32>>,
+    pub random_sequence_index: Option<usize>,
     pub compiler_version: Option<String>,
 }
 
@@ -97,15 +111,16 @@ pub struct ScriptLangEngine {
     pub(super) visible_function_symbols_by_script: HashMap<String, BTreeMap<String, String>>,
     pub(super) defs_prelude_by_script: HashMap<String, String>,
     pub(super) initial_random_seed: u32,
+    pub(super) initial_random_sequence: Option<Vec<u32>>,
     pub(super) rhai_engine: Engine,
-    pub(super) shared_rng_state: Rc<RefCell<u32>>,
+    pub(super) shared_rng_state: Rc<RefCell<RuntimeRandomState>>,
 
     pub(super) frames: Vec<RuntimeFrame>,
     pub(super) pending_boundary: Option<PendingBoundary>,
     pub(super) waiting_choice: bool,
     pub(super) ended: bool,
     pub(super) frame_counter: u64,
-    pub(super) rng_state: u32,
+    pub(super) seeded_rng_state: u32,
     pub(super) once_state_by_script: BTreeMap<String, BTreeSet<String>>,
 }
 
@@ -186,7 +201,15 @@ impl ScriptLangEngine {
             visible_function_symbols_by_script.insert(script_name.clone(), public_to_symbol);
         }
         let initial_random_seed = options.random_seed.unwrap_or(1);
-        let shared_rng_state = Rc::new(RefCell::new(initial_random_seed));
+        let initial_random_sequence = options.random_sequence.clone();
+        let random_sequence_index = options.random_sequence_index.unwrap_or(0);
+        let shared_rng_state = Rc::new(RefCell::new(match options.random_sequence {
+            Some(values) => RuntimeRandomState::Sequence {
+                values,
+                index: random_sequence_index,
+            },
+            None => RuntimeRandomState::Seeded(initial_random_seed),
+        }));
         let mut rhai_engine = Engine::new();
         rhai_engine.set_strict_variables(true);
         let rng_for_builtin = Rc::clone(&shared_rng_state);
@@ -200,7 +223,20 @@ impl ScriptLangEngine {
                     )));
                 }
                 let mut state = rng_for_builtin.borrow_mut();
-                let value = next_random_bounded(&mut state, bound as u32);
+                let value = match &mut *state {
+                    RuntimeRandomState::Seeded(seed_state) => {
+                        next_random_bounded(seed_state, bound as u32)
+                    }
+                    RuntimeRandomState::Sequence { values, index } => {
+                        if *index >= values.len() {
+                            0
+                        } else {
+                            let value = values[*index] % (bound as u32);
+                            *index += 1;
+                            value
+                        }
+                    }
+                };
                 Ok(value as INT)
             },
         );
@@ -228,6 +264,7 @@ impl ScriptLangEngine {
             visible_function_symbols_by_script,
             defs_prelude_by_script: HashMap::new(),
             initial_random_seed,
+            initial_random_sequence,
             rhai_engine,
             shared_rng_state,
             frames: Vec::new(),
@@ -235,9 +272,26 @@ impl ScriptLangEngine {
             waiting_choice: false,
             ended: false,
             frame_counter: 1,
-            rng_state: initial_random_seed,
+            seeded_rng_state: initial_random_seed,
             once_state_by_script: BTreeMap::new(),
         })
+    }
+
+    pub fn random_state_snapshot(&self) -> RandomStateView {
+        match &*self.shared_rng_state.borrow() {
+            RuntimeRandomState::Seeded(state) => RandomStateView::Seeded { state: *state },
+            RuntimeRandomState::Sequence { values, index } => RandomStateView::Sequence {
+                values: values.clone(),
+                index: *index,
+            },
+        }
+    }
+
+    pub(super) fn current_seeded_rng_state(&self) -> u32 {
+        match &*self.shared_rng_state.borrow() {
+            RuntimeRandomState::Seeded(state) => *state,
+            RuntimeRandomState::Sequence { .. } => self.seeded_rng_state,
+        }
     }
 
     pub fn compiler_version(&self) -> &str {
@@ -330,6 +384,8 @@ mod lifecycle_tests {
                 names: vec!["random".to_string()],
             })),
             random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
             compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
         });
         assert!(result.is_err());
@@ -368,6 +424,8 @@ mod lifecycle_tests {
                 names: vec!["addWithGameBonus".to_string()],
             })),
             random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
             compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
         });
         assert!(result.is_err());
@@ -411,6 +469,8 @@ mod lifecycle_tests {
             defs_global_init_order: compiled.defs_global_init_order,
             host_functions: None,
             random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
             compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
         });
         let error = result
@@ -443,6 +503,162 @@ mod lifecycle_tests {
     }
 
     #[test]
+    pub(super) fn random_sequence_returns_values_in_order_and_modulo_bound() {
+        let files = map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="a" type="int">random(5)</var>
+      <text>${a}</text>
+      <var name="b" type="int">random(5)</var>
+      <text>${b}</text>
+      <var name="c" type="int">random(5)</var>
+      <text>${c}</text>
+    </script>
+    "#,
+        )]);
+        let compiled = compile_project_from_sources(files);
+        let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_json: compiled.global_json,
+            defs_global_declarations: compiled.defs_global_declarations,
+            defs_global_init_order: compiled.defs_global_init_order,
+            host_functions: None,
+            random_seed: Some(1),
+            random_sequence: Some(vec![12, 3, 1]),
+            random_sequence_index: Some(0),
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        })
+        .expect("new engine");
+        engine.start("main", None).expect("start");
+        let a = engine.next_output().expect("a");
+        let b = engine.next_output().expect("b");
+        let c = engine.next_output().expect("c");
+        assert_eq!(
+            a,
+            EngineOutput::Text {
+                text: "2".to_string()
+            }
+        );
+        assert_eq!(
+            b,
+            EngineOutput::Text {
+                text: "3".to_string()
+            }
+        );
+        assert_eq!(
+            c,
+            EngineOutput::Text {
+                text: "1".to_string()
+            }
+        );
+    }
+
+    #[test]
+    pub(super) fn random_sequence_returns_zero_after_exhausted() {
+        let files = map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="a" type="int">random(7)</var>
+      <text>${a}</text>
+      <var name="b" type="int">random(7)</var>
+      <text>${b}</text>
+      <var name="c" type="int">random(7)</var>
+      <text>${c}</text>
+    </script>
+    "#,
+        )]);
+        let compiled = compile_project_from_sources(files);
+        let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_json: compiled.global_json,
+            defs_global_declarations: compiled.defs_global_declarations,
+            defs_global_init_order: compiled.defs_global_init_order,
+            host_functions: None,
+            random_seed: Some(1),
+            random_sequence: Some(vec![5]),
+            random_sequence_index: Some(0),
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        })
+        .expect("new engine");
+        engine.start("main", None).expect("start");
+        let a = engine.next_output().expect("a");
+        let b = engine.next_output().expect("b");
+        let c = engine.next_output().expect("c");
+        assert_eq!(
+            a,
+            EngineOutput::Text {
+                text: "5".to_string()
+            }
+        );
+        assert_eq!(
+            b,
+            EngineOutput::Text {
+                text: "0".to_string()
+            }
+        );
+        assert_eq!(
+            c,
+            EngineOutput::Text {
+                text: "0".to_string()
+            }
+        );
+    }
+
+    #[test]
+    pub(super) fn random_state_snapshot_covers_seeded_and_sequence_modes() {
+        let mut seeded = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>x</text></script>"#,
+        )]));
+        seeded.start("main", None).expect("start");
+        let seeded_state_or_zero = |view: RandomStateView| match view {
+            RandomStateView::Seeded { state } => state,
+            RandomStateView::Sequence { .. } => 0,
+        };
+        assert_eq!(seeded_state_or_zero(seeded.random_state_snapshot()), 1);
+        assert_eq!(seeded.current_seeded_rng_state(), 1);
+
+        let files = map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="a" type="int">random(5)</var>
+      <text>${a}</text>
+    </script>
+    "#,
+        )]);
+        let compiled = compile_project_from_sources(files);
+        let mut sequence = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_json: compiled.global_json,
+            defs_global_declarations: compiled.defs_global_declarations,
+            defs_global_init_order: compiled.defs_global_init_order,
+            host_functions: None,
+            random_seed: Some(9),
+            random_sequence: Some(vec![12, 3]),
+            random_sequence_index: Some(1),
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        })
+        .expect("new");
+        sequence.start("main", None).expect("start");
+        let sequence_values_or_default = |view: RandomStateView| match view {
+            RandomStateView::Sequence { values, index } => (values, index),
+            RandomStateView::Seeded { .. } => (Vec::new(), usize::MAX),
+        };
+        let (values, index) = sequence_values_or_default(sequence.random_state_snapshot());
+        assert_eq!(values, vec![12, 3]);
+        assert_eq!(index, 0);
+        assert_eq!(seeded_state_or_zero(sequence.random_state_snapshot()), 0);
+        let (fallback_values, fallback_index) =
+            sequence_values_or_default(seeded.random_state_snapshot());
+        assert!(fallback_values.is_empty());
+        assert_eq!(fallback_index, usize::MAX);
+        assert_eq!(sequence.current_seeded_rng_state(), 9);
+    }
+
+    #[test]
     pub(super) fn new_success_path_initializes_defs_and_function_symbols() {
         let files = map(&[
             (
@@ -472,6 +688,8 @@ mod lifecycle_tests {
             defs_global_init_order: compiled.defs_global_init_order,
             host_functions: None,
             random_seed: Some(7),
+            random_sequence: None,
+            random_sequence_index: None,
             compiler_version: None,
         })
         .expect("new should succeed");

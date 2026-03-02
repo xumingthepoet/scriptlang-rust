@@ -40,8 +40,8 @@ mod snapshot;
 mod step;
 
 pub use lifecycle::{
-    EmptyHostFunctionRegistry, HostFunctionRegistry, ScriptLangEngine, ScriptLangEngineOptions,
-    DEFAULT_COMPILER_VERSION, SNAPSHOT_SCHEMA_V3,
+    EmptyHostFunctionRegistry, HostFunctionRegistry, RandomStateView, ScriptLangEngine,
+    ScriptLangEngineOptions, DEFAULT_COMPILER_VERSION, SNAPSHOT_SCHEMA_V3,
 };
 
 #[cfg(test)]
@@ -79,6 +79,8 @@ pub(super) mod runtime_test_support {
             defs_global_init_order: compiled.defs_global_init_order,
             host_functions: None,
             random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
             compiler_version: None,
         })
         .expect("engine should build")

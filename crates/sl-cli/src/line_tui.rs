@@ -6,13 +6,14 @@ use sl_api::{EngineOutput, ScriptLangError};
 
 use crate::{
     create_engine_for_scenario, load_engine_from_state_for_ref, map_tui_io, save_engine_state,
-    LoadedScenario, TuiCommandAction, TuiCommandContext,
+    LoadedScenario, RandConfig, TuiCommandAction, TuiCommandContext,
 };
 
 pub(crate) fn run_tui_line_mode(
     state_file: &str,
     scenario: &LoadedScenario,
     entry_script: &str,
+    random_sequence: Option<Vec<u32>>,
     engine: &mut sl_api::ScriptLangEngine,
 ) -> Result<i32, ScriptLangError> {
     let stdin = io::stdin();
@@ -22,6 +23,7 @@ pub(crate) fn run_tui_line_mode(
         state_file,
         scenario,
         entry_script,
+        random_sequence,
         engine,
         &mut reader,
         &mut writer,
@@ -32,6 +34,7 @@ pub(crate) fn run_tui_line_mode_with_io(
     state_file: &str,
     scenario: &LoadedScenario,
     entry_script: &str,
+    random_sequence: Option<Vec<u32>>,
     engine: &mut sl_api::ScriptLangEngine,
     reader: &mut dyn BufRead,
     writer: &mut dyn Write,
@@ -42,6 +45,7 @@ pub(crate) fn run_tui_line_mode_with_io(
         state_file,
         scenario,
         entry_script,
+        random_sequence,
     };
 
     loop {
@@ -115,6 +119,7 @@ pub(crate) fn handle_tui_command(
     state_file: &str,
     scenario: &LoadedScenario,
     entry_script: &str,
+    random_sequence: Option<Vec<u32>>,
     engine: &mut sl_api::ScriptLangEngine,
     emit: &mut dyn FnMut(String),
 ) -> Result<TuiCommandAction, ScriptLangError> {
@@ -140,7 +145,15 @@ pub(crate) fn handle_tui_command(
             Ok(TuiCommandAction::RefreshBoundary)
         }
         ":restart" => {
-            let mut restarted = create_engine_for_scenario(scenario, entry_script)?;
+            let mut restarted = create_engine_for_scenario(
+                scenario,
+                entry_script,
+                RandConfig {
+                    sequence: random_sequence.clone(),
+                    sequence_index: Some(0),
+                    seed_state: None,
+                },
+            )?;
             std::mem::swap(engine, &mut restarted);
             emit("restarted".to_string());
             Ok(TuiCommandAction::RefreshBoundary)
@@ -164,6 +177,7 @@ pub(crate) fn handle_line_cmd(
         context.state_file,
         context.scenario,
         context.entry_script,
+        context.random_sequence.clone(),
         engine,
         emit,
     )
@@ -197,7 +211,8 @@ mod line_tui_tests {
     }
 
     fn create_engine_for_tests(scenario: &LoadedScenario) -> sl_api::ScriptLangEngine {
-        create_engine_for_scenario(scenario, "main").expect("engine should be created")
+        create_engine_for_scenario(scenario, "main", RandConfig::default())
+            .expect("engine should be created")
     }
 
     #[test]
@@ -225,6 +240,7 @@ mod line_tui_tests {
             &state_file_str,
             &choice_input_scenario,
             "main",
+            None,
             &mut engine,
             &mut reader,
             &mut writer,
@@ -249,6 +265,7 @@ mod line_tui_tests {
             &state_file_str,
             &choice_quit_scenario,
             "main",
+            None,
             &mut engine,
             &mut reader,
             &mut writer,
@@ -263,6 +280,7 @@ mod line_tui_tests {
             &state_file_str,
             &choice_quit_scenario,
             "main",
+            None,
             &mut engine,
             &mut reader,
             &mut writer,
@@ -287,6 +305,7 @@ mod line_tui_tests {
             &state_file_str,
             &input_quit_scenario,
             "main",
+            None,
             &mut engine,
             &mut reader,
             &mut writer,
@@ -301,6 +320,7 @@ mod line_tui_tests {
             &state_file_str,
             &input_quit_scenario,
             "main",
+            None,
             &mut engine,
             &mut reader,
             &mut writer,
@@ -315,6 +335,7 @@ mod line_tui_tests {
             &state_file_str,
             &choice_quit_scenario,
             "main",
+            None,
             &mut engine,
             &mut reader,
             &mut writer,
@@ -348,6 +369,7 @@ mod line_tui_tests {
             &state_file_str,
             &scenario,
             "main",
+            None,
             &mut engine,
             &mut emit,
         )
@@ -360,6 +382,7 @@ mod line_tui_tests {
             &state_file_str,
             &scenario,
             "main",
+            None,
             &mut engine,
             &mut emit,
         )
@@ -375,6 +398,7 @@ mod line_tui_tests {
             &state_file_str,
             &scenario,
             "main",
+            None,
             &mut engine,
             &mut emit,
         )
@@ -390,6 +414,7 @@ mod line_tui_tests {
             &state_file_str,
             &scenario,
             "main",
+            None,
             &mut engine,
             &mut emit,
         )
@@ -409,6 +434,7 @@ mod line_tui_tests {
             state_file: &state_file_str,
             scenario: &scenario,
             entry_script: "main",
+            random_sequence: None,
         };
         let mut engine = create_engine_for_tests(&scenario);
         let mut emitted = Vec::new();
