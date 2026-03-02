@@ -108,6 +108,8 @@ cargo run -p sl-cli -- agent input --state-in /tmp/sl-next.json --text "Rin" --s
 cargo run -p sl-cli -- agent replay --scripts-dir crates/sl-test-example/examples/16-input-name --step input:Rin
 cargo run -p sl-cli -- agent replay --scripts-dir crates/sl-test-example/examples/16-input-name --step input:Rin --rand "12,3,1,4"
 cargo run -p sl-cli -- agent replay --scripts-dir crates/sl-test-example/examples/16-input-name --step input:Rin --step choose:0
+cargo run -p sl-cli -- agent compile --scripts-dir crates/sl-test-example/examples/01-text-code --dry-run
+cargo run -p sl-cli -- agent compile --scripts-dir crates/sl-test-example/examples/01-text-code -o /tmp/artifact.json
 cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/06-snapshot-flow
 ```
 

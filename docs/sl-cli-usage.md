@@ -124,6 +124,31 @@ cargo run -p sl-cli -- agent replay \
 - 按序列依次返回 `value % n`。
 - 序列耗尽后固定返回 `0`。
 
+### 2.5 `agent compile`
+
+编译脚本并输出 artifact JSON 文件。支持 `--dry-run` 模式用于排查编译错误。
+
+```bash
+# Dry-run 模式：只编译不写入，用于调试编译错误
+cargo run -p sl-cli -- agent compile \
+  --scripts-dir crates/sl-test-example/examples/01-text-code \
+  --dry-run
+```
+
+```bash
+# 正常编译：输出 artifact JSON 文件
+cargo run -p sl-cli -- agent compile \
+  --scripts-dir crates/sl-test-example/examples/01-text-code \
+  -o /tmp/artifact.json
+```
+
+参数：
+- `--scripts-dir <path>`：脚本目录（必填）
+- `--entry-script <name>`：入口脚本，默认 `main`
+- `-o, --output <path>`：输出文件路径（非 dry-run 必填）
+- `--dry-run`：仅在内存中编译，不写入文件
+- `--rand <csv>`：可选随机序列（compile 命令中未使用，为保持一致性）
+
 ---
 
 ## 3. Agent 输出格式
