@@ -9,6 +9,7 @@ use sl_compiler::{
 use sl_core::{CompileProjectResult, CompiledProjectArtifactV1};
 use sl_runtime::{HostFunctionRegistry, ScriptLangEngineOptions};
 
+pub use sl_compiler::write_artifact_json;
 pub use sl_compiler::DEFAULT_COMPILER_VERSION;
 pub use sl_core::{
     ChoiceItem, EngineOutput, PendingBoundaryV3, ScriptLangError, SlValue, SnapshotV3,

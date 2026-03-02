@@ -36,6 +36,11 @@ pub(crate) enum AgentCommand {
         long_about = "Run from a fresh start with queued --step actions.\n\nEach `--step` is consumed when a matching boundary appears:\n- choose:<index>\n- input:<text>\n\nWhen steps are exhausted, replay continues until the next boundary (CHOICES/INPUT/END), then exits successfully with a summary."
     )]
     Replay(ReplayArgs),
+    #[command(about = "Compile scripts and output artifact JSON")]
+    #[command(
+        long_about = "Compile scripts and output artifact JSON.\n\nUse --dry-run to compile only in memory without writing output (useful for debugging compilation errors)."
+    )]
+    Compile(CompileArgs),
 }
 
 #[derive(Debug, Args)]
@@ -117,6 +122,25 @@ pub(crate) struct TuiArgs {
     #[arg(long = "state-file")]
     #[arg(help = "Path to save/load state (default: .scriptlang/save.json)")]
     pub(crate) state_file: Option<String>,
+    #[arg(long = "rand")]
+    #[arg(help = "Comma-separated random sequence, e.g. 12,3,1")]
+    pub(crate) rand: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct CompileArgs {
+    #[arg(long = "scripts-dir")]
+    #[arg(help = "Directory containing *.script.xml / *.defs.xml / *.json")]
+    pub(crate) scripts_dir: String,
+    #[arg(long = "entry-script")]
+    #[arg(help = "Entry script name (default: main)")]
+    pub(crate) entry_script: Option<String>,
+    #[arg(long = "output", short = 'o')]
+    #[arg(help = "Output path for artifact JSON (required if not --dry-run)")]
+    pub(crate) output: Option<String>,
+    #[arg(long = "dry-run")]
+    #[arg(help = "Compile only in memory, do not write output")]
+    pub(crate) dry_run: bool,
     #[arg(long = "rand")]
     #[arg(help = "Comma-separated random sequence, e.g. 12,3,1")]
     pub(crate) rand: Option<String>,

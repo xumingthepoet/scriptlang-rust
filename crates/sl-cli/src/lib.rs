@@ -23,7 +23,8 @@ mod tui_state;
 
 pub(crate) use boundary_runner::{emit_boundary, run_to_boundary};
 pub(crate) use cli_args::{
-    AgentArgs, AgentCommand, ChooseArgs, Cli, InputArgs, Mode, ReplayArgs, StartArgs, TuiArgs,
+    AgentArgs, AgentCommand, ChooseArgs, Cli, CompileArgs, InputArgs, Mode, ReplayArgs, StartArgs,
+    TuiArgs,
 };
 pub(crate) use error_map::{
     emit_error, map_cli_source_path, map_cli_source_read, map_cli_source_scan,

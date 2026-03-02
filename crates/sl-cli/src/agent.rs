@@ -8,8 +8,8 @@ use sl_api::DEFAULT_COMPILER_VERSION;
 use crate::{
     create_engine_for_scenario, emit_boundary_with_saved_state, load_player_state,
     load_source_by_ref, load_source_by_scripts_dir, parse_rand_sequence, resume_engine_for_state,
-    run_to_boundary, AgentArgs, AgentCommand, ChooseArgs, InputArgs, RandConfig, ReplayArgs,
-    StartArgs,
+    run_to_boundary, AgentArgs, AgentCommand, ChooseArgs, CompileArgs, InputArgs, RandConfig,
+    ReplayArgs, StartArgs,
 };
 
 pub(super) fn run_agent(args: AgentArgs) -> Result<i32, ScriptLangError> {
@@ -18,6 +18,7 @@ pub(super) fn run_agent(args: AgentArgs) -> Result<i32, ScriptLangError> {
         AgentCommand::Choose(args) => run_choose(args),
         AgentCommand::Input(args) => run_input(args),
         AgentCommand::Replay(args) => run_replay(args),
+        AgentCommand::Compile(args) => run_compile(args),
     }
 }
 
@@ -59,6 +60,46 @@ pub(super) fn run_input(args: InputArgs) -> Result<i32, ScriptLangError> {
     run_state_transition(&args.state_in, &args.state_out, random_sequence, |engine| {
         engine.submit_input(&args.text)
     })
+}
+
+pub(super) fn run_compile(args: CompileArgs) -> Result<i32, ScriptLangError> {
+    use sl_api::compile_artifact_from_xml_map;
+    use sl_api::write_artifact_json;
+
+    // 1. 加载源文件
+    let scenario = load_source_by_scripts_dir(
+        &args.scripts_dir,
+        args.entry_script.as_deref().unwrap_or("main"),
+    )?;
+
+    // 2. 编译（在内存中进行）
+    let artifact =
+        compile_artifact_from_xml_map(&scenario.scripts_xml, Some(scenario.entry_script.clone()))?;
+
+    // 3. 根据 dry_run 决定是否写入
+    if args.dry_run {
+        // Dry-run 模式：只打印摘要信息
+        println!("Compilation successful (dry-run):");
+        println!("  Entry: {}", artifact.entry_script);
+        println!("  Scripts: {}", artifact.scripts.len());
+        println!("  Global JSON keys: {}", artifact.global_json.len());
+        println!(
+            "  Defs global declarations: {}",
+            artifact.defs_global_declarations.len()
+        );
+    } else {
+        // 正常模式：写入文件
+        let output_path = args.output.ok_or_else(|| {
+            ScriptLangError::new(
+                "CLI_OUTPUT_REQUIRED",
+                "--output is required when not using --dry-run".to_string(),
+            )
+        })?;
+        write_artifact_json(std::path::Path::new(&output_path), &artifact)?;
+        println!("Artifact written to: {}", output_path);
+    }
+
+    Ok(0)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
