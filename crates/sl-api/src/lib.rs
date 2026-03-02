@@ -4,12 +4,15 @@ use std::sync::Arc;
 use sl_compiler::{
     compile_artifact_from_xml_map as compile_compiled_artifact_from_xml_map,
     compile_project_bundle_from_xml_map, compile_project_scripts_from_xml_map,
-    CompileProjectBundleResult, DEFAULT_COMPILER_VERSION,
+    CompileProjectBundleResult,
 };
-use sl_core::{CompileProjectResult, CompiledProjectArtifactV1, SlValue, SnapshotV3};
+use sl_core::{CompileProjectResult, CompiledProjectArtifactV1};
 use sl_runtime::{HostFunctionRegistry, ScriptLangEngineOptions};
 
-pub use sl_core::{ChoiceItem, EngineOutput, ScriptLangError};
+pub use sl_compiler::DEFAULT_COMPILER_VERSION;
+pub use sl_core::{
+    ChoiceItem, EngineOutput, PendingBoundaryV3, ScriptLangError, SlValue, SnapshotV3,
+};
 pub use sl_runtime::ScriptLangEngine;
 
 #[derive(Clone)]
@@ -158,7 +161,7 @@ pub fn resume_engine_from_xml(
     resume_engine_from_artifact(ResumeEngineFromArtifactOptions {
         artifact: CompiledProjectArtifactV1 {
             schema_version: sl_core::COMPILED_PROJECT_SCHEMA_V1.to_string(),
-            compiler_version: DEFAULT_COMPILER_VERSION.to_string(),
+            compiler_version: sl_compiler::DEFAULT_COMPILER_VERSION.to_string(),
             entry_script: "main".to_string(),
             scripts: compiled.scripts,
             global_json: compiled.global_json,

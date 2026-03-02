@@ -1,9 +1,9 @@
 use std::path::Path;
 
-use sl_core::EngineOutput;
-use sl_core::ScriptLangError;
-use sl_runtime::ScriptLangEngine;
-use sl_runtime::DEFAULT_COMPILER_VERSION;
+use sl_api::EngineOutput;
+use sl_api::ScriptLangEngine;
+use sl_api::ScriptLangError;
+use sl_api::DEFAULT_COMPILER_VERSION;
 
 use crate::{
     create_engine_for_scenario, emit_boundary_with_saved_state, load_player_state,
@@ -234,7 +234,7 @@ fn run_replay_sequence(
 fn run_state_transition(
     state_in: &str,
     state_out: &str,
-    transition: impl FnOnce(&mut sl_runtime::ScriptLangEngine) -> Result<(), ScriptLangError>,
+    transition: impl FnOnce(&mut sl_api::ScriptLangEngine) -> Result<(), ScriptLangError>,
 ) -> Result<i32, ScriptLangError> {
     let state = load_player_state(Path::new(state_in))?;
     let scenario = load_source_by_ref(&state.scenario_id)?;

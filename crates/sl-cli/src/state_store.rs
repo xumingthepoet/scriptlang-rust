@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-use sl_core::ScriptLangError;
+use sl_api::ScriptLangError;
 
 use crate::{
     map_cli_state_invalid, map_cli_state_read, map_cli_state_write, PlayerStateV3,
@@ -45,8 +45,8 @@ pub(crate) fn load_player_state(path: &Path) -> Result<PlayerStateV3, ScriptLang
 mod state_store_tests {
     use super::*;
     use crate::cli_test_support::*;
-    use sl_core::SnapshotV3;
-    use sl_runtime::DEFAULT_COMPILER_VERSION;
+    use sl_api::SnapshotV3;
+    use sl_api::DEFAULT_COMPILER_VERSION;
     use std::collections::BTreeMap;
     use std::fs;
     use std::path::Path;
@@ -63,7 +63,7 @@ mod state_store_tests {
                 compiler_version: DEFAULT_COMPILER_VERSION.to_string(),
                 runtime_frames: Vec::new(),
                 rng_state: 1,
-                pending_boundary: sl_core::PendingBoundaryV3::Choice {
+                pending_boundary: sl_api::PendingBoundaryV3::Choice {
                     node_id: "n1".to_string(),
                     items: Vec::new(),
                     prompt_text: None,

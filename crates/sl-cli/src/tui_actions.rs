@@ -1,8 +1,8 @@
 use std::path::Path;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use sl_core::ScriptLangError;
-use sl_runtime::DEFAULT_COMPILER_VERSION;
+use sl_api::ScriptLangError;
+use sl_api::DEFAULT_COMPILER_VERSION;
 
 use crate::tui_state::TuiUiState;
 use crate::{
@@ -21,7 +21,7 @@ pub(crate) struct TuiActionContext<'a> {
 pub(crate) fn handle_key(
     key: KeyEvent,
     context: &TuiActionContext<'_>,
-    engine: &mut sl_runtime::ScriptLangEngine,
+    engine: &mut sl_api::ScriptLangEngine,
     ui: &mut TuiUiState,
 ) -> Result<bool, ScriptLangError> {
     if key.code == KeyCode::Esc || matches!(key.code, KeyCode::Char('q')) {
@@ -156,7 +156,7 @@ pub(crate) fn handle_key(
 }
 
 fn choose_current(
-    engine: &mut sl_runtime::ScriptLangEngine,
+    engine: &mut sl_api::ScriptLangEngine,
     choice_index: usize,
 ) -> Result<crate::BoundaryResult, ScriptLangError> {
     engine.choose(choice_index)?;
@@ -164,7 +164,7 @@ fn choose_current(
 }
 
 fn submit_current_input(
-    engine: &mut sl_runtime::ScriptLangEngine,
+    engine: &mut sl_api::ScriptLangEngine,
     input: &str,
 ) -> Result<crate::BoundaryResult, ScriptLangError> {
     engine.submit_input(input)?;

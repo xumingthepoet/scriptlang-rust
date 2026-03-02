@@ -1,4 +1,4 @@
-use sl_core::ScriptLangError;
+use sl_api::ScriptLangError;
 use std::fmt::Display;
 
 fn map_error(code: &'static str, error: impl Display) -> ScriptLangError {

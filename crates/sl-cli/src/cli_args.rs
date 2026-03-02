@@ -3,7 +3,9 @@ use clap::{Args, Parser, Subcommand};
 #[derive(Debug, Parser)]
 #[command(name = "scriptlang-player")]
 #[command(about = "ScriptLang CLI for scripted runs and interactive debugging")]
-#[command(long_about = "ScriptLang CLI for scripted runs and interactive debugging.\n\nUse `agent` for automation-friendly workflows (`start/choose/input/replay`), and `tui` for manual interactive playtesting.")]
+#[command(
+    long_about = "ScriptLang CLI for scripted runs and interactive debugging.\n\nUse `agent` for automation-friendly workflows (`start/choose/input/replay`), and `tui` for manual interactive playtesting."
+)]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Mode,
@@ -30,7 +32,9 @@ pub(crate) enum AgentCommand {
     #[command(about = "Resume from state and submit input text")]
     Input(InputArgs),
     #[command(about = "Run from a fresh start with queued --step actions")]
-    #[command(long_about = "Run from a fresh start with queued --step actions.\n\nEach `--step` is consumed when a matching boundary appears:\n- choose:<index>\n- input:<text>\n\nWhen steps are exhausted, replay continues until the next boundary (CHOICES/INPUT/END), then exits successfully with a summary.")]
+    #[command(
+        long_about = "Run from a fresh start with queued --step actions.\n\nEach `--step` is consumed when a matching boundary appears:\n- choose:<index>\n- input:<text>\n\nWhen steps are exhausted, replay continues until the next boundary (CHOICES/INPUT/END), then exits successfully with a summary."
+    )]
     Replay(ReplayArgs),
 }
 
@@ -74,7 +78,9 @@ pub(crate) struct InputArgs {
 }
 
 #[derive(Debug, Args)]
-#[command(after_help = "Examples:\n  sl-cli agent replay --scripts-dir crates/sl-test-example/examples/16-input-name --step input:Rin\n  sl-cli agent replay --scripts-dir crates/sl-test-example/examples/07-battle-duel --step choose:0 --step choose:1 --step input:Rin")]
+#[command(
+    after_help = "Examples:\n  sl-cli agent replay --scripts-dir crates/sl-test-example/examples/16-input-name --step input:Rin\n  sl-cli agent replay --scripts-dir crates/sl-test-example/examples/07-battle-duel --step choose:0 --step choose:1 --step input:Rin"
+)]
 pub(crate) struct ReplayArgs {
     #[arg(long = "scripts-dir")]
     #[arg(help = "Directory containing *.script.xml / *.defs.xml / *.json")]

@@ -22,5 +22,3 @@ walkdir.workspace = true
 ratatui.workspace = true
 crossterm.workspace = true
 sl-api = { path = "../sl-api" }
-sl-core = { path = "../sl-core" }
-sl-runtime = { path = "../sl-runtime" }

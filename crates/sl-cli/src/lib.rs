@@ -1,11 +1,11 @@
 use std::ffi::OsString;
 
 use clap::{Command, CommandFactory, Parser};
+use sl_api::ScriptLangError;
+#[cfg(test)]
+use sl_api::DEFAULT_COMPILER_VERSION;
 #[cfg(test)]
 use sl_api::{create_engine_from_xml, CreateEngineFromXmlOptions};
-use sl_core::ScriptLangError;
-#[cfg(test)]
-use sl_runtime::DEFAULT_COMPILER_VERSION;
 
 mod agent;
 mod boundary_runner;

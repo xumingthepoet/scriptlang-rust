@@ -1,8 +1,8 @@
 use std::io::{self, BufRead, Write};
 use std::path::Path;
 
-use sl_core::{EngineOutput, ScriptLangError};
-use sl_runtime::DEFAULT_COMPILER_VERSION;
+use sl_api::DEFAULT_COMPILER_VERSION;
+use sl_api::{EngineOutput, ScriptLangError};
 
 use crate::{
     create_engine_for_scenario, load_engine_from_state_for_ref, map_tui_io, save_engine_state,
@@ -13,7 +13,7 @@ pub(crate) fn run_tui_line_mode(
     state_file: &str,
     scenario: &LoadedScenario,
     entry_script: &str,
-    engine: &mut sl_runtime::ScriptLangEngine,
+    engine: &mut sl_api::ScriptLangEngine,
 ) -> Result<i32, ScriptLangError> {
     let stdin = io::stdin();
     let mut reader = stdin.lock();
@@ -32,7 +32,7 @@ pub(crate) fn run_tui_line_mode_with_io(
     state_file: &str,
     scenario: &LoadedScenario,
     entry_script: &str,
-    engine: &mut sl_runtime::ScriptLangEngine,
+    engine: &mut sl_api::ScriptLangEngine,
     reader: &mut dyn BufRead,
     writer: &mut dyn Write,
 ) -> Result<i32, ScriptLangError> {
@@ -115,7 +115,7 @@ pub(crate) fn handle_tui_command(
     state_file: &str,
     scenario: &LoadedScenario,
     entry_script: &str,
-    engine: &mut sl_runtime::ScriptLangEngine,
+    engine: &mut sl_api::ScriptLangEngine,
     emit: &mut dyn FnMut(String),
 ) -> Result<TuiCommandAction, ScriptLangError> {
     match raw {
@@ -156,7 +156,7 @@ pub(crate) fn handle_tui_command(
 pub(crate) fn handle_line_cmd(
     raw: &str,
     context: &TuiCommandContext<'_>,
-    engine: &mut sl_runtime::ScriptLangEngine,
+    engine: &mut sl_api::ScriptLangEngine,
     emit: &mut dyn FnMut(String),
 ) -> Result<TuiCommandAction, ScriptLangError> {
     handle_tui_command(
@@ -196,7 +196,7 @@ mod line_tui_tests {
         load_source_by_scripts_dir(&scripts_dir_str, "main").expect("scenario should load")
     }
 
-    fn create_engine_for_tests(scenario: &LoadedScenario) -> sl_runtime::ScriptLangEngine {
+    fn create_engine_for_tests(scenario: &LoadedScenario) -> sl_api::ScriptLangEngine {
         create_engine_for_scenario(scenario, "main").expect("engine should be created")
     }
 

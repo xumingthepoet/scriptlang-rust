@@ -754,8 +754,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sl-api",
- "sl-core",
- "sl-runtime",
  "walkdir",
 ]
 
@@ -793,7 +791,7 @@ version = "0.1.0"
 dependencies = [
  "regex",
  "rhai",
- "sl-api",
+ "sl-compiler",
  "sl-core",
 ]
 

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use sl_core::SnapshotV3;
+use sl_api::SnapshotV3;
 
 pub(crate) const PLAYER_STATE_SCHEMA: &str = "player-state.v3";
 

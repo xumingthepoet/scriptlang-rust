@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use sl_core::ScriptLangError;
+use sl_api::ScriptLangError;
 use walkdir::WalkDir;
 
 use crate::{map_cli_source_path, map_cli_source_read, map_cli_source_scan, LoadedScenario};

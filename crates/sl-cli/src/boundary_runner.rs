@@ -1,9 +1,9 @@
-use sl_core::{EngineOutput, ScriptLangError};
+use sl_api::{EngineOutput, ScriptLangError};
 
 use crate::{BoundaryEvent, BoundaryResult};
 
 pub(crate) fn run_to_boundary(
-    engine: &mut sl_runtime::ScriptLangEngine,
+    engine: &mut sl_api::ScriptLangEngine,
 ) -> Result<BoundaryResult, ScriptLangError> {
     let mut texts = Vec::new();
 
@@ -105,8 +105,8 @@ mod boundary_runner_tests {
     use super::*;
     use crate::cli_test_support::*;
     use crate::{load_source_by_ref, load_source_by_scripts_dir};
+    use sl_api::DEFAULT_COMPILER_VERSION;
     use sl_api::{create_engine_from_xml, CreateEngineFromXmlOptions};
-    use sl_runtime::DEFAULT_COMPILER_VERSION;
 
     #[test]
     fn run_to_boundary_and_load_source_helpers_work_with_examples() {

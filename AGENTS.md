@@ -23,9 +23,17 @@
 
 ### 依赖方向（必须保持）
 1. `sl-core` 为最底层，不依赖其他业务 crate。
-2. `sl-parser`、`sl-compiler`、`sl-runtime` 只依赖 `sl-core` 和必要三方库。
-3. `sl-api` 负责组合 parser/compiler/runtime，不反向渗透实现细节。
-4. `sl-cli` 只作为宿主层调用 `sl-api`，不内联核心业务逻辑。
+2. `sl-parser` 依赖 `sl-core` 和必要三方库。
+3. `sl-compiler` 可依赖 `sl-parser`、`sl-core` 和必要三方库。
+4. `sl-runtime` 只依赖 `sl-core` 和必要三方库。
+5. `sl-api` 负责组合 compiler/runtime，不反向渗透实现细节。
+6. `sl-cli` 只作为宿主层调用 `sl-api`，不内联核心业务逻辑。
+
+### 对外公开面（必须保持）
+- 对宿主/用户推荐且稳定的入口只有：
+  - `sl-api`（库）
+  - `sl-cli`（命令行）
+- 其余 crate（`sl-core/sl-parser/sl-compiler/sl-runtime/sl-test-example`）属于内部实现细节，不作为直接集成入口。
 
 ## 开发流程
 1. 先确认修改落在哪一层（parser/compiler/runtime/api/cli），避免跨层耦合。

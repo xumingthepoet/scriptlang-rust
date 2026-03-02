@@ -18,6 +18,12 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 - `crates/sl-cli`: host-side CLI (`agent` and `tui` modes).
 - `crates/sl-test-example`: example integration tests + in-crate testcase runner/assertion.
 
+## Public Surface
+- Stable/recommended user-facing entry points:
+  - `sl-api` (Rust host integration)
+  - `sl-cli` (command-line host tooling)
+- Other crates (`sl-core/sl-parser/sl-compiler/sl-runtime/sl-test-example`) are internal building blocks and not recommended as direct integration entry points.
+
 ## Internal Module Layout
 - `crates/sl-cli/src`:
   `lib.rs` only coordinates modules; runtime logic is split into

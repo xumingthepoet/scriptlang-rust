@@ -1,11 +1,11 @@
 use std::path::Path;
 
+use sl_api::ScriptLangError;
+use sl_api::DEFAULT_COMPILER_VERSION;
 use sl_api::{
     create_engine_from_xml, resume_engine_from_xml, CreateEngineFromXmlOptions,
     ResumeEngineFromXmlOptions,
 };
-use sl_core::ScriptLangError;
-use sl_runtime::DEFAULT_COMPILER_VERSION;
 
 use crate::{
     emit_boundary, load_player_state, load_source_by_ref, save_player_state, BoundaryEvent,
@@ -15,7 +15,7 @@ use crate::{
 pub(crate) fn create_engine_for_scenario(
     scenario: &LoadedScenario,
     entry_script: &str,
-) -> Result<sl_runtime::ScriptLangEngine, ScriptLangError> {
+) -> Result<sl_api::ScriptLangEngine, ScriptLangError> {
     create_engine_from_xml(CreateEngineFromXmlOptions {
         scripts_xml: scenario.scripts_xml.clone(),
         entry_script: Some(entry_script.to_string()),
@@ -29,7 +29,7 @@ pub(crate) fn create_engine_for_scenario(
 pub(crate) fn resume_engine_for_state(
     scenario: &LoadedScenario,
     state: &PlayerStateV3,
-) -> Result<sl_runtime::ScriptLangEngine, ScriptLangError> {
+) -> Result<sl_api::ScriptLangEngine, ScriptLangError> {
     resume_engine_from_xml(ResumeEngineFromXmlOptions {
         scripts_xml: scenario.scripts_xml.clone(),
         snapshot: state.snapshot.clone(),
@@ -40,7 +40,7 @@ pub(crate) fn resume_engine_for_state(
 
 pub(crate) fn save_engine_state(
     path: &Path,
-    engine: &sl_runtime::ScriptLangEngine,
+    engine: &sl_api::ScriptLangEngine,
     scenario_id: &str,
     compiler_version: &str,
 ) -> Result<(), ScriptLangError> {
@@ -56,7 +56,7 @@ pub(crate) fn save_engine_state(
 
 pub(crate) fn load_engine_from_state_for_ref(
     path: &Path,
-) -> Result<(LoadedScenario, PlayerStateV3, sl_runtime::ScriptLangEngine), ScriptLangError> {
+) -> Result<(LoadedScenario, PlayerStateV3, sl_api::ScriptLangEngine), ScriptLangError> {
     let state = load_player_state(path)?;
     let scenario = load_source_by_ref(&state.scenario_id)?;
     let engine = resume_engine_for_state(&scenario, &state)?;
@@ -66,7 +66,7 @@ pub(crate) fn load_engine_from_state_for_ref(
 pub(crate) fn load_engine_from_state_for_scenario(
     path: &Path,
     scenario: &LoadedScenario,
-) -> Result<(PlayerStateV3, sl_runtime::ScriptLangEngine), ScriptLangError> {
+) -> Result<(PlayerStateV3, sl_api::ScriptLangEngine), ScriptLangError> {
     let state = load_player_state(path)?;
     if state.scenario_id != scenario.id {
         return Err(ScriptLangError::new(
@@ -82,7 +82,7 @@ pub(crate) fn load_engine_from_state_for_scenario(
 }
 
 pub(crate) fn emit_boundary_with_saved_state(
-    engine: &sl_runtime::ScriptLangEngine,
+    engine: &sl_api::ScriptLangEngine,
     boundary: BoundaryResult,
     state_out: &str,
     scenario_id: &str,
@@ -125,7 +125,7 @@ mod session_ops_tests {
         assert_eq!(state.scenario_id, scenario.id);
         assert!(matches!(
             resumed.next_output().expect("resume next should work"),
-            sl_core::EngineOutput::Choices { .. }
+            sl_api::EngineOutput::Choices { .. }
         ));
 
         let (_state, mut resumed_for_scenario) =
@@ -135,7 +135,7 @@ mod session_ops_tests {
             resumed_for_scenario
                 .next_output()
                 .expect("resume next should work"),
-            sl_core::EngineOutput::Choices { .. }
+            sl_api::EngineOutput::Choices { .. }
         ));
 
         let emit_code = emit_boundary_with_saved_state(

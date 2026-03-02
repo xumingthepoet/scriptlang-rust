@@ -9,7 +9,7 @@ mod rich {
     use crossterm::ExecutableCommand;
     use ratatui::backend::CrosstermBackend;
     use ratatui::Terminal;
-    use sl_core::ScriptLangError;
+    use sl_api::ScriptLangError;
 
     use crate::tui_actions::{handle_key, TuiActionContext};
     use crate::tui_render::render_tui;
@@ -50,7 +50,7 @@ mod rich {
         state_file: &str,
         scenario: &LoadedScenario,
         entry_script: &str,
-        engine: &mut sl_runtime::ScriptLangEngine,
+        engine: &mut sl_api::ScriptLangEngine,
     ) -> Result<i32, ScriptLangError> {
         let mut terminal = TuiTerminal::new()?;
         let mut ui = TuiUiState {
@@ -113,8 +113,8 @@ pub(super) fn run_tui_ratatui_mode(
     state_file: &str,
     scenario: &super::LoadedScenario,
     entry_script: &str,
-    engine: &mut sl_runtime::ScriptLangEngine,
-) -> Result<i32, sl_core::ScriptLangError> {
+    engine: &mut sl_api::ScriptLangEngine,
+) -> Result<i32, sl_api::ScriptLangError> {
     use std::io::IsTerminal;
 
     if should_force_line_mode()
