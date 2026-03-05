@@ -38,8 +38,8 @@ pub fn run_case(example_dir: &Path, case: &TestCase) -> Result<RunReport, SlTest
     for step in 1..=MAX_STEPS {
         let output = engine.next_output().map_err(SlTestExampleError::Engine)?;
         match output {
-            sl_core::EngineOutput::Text { text } => {
-                observed_events.push(ExpectedEvent::Text { text });
+            sl_core::EngineOutput::Text { text, tag } => {
+                observed_events.push(ExpectedEvent::Text { text, tag });
             }
             sl_core::EngineOutput::Choices { items, prompt_text } => {
                 let choices = items.into_iter().map(|item| item.text).collect();
@@ -198,6 +198,7 @@ mod runner_tests {
         let case = simple_case(vec![
             ExpectedEvent::Text {
                 text: "Hello".to_string(),
+                tag: None,
             },
             ExpectedEvent::End,
         ]);
@@ -240,6 +241,7 @@ mod runner_tests {
                 },
                 ExpectedEvent::Text {
                     text: "A".to_string(),
+                    tag: None,
                 },
                 ExpectedEvent::Input {
                     prompt_text: "Name".to_string(),
@@ -247,6 +249,7 @@ mod runner_tests {
                 },
                 ExpectedEvent::Text {
                     text: "Guild".to_string(),
+                    tag: None,
                 },
                 ExpectedEvent::End,
             ],

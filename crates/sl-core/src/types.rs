@@ -143,6 +143,8 @@ pub enum ScriptNode {
     Text {
         id: String,
         value: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tag: Option<String>,
         once: bool,
         location: SourceSpan,
     },
@@ -318,6 +320,8 @@ pub struct Snapshot {
 pub enum EngineOutput {
     Text {
         text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tag: Option<String>,
     },
     Choices {
         items: Vec<ChoiceItem>,

@@ -271,7 +271,8 @@ mod boundary_tests {
     pub(super) fn helper_kind_functions_cover_all_variants() {
         assert_eq!(
             output_kind(&EngineOutput::Text {
-                text: "x".to_string()
+                text: "x".to_string(),
+                tag: None
             }),
             "text"
         );
@@ -392,7 +393,7 @@ mod boundary_tests {
         assert_eq!(output_kind(&second), "text");
         assert!(matches!(
             second,
-            EngineOutput::Text { text } if text == "Hello Traveler"
+            EngineOutput::Text { text, .. } if text == "Hello Traveler"
         ));
     }
 
@@ -416,7 +417,7 @@ mod boundary_tests {
         assert_eq!(output_kind(&second), "text");
         assert!(matches!(
             second,
-            EngineOutput::Text { text } if text == "Hello Guild"
+            EngineOutput::Text { text, .. } if text == "Hello Guild"
         ));
     }
 

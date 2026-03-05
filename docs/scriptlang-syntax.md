@@ -171,10 +171,11 @@ key 固定是 string。
 ## 6.2 `<text>`
 
 用途：输出文本。支持 `${expr}` 插值。  
-属性：`once`（可选，`true/false`）。  
+属性：`once`（可选，`true/false`）、`tag`（可选，宿主扩展标签，运行时透传）。  
 
 ```xml
 <text once="true">Welcome, ${name}</text>
+<text tag="sound">sfx/open-door.ogg</text>
 ```
 
 ## 6.3 `<code>`

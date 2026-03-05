@@ -69,6 +69,11 @@ All code must be written with testability in mind:
 - Template `<option>` supports `text` and `when`; `once` and `fall_over` are rejected.
 - Expanded dynamic items keep source order with neighboring static options.
 
+## Text Tag Passthrough
+- `<text>` supports optional `tag` attribute as host metadata.
+- Runtime and API expose it via `EngineOutput::Text { text, tag }`.
+- CLI machine output keeps `TEXT_JSON` and emits optional `TEXT_TAG_JSON`.
+
 ## Commands
 - `make check`: `cargo check --workspace --all-targets --all-features`
 - `make fmt`: `cargo fmt --all -- --check`

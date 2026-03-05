@@ -34,8 +34,8 @@ pub(crate) use line_tui::run_tui_line_mode;
 #[cfg(test)]
 pub(crate) use line_tui::{handle_line_cmd, handle_tui_command};
 pub(crate) use models::{
-    BoundaryEvent, BoundaryResult, LoadedScenario, PlayerRandomMode, PlayerState, TuiCommandAction,
-    TuiCommandContext, PLAYER_STATE_SCHEMA,
+    BoundaryEvent, BoundaryResult, LoadedScenario, PlayerRandomMode, PlayerState, TextEvent,
+    TuiCommandAction, TuiCommandContext, PLAYER_STATE_SCHEMA,
 };
 pub(crate) use session_ops::{
     create_engine_for_scenario, emit_boundary_with_saved_state, load_engine_from_state_for_ref,

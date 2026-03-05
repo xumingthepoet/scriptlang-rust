@@ -559,19 +559,22 @@ mod lifecycle_tests {
         assert_eq!(
             a,
             EngineOutput::Text {
-                text: "2".to_string()
+                text: "2".to_string(),
+                tag: None
             }
         );
         assert_eq!(
             b,
             EngineOutput::Text {
-                text: "3".to_string()
+                text: "3".to_string(),
+                tag: None
             }
         );
         assert_eq!(
             c,
             EngineOutput::Text {
-                text: "1".to_string()
+                text: "1".to_string(),
+                tag: None
             }
         );
     }
@@ -611,19 +614,22 @@ mod lifecycle_tests {
         assert_eq!(
             a,
             EngineOutput::Text {
-                text: "5".to_string()
+                text: "5".to_string(),
+                tag: None
             }
         );
         assert_eq!(
             b,
             EngineOutput::Text {
-                text: "0".to_string()
+                text: "0".to_string(),
+                tag: None
             }
         );
         assert_eq!(
             c,
             EngineOutput::Text {
-                text: "0".to_string()
+                text: "0".to_string(),
+                tag: None
             }
         );
     }
@@ -880,7 +886,8 @@ mod lifecycle_tests {
         assert_eq!(
             output,
             EngineOutput::Text {
-                text: "7".to_string()
+                text: "7".to_string(),
+                tag: None
             }
         );
     }

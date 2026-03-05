@@ -206,8 +206,11 @@ fn run_replay_sequence(
 
     loop {
         match engine.next_output()? {
-            EngineOutput::Text { text } => {
+            EngineOutput::Text { text, tag } => {
                 lines.push(format!("TEXT: {}", text));
+                if let Some(tag) = tag {
+                    lines.push(format!("TEXT_TAG: {}", tag));
+                }
             }
             EngineOutput::Choices { items, prompt_text } => {
                 lines.push(format!("CHOICES: {}", prompt_text.unwrap_or_default()));

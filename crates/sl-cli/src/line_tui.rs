@@ -50,9 +50,12 @@ pub(crate) fn run_tui_line_mode_with_io(
 
     loop {
         match engine.next_output()? {
-            EngineOutput::Text { text } => {
+            EngineOutput::Text { text, tag } => {
                 println!();
                 println!("{}", text);
+                if let Some(tag) = tag {
+                    println!("[tag: {}]", tag);
+                }
             }
             EngineOutput::Choices { items, prompt_text } => {
                 println!();

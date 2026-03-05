@@ -492,13 +492,15 @@ mod tests {
         assert_eq!(
             engine.next_output().expect("first output"),
             EngineOutput::Text {
-                text: "2".to_string()
+                text: "2".to_string(),
+                tag: None
             }
         );
         assert_eq!(
             engine.next_output().expect("second output"),
             EngineOutput::Text {
-                text: "0".to_string()
+                text: "0".to_string(),
+                tag: None
             }
         );
     }

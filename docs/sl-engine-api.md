@@ -22,7 +22,7 @@
 ### 2.2 运行输出
 
 - `EngineOutput`（来自 `sl-core`）：
-  - `Text { text }`
+  - `Text { text, tag }`（`tag` 为可选元数据，供宿主扩展）
   - `Choices { items, prompt_text }`
   - `Input { prompt_text, default_text }`
   - `End`

@@ -36,6 +36,7 @@ impl ScriptLangEngine {
                 Text {
                     script_name: String,
                     value: String,
+                    tag: Option<String>,
                     once: bool,
                     id: String,
                 },
@@ -88,10 +89,15 @@ impl ScriptLangEngine {
                 } else {
                     match &group.nodes[top_node_index] {
                         ScriptNode::Text {
-                            value, once, id, ..
+                            value,
+                            tag,
+                            once,
+                            id,
+                            ..
                         } => PlannedNode::Text {
                             script_name: script_name.to_string(),
                             value: value.clone(),
+                            tag: tag.clone(),
                             once: *once,
                             id: id.clone(),
                         },
@@ -170,6 +176,7 @@ impl ScriptLangEngine {
                 PlannedNode::Text {
                     script_name,
                     value,
+                    tag,
                     once,
                     id,
                 } => {
@@ -185,7 +192,10 @@ impl ScriptLangEngine {
                         self.mark_once_state(&script_name, &format!("text:{}", id));
                     }
 
-                    return Ok(EngineOutput::Text { text: rendered });
+                    return Ok(EngineOutput::Text {
+                        text: rendered,
+                        tag,
+                    });
                 }
                 PlannedNode::Code { code } => {
                     self.run_code(&code)?;
@@ -534,6 +544,36 @@ mod step_tests {
     }
 
     #[test]
+    pub(super) fn next_text_preserves_optional_tag() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text tag="sound">sfx/open.ogg</text></script>"#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        let first = engine.next_output().expect("next");
+        assert!(matches!(
+            first,
+            EngineOutput::Text { text, tag } if text == "sfx/open.ogg" && tag == Some("sound".to_string())
+        ));
+    }
+
+    #[test]
+    pub(super) fn next_text_treats_blank_tag_as_none() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text tag="   ">plain</text></script>"#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        let first = engine.next_output().expect("next");
+        assert!(matches!(
+            first,
+            EngineOutput::Text { text, tag } if text == "plain" && tag.is_none()
+        ));
+    }
+
+    #[test]
     pub(super) fn drives_complex_flow_to_end() {
         let files = map(&[
             (
@@ -611,7 +651,7 @@ mod step_tests {
         let mut texts = Vec::new();
         for _ in 0..64usize {
             let output = engine.next_output().expect("next should pass");
-            if let EngineOutput::Text { text } = &output {
+            if let EngineOutput::Text { text, .. } = &output {
                 texts.push(text.clone());
             }
             if matches!(output, EngineOutput::End) {
@@ -655,7 +695,7 @@ mod step_tests {
         for _ in 0..10 {
             let output = engine.next_output().expect("next should succeed");
             match output {
-                EngineOutput::Text { text } => {
+                EngineOutput::Text { text, .. } => {
                     println!("Text: {}", text);
                 }
                 EngineOutput::Choices { items, .. } => {
@@ -1707,7 +1747,7 @@ mod step_tests {
         )]));
         engine.start("main", None).expect("start");
         let out = engine.next_output().expect("next");
-        assert!(matches!(out, EngineOutput::Text { ref text } if text == "done"));
+        assert!(matches!(out, EngineOutput::Text { ref text, .. } if text == "done"));
     }
 
     #[test]
@@ -1741,7 +1781,7 @@ mod step_tests {
         assert!(items[0].id.starts_with("dyn:"));
         engine.choose(0).expect("choose dynamic");
         let dynamic_text = engine.next_output().expect("dynamic text");
-        assert!(matches!(dynamic_text, EngineOutput::Text { ref text } if text == "dynamic 2"));
+        assert!(matches!(dynamic_text, EngineOutput::Text { ref text, .. } if text == "dynamic 2"));
 
         let second = engine.next_output().expect("choice 2");
         assert_eq!(output_kind(&second), "choices");
@@ -1750,7 +1790,7 @@ mod step_tests {
         assert_eq!(items[0].text, "F");
         engine.choose(0).expect("choose fall_over");
         let fall = engine.next_output().expect("fall text");
-        assert!(matches!(fall, EngineOutput::Text { ref text } if text == "fall"));
+        assert!(matches!(fall, EngineOutput::Text { ref text, .. } if text == "fall"));
 
         let error = engine
             .next_output()

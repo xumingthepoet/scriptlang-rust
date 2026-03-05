@@ -1,6 +1,6 @@
 use sl_api::{EngineOutput, ScriptLangError};
 
-use crate::{BoundaryEvent, BoundaryResult};
+use crate::{BoundaryEvent, BoundaryResult, TextEvent};
 
 pub(crate) fn run_to_boundary(
     engine: &mut sl_api::ScriptLangEngine,
@@ -9,7 +9,7 @@ pub(crate) fn run_to_boundary(
 
     loop {
         match engine.next_output()? {
-            EngineOutput::Text { text } => texts.push(text),
+            EngineOutput::Text { text, tag } => texts.push(TextEvent { text, tag }),
             EngineOutput::Choices { items, prompt_text } => {
                 return Ok(BoundaryResult {
                     event: BoundaryEvent::Choices,
@@ -58,11 +58,17 @@ pub(crate) fn emit_boundary(boundary: BoundaryResult, state_out: Option<String>)
         BoundaryEvent::End => println!("EVENT:END"),
     }
 
-    for text in boundary.texts {
+    for text_event in boundary.texts {
         println!(
             "TEXT_JSON:{}",
-            serde_json::to_string(&text).expect("string json")
+            serde_json::to_string(&text_event.text).expect("string json")
         );
+        if let Some(tag) = text_event.tag {
+            println!(
+                "TEXT_TAG_JSON:{}",
+                serde_json::to_string(&tag).expect("string json")
+            );
+        }
     }
 
     if let Some(prompt) = boundary.choice_prompt_text {
@@ -134,5 +140,29 @@ mod boundary_runner_tests {
 
         let loaded_by_ref = load_source_by_ref(&loaded.id).expect("load by ref should pass");
         assert_eq!(loaded_by_ref.entry_script, "main");
+    }
+
+    #[test]
+    fn emit_boundary_supports_optional_text_tag_output() {
+        emit_boundary(
+            BoundaryResult {
+                event: BoundaryEvent::End,
+                texts: vec![
+                    TextEvent {
+                        text: "plain".to_string(),
+                        tag: None,
+                    },
+                    TextEvent {
+                        text: "sfx/path.ogg".to_string(),
+                        tag: Some("sound".to_string()),
+                    },
+                ],
+                choices: Vec::new(),
+                choice_prompt_text: None,
+                input_prompt_text: None,
+                input_default_text: None,
+            },
+            None,
+        );
     }
 }

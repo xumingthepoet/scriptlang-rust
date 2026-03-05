@@ -158,6 +158,7 @@ cargo run -p sl-cli -- agent compile \
 - `RESULT:OK|ERROR`
 - `EVENT:CHOICES|INPUT|END`
 - `TEXT_JSON:...`
+- `TEXT_TAG_JSON:...`（可选；仅当对应 `TEXT_JSON` 来自 `<text tag="...">` 时输出）
 - `PROMPT_JSON:...`
 - `CHOICE:<index>|<json_text>`
 - `INPUT_DEFAULT_JSON:...`

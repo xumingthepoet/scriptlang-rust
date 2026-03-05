@@ -39,6 +39,8 @@ impl TestAction {
 pub enum ExpectedEvent {
     Text {
         text: String,
+        #[serde(default)]
+        tag: Option<String>,
     },
     Choices {
         #[serde(default, rename = "promptText")]

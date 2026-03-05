@@ -231,7 +231,8 @@ mod frame_stack_tests {
         assert_eq!(output_kind(&again), "choices");
         assert_eq!(
             output_kind(&EngineOutput::Text {
-                text: "x".to_string()
+                text: "x".to_string(),
+                tag: None
             }),
             "text"
         );

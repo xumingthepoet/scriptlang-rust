@@ -70,14 +70,19 @@ impl TuiUiState {
 
     pub(crate) fn append_boundary(&mut self, boundary: BoundaryResult) {
         if !boundary.texts.is_empty() {
-            self.pending_lines.extend(boundary.texts.clone());
+            self.pending_lines
+                .extend(boundary.texts.iter().map(|event| event.text.clone()));
         }
         self.set_boundary_state(boundary);
     }
 
     pub(crate) fn replace_boundary(&mut self, boundary: BoundaryResult) {
         self.rendered_lines.clear();
-        self.pending_lines = boundary.texts.clone();
+        self.pending_lines = boundary
+            .texts
+            .iter()
+            .map(|event| event.text.clone())
+            .collect();
         self.typing_line = None;
         self.typing_chars = 0;
         self.set_boundary_state(boundary);

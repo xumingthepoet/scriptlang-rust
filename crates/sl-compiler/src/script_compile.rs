@@ -138,6 +138,9 @@ pub(crate) fn compile_group_nodes(
             "text" => ScriptNode::Text {
                 id: builder.next_node_id("text"),
                 value: parse_inline_required(child)?,
+                tag: get_optional_attr(child, "tag")
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty()),
                 once: parse_bool_attr(child, "once", false)?,
                 location: child.location.clone(),
             },
