@@ -231,54 +231,144 @@ pub(crate) fn compile_group_nodes(
             }
             "choice" => {
                 let prompt_text = get_required_non_empty_attr(child, "text")?;
-                let mut options = Vec::new();
+                let mut entries = Vec::new();
                 let mut fall_over_seen = 0usize;
+                let mut fall_over_entry_index = None;
 
-                for option in element_children(child) {
-                    if option.name != "option" {
-                        return Err(ScriptLangError::with_span(
-                            "XML_CHOICE_CHILD_INVALID",
-                            format!("Unsupported child <{}> under <choice>.", option.name),
-                            option.location.clone(),
-                        ));
-                    }
+                for choice_child in element_children(child) {
+                    match choice_child.name.as_str() {
+                        "option" => {
+                            let once = parse_bool_attr(choice_child, "once", false)?;
+                            let fall_over = parse_bool_attr(choice_child, "fall_over", false)?;
+                            let when_expr = get_optional_attr(choice_child, "when");
+                            if fall_over {
+                                fall_over_seen += 1;
+                                fall_over_entry_index = Some(entries.len());
+                                if when_expr.is_some() {
+                                    return Err(ScriptLangError::with_span(
+                                        "XML_OPTION_FALL_OVER_WHEN_FORBIDDEN",
+                                        "fall_over option cannot declare when.",
+                                        choice_child.location.clone(),
+                                    ));
+                                }
+                            }
 
-                    let once = parse_bool_attr(option, "once", false)?;
-                    let fall_over = parse_bool_attr(option, "fall_over", false)?;
-                    let when_expr = get_optional_attr(option, "when");
-                    if fall_over {
-                        fall_over_seen += 1;
-                        if when_expr.is_some() {
+                            let option_group_id = builder.next_group_id();
+                            let option_mode = CompileGroupMode::new(mode.while_depth, true);
+                            let option_result = compile_child_group(
+                                group_id,
+                                &option_group_id,
+                                choice_child,
+                                builder,
+                                visible_types,
+                                local_var_types,
+                                option_mode,
+                            );
+                            option_result?;
+
+                            entries.push(ChoiceEntry::Static {
+                                option: ChoiceOption {
+                                    id: builder.next_choice_id(),
+                                    text: get_required_non_empty_attr(choice_child, "text")?,
+                                    when_expr,
+                                    once,
+                                    fall_over,
+                                    group_id: option_group_id,
+                                    location: choice_child.location.clone(),
+                                },
+                            });
+                        }
+                        "dynamic-options" => {
+                            let array_expr = get_required_non_empty_attr(choice_child, "array")?;
+                            let item_name = get_required_non_empty_attr(choice_child, "item")?;
+                            let index_name = get_optional_attr(choice_child, "index");
+                            assert_name_not_reserved(
+                                &item_name,
+                                "dynamic-options item",
+                                choice_child.location.clone(),
+                            )?;
+                            if let Some(index_name_value) = &index_name {
+                                assert_name_not_reserved(
+                                    index_name_value,
+                                    "dynamic-options index",
+                                    choice_child.location.clone(),
+                                )?;
+                            }
+                            let templates = element_children(choice_child).collect::<Vec<_>>();
+                            if templates.is_empty() {
+                                return Err(ScriptLangError::with_span(
+                                    "XML_DYNAMIC_OPTIONS_TEMPLATE_REQUIRED",
+                                    "<dynamic-options> must contain exactly one <option> template child.",
+                                    choice_child.location.clone(),
+                                ));
+                            }
+                            if templates.len() != 1 || templates[0].name != "option" {
+                                return Err(ScriptLangError::with_span(
+                                    "XML_DYNAMIC_OPTIONS_CHILD_INVALID",
+                                    "<dynamic-options> only supports exactly one direct <option> template child.",
+                                    choice_child.location.clone(),
+                                ));
+                            }
+
+                            let template_option = templates[0];
+                            let has_once = parse_bool_attr(template_option, "once", false)?;
+                            if has_once {
+                                return Err(ScriptLangError::with_span(
+                                    "XML_DYNAMIC_OPTION_ONCE_UNSUPPORTED",
+                                    "<dynamic-options> template <option> does not support once.",
+                                    template_option.location.clone(),
+                                ));
+                            }
+                            let has_fall_over =
+                                parse_bool_attr(template_option, "fall_over", false)?;
+                            if has_fall_over {
+                                return Err(ScriptLangError::with_span(
+                                    "XML_DYNAMIC_OPTION_FALL_OVER_UNSUPPORTED",
+                                    "<dynamic-options> template <option> does not support fall_over.",
+                                    template_option.location.clone(),
+                                ));
+                            }
+
+                            let option_group_id = builder.next_group_id();
+                            let option_mode = CompileGroupMode::new(mode.while_depth, true);
+                            let template_result = compile_child_group(
+                                group_id,
+                                &option_group_id,
+                                template_option,
+                                builder,
+                                visible_types,
+                                local_var_types,
+                                option_mode,
+                            );
+                            template_result?;
+
+                            entries.push(ChoiceEntry::Dynamic {
+                                block: DynamicChoiceBlock {
+                                    id: builder.next_choice_id(),
+                                    array_expr,
+                                    item_name,
+                                    index_name,
+                                    template: DynamicChoiceTemplate {
+                                        text: get_required_non_empty_attr(template_option, "text")?,
+                                        when_expr: get_optional_attr(template_option, "when"),
+                                        group_id: option_group_id,
+                                        location: template_option.location.clone(),
+                                    },
+                                    location: choice_child.location.clone(),
+                                },
+                            });
+                        }
+                        _ => {
                             return Err(ScriptLangError::with_span(
-                                "XML_OPTION_FALL_OVER_WHEN_FORBIDDEN",
-                                "fall_over option cannot declare when.",
-                                option.location.clone(),
+                                "XML_CHOICE_CHILD_INVALID",
+                                format!(
+                                    "Unsupported child <{}> under <choice>.",
+                                    choice_child.name
+                                ),
+                                choice_child.location.clone(),
                             ));
                         }
                     }
-
-                    let option_group_id = builder.next_group_id();
-                    let option_mode = CompileGroupMode::new(mode.while_depth, true);
-                    let option_result = compile_child_group(
-                        group_id,
-                        &option_group_id,
-                        option,
-                        builder,
-                        visible_types,
-                        local_var_types,
-                        option_mode,
-                    );
-                    option_result?;
-
-                    options.push(ChoiceOption {
-                        id: builder.next_choice_id(),
-                        text: get_required_non_empty_attr(option, "text")?,
-                        when_expr,
-                        once,
-                        fall_over,
-                        group_id: option_group_id,
-                        location: option.location.clone(),
-                    });
                 }
 
                 if fall_over_seen > 1 {
@@ -289,8 +379,8 @@ pub(crate) fn compile_group_nodes(
                     ));
                 }
 
-                if let Some(index) = options.iter().position(|option| option.fall_over) {
-                    if index != options.len().saturating_sub(1) {
+                if let Some(index) = fall_over_entry_index {
+                    if index != entries.len().saturating_sub(1) {
                         return Err(ScriptLangError::with_span(
                             "XML_OPTION_FALL_OVER_NOT_LAST",
                             "fall_over option must be the last option.",
@@ -302,7 +392,7 @@ pub(crate) fn compile_group_nodes(
                 ScriptNode::Choice {
                     id: builder.next_node_id("choice"),
                     prompt_text,
-                    options,
+                    entries,
                     location: child.location.clone(),
                 }
             }
@@ -773,15 +863,30 @@ mod script_compile_tests {
                 XmlNode::Element(xml_element(
                     "choice",
                     &[("text", "Pick")],
-                    vec![XmlNode::Element(xml_element(
-                        "option",
-                        &[("text", "O")],
-                        vec![XmlNode::Element(xml_element(
-                            "text",
-                            &[],
-                            vec![xml_text("X")],
-                        ))],
-                    ))],
+                    vec![
+                        XmlNode::Element(xml_element(
+                            "option",
+                            &[("text", "O")],
+                            vec![XmlNode::Element(xml_element(
+                                "text",
+                                &[],
+                                vec![xml_text("X")],
+                            ))],
+                        )),
+                        XmlNode::Element(xml_element(
+                            "dynamic-options",
+                            &[("array", "arr"), ("item", "it"), ("index", "i")],
+                            vec![XmlNode::Element(xml_element(
+                                "option",
+                                &[("text", "D")],
+                                vec![XmlNode::Element(xml_element(
+                                    "text",
+                                    &[],
+                                    vec![xml_text("DX")],
+                                ))],
+                            ))],
+                        )),
+                    ],
                 )),
             ],
         );
@@ -1101,6 +1206,54 @@ mod script_compile_tests {
                         "<script name=\"main\"><choice text=\"c\"><option text=\"a\" fall_over=\"true\"/><option text=\"b\"/></choice></script>",
                     )]),
                     "XML_OPTION_FALL_OVER_NOT_LAST",
+                ),
+                (
+                    "dynamic options template required",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><choice text=\"c\"><dynamic-options array=\"arr\" item=\"it\"/></choice></script>",
+                    )]),
+                    "XML_DYNAMIC_OPTIONS_TEMPLATE_REQUIRED",
+                ),
+                (
+                    "dynamic options child invalid",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><choice text=\"c\"><dynamic-options array=\"arr\" item=\"it\"><option text=\"a\"/><option text=\"b\"/></dynamic-options></choice></script>",
+                    )]),
+                    "XML_DYNAMIC_OPTIONS_CHILD_INVALID",
+                ),
+                (
+                    "dynamic option once unsupported",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><choice text=\"c\"><dynamic-options array=\"arr\" item=\"it\"><option text=\"a\" once=\"true\"/></dynamic-options></choice></script>",
+                    )]),
+                    "XML_DYNAMIC_OPTION_ONCE_UNSUPPORTED",
+                ),
+                (
+                    "dynamic option fall_over unsupported",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><choice text=\"c\"><dynamic-options array=\"arr\" item=\"it\"><option text=\"a\" fall_over=\"true\"/></dynamic-options></choice></script>",
+                    )]),
+                    "XML_DYNAMIC_OPTION_FALL_OVER_UNSUPPORTED",
+                ),
+                (
+                    "dynamic options reserved item",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><choice text=\"c\"><dynamic-options array=\"arr\" item=\"__sl_it\"><option text=\"a\"/></dynamic-options></choice></script>",
+                    )]),
+                    "NAME_RESERVED_PREFIX",
+                ),
+                (
+                    "dynamic options reserved index",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><choice text=\"c\"><dynamic-options array=\"arr\" item=\"it\" index=\"__sl_i\"><option text=\"a\"/></dynamic-options></choice></script>",
+                    )]),
+                    "NAME_RESERVED_PREFIX",
                 ),
                 (
                     "input default unsupported",
@@ -1499,7 +1652,7 @@ mod script_compile_tests {
         let choice_node = ScriptNode::Choice {
             id: "ch1".to_string(),
             prompt_text: "Pick".to_string(),
-            options: Vec::new(),
+            entries: Vec::new(),
             location: SourceSpan::synthetic(),
         };
         let choice_id = node_id(&choice_node);
@@ -1549,6 +1702,39 @@ mod script_compile_tests {
             CompileGroupMode::new(0, false),
         )
         .expect("option continue and last fall_over should compile");
+
+        let dynamic_choice = map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="arr" type="int[]">[1,2]</var>
+      <choice text="Pick">
+        <option text="A"><text>A</text></option>
+        <dynamic-options array="arr" item="it" index="i">
+          <option text="${it}:${i}" when="it > 0">
+            <text>dyn</text>
+          </option>
+        </dynamic-options>
+      </choice>
+    </script>
+    "#,
+        )]);
+        let dynamic_compiled =
+            compile_project_bundle_from_xml_map(&dynamic_choice).expect("dynamic choice compile");
+        let dynamic_main = dynamic_compiled.scripts.get("main").expect("main script");
+        let dynamic_root = dynamic_main
+            .groups
+            .get(&dynamic_main.root_group_id)
+            .expect("root group");
+        assert!(dynamic_root.nodes.iter().any(|node| {
+            matches!(
+                node,
+                ScriptNode::Choice {
+                    entries,
+                    ..
+                } if entries.iter().any(|entry| matches!(entry, ChoiceEntry::Dynamic { .. }))
+            )
+        }));
 
         let empty_args = parse_script_args(
             &xml_element("script", &[("args", "   ")], Vec::new()),

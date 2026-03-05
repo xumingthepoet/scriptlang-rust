@@ -1,5 +1,6 @@
 use super::lifecycle::{
-    CompletionKind, PendingBoundary as RuntimePendingBoundary, RuntimeFrame, RuntimeRandomState,
+    CompletionKind, PendingBoundary as RuntimePendingBoundary, PendingChoiceOption, RuntimeFrame,
+    RuntimeRandomState,
 };
 use super::*;
 use sl_core::PendingBoundary as SnapshotPendingBoundary;
@@ -40,8 +41,17 @@ impl ScriptLangEngine {
                 ..
             } => SnapshotPendingBoundary::Choice {
                 node_id: node_id.clone(),
-                items: options.clone(),
+                items: options.iter().map(|option| option.item.clone()).collect(),
                 prompt_text: prompt_text.clone(),
+                dynamic_bindings: options
+                    .iter()
+                    .filter_map(|option| {
+                        option
+                            .dynamic_binding
+                            .clone()
+                            .map(|binding| (option.item.id.clone(), binding))
+                    })
+                    .collect(),
             },
             RuntimePendingBoundary::Input {
                 node_id,
@@ -195,6 +205,7 @@ impl ScriptLangEngine {
                 node_id,
                 items,
                 prompt_text,
+                dynamic_bindings,
             } => {
                 let ScriptNode::Choice { id, .. } = node else {
                     return Err(ScriptLangError::new(
@@ -212,7 +223,13 @@ impl ScriptLangEngine {
                 RuntimePendingBoundary::Choice {
                     frame_id: top.frame_id,
                     node_id,
-                    options: items,
+                    options: items
+                        .into_iter()
+                        .map(|item| PendingChoiceOption {
+                            dynamic_binding: dynamic_bindings.get(&item.id).cloned(),
+                            item,
+                        })
+                        .collect(),
                     prompt_text,
                 }
             }
@@ -438,6 +455,7 @@ mod snapshot_tests {
             node_id: "invalid-node-id".to_string(),
             items: Vec::new(),
             prompt_text: None,
+            dynamic_bindings: BTreeMap::new(),
         };
 
         let mut resumed = engine_from_sources(sources);
@@ -523,6 +541,7 @@ mod snapshot_tests {
             node_id: input_node_id,
             items: Vec::new(),
             prompt_text: None,
+            dynamic_bindings: BTreeMap::new(),
         };
         let mut resume_choice = engine_from_sources(map(&[(
             "main.script.xml",
@@ -769,5 +788,39 @@ mod snapshot_tests {
         resumed.choose(0).expect("choose");
         let text = resumed.next_output().expect("text");
         assert!(matches!(text, EngineOutput::Text { text, .. } if text == "0"));
+    }
+
+    #[test]
+    pub(super) fn snapshot_resume_preserves_dynamic_choice_bindings() {
+        let files = map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="arr" type="int[]">[5]</var>
+      <choice text="Pick">
+        <dynamic-options array="arr" item="it" index="i">
+          <option text="${it}-${i}">
+            <text>${it}:${i}</text>
+          </option>
+        </dynamic-options>
+      </choice>
+    </script>
+    "#,
+        )]);
+
+        let mut engine = engine_from_sources(files.clone());
+        engine.start("main", None).expect("start");
+        let first = engine.next_output().expect("choice");
+        assert!(matches!(
+            &first,
+            EngineOutput::Choices { items, .. } if items.len() == 1 && items[0].text == "5-0"
+        ));
+        let snapshot = engine.snapshot().expect("snapshot");
+
+        let mut resumed = engine_from_sources(files);
+        resumed.resume(snapshot).expect("resume");
+        resumed.choose(0).expect("choose");
+        let out = resumed.next_output().expect("text");
+        assert!(matches!(out, EngineOutput::Text { text, .. } if text == "5:0"));
     }
 }

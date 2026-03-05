@@ -71,11 +71,17 @@ pub(super) struct RuntimeFrame {
 }
 
 #[derive(Debug, Clone)]
+pub(super) struct PendingChoiceOption {
+    pub(super) item: ChoiceItem,
+    pub(super) dynamic_binding: Option<PendingDynamicChoiceBinding>,
+}
+
+#[derive(Debug, Clone)]
 pub(super) enum PendingBoundary {
     Choice {
         frame_id: u64,
         node_id: String,
-        options: Vec<ChoiceItem>,
+        options: Vec<PendingChoiceOption>,
         prompt_text: Option<String>,
     },
     Input {

@@ -73,6 +73,7 @@ mod state_store_tests {
                     node_id: "n1".to_string(),
                     items: Vec::new(),
                     prompt_text: None,
+                    dynamic_bindings: BTreeMap::new(),
                 },
                 defs_globals: BTreeMap::new(),
                 once_state_by_script: BTreeMap::new(),

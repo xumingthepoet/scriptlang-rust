@@ -23,9 +23,10 @@ use rng::next_random_bounded;
 #[cfg(test)]
 use rng::{next_random_bounded_with, next_random_u32};
 use sl_core::{
-    default_value_from_type, is_type_compatible, ChoiceItem, ContinuationFrame, ContinueTarget,
-    DefsGlobalVarDecl, EngineOutput, PendingBoundary, ScriptIr, ScriptLangError, ScriptNode,
-    ScriptType, SlValue, Snapshot, SnapshotCompletion, SnapshotFrame,
+    default_value_from_type, is_type_compatible, ChoiceEntry, ChoiceItem, ContinuationFrame,
+    ContinueTarget, DefsGlobalVarDecl, EngineOutput, PendingBoundary, PendingDynamicChoiceBinding,
+    ScriptIr, ScriptLangError, ScriptNode, ScriptType, SlValue, Snapshot, SnapshotCompletion,
+    SnapshotFrame,
 };
 
 mod boundary;

@@ -63,6 +63,12 @@ All code must be written with testability in mind:
 - globals initialize on `engine.start`, support short name and `ns.var` access, and follow include-closure visibility.
 - when short names conflict across namespaces, only fully-qualified `ns.var` remains available.
 
+## Choice Dynamic Options
+- `<choice>` supports mixed static `<option>` and `<dynamic-options>` blocks.
+- `<dynamic-options array=\"...\" item=\"...\" index=\"...\">` must contain exactly one template `<option>`.
+- Template `<option>` supports `text` and `when`; `once` and `fall_over` are rejected.
+- Expanded dynamic items keep source order with neighboring static options.
+
 ## Commands
 - `make check`: `cargo check --workspace --all-targets --all-features`
 - `make fmt`: `cargo fmt --all -- --check`

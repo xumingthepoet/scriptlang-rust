@@ -141,14 +141,33 @@ pub(crate) fn validate_json_symbol_visibility(
                 } => {
                     ensure_script_node_safe(when_expr, "while condition", location)?;
                 }
-                ScriptNode::Choice { options, .. } => {
-                    for (when_expr, location) in options.iter().filter_map(|option| {
-                        option
-                            .when_expr
-                            .as_ref()
-                            .map(|expr| (expr, &option.location))
-                    }) {
-                        ensure_script_node_safe(when_expr, "choice option condition", location)?;
+                ScriptNode::Choice { entries, .. } => {
+                    for entry in entries {
+                        match entry {
+                            ChoiceEntry::Static { option } => {
+                                if let Some(when_expr) = option.when_expr.as_ref() {
+                                    ensure_script_node_safe(
+                                        when_expr,
+                                        "choice option condition",
+                                        &option.location,
+                                    )?;
+                                }
+                            }
+                            ChoiceEntry::Dynamic { block } => {
+                                ensure_script_node_safe(
+                                    &block.array_expr,
+                                    "dynamic options array expression",
+                                    &block.location,
+                                )?;
+                                if let Some(when_expr) = block.template.when_expr.as_ref() {
+                                    ensure_script_node_safe(
+                                        when_expr,
+                                        "dynamic option condition",
+                                        &block.template.location,
+                                    )?;
+                                }
+                            }
+                        }
                     }
                 }
                 ScriptNode::Call { args, location, .. }
@@ -537,14 +556,16 @@ mod json_symbols_tests {
                         ScriptNode::Choice {
                             id: "c1".to_string(),
                             prompt_text: "pick".to_string(),
-                            options: vec![ChoiceOption {
-                                id: "o1".to_string(),
-                                text: "A".to_string(),
-                                when_expr: Some("hp > 0".to_string()),
-                                once: false,
-                                fall_over: false,
-                                group_id: "g1".to_string(),
-                                location: span.clone(),
+                            entries: vec![ChoiceEntry::Static {
+                                option: ChoiceOption {
+                                    id: "o1".to_string(),
+                                    text: "A".to_string(),
+                                    when_expr: Some("hp > 0".to_string()),
+                                    once: false,
+                                    fall_over: false,
+                                    group_id: "g1".to_string(),
+                                    location: span.clone(),
+                                },
                             }],
                             location: span.clone(),
                         },
@@ -559,6 +580,79 @@ mod json_symbols_tests {
 
         validate_json_symbol_visibility(&script_ir, &all_json_symbols)
             .expect("non-hidden expressions should pass");
+    }
+
+    #[test]
+    fn validate_json_visibility_handles_dynamic_choice_expressions() {
+        let span = SourceSpan::synthetic();
+        let script_ir = ScriptIr {
+            script_path: "main.script.xml".to_string(),
+            script_name: "main".to_string(),
+            params: Vec::new(),
+            root_group_id: "g0".to_string(),
+            groups: BTreeMap::from([(
+                "g0".to_string(),
+                ImplicitGroup {
+                    group_id: "g0".to_string(),
+                    parent_group_id: None,
+                    entry_node_id: None,
+                    nodes: vec![ScriptNode::Choice {
+                        id: "c1".to_string(),
+                        prompt_text: "pick".to_string(),
+                        entries: vec![
+                            ChoiceEntry::Static {
+                                option: ChoiceOption {
+                                    id: "s1".to_string(),
+                                    text: "S".to_string(),
+                                    when_expr: None,
+                                    once: false,
+                                    fall_over: false,
+                                    group_id: "g1".to_string(),
+                                    location: span.clone(),
+                                },
+                            },
+                            ChoiceEntry::Dynamic {
+                                block: DynamicChoiceBlock {
+                                    id: "dyn1".to_string(),
+                                    array_expr: "items".to_string(),
+                                    item_name: "it".to_string(),
+                                    index_name: Some("i".to_string()),
+                                    template: DynamicChoiceTemplate {
+                                        text: "${it}".to_string(),
+                                        when_expr: Some("i >= 0".to_string()),
+                                        group_id: "g1".to_string(),
+                                        location: span.clone(),
+                                    },
+                                    location: span.clone(),
+                                },
+                            },
+                            ChoiceEntry::Dynamic {
+                                block: DynamicChoiceBlock {
+                                    id: "dyn2".to_string(),
+                                    array_expr: "items".to_string(),
+                                    item_name: "jt".to_string(),
+                                    index_name: None,
+                                    template: DynamicChoiceTemplate {
+                                        text: "${jt}".to_string(),
+                                        when_expr: None,
+                                        group_id: "g2".to_string(),
+                                        location: span.clone(),
+                                    },
+                                    location: span.clone(),
+                                },
+                            },
+                        ],
+                        location: span.clone(),
+                    }],
+                },
+            )]),
+            visible_json_globals: Vec::new(),
+            visible_functions: BTreeMap::new(),
+            visible_defs_globals: BTreeMap::new(),
+        };
+
+        validate_json_symbol_visibility(&script_ir, &BTreeSet::from(["secret".to_string()]))
+            .expect("dynamic choice expressions should pass visibility checks");
     }
 
     #[test]

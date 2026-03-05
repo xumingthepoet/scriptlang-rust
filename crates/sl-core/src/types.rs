@@ -113,6 +113,31 @@ pub struct ChoiceOption {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DynamicChoiceTemplate {
+    pub text: String,
+    pub when_expr: Option<String>,
+    pub group_id: String,
+    pub location: SourceSpan,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DynamicChoiceBlock {
+    pub id: String,
+    pub array_expr: String,
+    pub item_name: String,
+    pub index_name: Option<String>,
+    pub template: DynamicChoiceTemplate,
+    pub location: SourceSpan,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ChoiceEntry {
+    Static { option: ChoiceOption },
+    Dynamic { block: DynamicChoiceBlock },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ScriptNode {
     Text {
@@ -147,7 +172,7 @@ pub enum ScriptNode {
     Choice {
         id: String,
         prompt_text: String,
-        options: Vec<ChoiceOption>,
+        entries: Vec<ChoiceEntry>,
         location: SourceSpan,
     },
     Input {
@@ -245,7 +270,17 @@ pub struct ChoiceItem {
     pub text: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingDynamicChoiceBinding {
+    pub group_id: String,
+    pub item_name: String,
+    pub item_value: SlValue,
+    pub index_name: Option<String>,
+    pub index_value: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum PendingBoundary {
     #[serde(rename_all = "camelCase")]
@@ -253,6 +288,8 @@ pub enum PendingBoundary {
         node_id: String,
         items: Vec<ChoiceItem>,
         prompt_text: Option<String>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        dynamic_bindings: BTreeMap<String, PendingDynamicChoiceBinding>,
     },
     #[serde(rename_all = "camelCase")]
     Input {

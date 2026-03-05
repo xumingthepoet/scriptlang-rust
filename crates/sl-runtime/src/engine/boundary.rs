@@ -67,11 +67,7 @@ impl ScriptLangEngine {
             }
         };
 
-        let Some(ScriptNode::Choice {
-            options: node_options,
-            ..
-        }) = group.nodes.get(node_index)
-        else {
+        let Some(ScriptNode::Choice { entries, .. }) = group.nodes.get(node_index) else {
             self.pending_boundary = Some(PendingBoundary::Choice {
                 frame_id,
                 node_id,
@@ -84,22 +80,31 @@ impl ScriptLangEngine {
             ));
         };
 
+        enum ChosenTarget {
+            Static(sl_core::ChoiceOption),
+            Dynamic(PendingDynamicChoiceBinding),
+        }
+
         let item = &options[index];
-        let Some(option) = node_options
-            .iter()
-            .find(|candidate| candidate.id == item.id)
-            .cloned()
-        else {
-            self.pending_boundary = Some(PendingBoundary::Choice {
-                frame_id,
-                node_id,
-                options,
-                prompt_text,
-            });
-            return Err(ScriptLangError::new(
-                "ENGINE_CHOICE_NOT_FOUND",
-                "Choice option no longer exists.",
-            ));
+        let chosen_target = if let Some(binding) = item.dynamic_binding.clone() {
+            ChosenTarget::Dynamic(binding)
+        } else {
+            let Some(option) = entries.iter().find_map(|entry| match entry {
+                ChoiceEntry::Static { option } if option.id == item.item.id => Some(option.clone()),
+                _ => None,
+            }) else {
+                self.pending_boundary = Some(PendingBoundary::Choice {
+                    frame_id,
+                    node_id,
+                    options,
+                    prompt_text,
+                });
+                return Err(ScriptLangError::new(
+                    "ENGINE_CHOICE_NOT_FOUND",
+                    "Choice option no longer exists.",
+                ));
+            };
+            ChosenTarget::Static(option)
         };
         let script_name = script_name.to_string();
 
@@ -107,9 +112,15 @@ impl ScriptLangEngine {
             .node_index
             .checked_add(1)
             .expect("node index should not overflow");
-        if let Err(error) =
-            self.push_group_frame(&option.group_id, CompletionKind::ResumeAfterChild)
-        {
+        let push_result = match &chosen_target {
+            ChosenTarget::Static(option) => {
+                self.push_group_frame(&option.group_id, CompletionKind::ResumeAfterChild)
+            }
+            ChosenTarget::Dynamic(binding) => {
+                self.push_group_frame(&binding.group_id, CompletionKind::ResumeAfterChild)
+            }
+        };
+        if let Err(error) = push_result {
             self.pending_boundary = Some(PendingBoundary::Choice {
                 frame_id,
                 node_id,
@@ -119,8 +130,29 @@ impl ScriptLangEngine {
             return Err(error);
         }
         self.frames[frame_index].node_index = next_node_index;
-        if option.once {
-            self.mark_once_state(&script_name, &format!("option:{}", option.id));
+        match chosen_target {
+            ChosenTarget::Static(option) => {
+                if option.once {
+                    self.mark_once_state(&script_name, &format!("option:{}", option.id));
+                }
+            }
+            ChosenTarget::Dynamic(binding) => {
+                let selected_frame = self
+                    .frames
+                    .last_mut()
+                    .expect("push_group_frame should create child frame");
+                selected_frame
+                    .scope
+                    .insert(binding.item_name, binding.item_value);
+                if let Some(index_name) = binding.index_name {
+                    let index_value = binding
+                        .index_value
+                        .expect("dynamic choice index binding should exist");
+                    selected_frame
+                        .scope
+                        .insert(index_name, SlValue::Number(index_value as f64));
+                }
+            }
         }
         self.waiting_choice = false;
         Ok(())
@@ -365,7 +397,7 @@ mod boundary_tests {
             .expect("pending choice should exist");
         assert!(matches!(pending, PendingBoundary::Choice { .. }));
         if let PendingBoundary::Choice { options, .. } = pending {
-            options[0].id = "missing".to_string();
+            options[0].item.id = "missing".to_string();
         }
         let error = option_missing
             .choose(0)
@@ -404,15 +436,17 @@ mod boundary_tests {
         assert!(matches!(pending, PendingBoundary::Choice { .. }));
         let mut once_key = None;
         if let PendingBoundary::Choice { options, .. } = pending {
-            once_key = Some(format!("option:{}", options[0].id));
+            once_key = Some(format!("option:{}", options[0].item.id));
         }
         let once_key = once_key.expect("choice options should exist");
         assert!(!push_fail.has_once_state(&script_name, &once_key));
         for script in push_fail.scripts.values_mut() {
             for group in script.groups.values_mut() {
                 for node in &mut group.nodes {
-                    if let ScriptNode::Choice { options, .. } = node {
-                        options[0].group_id = "missing-group".to_string();
+                    if let ScriptNode::Choice { entries, .. } = node {
+                        if let Some(ChoiceEntry::Static { option }) = entries.first_mut() {
+                            option.group_id = "missing-group".to_string();
+                        }
                     }
                 }
             }
@@ -438,10 +472,13 @@ mod boundary_tests {
         wrong_kind.pending_boundary = Some(PendingBoundary::Choice {
             frame_id: 1,
             node_id: "c".to_string(),
-            options: vec![ChoiceItem {
-                index: 0,
-                id: "opt".to_string(),
-                text: "A".to_string(),
+            options: vec![super::lifecycle::PendingChoiceOption {
+                item: ChoiceItem {
+                    index: 0,
+                    id: "opt".to_string(),
+                    text: "A".to_string(),
+                },
+                dynamic_binding: None,
             }],
             prompt_text: None,
         });

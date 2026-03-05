@@ -26,7 +26,7 @@ impl ScriptLangEngine {
                 prompt_text,
                 ..
             } => EngineOutput::Choices {
-                items: options.clone(),
+                items: options.iter().map(|option| option.item.clone()).collect(),
                 prompt_text: prompt_text.clone(),
             },
             PendingBoundary::Input {

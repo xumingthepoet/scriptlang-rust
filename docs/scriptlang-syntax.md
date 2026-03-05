@@ -236,18 +236,21 @@ key 固定是 string。
 
 用途：生成可选分支边界。  
 属性：`text`（必填，提示文本）。  
-子节点：仅允许 `<option>`。  
+子节点：允许 `<option>` 和 `<dynamic-options>`（可混排，按源码顺序展开）。  
 
 ```xml
 <choice text="Choose">
   <option text="A"><text>Alpha</text></option>
+  <dynamic-options array="arr" item="it" index="i">
+    <option text="${it}:${i}"><text>Dyn</text></option>
+  </dynamic-options>
   <option text="B"><text>Beta</text></option>
 </choice>
 ```
 
 ## 6.9 `<option>`
 
-用途：`<choice>` 的选项。  
+用途：`<choice>` 的静态选项，或 `<dynamic-options>` 内的模板选项。  
 属性：
 - `text`（必填）
 - `when`（可选，显示条件）
@@ -266,7 +269,33 @@ key 固定是 string。
 - 必须是最后一个 `<option>`。
 - `fall_over` 选项不能再声明 `when`。
 
-## 6.10 `<input>`
+当 `<option>` 用作 `<dynamic-options>` 模板时：
+- 仅支持 `text`、`when`。
+- 不支持 `once`。
+- 不支持 `fall_over`。
+
+## 6.10 `<dynamic-options>`
+
+用途：从数组动态展开 choice 选项。  
+属性：
+- `array`（必填，表达式，运行时必须是数组）
+- `item`（必填，数组元素绑定名）
+- `index`（可选，元素索引绑定名）
+
+子节点规则：
+- 必须且只能有一个直接子节点 `<option>`，作为模板。
+
+```xml
+<choice text="Pick">
+  <dynamic-options array="items" item="it" index="i">
+    <option text="${it.name}" when="it.enabled">
+      <text>picked ${it.name} at ${i}</text>
+    </option>
+  </dynamic-options>
+</choice>
+```
+
+## 6.11 `<input>`
 
 用途：请求宿主输入字符串并写入变量。  
 属性：`var`、`text`（必填）。  
@@ -278,7 +307,7 @@ key 固定是 string。
 <text>Hello ${heroName}</text>
 ```
 
-## 6.11 `<break/>`
+## 6.12 `<break/>`
 
 用途：跳出最近的 `<while>`。  
 限制：只能在 `<while>` 内使用。  
@@ -289,7 +318,7 @@ key 固定是 string。
 </while>
 ```
 
-## 6.12 `<continue/>`
+## 6.13 `<continue/>`
 
 用途：继续最近循环，或作为 `<option>` 直接子节点回到 choice。  
 限制：
@@ -311,7 +340,7 @@ key 固定是 string。
 </choice>
 ```
 
-## 6.13 `<call>`
+## 6.14 `<call>`
 
 用途：调用其他脚本。  
 属性：
@@ -326,7 +355,7 @@ key 固定是 string。
 <call script="battle" args="hp, ref:score"/>
 ```
 
-## 6.14 `<return>`
+## 6.15 `<return>`
 
 用途：从当前脚本返回，或转移到新脚本。  
 属性：
@@ -345,7 +374,7 @@ key 固定是 string。
 <return script="nextScene" args="heroName, hp"/>
 ```
 
-## 6.15 `<group>`
+## 6.16 `<group>`
 
 用途：语句分组容器，创建块级作用域。  
 属性：无。  

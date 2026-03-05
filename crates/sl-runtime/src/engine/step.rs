@@ -1,4 +1,4 @@
-use super::lifecycle::{CompletionKind, PendingBoundary, RuntimeFrame};
+use super::lifecycle::{CompletionKind, PendingBoundary, PendingChoiceOption, RuntimeFrame};
 use super::*;
 
 impl ScriptLangEngine {
@@ -52,7 +52,7 @@ impl ScriptLangEngine {
                 Choice {
                     script_name: String,
                     id: String,
-                    options: Vec<sl_core::ChoiceOption>,
+                    entries: Vec<ChoiceEntry>,
                     prompt_text: String,
                 },
                 Input {
@@ -114,13 +114,13 @@ impl ScriptLangEngine {
                         },
                         ScriptNode::Choice {
                             id,
-                            options,
+                            entries,
                             prompt_text,
                             ..
                         } => PlannedNode::Choice {
                             script_name: script_name.to_string(),
                             id: id.clone(),
-                            options: options.clone(),
+                            entries: entries.clone(),
                             prompt_text: prompt_text.clone(),
                         },
                         ScriptNode::Input {
@@ -219,28 +219,93 @@ impl ScriptLangEngine {
                 PlannedNode::Choice {
                     script_name,
                     id,
-                    options,
+                    entries,
                     prompt_text,
                 } => {
-                    let mut visible_regular = Vec::new();
-                    for option in options.iter().filter(|option| !option.fall_over) {
-                        if self.is_choice_option_visible(&script_name, option)? {
-                            visible_regular.push(option.clone());
+                    let mut visible_regular = Vec::<PendingChoiceOption>::new();
+                    let mut visible_fall_over = None;
+                    let mut dynamic_block_ordinal = 0usize;
+
+                    for entry in &entries {
+                        match entry {
+                            ChoiceEntry::Static { option } => {
+                                if option.fall_over {
+                                    if self.is_choice_option_visible(&script_name, option)? {
+                                        visible_fall_over = Some(PendingChoiceOption {
+                                            item: ChoiceItem {
+                                                index: 0,
+                                                id: option.id.clone(),
+                                                text: self.render_text(&option.text)?,
+                                            },
+                                            dynamic_binding: None,
+                                        });
+                                    }
+                                    continue;
+                                }
+
+                                if self.is_choice_option_visible(&script_name, option)? {
+                                    visible_regular.push(PendingChoiceOption {
+                                        item: ChoiceItem {
+                                            index: 0,
+                                            id: option.id.clone(),
+                                            text: self.render_text(&option.text)?,
+                                        },
+                                        dynamic_binding: None,
+                                    });
+                                }
+                            }
+                            ChoiceEntry::Dynamic { block } => {
+                                let array_value = self.eval_expression(&block.array_expr)?;
+                                let SlValue::Array(items) = array_value else {
+                                    return Err(ScriptLangError::new(
+                                        "ENGINE_CHOICE_ARRAY_NOT_ARRAY",
+                                        format!(
+                                            "dynamic-options array expression \"{}\" must evaluate to array.",
+                                            block.array_expr
+                                        ),
+                                    ));
+                                };
+
+                                for (element_index, element_value) in items.into_iter().enumerate()
+                                {
+                                    let binding = (&element_value, element_index);
+                                    let visible = self.dynamic_choice_when(block, binding)?;
+
+                                    if !visible {
+                                        continue;
+                                    }
+
+                                    let rendered_text = self.dynamic_choice_text(block, binding)?;
+
+                                    visible_regular.push(PendingChoiceOption {
+                                        item: ChoiceItem {
+                                            index: 0,
+                                            id: format!(
+                                                "dyn:{}:{}:{}",
+                                                id, dynamic_block_ordinal, element_index
+                                            ),
+                                            text: rendered_text,
+                                        },
+                                        dynamic_binding: Some(PendingDynamicChoiceBinding {
+                                            group_id: block.template.group_id.clone(),
+                                            item_name: block.item_name.clone(),
+                                            item_value: element_value,
+                                            index_name: block.index_name.clone(),
+                                            index_value: block
+                                                .index_name
+                                                .as_ref()
+                                                .map(|_| element_index),
+                                        }),
+                                    });
+                                }
+
+                                dynamic_block_ordinal += 1;
+                            }
                         }
                     }
 
                     let visible_options = if visible_regular.is_empty() {
-                        if let Some(fall_over_option) =
-                            options.iter().find(|option| option.fall_over)
-                        {
-                            if self.is_choice_option_visible(&script_name, fall_over_option)? {
-                                vec![fall_over_option.clone()]
-                            } else {
-                                Vec::new()
-                            }
-                        } else {
-                            Vec::new()
-                        }
+                        visible_fall_over.into_iter().collect::<Vec<_>>()
                     } else {
                         visible_regular
                     };
@@ -250,21 +315,21 @@ impl ScriptLangEngine {
                         continue;
                     }
 
-                    let mut items = Vec::new();
-                    for (index, option) in visible_options.iter().enumerate() {
-                        items.push(ChoiceItem {
-                            index,
-                            id: option.id.clone(),
-                            text: self.render_text(&option.text)?,
-                        });
+                    let mut pending_options = visible_options;
+                    for (index, option) in pending_options.iter_mut().enumerate() {
+                        option.item.index = index;
                     }
+                    let items = pending_options
+                        .iter()
+                        .map(|option| option.item.clone())
+                        .collect::<Vec<_>>();
 
                     let prompt_text = Some(self.render_text(&prompt_text)?);
                     let frame_id = self.top_frame_id()?;
                     self.pending_boundary = Some(PendingBoundary::Choice {
                         frame_id,
                         node_id: id,
-                        options: items.clone(),
+                        options: pending_options,
                         prompt_text: prompt_text.clone(),
                     });
                     self.waiting_choice = true;
@@ -323,6 +388,90 @@ impl ScriptLangEngine {
             "ENGINE_GUARD_EXCEEDED",
             "Execution guard exceeded 10000 iterations.",
         ))
+    }
+
+    fn dynamic_choice_when(
+        &mut self,
+        block: &sl_core::DynamicChoiceBlock,
+        binding: (&SlValue, usize),
+    ) -> Result<bool, ScriptLangError> {
+        let (element_value, element_index) = binding;
+        match block.template.when_expr.as_ref() {
+            Some(when_expr) => self.with_dynamic_choice_bindings(
+                &block.item_name,
+                element_value,
+                block.index_name.as_deref(),
+                element_index,
+                |engine| engine.eval_boolean(when_expr),
+            ),
+            None => Ok(true),
+        }
+    }
+
+    fn dynamic_choice_text(
+        &mut self,
+        block: &sl_core::DynamicChoiceBlock,
+        binding: (&SlValue, usize),
+    ) -> Result<String, ScriptLangError> {
+        let (element_value, element_index) = binding;
+        self.with_dynamic_choice_bindings(
+            &block.item_name,
+            element_value,
+            block.index_name.as_deref(),
+            element_index,
+            |engine| engine.render_text(&block.template.text),
+        )
+    }
+
+    fn with_dynamic_choice_bindings<T, F>(
+        &mut self,
+        item_name: &str,
+        item_value: &SlValue,
+        index_name: Option<&str>,
+        index_value: usize,
+        evaluator: F,
+    ) -> Result<T, ScriptLangError>
+    where
+        F: FnOnce(&mut ScriptLangEngine) -> Result<T, ScriptLangError>,
+    {
+        let frame = self
+            .frames
+            .last_mut()
+            .expect("dynamic choice binding requires active frame");
+
+        let item_previous = frame
+            .scope
+            .insert(item_name.to_string(), item_value.clone());
+        let index_previous = if let Some(index_name) = index_name {
+            frame
+                .scope
+                .insert(index_name.to_string(), SlValue::Number(index_value as f64))
+        } else {
+            None
+        };
+
+        let result = evaluator(self);
+
+        let frame = self
+            .frames
+            .last_mut()
+            .expect("dynamic choice binding restore requires active frame");
+
+        if let Some(previous) = item_previous {
+            frame.scope.insert(item_name.to_string(), previous);
+        } else {
+            frame.scope.remove(item_name);
+        }
+
+        if let Some(index_name) = index_name {
+            if let Some(previous) = index_previous {
+                frame.scope.insert(index_name.to_string(), previous);
+            } else {
+                frame.scope.remove(index_name);
+            }
+        }
+
+        result
     }
 }
 
@@ -618,10 +767,14 @@ mod step_tests {
             .nodes
             .iter()
             .find_map(|node| match node {
-                ScriptNode::Choice { options, .. } => options
-                    .iter()
-                    .find(|option| option.fall_over)
-                    .map(|option| option.id.clone()),
+                ScriptNode::Choice { entries, .. } => {
+                    entries.iter().find_map(|entry| match entry {
+                        ChoiceEntry::Static { option } if option.fall_over => {
+                            Some(option.id.clone())
+                        }
+                        _ => None,
+                    })
+                }
                 _ => None,
             })
             .expect("fall_over option");
@@ -703,7 +856,7 @@ mod step_tests {
             .expect("pending choice should exist");
         assert!(matches!(pending, PendingBoundary::Choice { .. }));
         if let PendingBoundary::Choice { options, .. } = pending {
-            options[0].id = "missing-option".to_string();
+            options[0].item.id = "missing-option".to_string();
         }
         let error = option_missing
             .choose(0)
@@ -749,10 +902,13 @@ mod step_tests {
         with_choice.pending_boundary = Some(PendingBoundary::Choice {
             frame_id,
             node_id: "node".to_string(),
-            options: vec![ChoiceItem {
-                index: 0,
-                id: "id0".to_string(),
-                text: "A".to_string(),
+            options: vec![PendingChoiceOption {
+                item: ChoiceItem {
+                    index: 0,
+                    id: "id0".to_string(),
+                    text: "A".to_string(),
+                },
+                dynamic_binding: None,
             }],
             prompt_text: None,
         });
@@ -1362,5 +1518,132 @@ mod step_tests {
         assert!(
             matches!(output, EngineOutput::Choices { ref items, .. } if items.len() == 1 && items[0].text == "A")
         );
+    }
+
+    #[test]
+    pub(super) fn dynamic_options_mix_with_static_options_in_source_order() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="arr" type="int[]">[2, 3]</var>
+      <choice text="Pick">
+        <option text="Static"><text>S</text></option>
+        <dynamic-options array="arr" item="it" index="i">
+          <option text="D-${it}-${i}" when="it > 2"><text>D ${it}/${i}</text></option>
+        </dynamic-options>
+        <option text="Tail"><text>T</text></option>
+      </choice>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        let output = engine.next_output().expect("choice output");
+        assert!(matches!(
+            &output,
+            EngineOutput::Choices { items, .. }
+                if items.len() == 3
+                    && items[0].text == "Static"
+                    && items[1].text == "D-3-1"
+                    && items[2].text == "Tail"
+        ));
+        engine.choose(1).expect("choose dynamic option");
+        let text = engine.next_output().expect("dynamic text");
+        assert!(matches!(text, EngineOutput::Text { text, .. } if text == "D 3/1"));
+    }
+
+    #[test]
+    pub(super) fn dynamic_options_array_expression_must_evaluate_to_array() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="arr" type="int">1</var>
+      <choice text="Pick">
+        <dynamic-options array="arr" item="it">
+          <option text="${it}"><text>X</text></option>
+        </dynamic-options>
+      </choice>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+        let error = engine
+            .next_output()
+            .expect_err("non-array dynamic source should fail");
+        assert_eq!(error.code, "ENGINE_CHOICE_ARRAY_NOT_ARRAY");
+    }
+
+    #[test]
+    pub(super) fn dynamic_options_without_index_still_render_and_choose() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="arr" type="int[]">[7]</var>
+      <choice text="Pick">
+        <dynamic-options array="arr" item="it">
+          <option text="${it}" when="it > 0">
+            <text>picked ${it}</text>
+          </option>
+        </dynamic-options>
+      </choice>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+        let out = engine.next_output().expect("choice");
+        assert!(
+            matches!(&out, EngineOutput::Choices { items, .. } if items.len() == 1 && items[0].text == "7")
+        );
+        engine.choose(0).expect("choose");
+        let text = engine.next_output().expect("text");
+        assert!(matches!(text, EngineOutput::Text { text, .. } if text == "picked 7"));
+    }
+
+    #[test]
+    pub(super) fn nested_dynamic_options_allow_shadowing_and_restore_outer_bindings() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="arr1" type="int[]">[1]</var>
+      <var name="arr2" type="int[]">[10]</var>
+      <choice text="Outer">
+        <dynamic-options array="arr1" item="it" index="i">
+          <option text="${it}-${i}">
+            <choice text="Inner">
+              <dynamic-options array="arr2" item="it" index="i">
+                <option text="${it}-${i}">
+                  <text>inner ${it}-${i}</text>
+                </option>
+              </dynamic-options>
+            </choice>
+            <text>outer ${it}-${i}</text>
+          </option>
+        </dynamic-options>
+      </choice>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        let outer = engine.next_output().expect("outer choice");
+        assert!(
+            matches!(&outer, EngineOutput::Choices { items, .. } if items.len() == 1 && items[0].text == "1-0")
+        );
+        engine.choose(0).expect("choose outer");
+
+        let inner = engine.next_output().expect("inner choice");
+        assert!(
+            matches!(&inner, EngineOutput::Choices { items, .. } if items.len() == 1 && items[0].text == "10-0")
+        );
+        engine.choose(0).expect("choose inner");
+
+        let inner_text = engine.next_output().expect("inner text");
+        assert!(matches!(inner_text, EngineOutput::Text { text, .. } if text == "inner 10-0"));
+        let outer_text = engine.next_output().expect("outer text");
+        assert!(matches!(outer_text, EngineOutput::Text { text, .. } if text == "outer 1-0"));
     }
 }

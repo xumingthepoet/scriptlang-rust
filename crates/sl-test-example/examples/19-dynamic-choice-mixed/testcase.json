@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "sl-tool-case",
+  "entryScript": "main",
+  "actions": [
+    { "kind": "choose", "index": 1 }
+  ],
+  "expectedEvents": [
+    { "kind": "choices", "promptText": "Pick", "choices": ["Static", "D-3-1", "Tail"] },
+    { "kind": "text", "text": "D 3/1" },
+    { "kind": "end" }
+  ]
+}

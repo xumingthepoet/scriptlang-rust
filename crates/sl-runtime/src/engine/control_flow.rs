@@ -75,14 +75,17 @@ impl ScriptLangEngine {
 
             let (_, group) = self.lookup_group(&frame.group_id)?;
             let choice_node_index = frame.node_index - 1;
-            let Some(ScriptNode::Choice { options, .. }) = group.nodes.get(choice_node_index)
+            let Some(ScriptNode::Choice { entries, .. }) = group.nodes.get(choice_node_index)
             else {
                 continue;
             };
 
-            let option_group_ids = options
+            let option_group_ids = entries
                 .iter()
-                .map(|option| option.group_id.clone())
+                .map(|entry| match entry {
+                    ChoiceEntry::Static { option } => option.group_id.clone(),
+                    ChoiceEntry::Dynamic { block } => block.template.group_id.clone(),
+                })
                 .collect::<BTreeSet<_>>();
 
             let has_deep_option_frame = (frame_index + 1..self.frames.len())
@@ -206,5 +209,31 @@ mod control_flow_tests {
             .find_choice_continue_context()
             .expect("context lookup should not fail");
         assert!(context.is_none());
+    }
+
+    #[test]
+    pub(super) fn choice_continue_context_tracks_dynamic_option_groups() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="arr" type="int[]">[1]</var>
+      <choice text="Pick">
+        <dynamic-options array="arr" item="it">
+          <option text="${it}">
+            <continue/>
+          </option>
+        </dynamic-options>
+      </choice>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+        let _ = engine.next_output().expect("choice");
+        engine.choose(0).expect("choose dynamic");
+        let context = engine
+            .find_choice_continue_context()
+            .expect("context lookup should pass");
+        assert!(context.is_some());
     }
 }

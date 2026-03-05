@@ -5,10 +5,10 @@ pub(crate) use std::sync::OnceLock;
 pub(crate) use regex::Regex;
 pub(crate) use serde_json::Value as JsonValue;
 pub(crate) use sl_core::{
-    default_value_from_type, CallArgument, ChoiceOption, CompiledProjectArtifact, ContinueTarget,
-    DefsGlobalVarDecl, FunctionDecl, FunctionParam, FunctionReturn, ImplicitGroup, ScriptIr,
-    ScriptLangError, ScriptNode, ScriptParam, ScriptType, SlValue, SourceSpan, VarDeclaration,
-    COMPILED_PROJECT_SCHEMA,
+    default_value_from_type, CallArgument, ChoiceEntry, ChoiceOption, CompiledProjectArtifact,
+    ContinueTarget, DefsGlobalVarDecl, DynamicChoiceBlock, DynamicChoiceTemplate, FunctionDecl,
+    FunctionParam, FunctionReturn, ImplicitGroup, ScriptIr, ScriptLangError, ScriptNode,
+    ScriptParam, ScriptType, SlValue, SourceSpan, VarDeclaration, COMPILED_PROJECT_SCHEMA,
 };
 pub(crate) use sl_parser::{
     parse_include_directives, parse_xml_document, XmlElementNode, XmlNode, XmlTextNode,

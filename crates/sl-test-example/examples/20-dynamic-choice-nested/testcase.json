@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "sl-tool-case",
+  "entryScript": "main",
+  "actions": [
+    { "kind": "choose", "index": 0 },
+    { "kind": "choose", "index": 0 }
+  ],
+  "expectedEvents": [
+    { "kind": "choices", "promptText": "Outer", "choices": ["1-0"] },
+    { "kind": "choices", "promptText": "Inner", "choices": ["10-0"] },
+    { "kind": "text", "text": "inner 10-0" },
+    { "kind": "text", "text": "outer 1-0" },
+    { "kind": "end" }
+  ]
+}
