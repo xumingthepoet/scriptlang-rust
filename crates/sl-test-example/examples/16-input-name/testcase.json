@@ -1,5 +1,5 @@
 {
-  "schemaVersion": "sl-tool-case.v1",
+  "schemaVersion": "sl-tool-case",
   "entryScript": "main",
   "actions": [
     { "kind": "input", "text": "" },

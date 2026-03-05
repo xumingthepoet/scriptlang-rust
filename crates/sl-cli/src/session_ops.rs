@@ -10,7 +10,7 @@ use sl_api::{
 
 use crate::{
     emit_boundary, load_player_state, load_source_by_ref, save_player_state, BoundaryEvent,
-    BoundaryResult, LoadedScenario, PlayerRandomMode, PlayerStateV4, PLAYER_STATE_SCHEMA,
+    BoundaryResult, LoadedScenario, PlayerRandomMode, PlayerState, PLAYER_STATE_SCHEMA,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -70,7 +70,7 @@ pub(crate) fn create_engine_for_scenario(
 
 pub(crate) fn resume_engine_for_state(
     scenario: &LoadedScenario,
-    state: &PlayerStateV4,
+    state: &PlayerState,
     rand_override: Option<Vec<u32>>,
 ) -> Result<sl_api::ScriptLangEngine, ScriptLangError> {
     let (random_sequence, random_sequence_index) = if let Some(sequence) = rand_override {
@@ -110,7 +110,7 @@ pub(crate) fn save_engine_state(
             }
         };
 
-    let state = PlayerStateV4 {
+    let state = PlayerState {
         schema_version: PLAYER_STATE_SCHEMA.to_string(),
         scenario_id: scenario_id.to_string(),
         compiler_version: compiler_version.to_string(),
@@ -125,7 +125,7 @@ pub(crate) fn save_engine_state(
 
 pub(crate) fn load_engine_from_state_for_ref(
     path: &Path,
-) -> Result<(LoadedScenario, PlayerStateV4, sl_api::ScriptLangEngine), ScriptLangError> {
+) -> Result<(LoadedScenario, PlayerState, sl_api::ScriptLangEngine), ScriptLangError> {
     let state = load_player_state(path)?;
     let scenario = load_source_by_ref(&state.scenario_id)?;
     let engine = resume_engine_for_state(&scenario, &state, None)?;
@@ -135,7 +135,7 @@ pub(crate) fn load_engine_from_state_for_ref(
 pub(crate) fn load_engine_from_state_for_scenario(
     path: &Path,
     scenario: &LoadedScenario,
-) -> Result<(PlayerStateV4, sl_api::ScriptLangEngine), ScriptLangError> {
+) -> Result<(PlayerState, sl_api::ScriptLangEngine), ScriptLangError> {
     let state = load_player_state(path)?;
     if state.scenario_id != scenario.id {
         return Err(ScriptLangError::new(

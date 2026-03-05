@@ -7,11 +7,11 @@ This workspace uses `sl-test-example` to validate all examples under `crates/sl-
 - Runner API: `sl_test_example::run_case(...)` and `sl_test_example::assert_case(...)`
 - Integration tests: `crates/sl-test-example/tests/*_it.rs`
 
-## Case Schema (`sl-tool-case.v1`)
+## Case Schema (`sl-tool-case`)
 
 ```json
 {
-  "schemaVersion": "sl-tool-case.v1",
+  "schemaVersion": "sl-tool-case",
   "entryScript": "main",
   "actions": [
     { "kind": "choose", "index": 0 },

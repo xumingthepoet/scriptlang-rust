@@ -3,12 +3,12 @@ use std::path::Path;
 
 use crate::*;
 
-pub const DEFAULT_COMPILER_VERSION: &str = "player.v1";
+pub const DEFAULT_COMPILER_VERSION: &str = "player";
 
 pub fn compile_artifact_from_xml_map(
     xml_by_path: &BTreeMap<String, String>,
     entry_script: Option<String>,
-) -> Result<CompiledProjectArtifactV1, ScriptLangError> {
+) -> Result<CompiledProjectArtifact, ScriptLangError> {
     let CompileProjectBundleResult {
         scripts,
         global_json,
@@ -18,8 +18,8 @@ pub fn compile_artifact_from_xml_map(
 
     let entry_script = resolve_entry_script(&scripts, entry_script)?;
 
-    Ok(CompiledProjectArtifactV1 {
-        schema_version: COMPILED_PROJECT_SCHEMA_V1.to_string(),
+    Ok(CompiledProjectArtifact {
+        schema_version: COMPILED_PROJECT_SCHEMA.to_string(),
         compiler_version: DEFAULT_COMPILER_VERSION.to_string(),
         entry_script,
         scripts,
@@ -31,14 +31,14 @@ pub fn compile_artifact_from_xml_map(
 
 pub fn write_artifact_json(
     path: &Path,
-    artifact: &CompiledProjectArtifactV1,
+    artifact: &CompiledProjectArtifact,
 ) -> Result<(), ScriptLangError> {
-    if artifact.schema_version != COMPILED_PROJECT_SCHEMA_V1 {
+    if artifact.schema_version != COMPILED_PROJECT_SCHEMA {
         return Err(ScriptLangError::new(
             "ARTIFACT_SCHEMA_UNSUPPORTED",
             format!(
                 "Unsupported compiled artifact schema \"{}\", expected \"{}\".",
-                artifact.schema_version, COMPILED_PROJECT_SCHEMA_V1
+                artifact.schema_version, COMPILED_PROJECT_SCHEMA
             ),
         ));
     }
@@ -49,18 +49,18 @@ pub fn write_artifact_json(
         .map_err(|error| ScriptLangError::new("ARTIFACT_IO_ERROR", error.to_string()))
 }
 
-pub fn read_artifact_json(path: &Path) -> Result<CompiledProjectArtifactV1, ScriptLangError> {
+pub fn read_artifact_json(path: &Path) -> Result<CompiledProjectArtifact, ScriptLangError> {
     let raw = fs::read_to_string(path)
         .map_err(|error| ScriptLangError::new("ARTIFACT_IO_ERROR", error.to_string()))?;
-    let artifact: CompiledProjectArtifactV1 = serde_json::from_str(&raw)
+    let artifact: CompiledProjectArtifact = serde_json::from_str(&raw)
         .map_err(|error| ScriptLangError::new("ARTIFACT_PARSE_ERROR", error.to_string()))?;
 
-    if artifact.schema_version != COMPILED_PROJECT_SCHEMA_V1 {
+    if artifact.schema_version != COMPILED_PROJECT_SCHEMA {
         return Err(ScriptLangError::new(
             "ARTIFACT_SCHEMA_UNSUPPORTED",
             format!(
                 "Unsupported compiled artifact schema \"{}\", expected \"{}\".",
-                artifact.schema_version, COMPILED_PROJECT_SCHEMA_V1
+                artifact.schema_version, COMPILED_PROJECT_SCHEMA
             ),
         ));
     }
@@ -114,7 +114,7 @@ mod artifact_tests {
         )]);
 
         let artifact = compile_artifact_from_xml_map(&files, None).expect("compile artifact");
-        assert_eq!(artifact.schema_version, COMPILED_PROJECT_SCHEMA_V1);
+        assert_eq!(artifact.schema_version, COMPILED_PROJECT_SCHEMA);
         assert_eq!(artifact.compiler_version, DEFAULT_COMPILER_VERSION);
         assert_eq!(artifact.entry_script, "main");
         assert!(artifact.scripts.contains_key("main"));
@@ -219,7 +219,7 @@ mod artifact_tests {
             &schema_path,
             r#"{
   "schemaVersion": "compiled-project.v0",
-  "compilerVersion": "player.v1",
+  "compilerVersion": "player",
   "entryScript": "main",
   "scripts": {},
   "globalJson": {},

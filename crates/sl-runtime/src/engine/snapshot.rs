@@ -1,8 +1,11 @@
-use super::lifecycle::{CompletionKind, PendingBoundary, RuntimeFrame, RuntimeRandomState};
+use super::lifecycle::{
+    CompletionKind, PendingBoundary as RuntimePendingBoundary, RuntimeFrame, RuntimeRandomState,
+};
 use super::*;
+use sl_core::PendingBoundary as SnapshotPendingBoundary;
 
 impl ScriptLangEngine {
-    pub fn snapshot(&self) -> Result<SnapshotV3, ScriptLangError> {
+    pub fn snapshot(&self) -> Result<Snapshot, ScriptLangError> {
         let Some(boundary) = &self.pending_boundary else {
             return Err(ScriptLangError::new(
                 "SNAPSHOT_NOT_ALLOWED",
@@ -13,7 +16,7 @@ impl ScriptLangEngine {
         let runtime_frames = self
             .frames
             .iter()
-            .map(|frame| SnapshotFrameV3 {
+            .map(|frame| SnapshotFrame {
                 frame_id: frame.frame_id,
                 group_id: frame.group_id.clone(),
                 node_index: frame.node_index,
@@ -30,23 +33,23 @@ impl ScriptLangEngine {
             .collect::<Vec<_>>();
 
         let pending_boundary = match boundary {
-            PendingBoundary::Choice {
+            RuntimePendingBoundary::Choice {
                 node_id,
                 options,
                 prompt_text,
                 ..
-            } => PendingBoundaryV3::Choice {
+            } => SnapshotPendingBoundary::Choice {
                 node_id: node_id.clone(),
                 items: options.clone(),
                 prompt_text: prompt_text.clone(),
             },
-            PendingBoundary::Input {
+            RuntimePendingBoundary::Input {
                 node_id,
                 target_var,
                 prompt_text,
                 default_text,
                 ..
-            } => PendingBoundaryV3::Input {
+            } => SnapshotPendingBoundary::Input {
                 node_id: node_id.clone(),
                 target_var: target_var.clone(),
                 prompt_text: prompt_text.clone(),
@@ -64,8 +67,8 @@ impl ScriptLangEngine {
             })
             .collect();
 
-        Ok(SnapshotV3 {
-            schema_version: SNAPSHOT_SCHEMA_V3.to_string(),
+        Ok(Snapshot {
+            schema_version: SNAPSHOT_SCHEMA.to_string(),
             compiler_version: self.compiler_version.clone(),
             runtime_frames,
             rng_state: self.current_seeded_rng_state(),
@@ -75,8 +78,8 @@ impl ScriptLangEngine {
         })
     }
 
-    pub fn resume(&mut self, snapshot: SnapshotV3) -> Result<(), ScriptLangError> {
-        if snapshot.schema_version != SNAPSHOT_SCHEMA_V3 {
+    pub fn resume(&mut self, snapshot: Snapshot) -> Result<(), ScriptLangError> {
+        if snapshot.schema_version != SNAPSHOT_SCHEMA {
             return Err(ScriptLangError::new(
                 "SNAPSHOT_SCHEMA",
                 format!(
@@ -188,7 +191,7 @@ impl ScriptLangEngine {
         };
 
         self.pending_boundary = Some(match snapshot.pending_boundary {
-            PendingBoundaryV3::Choice {
+            SnapshotPendingBoundary::Choice {
                 node_id,
                 items,
                 prompt_text,
@@ -206,14 +209,14 @@ impl ScriptLangEngine {
                     ));
                 }
                 self.waiting_choice = true;
-                PendingBoundary::Choice {
+                RuntimePendingBoundary::Choice {
                     frame_id: top.frame_id,
                     node_id,
                     options: items,
                     prompt_text,
                 }
             }
-            PendingBoundaryV3::Input {
+            SnapshotPendingBoundary::Input {
                 node_id,
                 target_var,
                 prompt_text,
@@ -232,7 +235,7 @@ impl ScriptLangEngine {
                     ));
                 }
                 self.waiting_choice = false;
-                PendingBoundary::Input {
+                RuntimePendingBoundary::Input {
                     frame_id: top.frame_id,
                     node_id,
                     target_var,
@@ -429,9 +432,9 @@ mod snapshot_tests {
         let mut snapshot = engine.snapshot().expect("snapshot");
         assert!(matches!(
             snapshot.pending_boundary,
-            PendingBoundaryV3::Choice { .. }
+            PendingBoundary::Choice { .. }
         ));
-        snapshot.pending_boundary = PendingBoundaryV3::Choice {
+        snapshot.pending_boundary = PendingBoundary::Choice {
             node_id: "invalid-node-id".to_string(),
             items: Vec::new(),
             prompt_text: None,
@@ -509,14 +512,14 @@ mod snapshot_tests {
         let mut choice_on_input = input_snapshot.clone();
         assert!(matches!(
             choice_on_input.pending_boundary,
-            PendingBoundaryV3::Input { .. }
+            PendingBoundary::Input { .. }
         ));
         let mut input_node_id = None;
-        if let PendingBoundaryV3::Input { node_id, .. } = &choice_on_input.pending_boundary {
+        if let PendingBoundary::Input { node_id, .. } = &choice_on_input.pending_boundary {
             input_node_id = Some(node_id.clone());
         }
         let input_node_id = input_node_id.expect("snapshot should contain input boundary");
-        choice_on_input.pending_boundary = PendingBoundaryV3::Choice {
+        choice_on_input.pending_boundary = PendingBoundary::Choice {
             node_id: input_node_id,
             items: Vec::new(),
             prompt_text: None,
@@ -552,14 +555,14 @@ mod snapshot_tests {
         let mut input_on_choice = choice_snapshot.clone();
         assert!(matches!(
             input_on_choice.pending_boundary,
-            PendingBoundaryV3::Choice { .. }
+            PendingBoundary::Choice { .. }
         ));
         let mut choice_node_id = None;
-        if let PendingBoundaryV3::Choice { node_id, .. } = &input_on_choice.pending_boundary {
+        if let PendingBoundary::Choice { node_id, .. } = &input_on_choice.pending_boundary {
             choice_node_id = Some(node_id.clone());
         }
         let choice_node_id = choice_node_id.expect("snapshot should contain choice boundary");
-        input_on_choice.pending_boundary = PendingBoundaryV3::Input {
+        input_on_choice.pending_boundary = PendingBoundary::Input {
             node_id: choice_node_id,
             target_var: "name".to_string(),
             prompt_text: "p".to_string(),
@@ -583,9 +586,9 @@ mod snapshot_tests {
         let mut input_mismatch = input_snapshot.clone();
         assert!(matches!(
             input_mismatch.pending_boundary,
-            PendingBoundaryV3::Input { .. }
+            PendingBoundary::Input { .. }
         ));
-        input_mismatch.pending_boundary = PendingBoundaryV3::Input {
+        input_mismatch.pending_boundary = PendingBoundary::Input {
             node_id: "missing-input-node".to_string(),
             target_var: "name".to_string(),
             prompt_text: "name?".to_string(),
@@ -605,7 +608,7 @@ mod snapshot_tests {
             .expect_err("input node mismatch should fail");
         assert_eq!(error.code, "SNAPSHOT_PENDING_BOUNDARY");
 
-        let pending = PendingBoundary::Input {
+        let pending = RuntimePendingBoundary::Input {
             frame_id: 1,
             node_id: "n".to_string(),
             target_var: "name".to_string(),

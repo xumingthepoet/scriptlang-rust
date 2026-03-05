@@ -4,7 +4,7 @@ use std::path::Path;
 
 use walkdir::WalkDir;
 
-use crate::{SlTestExampleError, TestCase, TESTCASE_SCHEMA_V1};
+use crate::{SlTestExampleError, TestCase, TESTCASE_SCHEMA};
 
 pub fn read_scripts_xml_from_dir(
     example_dir: &Path,
@@ -62,9 +62,9 @@ pub fn read_test_case(case_path: &Path) -> Result<TestCase, SlTestExampleError> 
             source,
         })?;
 
-    if parsed.schema_version != TESTCASE_SCHEMA_V1 {
+    if parsed.schema_version != TESTCASE_SCHEMA {
         return Err(SlTestExampleError::InvalidSchemaVersion {
-            expected: TESTCASE_SCHEMA_V1.to_string(),
+            expected: TESTCASE_SCHEMA.to_string(),
             found: parsed.schema_version,
         });
     }
@@ -159,7 +159,7 @@ mod source_tests {
         write_file(
             &case_path,
             r#"{
-  "schemaVersion":"sl-tool-case.v1",
+  "schemaVersion":"sl-tool-case",
   "entryScript":"main",
   "actions":[],
   "expectedEvents":[{"kind":"end"}]
@@ -167,7 +167,7 @@ mod source_tests {
         );
 
         let parsed = read_test_case(&case_path).expect("case should parse");
-        assert_eq!(parsed.schema_version, TESTCASE_SCHEMA_V1);
+        assert_eq!(parsed.schema_version, TESTCASE_SCHEMA);
         assert_eq!(parsed.entry_script, "main");
         assert_eq!(parsed.expected_events.len(), 1);
     }

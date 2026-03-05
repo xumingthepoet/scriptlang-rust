@@ -29,7 +29,7 @@
 
 ### 2.3 快照
 
-- `SnapshotV3`（来自 `sl-core`）：
+- `Snapshot`（来自 `sl-core`）：
   - 包含运行帧、随机数状态、待处理边界（choice/input）和 once 状态。
   - `snapshot()` 仅允许在等待 choice/input 边界时调用。
 
@@ -41,8 +41,8 @@
 
 ### 2.5 编译产物
 
-- `CompiledProjectArtifactV1`（来自 `sl-core`）：
-  - `schemaVersion` 固定为 `compiled-project.v1`
+- `CompiledProjectArtifact`（来自 `sl-core`）：
+  - `schemaVersion` 固定为 `compiled-project`
   - 包含 `entryScript / scripts / globalJson / defsGlobalDeclarations / defsGlobalInitOrder`
   - 可作为“离线编译后运行”的稳定输入
 
@@ -52,8 +52,8 @@
 
 推荐把宿主流程固定为两步：
 
-1. `XML/JSON/DEFS -> CompiledProjectArtifactV1`
-2. `CompiledProjectArtifactV1 -> Engine start/resume`
+1. `XML/JSON/DEFS -> CompiledProjectArtifact`
+2. `CompiledProjectArtifact -> Engine start/resume`
 
 这样可以在“运行前”尽早暴露编译错误，并支持产物缓存、分发和复用。
 
@@ -125,7 +125,7 @@ let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
     random_seed: Some(1),
     random_sequence: None,
     random_sequence_index: None,
-    compiler_version: Some("player.v1".to_string()),
+    compiler_version: Some("player".to_string()),
 })?;
 
 assert!(matches!(engine.next_output()?, EngineOutput::Text { .. }));
@@ -168,7 +168,7 @@ let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
     entry_args: None,
     host_functions: None,
     random_seed: Some(1),
-    compiler_version: Some("player.v1".to_string()),
+    compiler_version: Some("player".to_string()),
 })?;
 
 assert!(matches!(engine.next_output()?, EngineOutput::Choices { .. }));
@@ -180,7 +180,7 @@ let mut resumed = resume_engine_from_xml(ResumeEngineFromXmlOptions {
     host_functions: None,
     random_sequence: None,
     random_sequence_index: None,
-    compiler_version: Some("player.v1".to_string()),
+    compiler_version: Some("player".to_string()),
 })?;
 resumed.choose(0)?;
 assert!(matches!(resumed.next_output()?, EngineOutput::Text { .. }));
@@ -189,19 +189,19 @@ assert!(matches!(resumed.next_output()?, EngineOutput::Text { .. }));
 
 ## 3.5 `compile_artifact_from_xml_map`
 
-编译并返回 `CompiledProjectArtifactV1`，用于把编译与运行拆成两段。
+编译并返回 `CompiledProjectArtifact`，用于把编译与运行拆成两段。
 
 ```rust
 use std::collections::BTreeMap;
 use sl_api::compile_artifact_from_xml_map;
-use sl_core::COMPILED_PROJECT_SCHEMA_V1;
+use sl_core::COMPILED_PROJECT_SCHEMA;
 
 let files = BTreeMap::from([
     ("main.script.xml".to_string(), r#"<script name="main"><text>Hello</text></script>"#.to_string())
 ]);
 
 let artifact = compile_artifact_from_xml_map(&files, None)?;
-assert_eq!(artifact.schema_version, COMPILED_PROJECT_SCHEMA_V1);
+assert_eq!(artifact.schema_version, COMPILED_PROJECT_SCHEMA);
 # Ok::<(), sl_core::ScriptLangError>(())
 ```
 

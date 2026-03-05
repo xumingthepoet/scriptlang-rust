@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use sl_api::SnapshotV3;
+use sl_api::Snapshot;
 
-pub(crate) const PLAYER_STATE_SCHEMA: &str = "player-state.v4";
+pub(crate) const PLAYER_STATE_SCHEMA: &str = "player-state";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -22,11 +22,11 @@ pub(crate) struct LoadedScenario {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct PlayerStateV4 {
+pub(crate) struct PlayerState {
     pub(crate) schema_version: String,
     pub(crate) scenario_id: String,
     pub(crate) compiler_version: String,
-    pub(crate) snapshot: SnapshotV3,
+    pub(crate) snapshot: Snapshot,
     pub(crate) random_mode: PlayerRandomMode,
     pub(crate) random_seed_state: Option<u32>,
     #[serde(default)]

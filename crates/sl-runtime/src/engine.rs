@@ -24,8 +24,8 @@ use rng::next_random_bounded;
 use rng::{next_random_bounded_with, next_random_u32};
 use sl_core::{
     default_value_from_type, is_type_compatible, ChoiceItem, ContinuationFrame, ContinueTarget,
-    DefsGlobalVarDecl, EngineOutput, PendingBoundaryV3, ScriptIr, ScriptLangError, ScriptNode,
-    ScriptType, SlValue, SnapshotCompletion, SnapshotFrameV3, SnapshotV3,
+    DefsGlobalVarDecl, EngineOutput, PendingBoundary, ScriptIr, ScriptLangError, ScriptNode,
+    ScriptType, SlValue, Snapshot, SnapshotCompletion, SnapshotFrame,
 };
 
 mod boundary;
@@ -41,7 +41,7 @@ mod step;
 
 pub use lifecycle::{
     EmptyHostFunctionRegistry, HostFunctionRegistry, RandomStateView, ScriptLangEngine,
-    ScriptLangEngineOptions, DEFAULT_COMPILER_VERSION, SNAPSHOT_SCHEMA_V3,
+    ScriptLangEngineOptions, DEFAULT_COMPILER_VERSION, SNAPSHOT_SCHEMA,
 };
 
 #[cfg(test)]

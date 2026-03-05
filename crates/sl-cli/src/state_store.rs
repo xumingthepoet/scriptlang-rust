@@ -2,22 +2,13 @@ use std::fs;
 use std::path::Path;
 
 use sl_api::ScriptLangError;
-use sl_api::SnapshotV3;
 
 use crate::{
-    map_cli_state_invalid, map_cli_state_read, map_cli_state_write, PlayerRandomMode,
-    PlayerStateV4, PLAYER_STATE_SCHEMA,
+    map_cli_state_invalid, map_cli_state_read, map_cli_state_write, PlayerState,
+    PLAYER_STATE_SCHEMA,
 };
 
-#[derive(Debug, Clone, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PlayerStateLegacyV3 {
-    scenario_id: String,
-    compiler_version: String,
-    snapshot: SnapshotV3,
-}
-
-pub(crate) fn save_player_state(path: &Path, state: &PlayerStateV4) -> Result<(), ScriptLangError> {
+pub(crate) fn save_player_state(path: &Path, state: &PlayerState) -> Result<(), ScriptLangError> {
     let parent = match path.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
@@ -28,7 +19,7 @@ pub(crate) fn save_player_state(path: &Path, state: &PlayerStateV4) -> Result<()
     fs::write(path, payload).map_err(map_cli_state_write)
 }
 
-pub(crate) fn load_player_state(path: &Path) -> Result<PlayerStateV4, ScriptLangError> {
+pub(crate) fn load_player_state(path: &Path) -> Result<PlayerState, ScriptLangError> {
     if !path.exists() {
         return Err(ScriptLangError::new(
             "CLI_STATE_NOT_FOUND",
@@ -45,23 +36,8 @@ pub(crate) fn load_player_state(path: &Path) -> Result<PlayerStateV4, ScriptLang
         .ok_or_else(|| ScriptLangError::new("CLI_STATE_SCHEMA", "Missing state schemaVersion."))?;
 
     if schema_version == PLAYER_STATE_SCHEMA {
-        let state: PlayerStateV4 = serde_json::from_value(value).map_err(map_cli_state_invalid)?;
+        let state: PlayerState = serde_json::from_value(value).map_err(map_cli_state_invalid)?;
         return Ok(state);
-    }
-
-    if schema_version == "player-state.v3" {
-        let legacy: PlayerStateLegacyV3 =
-            serde_json::from_value(value).map_err(map_cli_state_invalid)?;
-        return Ok(PlayerStateV4 {
-            schema_version: PLAYER_STATE_SCHEMA.to_string(),
-            scenario_id: legacy.scenario_id,
-            compiler_version: legacy.compiler_version,
-            snapshot: legacy.snapshot.clone(),
-            random_mode: PlayerRandomMode::Seeded,
-            random_seed_state: Some(legacy.snapshot.rng_state),
-            random_sequence: Vec::new(),
-            random_sequence_index: None,
-        });
     }
 
     Err(ScriptLangError::new(
@@ -74,6 +50,8 @@ pub(crate) fn load_player_state(path: &Path) -> Result<PlayerStateV4, ScriptLang
 mod state_store_tests {
     use super::*;
     use crate::cli_test_support::*;
+    use crate::PlayerRandomMode;
+    use sl_api::Snapshot;
     use sl_api::DEFAULT_COMPILER_VERSION;
     use std::collections::BTreeMap;
     use std::fs;
@@ -82,16 +60,16 @@ mod state_store_tests {
     #[test]
     fn save_and_load_player_state_roundtrip_and_schema_validation() {
         let state_path = temp_path("player-state.json");
-        let state = PlayerStateV4 {
+        let state = PlayerState {
             schema_version: PLAYER_STATE_SCHEMA.to_string(),
             scenario_id: "scripts-dir:/tmp/demo".to_string(),
             compiler_version: DEFAULT_COMPILER_VERSION.to_string(),
-            snapshot: SnapshotV3 {
-                schema_version: "snapshot.v3".to_string(),
+            snapshot: Snapshot {
+                schema_version: "snapshot".to_string(),
                 compiler_version: DEFAULT_COMPILER_VERSION.to_string(),
                 runtime_frames: Vec::new(),
                 rng_state: 1,
-                pending_boundary: sl_api::PendingBoundaryV3::Choice {
+                pending_boundary: sl_api::PendingBoundary::Choice {
                     node_id: "n1".to_string(),
                     items: Vec::new(),
                     prompt_text: None,
@@ -129,27 +107,13 @@ mod state_store_tests {
             save_player_state(Path::new("/"), &state).expect_err("writing root should fail");
         assert_eq!(write_root_error.code, "CLI_STATE_WRITE");
 
-        let v3_path = temp_path("legacy-player-state-v3.json");
+        let missing_schema_path = temp_path("missing-player-state-schema.json");
         write_file(
-            &v3_path,
-            r#"{
-  "schemaVersion":"player-state.v3",
-  "scenarioId":"scripts-dir:/tmp/legacy",
-  "compilerVersion":"player.v1",
-  "snapshot":{
-    "schemaVersion":"snapshot.v3",
-    "compilerVersion":"player.v1",
-    "runtimeFrames":[],
-    "rngState":7,
-    "pendingBoundary":{"kind":"Choice","nodeId":"n1","items":[],"promptText":null},
-    "defsGlobals":{},
-    "onceStateByScript":{}
-  }
-}"#,
+            &missing_schema_path,
+            r#"{"scenarioId":"scripts-dir:/tmp/legacy"}"#,
         );
-        let loaded_v3 = load_player_state(&v3_path).expect("legacy v3 should be accepted");
-        assert_eq!(loaded_v3.schema_version, PLAYER_STATE_SCHEMA);
-        assert_eq!(loaded_v3.random_mode, PlayerRandomMode::Seeded);
-        assert_eq!(loaded_v3.random_seed_state, Some(7));
+        let missing_schema_error =
+            load_player_state(&missing_schema_path).expect_err("missing schema should fail");
+        assert_eq!(missing_schema_error.code, "CLI_STATE_SCHEMA");
     }
 }

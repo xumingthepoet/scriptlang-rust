@@ -180,7 +180,7 @@ mod runner_tests {
 
     fn simple_case(expected_events: Vec<ExpectedEvent>) -> TestCase {
         TestCase {
-            schema_version: crate::TESTCASE_SCHEMA_V1.to_string(),
+            schema_version: crate::TESTCASE_SCHEMA.to_string(),
             entry_script: "main".to_string(),
             actions: Vec::new(),
             expected_events,
@@ -225,7 +225,7 @@ mod runner_tests {
         );
 
         let case = TestCase {
-            schema_version: crate::TESTCASE_SCHEMA_V1.to_string(),
+            schema_version: crate::TESTCASE_SCHEMA.to_string(),
             entry_script: "main".to_string(),
             actions: vec![
                 TestAction::Choose { index: 0 },
@@ -272,7 +272,7 @@ mod runner_tests {
         );
 
         let missing = TestCase {
-            schema_version: crate::TESTCASE_SCHEMA_V1.to_string(),
+            schema_version: crate::TESTCASE_SCHEMA.to_string(),
             entry_script: "main".to_string(),
             actions: vec![],
             expected_events: vec![],
@@ -284,7 +284,7 @@ mod runner_tests {
         ));
 
         let wrong_kind = TestCase {
-            schema_version: crate::TESTCASE_SCHEMA_V1.to_string(),
+            schema_version: crate::TESTCASE_SCHEMA.to_string(),
             entry_script: "main".to_string(),
             actions: vec![TestAction::Input {
                 text: "x".to_string(),
@@ -309,7 +309,7 @@ mod runner_tests {
         );
 
         let missing_input = TestCase {
-            schema_version: crate::TESTCASE_SCHEMA_V1.to_string(),
+            schema_version: crate::TESTCASE_SCHEMA.to_string(),
             entry_script: "main".to_string(),
             actions: vec![],
             expected_events: vec![],
@@ -322,7 +322,7 @@ mod runner_tests {
         ));
 
         let wrong_input_kind = TestCase {
-            schema_version: crate::TESTCASE_SCHEMA_V1.to_string(),
+            schema_version: crate::TESTCASE_SCHEMA.to_string(),
             entry_script: "main".to_string(),
             actions: vec![TestAction::Choose { index: 0 }],
             expected_events: vec![],
@@ -343,7 +343,7 @@ mod runner_tests {
             r#"<script name="main"><text>x</text></script>"#,
         );
         let unused_case = TestCase {
-            schema_version: crate::TESTCASE_SCHEMA_V1.to_string(),
+            schema_version: crate::TESTCASE_SCHEMA.to_string(),
             entry_script: "main".to_string(),
             actions: vec![TestAction::Input {
                 text: "x".to_string(),
@@ -369,7 +369,7 @@ mod runner_tests {
 "#,
         );
         let bad_choose_case = TestCase {
-            schema_version: crate::TESTCASE_SCHEMA_V1.to_string(),
+            schema_version: crate::TESTCASE_SCHEMA.to_string(),
             entry_script: "main".to_string(),
             actions: vec![TestAction::Choose { index: 99 }],
             expected_events: vec![],
@@ -413,7 +413,7 @@ mod runner_tests {
         write_file(
             &count_case,
             r#"{
-  "schemaVersion":"sl-tool-case.v1",
+  "schemaVersion":"sl-tool-case",
   "actions":[],
   "expectedEvents":[{"kind":"end"}]
 }"#,
@@ -428,7 +428,7 @@ mod runner_tests {
         write_file(
             &value_case,
             r#"{
-  "schemaVersion":"sl-tool-case.v1",
+  "schemaVersion":"sl-tool-case",
   "actions":[],
   "expectedEvents":[{"kind":"text","text":"Wrong"},{"kind":"end"}]
 }"#,
@@ -453,7 +453,7 @@ mod runner_tests {
         write_file(
             &case_path,
             r#"{
-  "schemaVersion":"sl-tool-case.v1",
+  "schemaVersion":"sl-tool-case",
   "actions":[],
   "expectedEvents":[{"kind":"text","text":"Hello"},{"kind":"end"}]
 }"#,

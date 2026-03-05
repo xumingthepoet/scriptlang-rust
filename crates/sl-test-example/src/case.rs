@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const TESTCASE_SCHEMA_V1: &str = "sl-tool-case.v1";
+pub const TESTCASE_SCHEMA: &str = "sl-tool-case";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -79,14 +79,14 @@ mod case_tests {
     fn testcase_deserialize_applies_defaults() {
         let parsed: TestCase = serde_json::from_str(
             r#"{
-  "schemaVersion": "sl-tool-case.v1",
+  "schemaVersion": "sl-tool-case",
   "actions": [],
   "expectedEvents": []
 }"#,
         )
         .expect("testcase should deserialize");
 
-        assert_eq!(parsed.schema_version, TESTCASE_SCHEMA_V1);
+        assert_eq!(parsed.schema_version, TESTCASE_SCHEMA);
         assert_eq!(parsed.entry_script, "main");
         assert!(parsed.actions.is_empty());
         assert!(parsed.expected_events.is_empty());

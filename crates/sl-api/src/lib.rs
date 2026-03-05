@@ -6,14 +6,12 @@ use sl_compiler::{
     compile_project_bundle_from_xml_map, compile_project_scripts_from_xml_map,
     CompileProjectBundleResult,
 };
-use sl_core::{CompileProjectResult, CompiledProjectArtifactV1};
+use sl_core::{CompileProjectResult, CompiledProjectArtifact};
 use sl_runtime::{HostFunctionRegistry, ScriptLangEngineOptions};
 
 pub use sl_compiler::write_artifact_json;
 pub use sl_compiler::DEFAULT_COMPILER_VERSION;
-pub use sl_core::{
-    ChoiceItem, EngineOutput, PendingBoundaryV3, ScriptLangError, SlValue, SnapshotV3,
-};
+pub use sl_core::{ChoiceItem, EngineOutput, PendingBoundary, ScriptLangError, SlValue, Snapshot};
 pub use sl_runtime::{RandomStateView, ScriptLangEngine};
 
 #[derive(Clone)]
@@ -30,7 +28,7 @@ pub struct CreateEngineFromXmlOptions {
 
 #[derive(Clone)]
 pub struct CreateEngineFromArtifactOptions {
-    pub artifact: CompiledProjectArtifactV1,
+    pub artifact: CompiledProjectArtifact,
     pub entry_args: Option<BTreeMap<String, SlValue>>,
     pub host_functions: Option<Arc<dyn HostFunctionRegistry>>,
     pub random_seed: Option<u32>,
@@ -42,7 +40,7 @@ pub struct CreateEngineFromArtifactOptions {
 #[derive(Clone)]
 pub struct ResumeEngineFromXmlOptions {
     pub scripts_xml: BTreeMap<String, String>,
-    pub snapshot: SnapshotV3,
+    pub snapshot: Snapshot,
     pub host_functions: Option<Arc<dyn HostFunctionRegistry>>,
     pub random_sequence: Option<Vec<u32>>,
     pub random_sequence_index: Option<usize>,
@@ -51,8 +49,8 @@ pub struct ResumeEngineFromXmlOptions {
 
 #[derive(Clone)]
 pub struct ResumeEngineFromArtifactOptions {
-    pub artifact: CompiledProjectArtifactV1,
-    pub snapshot: SnapshotV3,
+    pub artifact: CompiledProjectArtifact,
+    pub snapshot: Snapshot,
     pub host_functions: Option<Arc<dyn HostFunctionRegistry>>,
     pub random_sequence: Option<Vec<u32>>,
     pub random_sequence_index: Option<usize>,
@@ -90,7 +88,7 @@ pub fn compile_project_from_xml_map(
 pub fn compile_artifact_from_xml_map(
     xml_by_path: &BTreeMap<String, String>,
     entry_script: Option<String>,
-) -> Result<CompiledProjectArtifactV1, ScriptLangError> {
+) -> Result<CompiledProjectArtifact, ScriptLangError> {
     compile_compiled_artifact_from_xml_map(xml_by_path, entry_script)
 }
 
@@ -174,8 +172,8 @@ pub fn resume_engine_from_xml(
 ) -> Result<ScriptLangEngine, ScriptLangError> {
     let compiled = compile_project_bundle_from_xml_map(&options.scripts_xml)?;
     resume_engine_from_artifact(ResumeEngineFromArtifactOptions {
-        artifact: CompiledProjectArtifactV1 {
-            schema_version: sl_core::COMPILED_PROJECT_SCHEMA_V1.to_string(),
+        artifact: CompiledProjectArtifact {
+            schema_version: sl_core::COMPILED_PROJECT_SCHEMA.to_string(),
             compiler_version: sl_compiler::DEFAULT_COMPILER_VERSION.to_string(),
             entry_script: "main".to_string(),
             scripts: compiled.scripts,
@@ -337,7 +335,7 @@ mod tests {
             r#"<script name="main"><text>Main</text></script>"#,
         )]);
         let artifact = compile_artifact_from_xml_map(&scripts, None).expect("compile artifact");
-        assert_eq!(artifact.schema_version, sl_core::COMPILED_PROJECT_SCHEMA_V1);
+        assert_eq!(artifact.schema_version, sl_core::COMPILED_PROJECT_SCHEMA);
         assert_eq!(artifact.entry_script, "main");
     }
 
@@ -367,9 +365,9 @@ mod tests {
             EngineOutput::Choices { .. }
         ));
 
-        let bad_artifact = CompiledProjectArtifactV1 {
-            schema_version: sl_core::COMPILED_PROJECT_SCHEMA_V1.to_string(),
-            compiler_version: "player.v1".to_string(),
+        let bad_artifact = CompiledProjectArtifact {
+            schema_version: sl_core::COMPILED_PROJECT_SCHEMA.to_string(),
+            compiler_version: "player".to_string(),
             entry_script: "missing".to_string(),
             scripts: BTreeMap::new(),
             global_json: BTreeMap::new(),
@@ -455,7 +453,7 @@ mod tests {
             random_seed: Some(7),
             random_sequence: None,
             random_sequence_index: None,
-            compiler_version: Some("player.v1".to_string()),
+            compiler_version: Some("player".to_string()),
         })
         .expect("engine should build");
 
@@ -484,7 +482,7 @@ mod tests {
             random_seed: Some(7),
             random_sequence: Some(vec![12]),
             random_sequence_index: Some(0),
-            compiler_version: Some("player.v1".to_string()),
+            compiler_version: Some("player".to_string()),
         })
         .expect("engine should build");
 
@@ -523,7 +521,7 @@ mod tests {
             random_seed: Some(1),
             random_sequence: None,
             random_sequence_index: None,
-            compiler_version: Some("player.v1".to_string()),
+            compiler_version: Some("player".to_string()),
         })
         .expect("engine should build");
         let first = engine.next_output().expect("next should succeed");
@@ -536,7 +534,7 @@ mod tests {
             host_functions: None,
             random_sequence: None,
             random_sequence_index: None,
-            compiler_version: Some("player.v1".to_string()),
+            compiler_version: Some("player".to_string()),
         })
         .expect("resume should succeed");
         resumed.choose(0).expect("choose should succeed");
@@ -565,7 +563,7 @@ mod tests {
             random_seed: Some(1),
             random_sequence: None,
             random_sequence_index: None,
-            compiler_version: Some("player.v1".to_string()),
+            compiler_version: Some("player".to_string()),
         })
         .err()
         .expect("reserved host function should fail create");
@@ -579,7 +577,7 @@ mod tests {
             random_seed: Some(1),
             random_sequence: None,
             random_sequence_index: None,
-            compiler_version: Some("player.v1".to_string()),
+            compiler_version: Some("player".to_string()),
         })
         .expect("engine should build");
         let output = ok_engine.next_output().expect("choice output");
@@ -595,7 +593,7 @@ mod tests {
             host_functions: Some(Arc::new(ReservedRegistry)),
             random_sequence: None,
             random_sequence_index: None,
-            compiler_version: Some("player.v1".to_string()),
+            compiler_version: Some("player".to_string()),
         })
         .err()
         .expect("reserved host function should fail resume");

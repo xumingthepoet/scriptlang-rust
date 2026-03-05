@@ -2,7 +2,7 @@ mod case;
 mod runner;
 mod source;
 
-pub use case::{ExpectedEvent, TestAction, TestCase, TESTCASE_SCHEMA_V1};
+pub use case::{ExpectedEvent, TestAction, TestCase, TESTCASE_SCHEMA};
 pub use runner::{assert_case, run_case, RunReport};
 
 use std::path::PathBuf;

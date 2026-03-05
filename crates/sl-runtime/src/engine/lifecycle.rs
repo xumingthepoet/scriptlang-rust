@@ -1,7 +1,7 @@
 use super::*;
 
-pub const DEFAULT_COMPILER_VERSION: &str = "player.v1";
-pub const SNAPSHOT_SCHEMA_V3: &str = "snapshot.v3";
+pub const DEFAULT_COMPILER_VERSION: &str = "player";
+pub const SNAPSHOT_SCHEMA: &str = "snapshot";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RandomStateView {

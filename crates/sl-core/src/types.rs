@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::value::SlValue;
 
-pub const COMPILED_PROJECT_SCHEMA_V1: &str = "compiled-project.v1";
+pub const COMPILED_PROJECT_SCHEMA: &str = "compiled-project";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceLocation {
@@ -215,7 +215,7 @@ pub struct ContinuationFrame {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SnapshotFrameV3 {
+pub struct SnapshotFrame {
     pub frame_id: u64,
     pub group_id: String,
     pub node_index: usize,
@@ -247,7 +247,7 @@ pub struct ChoiceItem {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
-pub enum PendingBoundaryV3 {
+pub enum PendingBoundary {
     #[serde(rename_all = "camelCase")]
     Choice {
         node_id: String,
@@ -265,12 +265,12 @@ pub enum PendingBoundaryV3 {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SnapshotV3 {
+pub struct Snapshot {
     pub schema_version: String,
     pub compiler_version: String,
-    pub runtime_frames: Vec<SnapshotFrameV3>,
+    pub runtime_frames: Vec<SnapshotFrame>,
     pub rng_state: u32,
-    pub pending_boundary: PendingBoundaryV3,
+    pub pending_boundary: PendingBoundary,
     #[serde(default)]
     pub defs_globals: BTreeMap<String, SlValue>,
     pub once_state_by_script: BTreeMap<String, Vec<String>>,
@@ -304,7 +304,7 @@ pub struct CompileProjectResult {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CompiledProjectArtifactV1 {
+pub struct CompiledProjectArtifact {
     pub schema_version: String,
     pub compiler_version: String,
     pub entry_script: String,
@@ -329,14 +329,14 @@ mod tests {
 
     #[test]
     fn compiled_project_schema_constant_matches_v1() {
-        assert_eq!(COMPILED_PROJECT_SCHEMA_V1, "compiled-project.v1");
+        assert_eq!(COMPILED_PROJECT_SCHEMA, "compiled-project");
     }
 
     #[test]
     fn compiled_project_artifact_roundtrip_json() {
-        let artifact = CompiledProjectArtifactV1 {
-            schema_version: COMPILED_PROJECT_SCHEMA_V1.to_string(),
-            compiler_version: "player.v1".to_string(),
+        let artifact = CompiledProjectArtifact {
+            schema_version: COMPILED_PROJECT_SCHEMA.to_string(),
+            compiler_version: "player".to_string(),
             entry_script: "main".to_string(),
             scripts: BTreeMap::new(),
             global_json: BTreeMap::new(),
@@ -345,7 +345,7 @@ mod tests {
         };
 
         let encoded = serde_json::to_string(&artifact).expect("artifact serialize");
-        let decoded: CompiledProjectArtifactV1 =
+        let decoded: CompiledProjectArtifact =
             serde_json::from_str(&encoded).expect("artifact deserialize");
         assert_eq!(decoded, artifact);
     }
