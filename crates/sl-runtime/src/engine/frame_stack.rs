@@ -40,6 +40,7 @@ impl ScriptLangEngine {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn top_frame_id(&self) -> Result<u64, ScriptLangError> {
         self.frames
             .last()
@@ -174,6 +175,28 @@ mod frame_stack_tests {
     use super::runtime_test_support::*;
     use super::*;
 
+    fn output_kind(output: &EngineOutput) -> &'static str {
+        match output {
+            EngineOutput::Text { .. } => "text",
+            EngineOutput::Choices { .. } => "choices",
+            EngineOutput::Input { .. } => "input",
+            EngineOutput::End => "end",
+        }
+    }
+
+    fn choice_pending_parts(
+        pending: PendingBoundary,
+    ) -> Option<(Vec<super::lifecycle::PendingChoiceOption>, Option<String>)> {
+        match pending {
+            PendingBoundary::Choice {
+                options,
+                prompt_text,
+                ..
+            } => Some((options, prompt_text)),
+            PendingBoundary::Input { .. } => None,
+        }
+    }
+
     #[test]
     pub(super) fn internal_state_error_paths_are_covered() {
         let mut engine = engine_from_sources(map(&[(
@@ -189,23 +212,13 @@ mod frame_stack_tests {
 
         engine.start("main", None).expect("start");
         let first = engine.next_output().expect("choice");
-        assert!(matches!(first, EngineOutput::Choices { .. }));
+        assert_eq!(output_kind(&first), "choices");
         let pending = engine
             .pending_boundary
             .clone()
             .expect("pending choice boundary should exist");
-        assert!(matches!(pending, PendingBoundary::Choice { .. }));
-        let mut items = Vec::new();
-        let mut prompt_text = None;
-        if let PendingBoundary::Choice {
-            options,
-            prompt_text: pending_prompt_text,
-            ..
-        } = pending
-        {
-            items = options;
-            prompt_text = pending_prompt_text;
-        }
+        let (items, prompt_text) =
+            choice_pending_parts(pending).expect("pending boundary should be choice");
         assert!(!items.is_empty());
         let frame_id = engine.frames.last().expect("frame").frame_id;
         engine.pending_boundary = Some(PendingBoundary::Choice {
@@ -215,12 +228,33 @@ mod frame_stack_tests {
             prompt_text: prompt_text.clone(),
         });
         let again = engine.next_output().expect("pending boundary should echo");
-        assert!(matches!(again, EngineOutput::Choices { .. }));
+        assert_eq!(output_kind(&again), "choices");
+        assert_eq!(
+            output_kind(&EngineOutput::Text {
+                text: "x".to_string()
+            }),
+            "text"
+        );
+        assert_eq!(
+            output_kind(&EngineOutput::Input {
+                prompt_text: "p".to_string(),
+                default_text: "d".to_string()
+            }),
+            "input"
+        );
+        assert!(choice_pending_parts(PendingBoundary::Input {
+            frame_id: 1,
+            node_id: "n".to_string(),
+            target_var: "name".to_string(),
+            prompt_text: "p".to_string(),
+            default_text: "d".to_string(),
+        })
+        .is_none());
 
         engine.pending_boundary = None;
         engine.ended = true;
         let end = engine.next_output().expect("ended should return end");
-        assert!(matches!(end, EngineOutput::End));
+        assert_eq!(output_kind(&end), "end");
 
         engine.pending_boundary = Some(PendingBoundary::Choice {
             frame_id: 999_999,
@@ -264,5 +298,108 @@ mod frame_stack_tests {
             .find_current_root_frame_index()
             .expect_err("no root frame");
         assert_eq!(err.code, "ENGINE_ROOT_FRAME");
+    }
+
+    #[test]
+    pub(super) fn finish_frame_writes_back_ref_binding_on_success() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]));
+        let group_id = engine
+            .group_lookup
+            .keys()
+            .next()
+            .expect("group key")
+            .to_string();
+        let number_ty = ScriptType::Primitive {
+            name: "int".to_string(),
+        };
+        engine.frames = vec![
+            RuntimeFrame {
+                frame_id: 10,
+                group_id: group_id.clone(),
+                node_index: 0,
+                scope: BTreeMap::from([("dst".to_string(), SlValue::Number(0.0))]),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: None,
+                var_types: BTreeMap::from([("dst".to_string(), number_ty.clone())]),
+            },
+            RuntimeFrame {
+                frame_id: 11,
+                group_id,
+                node_index: 0,
+                scope: BTreeMap::from([("src".to_string(), SlValue::Number(9.0))]),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: Some(ContinuationFrame {
+                    resume_frame_id: 10,
+                    next_node_index: 3,
+                    ref_bindings: BTreeMap::from([("src".to_string(), "dst".to_string())]),
+                }),
+                var_types: BTreeMap::from([("src".to_string(), number_ty)]),
+            },
+        ];
+        engine
+            .finish_frame(11)
+            .expect("finish should write back ref value");
+        assert_eq!(engine.frames.len(), 1);
+        assert_eq!(engine.frames[0].node_index, 3);
+        assert_eq!(
+            engine.frames[0].scope.get("dst"),
+            Some(&SlValue::Number(9.0))
+        );
+
+        engine.frames = vec![
+            RuntimeFrame {
+                frame_id: 20,
+                group_id: engine
+                    .group_lookup
+                    .keys()
+                    .next()
+                    .expect("group key")
+                    .to_string(),
+                node_index: 0,
+                scope: BTreeMap::from([("dst".to_string(), SlValue::Number(0.0))]),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: None,
+                var_types: BTreeMap::from([(
+                    "dst".to_string(),
+                    ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                )]),
+            },
+            RuntimeFrame {
+                frame_id: 21,
+                group_id: engine
+                    .group_lookup
+                    .keys()
+                    .next()
+                    .expect("group key")
+                    .to_string(),
+                node_index: 0,
+                scope: BTreeMap::from([("src".to_string(), SlValue::Number(9.0))]),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: Some(ContinuationFrame {
+                    resume_frame_id: 20,
+                    next_node_index: 1,
+                    ref_bindings: BTreeMap::from([("src".to_string(), "dst.x".to_string())]),
+                }),
+                var_types: BTreeMap::from([(
+                    "src".to_string(),
+                    ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                )]),
+            },
+        ];
+        let error = engine
+            .finish_frame(21)
+            .expect_err("nested write into scalar path should fail");
+        assert_eq!(error.code, "ENGINE_REF_PATH_WRITE");
     }
 }

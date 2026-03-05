@@ -124,23 +124,23 @@ impl ScriptLangEngine {
         for (namespace, values) in &namespace_values {
             scope.push_dynamic(
                 defs_namespace_symbol(namespace),
-                slvalue_to_dynamic(&SlValue::Map(values.clone()))?,
+                slvalue_to_dynamic(&SlValue::Map(values.clone())),
             );
         }
 
         for (alias, qualified_name) in self.collect_bundle_defs_short_aliases() {
             if let Some(value) = self.defs_globals_value.get(&qualified_name) {
-                scope.push_dynamic(alias, slvalue_to_dynamic(value)?);
+                scope.push_dynamic(alias, slvalue_to_dynamic(value));
             }
         }
 
         let mut global_snapshot = BTreeMap::new();
         for (name, value) in &self.global_json {
             global_snapshot.insert(name.clone(), value.clone());
-            scope.push_dynamic(name.clone(), slvalue_to_dynamic(value)?);
+            scope.push_dynamic(name.clone(), slvalue_to_dynamic(value));
         }
 
-        let rewritten = rewrite_defs_global_qualified_access(expr, &qualified_rewrite_map)?;
+        let rewritten = rewrite_defs_global_qualified_access(expr, &qualified_rewrite_map);
         let result = self
             .rhai_engine
             .eval_with_scope::<Dynamic>(&mut scope, &format!("({})", rewritten))
@@ -212,7 +212,7 @@ impl ScriptLangEngine {
             let binding = mutable_bindings
                 .get(name)
                 .expect("mutable order should only contain known bindings");
-            scope.push_dynamic(name.to_string(), slvalue_to_dynamic(&binding.value)?);
+            scope.push_dynamic(name.to_string(), slvalue_to_dynamic(&binding.value));
         }
 
         let mut defs_namespace_snapshot = BTreeMap::new();
@@ -240,7 +240,7 @@ impl ScriptLangEngine {
         for (namespace, values) in &defs_namespace_snapshot {
             let symbol = defs_namespace_symbol(namespace);
             defs_namespace_symbols.insert(namespace.clone(), symbol.clone());
-            scope.push_dynamic(symbol, slvalue_to_dynamic(&SlValue::Map(values.clone()))?);
+            scope.push_dynamic(symbol, slvalue_to_dynamic(&SlValue::Map(values.clone())));
         }
 
         let mut short_defs_aliases = BTreeMap::new();
@@ -262,7 +262,7 @@ impl ScriptLangEngine {
                         format!("Defs global \"{}\" is not initialized.", qualified_name),
                     )
                 })?;
-            scope.push_dynamic(alias.clone(), slvalue_to_dynamic(&value)?);
+            scope.push_dynamic(alias.clone(), slvalue_to_dynamic(&value));
             short_defs_aliases.insert(alias, (qualified_name, value));
         }
 
@@ -276,14 +276,14 @@ impl ScriptLangEngine {
                 .get(&name)
                 .expect("visible globals should exist in global json map");
             global_snapshot.insert(name.clone(), value.clone());
-            scope.push_dynamic(name, slvalue_to_dynamic(value)?);
+            scope.push_dynamic(name, slvalue_to_dynamic(value));
         }
 
         let source = {
             let prelude = self.get_or_build_defs_prelude(&script_name, &function_symbol_map)?;
-            let rewritten_script = rewrite_function_calls(script, &function_symbol_map)?;
+            let rewritten_script = rewrite_function_calls(script, &function_symbol_map);
             let rewritten_script =
-                rewrite_defs_global_qualified_access(&rewritten_script, &qualified_rewrite_map)?;
+                rewrite_defs_global_qualified_access(&rewritten_script, &qualified_rewrite_map);
             if is_expression {
                 if prelude.is_empty() {
                     format!("({})", rewritten_script)
@@ -486,9 +486,9 @@ impl ScriptLangEngine {
                 decl.return_binding.name,
                 slvalue_to_rhai_literal(&default_value)
             ));
-            let rewritten = rewrite_function_calls(&decl.code, function_symbol_map)?;
+            let rewritten = rewrite_function_calls(&decl.code, function_symbol_map);
             let rewritten =
-                rewrite_defs_global_qualified_access(&rewritten, &qualified_rewrite_map)?;
+                rewrite_defs_global_qualified_access(&rewritten, &qualified_rewrite_map);
             out.push_str(&rewritten);
             out.push('\n');
             out.push_str(&decl.return_binding.name);
@@ -648,7 +648,7 @@ mod eval_tests {
                 SlValue::Array(vec![SlValue::Bool(false), SlValue::String("x".to_string())]),
             ),
         ]));
-        let dynamic = slvalue_to_dynamic(&value).expect("to dynamic");
+        let dynamic = slvalue_to_dynamic(&value);
         let roundtrip = dynamic_to_slvalue(dynamic).expect("from dynamic");
         assert_eq!(roundtrip, value);
 
@@ -1286,5 +1286,151 @@ mod eval_tests {
         engine.start("main", None).expect("start");
         let output = engine.next_output().expect("text");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "11"));
+    }
+
+    #[test]
+    pub(super) fn eval_conversion_and_prelude_error_branches_are_covered() {
+        let mut initializer_unit = engine_from_sources(map(&[
+            ("game.json", r#"{ "hp": 5 }"#),
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: game.json -->
+    <script name="main"><text>x</text></script>
+    "#,
+            ),
+        ]));
+        initializer_unit.start("main", None).expect("start");
+        let error = initializer_unit
+            .eval_defs_global_initializer("{ game = (); 1 }")
+            .expect_err("initializer should reject unsupported global value type");
+        assert_eq!(error.code, "ENGINE_VALUE_UNSUPPORTED");
+
+        let mut readonly_unit = engine_from_sources(map(&[
+            ("game.json", r#"{ "hp": 5 }"#),
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: game.json -->
+    <script name="main"><code>game = ();</code></script>
+    "#,
+            ),
+        ]));
+        readonly_unit.start("main", None).expect("start");
+        let error = readonly_unit
+            .next_output()
+            .expect_err("unsupported global dynamic conversion should fail");
+        assert_eq!(error.code, "ENGINE_VALUE_UNSUPPORTED");
+
+        let mut mutable_unit = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><var name="x" type="int">1</var><code>x = ();</code></script>"#,
+        )]));
+        mutable_unit.start("main", None).expect("start");
+        let error = mutable_unit
+            .next_output()
+            .expect_err("unsupported mutable conversion should fail");
+        assert_eq!(error.code, "ENGINE_VALUE_UNSUPPORTED");
+
+        let mut mutable_type = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><var name="x" type="int">1</var><code>x = &quot;bad&quot;;</code></script>"#,
+        )]));
+        mutable_type.start("main", None).expect("start");
+        let error = mutable_type
+            .next_output()
+            .expect_err("mutable write type mismatch should fail");
+        assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
+
+        let mut ns_unit = engine_from_sources(map(&[
+            (
+                "shared.defs.xml",
+                r#"<defs name="shared"><var name="hp" type="int">7</var></defs>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: shared.defs.xml -->
+    <script name="main"><code>__sl_defs_ns_shared = ();</code></script>
+    "#,
+            ),
+        ]));
+        ns_unit.start("main", None).expect("start");
+        let error = ns_unit
+            .next_output()
+            .expect_err("namespace symbol unsupported conversion should fail");
+        assert_eq!(error.code, "ENGINE_VALUE_UNSUPPORTED");
+
+        let mut alias_unit = engine_from_sources(map(&[
+            (
+                "shared.defs.xml",
+                r#"<defs name="shared"><var name="hp" type="int">7</var></defs>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: shared.defs.xml -->
+    <script name="main"><code>hp = ();</code></script>
+    "#,
+            ),
+        ]));
+        alias_unit.start("main", None).expect("start");
+        let error = alias_unit
+            .next_output()
+            .expect_err("short alias unsupported conversion should fail");
+        assert_eq!(error.code, "ENGINE_VALUE_UNSUPPORTED");
+
+        let mut missing_symbol = engine_from_sources(map(&[
+            (
+                "shared.defs.xml",
+                r#"<defs name="shared"><function name="add" return="int:out">out = 1;</function></defs>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: shared.defs.xml -->
+    <script name="main"><text>x</text></script>
+    "#,
+            ),
+        ]));
+        missing_symbol.start("main", None).expect("start");
+        missing_symbol.defs_prelude_by_script.clear();
+        missing_symbol
+            .visible_function_symbols_by_script
+            .insert("main".to_string(), BTreeMap::new());
+        let error = missing_symbol
+            .eval_expression("1")
+            .expect_err("missing defs symbol map should fail");
+        assert_eq!(error.code, "ENGINE_DEFS_FUNCTION_SYMBOL_MISSING");
+
+        let mut prelude_missing_global = engine_from_sources(map(&[
+            (
+                "shared.defs.xml",
+                r#"<defs name="shared"><function name="add" return="int:out">out = 1;</function></defs>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: shared.defs.xml -->
+    <script name="main"><text>x</text></script>
+    "#,
+            ),
+        ]));
+        prelude_missing_global.start("main", None).expect("start");
+        prelude_missing_global
+            .visible_json_by_script
+            .entry("main".to_string())
+            .or_default()
+            .insert("ghost".to_string());
+        let prelude = prelude_missing_global
+            .build_defs_prelude(
+                "main",
+                prelude_missing_global
+                    .visible_function_symbols_by_script
+                    .get("main")
+                    .expect("symbol map"),
+            )
+            .expect("prelude build should ignore missing global binding");
+        assert!(prelude.contains("fn add("));
     }
 }

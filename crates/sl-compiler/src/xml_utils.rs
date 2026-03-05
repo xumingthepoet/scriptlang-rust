@@ -279,29 +279,34 @@ mod xml_utils_tests {
     use super::*;
     use crate::compiler_test_support::*;
 
+    fn parsed_type_kind(expr: ParsedTypeExpr) -> &'static str {
+        match expr {
+            ParsedTypeExpr::Primitive(_) => "primitive",
+            ParsedTypeExpr::Array(_) => "array",
+            ParsedTypeExpr::Map(_) => "map",
+            ParsedTypeExpr::Custom(_) => "custom",
+        }
+    }
+
     #[test]
     fn parse_type_and_call_argument_helpers_cover_valid_and_invalid_inputs() {
         let span = SourceSpan::synthetic();
-        assert!(matches!(
-            parse_type_expr("int", &span).expect("primitive"),
-            ParsedTypeExpr::Primitive(_)
-        ));
-        assert!(matches!(
-            parse_type_expr("int[]", &span).expect("array"),
-            ParsedTypeExpr::Array(_)
-        ));
-        assert!(matches!(
-            parse_type_expr("#{int}", &span).expect("map"),
-            ParsedTypeExpr::Map(_)
-        ));
-        assert!(matches!(
-            parse_type_expr("CustomType", &span).expect("custom"),
-            ParsedTypeExpr::Custom(_)
-        ));
+        let primitive = parse_type_expr("int", &span).expect("primitive");
+        let array = parse_type_expr("int[]", &span).expect("array");
+        let map = parse_type_expr("#{int}", &span).expect("map");
+        let custom = parse_type_expr("CustomType", &span).expect("custom");
+        assert_eq!(parsed_type_kind(primitive), "primitive");
+        assert_eq!(parsed_type_kind(array), "array");
+        assert_eq!(parsed_type_kind(map), "map");
+        assert_eq!(parsed_type_kind(custom), "custom");
         let invalid_type = parse_type_expr("Map<int,string>", &span).expect_err("invalid");
         assert_eq!(invalid_type.code, "TYPE_PARSE_ERROR");
         let empty_map_type = parse_type_expr("#{   }", &span).expect_err("empty map type");
         assert_eq!(empty_map_type.code, "TYPE_PARSE_ERROR");
+        let bad_array_elem = parse_type_expr("[]", &span).expect_err("invalid nested array type");
+        assert_eq!(bad_array_elem.code, "TYPE_PARSE_ERROR");
+        let bad_map_value = parse_type_expr("#{[]}", &span).expect_err("invalid map value type");
+        assert_eq!(bad_map_value.code, "TYPE_PARSE_ERROR");
 
         let args = parse_args(Some("1, ref:hp, a + 1".to_string())).expect("args");
         assert_eq!(args.len(), 3);
@@ -381,5 +386,14 @@ mod xml_utils_tests {
             split_by_top_level_comma("a,b,c"),
             vec!["a".to_string(), "b".to_string(), "c".to_string()]
         );
+    }
+
+    #[test]
+    fn parse_bool_attr_default_and_false_paths_are_covered() {
+        let node = xml_element("text", &[], vec![xml_text("x")]);
+        assert!(parse_bool_attr(&node, "once", true).expect("default should apply"));
+
+        let false_node = xml_element("text", &[("once", "false")], vec![xml_text("x")]);
+        assert!(!parse_bool_attr(&false_node, "once", true).expect("false attr"));
     }
 }

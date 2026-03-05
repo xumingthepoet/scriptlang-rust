@@ -216,6 +216,15 @@ fn resolve_entry_script(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn output_kind(output: &EngineOutput) -> &'static str {
+        match output {
+            EngineOutput::Text { .. } => "text",
+            EngineOutput::Choices { .. } => "choices",
+            EngineOutput::Input { .. } => "input",
+            EngineOutput::End => "end",
+        }
+    }
     use sl_core::EngineOutput;
     use std::sync::Arc;
 
@@ -360,10 +369,8 @@ mod tests {
             compiler_version: None,
         })
         .expect("engine should build");
-        assert!(matches!(
-            engine.next_output().expect("next output"),
-            EngineOutput::Choices { .. }
-        ));
+        let output = engine.next_output().expect("next output");
+        assert_eq!(output_kind(&output), "choices");
 
         let bad_artifact = CompiledProjectArtifact {
             schema_version: sl_core::COMPILED_PROJECT_SCHEMA.to_string(),
@@ -410,10 +417,8 @@ mod tests {
             compiler_version: None,
         })
         .expect("engine should build");
-        assert!(matches!(
-            engine.next_output().expect("next output"),
-            EngineOutput::Choices { .. }
-        ));
+        let output = engine.next_output().expect("next output");
+        assert_eq!(output_kind(&output), "choices");
         let snapshot = engine.snapshot().expect("snapshot should succeed");
 
         let mut resumed = resume_engine_from_artifact(ResumeEngineFromArtifactOptions {
@@ -426,10 +431,8 @@ mod tests {
         })
         .expect("resume from artifact");
         resumed.choose(0).expect("choose should succeed");
-        assert!(matches!(
-            resumed.next_output().expect("next output"),
-            EngineOutput::Text { .. }
-        ));
+        let output = resumed.next_output().expect("next output");
+        assert_eq!(output_kind(&output), "text");
     }
 
     #[test]
@@ -458,7 +461,7 @@ mod tests {
         .expect("engine should build");
 
         let first = engine.next_output().expect("next should succeed");
-        assert!(matches!(first, EngineOutput::Choices { .. }));
+        assert_eq!(output_kind(&first), "choices");
     }
 
     #[test]
@@ -525,7 +528,7 @@ mod tests {
         })
         .expect("engine should build");
         let first = engine.next_output().expect("next should succeed");
-        assert!(matches!(first, EngineOutput::Choices { .. }));
+        assert_eq!(output_kind(&first), "choices");
         let snapshot = engine.snapshot().expect("snapshot should succeed");
 
         let mut resumed = resume_engine_from_xml(ResumeEngineFromXmlOptions {
@@ -539,7 +542,7 @@ mod tests {
         .expect("resume should succeed");
         resumed.choose(0).expect("choose should succeed");
         let next = resumed.next_output().expect("next should succeed");
-        assert!(matches!(next, EngineOutput::Text { .. }));
+        assert_eq!(output_kind(&next), "text");
     }
 
     #[test]
@@ -581,8 +584,9 @@ mod tests {
         })
         .expect("engine should build");
         let output = ok_engine.next_output().expect("choice output");
-        assert!(
-            matches!(output, EngineOutput::Choices { .. }),
+        assert_eq!(
+            output_kind(&output),
+            "choices",
             "unexpected output: {:?}",
             output
         );
@@ -598,5 +602,143 @@ mod tests {
         .err()
         .expect("reserved host function should fail resume");
         assert_eq!(error.code, "ENGINE_HOST_FUNCTION_RESERVED");
+    }
+
+    #[test]
+    fn api_error_propagation_paths_are_covered() {
+        let bad_xml = map(&[("main.script.xml", "<script>")]);
+        let compile_error =
+            compile_project_from_xml_map(&bad_xml, None).expect_err("compile should fail");
+        assert_eq!(compile_error.code, "XML_PARSE_ERROR");
+
+        let scripts = map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <var name="x" type="int">1</var>
+</script>
+"#,
+        )]);
+        let artifact = compile_artifact_from_xml_map(&scripts, None).expect("artifact");
+        let create_error = create_engine_from_artifact(CreateEngineFromArtifactOptions {
+            artifact: artifact.clone(),
+            entry_args: Some(BTreeMap::from([(
+                "x".to_string(),
+                SlValue::String("bad".to_string()),
+            )])),
+            host_functions: None,
+            random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: None,
+        })
+        .err()
+        .expect("start arg type mismatch should fail");
+        assert_eq!(create_error.code, "ENGINE_CALL_ARG_UNKNOWN");
+
+        let mut ok_engine = create_engine_from_artifact(CreateEngineFromArtifactOptions {
+            artifact: artifact.clone(),
+            entry_args: None,
+            host_functions: None,
+            random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: None,
+        })
+        .expect("engine");
+        let out = ok_engine.next_output().expect("next");
+        assert_eq!(output_kind(&out), "end");
+        let bad_snapshot = ok_engine.snapshot().expect_err("no pending should fail");
+        assert_eq!(bad_snapshot.code, "SNAPSHOT_NOT_ALLOWED");
+        let snapshot = Snapshot {
+            schema_version: sl_runtime::SNAPSHOT_SCHEMA.to_string(),
+            compiler_version: "player.bad".to_string(),
+            runtime_frames: Vec::new(),
+            rng_state: 1,
+            pending_boundary: PendingBoundary::Input {
+                node_id: "n".to_string(),
+                target_var: "x".to_string(),
+                prompt_text: "p".to_string(),
+                default_text: "d".to_string(),
+            },
+            defs_globals: BTreeMap::new(),
+            once_state_by_script: BTreeMap::new(),
+        };
+        let resume_error = resume_engine_from_artifact(ResumeEngineFromArtifactOptions {
+            artifact: artifact.clone(),
+            snapshot,
+            host_functions: None,
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: None,
+        })
+        .err()
+        .expect("resume should fail");
+        assert_eq!(resume_error.code, "SNAPSHOT_COMPILER_VERSION");
+
+        let create_xml_error = create_engine_from_xml(CreateEngineFromXmlOptions {
+            scripts_xml: bad_xml.clone(),
+            entry_script: None,
+            entry_args: None,
+            host_functions: None,
+            random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: None,
+        })
+        .err()
+        .expect("create from xml should fail");
+        assert_eq!(create_xml_error.code, "XML_PARSE_ERROR");
+
+        let resume_xml_error = resume_engine_from_xml(ResumeEngineFromXmlOptions {
+            scripts_xml: bad_xml,
+            snapshot: Snapshot {
+                schema_version: sl_runtime::SNAPSHOT_SCHEMA.to_string(),
+                compiler_version: "player".to_string(),
+                runtime_frames: Vec::new(),
+                rng_state: 1,
+                pending_boundary: PendingBoundary::Input {
+                    node_id: "n".to_string(),
+                    target_var: "x".to_string(),
+                    prompt_text: "p".to_string(),
+                    default_text: "d".to_string(),
+                },
+                defs_globals: BTreeMap::new(),
+                once_state_by_script: BTreeMap::new(),
+            },
+            host_functions: None,
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: None,
+        })
+        .err()
+        .expect("resume from xml should fail");
+        assert_eq!(resume_xml_error.code, "XML_PARSE_ERROR");
+    }
+
+    #[test]
+    fn create_engine_from_xml_can_emit_input_output() {
+        let scripts = map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <var name="name" type="string">"Traveler"</var>
+  <input var="name" text="Name"/>
+</script>
+"#,
+        )]);
+        let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
+            scripts_xml: scripts,
+            entry_script: None,
+            entry_args: None,
+            host_functions: None,
+            random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: None,
+        })
+        .expect("engine should build");
+        let out = engine.next_output().expect("input output");
+        assert_eq!(output_kind(&out), "input");
     }
 }

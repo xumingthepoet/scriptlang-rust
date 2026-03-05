@@ -374,6 +374,22 @@ mod lifecycle_tests {
     use super::*;
     use crate::engine::runtime_test_support::*;
 
+    fn output_kind(output: &EngineOutput) -> &'static str {
+        match output {
+            EngineOutput::Text { .. } => "text",
+            EngineOutput::Choices { .. } => "choices",
+            EngineOutput::Input { .. } => "input",
+            EngineOutput::End => "end",
+        }
+    }
+
+    fn random_state_kind(view: &RandomStateView) -> &'static str {
+        match view {
+            RandomStateView::Seeded { .. } => "seeded",
+            RandomStateView::Sequence { .. } => "sequence",
+        }
+    }
+
     #[test]
     pub(super) fn new_rejects_reserved_host_function_name_random() {
         let files = map(&[(
@@ -499,7 +515,7 @@ mod lifecycle_tests {
         let mut engine = engine_from_sources(files);
         engine.start("main", None).expect("start");
         let output = engine.next_output().expect("next");
-        assert!(matches!(output, EngineOutput::Text { .. }));
+        assert_eq!(output_kind(&output), "text");
 
         let registry = TestRegistry {
             names: vec!["ok".to_string()],
@@ -619,11 +635,8 @@ mod lifecycle_tests {
             r#"<script name="main"><text>x</text></script>"#,
         )]));
         seeded.start("main", None).expect("start");
-        let seeded_state_or_zero = |view: RandomStateView| match view {
-            RandomStateView::Seeded { state } => state,
-            RandomStateView::Sequence { .. } => 0,
-        };
-        assert_eq!(seeded_state_or_zero(seeded.random_state_snapshot()), 1);
+        let seeded_view = seeded.random_state_snapshot();
+        assert!(matches!(seeded_view, RandomStateView::Seeded { state } if state == 1));
         assert_eq!(seeded.current_seeded_rng_state(), 1);
 
         let files = map(&[(
@@ -649,18 +662,15 @@ mod lifecycle_tests {
         })
         .expect("new");
         sequence.start("main", None).expect("start");
-        let sequence_values_or_default = |view: RandomStateView| match view {
-            RandomStateView::Sequence { values, index } => (values, index),
-            RandomStateView::Seeded { .. } => (Vec::new(), usize::MAX),
-        };
-        let (values, index) = sequence_values_or_default(sequence.random_state_snapshot());
-        assert_eq!(values, vec![12, 3]);
-        assert_eq!(index, 0);
-        assert_eq!(seeded_state_or_zero(sequence.random_state_snapshot()), 0);
-        let (fallback_values, fallback_index) =
-            sequence_values_or_default(seeded.random_state_snapshot());
-        assert!(fallback_values.is_empty());
-        assert_eq!(fallback_index, usize::MAX);
+        let sequence_view = sequence.random_state_snapshot();
+        assert!(matches!(
+            &sequence_view,
+            RandomStateView::Sequence { values, index } if values == &vec![12, 3] && *index == 0
+        ));
+        let sequence_view_for_seeded = sequence.random_state_snapshot();
+        assert_eq!(random_state_kind(&sequence_view_for_seeded), "sequence");
+        let seeded_view_for_fallback = seeded.random_state_snapshot();
+        assert_eq!(random_state_kind(&seeded_view_for_fallback), "seeded");
         assert_eq!(sequence.current_seeded_rng_state(), 9);
     }
 
@@ -825,8 +835,16 @@ mod lifecycle_tests {
         assert!(!engine.waiting_choice());
         engine.start("main", None).expect("start");
         let next = engine.next_output().expect("next");
-        assert!(matches!(next, EngineOutput::Choices { .. }));
+        assert_eq!(output_kind(&next), "choices");
         assert!(engine.waiting_choice());
+        assert_eq!(
+            output_kind(&EngineOutput::Input {
+                prompt_text: "p".to_string(),
+                default_text: "d".to_string()
+            }),
+            "input"
+        );
+        assert_eq!(output_kind(&EngineOutput::End), "end");
     }
 
     #[test]
@@ -843,6 +861,45 @@ mod lifecycle_tests {
         )]));
         engine.start("main", None).expect("start");
         let error = engine.next_output().expect_err("random(0) should fail");
-        assert!(error.code == "ENGINE_EVAL_ERROR" || error.code == "ENGINE_RANDOM_ERROR");
+        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
+    }
+
+    #[test]
+    pub(super) fn start_accepts_explicit_entry_args_map() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main" args="int:x"><text>${x}</text></script>"#,
+        )]));
+        engine
+            .start(
+                "main",
+                Some(BTreeMap::from([("x".to_string(), SlValue::Number(7.0))])),
+            )
+            .expect("start with explicit args should succeed");
+        let output = engine.next_output().expect("text");
+        assert_eq!(
+            output,
+            EngineOutput::Text {
+                text: "7".to_string()
+            }
+        );
+    }
+
+    #[test]
+    pub(super) fn start_rejects_explicit_entry_args_type_mismatch() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main" args="int:x"><text>${x}</text></script>"#,
+        )]));
+        let error = engine
+            .start(
+                "main",
+                Some(BTreeMap::from([(
+                    "x".to_string(),
+                    SlValue::String("bad".to_string()),
+                )])),
+            )
+            .expect_err("start with invalid arg type should fail");
+        assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
     }
 }

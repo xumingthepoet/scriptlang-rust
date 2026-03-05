@@ -193,10 +193,11 @@ impl ScriptLangEngine {
                     }
                 }
 
-                if let Some(mut continuation) = forwarded.take() {
-                    continuation.ref_bindings = BTreeMap::new();
-                    forwarded = Some(continuation);
-                }
+                let mut continuation = forwarded
+                    .take()
+                    .expect("forwarded continuation should exist when inherited is present");
+                continuation.ref_bindings = BTreeMap::new();
+                forwarded = Some(continuation);
             }
 
             let (scope, var_types) =
@@ -928,5 +929,271 @@ mod callstack_tests {
         engine.start("main", None).expect("start");
         let output = engine.next_output().expect("next");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "3"));
+    }
+
+    #[test]
+    pub(super) fn callstack_error_branches_on_lookup_and_ref_paths_are_covered() {
+        let mut missing_group = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>x</text></script>"#,
+        )]));
+        missing_group.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id: "missing-group".to_string(),
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::new(),
+        }];
+        let error = missing_group
+            .execute_call("main", &[])
+            .expect_err("caller group lookup should fail");
+        assert_eq!(error.code, "ENGINE_GROUP_NOT_FOUND");
+
+        let mut ref_read_error = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: callee.script.xml -->
+    <script name="main">
+      <call script="callee" args="ref:missing.path"/>
+    </script>
+    "#,
+            ),
+            (
+                "callee.script.xml",
+                r#"<script name="callee" args="ref:int:x"><return/></script>"#,
+            ),
+        ]));
+        ref_read_error.start("main", None).expect("start");
+        let error = ref_read_error
+            .next_output()
+            .expect_err("ref read should fail");
+        assert_eq!(error.code, "ENGINE_VAR_READ");
+
+        let mut eval_arg_error = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: callee.script.xml -->
+    <script name="main">
+      <call script="callee" args="unknown +"/>
+    </script>
+    "#,
+            ),
+            (
+                "callee.script.xml",
+                r#"<script name="callee" args="int:x"><return/></script>"#,
+            ),
+        ]));
+        eval_arg_error.start("main", None).expect("start");
+        let error = eval_arg_error
+            .next_output()
+            .expect_err("arg eval should fail");
+        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
+
+        let mut tail_scope_error = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"<script name="main"><text>main</text></script>"#,
+            ),
+            (
+                "callee.script.xml",
+                r#"<script name="callee" args="int:x"><text>${x}</text></script>"#,
+            ),
+        ]));
+        let main_root = tail_scope_error
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        tail_scope_error.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id: main_root,
+            node_index: 0,
+            scope: BTreeMap::from([("x".to_string(), SlValue::String("bad".to_string()))]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: Some(ContinuationFrame {
+                resume_frame_id: 42,
+                next_node_index: 1,
+                ref_bindings: BTreeMap::new(),
+            }),
+            var_types: BTreeMap::from([(
+                "x".to_string(),
+                ScriptType::Primitive {
+                    name: "string".to_string(),
+                },
+            )]),
+        }];
+        let error = tail_scope_error
+            .execute_call(
+                "callee",
+                &[sl_core::CallArgument {
+                    value_expr: "x".to_string(),
+                    is_ref: false,
+                }],
+            )
+            .expect_err("tail call scope creation should fail");
+        assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
+
+        let mut no_root = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><return/></script>"#,
+        )]));
+        no_root.frames.clear();
+        let error = no_root
+            .execute_return(None, &[])
+            .expect_err("missing root frame should fail");
+        assert_eq!(error.code, "ENGINE_ROOT_FRAME");
+
+        let mut return_arg_eval_error = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"<script name="main"><return script="next" args="bad +"/></script>"#,
+            ),
+            (
+                "next.script.xml",
+                r#"<script name="next" args="int:x"><text>${x}</text></script>"#,
+            ),
+        ]));
+        return_arg_eval_error.start("main", None).expect("start");
+        let error = return_arg_eval_error
+            .next_output()
+            .expect_err("return arg eval should fail");
+        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
+
+        let mut return_write_error = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"<script name="main"><text>main</text></script>"#,
+            ),
+            (
+                "next.script.xml",
+                r#"<script name="next"><text>next</text></script>"#,
+            ),
+        ]));
+        let main_root = return_write_error
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        return_write_error.frames = vec![
+            RuntimeFrame {
+                frame_id: 10,
+                group_id: main_root.clone(),
+                node_index: 0,
+                scope: BTreeMap::from([("dst".to_string(), SlValue::Number(0.0))]),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: None,
+                var_types: BTreeMap::from([(
+                    "dst".to_string(),
+                    ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                )]),
+            },
+            RuntimeFrame {
+                frame_id: 11,
+                group_id: main_root,
+                node_index: 0,
+                scope: BTreeMap::from([("x".to_string(), SlValue::Number(7.0))]),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: Some(ContinuationFrame {
+                    resume_frame_id: 10,
+                    next_node_index: 1,
+                    ref_bindings: BTreeMap::from([("x".to_string(), "dst.bad".to_string())]),
+                }),
+                var_types: BTreeMap::from([(
+                    "x".to_string(),
+                    ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                )]),
+            },
+        ];
+        let error = return_write_error
+            .execute_return(None, &[])
+            .expect_err("return ref write path should fail");
+        assert_eq!(error.code, "ENGINE_REF_PATH_WRITE");
+
+        let mut target_return_write_error = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"<script name="main"><text>main</text></script>"#,
+            ),
+            (
+                "next.script.xml",
+                r#"<script name="next"><text>next</text></script>"#,
+            ),
+        ]));
+        let main_root = target_return_write_error
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        target_return_write_error.frames = vec![
+            RuntimeFrame {
+                frame_id: 30,
+                group_id: main_root.clone(),
+                node_index: 0,
+                scope: BTreeMap::from([("dst".to_string(), SlValue::Number(0.0))]),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: None,
+                var_types: BTreeMap::from([(
+                    "dst".to_string(),
+                    ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                )]),
+            },
+            RuntimeFrame {
+                frame_id: 31,
+                group_id: main_root,
+                node_index: 0,
+                scope: BTreeMap::from([("x".to_string(), SlValue::Number(5.0))]),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: Some(ContinuationFrame {
+                    resume_frame_id: 30,
+                    next_node_index: 1,
+                    ref_bindings: BTreeMap::from([("x".to_string(), "dst.bad".to_string())]),
+                }),
+                var_types: BTreeMap::from([(
+                    "x".to_string(),
+                    ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                )]),
+            },
+        ];
+        let error = target_return_write_error
+            .execute_return(Some("next".to_string()), &[])
+            .expect_err("target return ref write path should fail");
+        assert_eq!(error.code, "ENGINE_REF_PATH_WRITE");
+
+        let mut return_target_type_error = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"<script name="main"><return script="next" args="&quot;bad&quot;"/></script>"#,
+            ),
+            (
+                "next.script.xml",
+                r#"<script name="next" args="int:x"><text>${x}</text></script>"#,
+            ),
+        ]));
+        return_target_type_error.start("main", None).expect("start");
+        let error = return_target_type_error
+            .next_output()
+            .expect_err("return target scope creation should fail");
+        assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
     }
 }

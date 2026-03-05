@@ -739,6 +739,15 @@ mod script_compile_tests {
     use super::*;
     use crate::compiler_test_support::*;
 
+    fn script_type_kind(ty: &ScriptType) -> &'static str {
+        match ty {
+            ScriptType::Primitive { .. } => "primitive",
+            ScriptType::Array { .. } => "array",
+            ScriptType::Map { .. } => "map",
+            ScriptType::Object { .. } => "object",
+        }
+    }
+
     #[test]
     fn parse_var_declaration_rejects_value_attr_and_child_elements() {
         let visible_types = BTreeMap::new();
@@ -788,6 +797,15 @@ mod script_compile_tests {
         let error = parse_script_args(&root_dup, &visible_types).expect_err("duplicate args");
         assert_eq!(error.code, "SCRIPT_ARGS_DUPLICATE");
 
+        let root_bad_type = xml_element("script", &[("args", "#{ }:a")], Vec::new());
+        let error =
+            parse_script_args(&root_bad_type, &visible_types).expect_err("invalid arg type expr");
+        assert_eq!(error.code, "TYPE_PARSE_ERROR");
+        let root_unknown_type = xml_element("script", &[("args", "Missing:a")], Vec::new());
+        let error =
+            parse_script_args(&root_unknown_type, &visible_types).expect_err("unknown arg type");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+
         let fn_node = xml_element(
             "function",
             &[("name", "f"), ("args", "ref:int:a"), ("return", "int:r")],
@@ -804,6 +822,33 @@ mod script_compile_tests {
         let error =
             parse_function_declaration_node(&fn_bad_return).expect_err("ref return unsupported");
         assert_eq!(error.code, "XML_FUNCTION_RETURN_REF_UNSUPPORTED");
+
+        let fn_reserved_arg = xml_element(
+            "function",
+            &[("name", "f"), ("args", "int:__sl_a"), ("return", "int:r")],
+            vec![xml_text("r = 1;")],
+        );
+        let error =
+            parse_function_declaration_node(&fn_reserved_arg).expect_err("reserved arg name");
+        assert_eq!(error.code, "NAME_RESERVED_PREFIX");
+
+        let fn_bad_arg_type = xml_element(
+            "function",
+            &[("name", "f"), ("args", "#{ }:a"), ("return", "int:r")],
+            vec![xml_text("r = 1;")],
+        );
+        let error =
+            parse_function_declaration_node(&fn_bad_arg_type).expect_err("bad arg type syntax");
+        assert_eq!(error.code, "TYPE_PARSE_ERROR");
+
+        let fn_missing_return = xml_element(
+            "function",
+            &[("name", "f"), ("args", "int:a")],
+            vec![xml_text("a = a + 1;")],
+        );
+        let error =
+            parse_function_declaration_node(&fn_missing_return).expect_err("missing return attr");
+        assert_eq!(error.code, "XML_MISSING_ATTR");
     }
 
     #[test]
@@ -817,14 +862,24 @@ mod script_compile_tests {
         assert_eq!(parsed_return.name, "out");
 
         let span = SourceSpan::synthetic();
-        assert!(matches!(
-            parse_type_expr("int[]", &span).expect("array should parse"),
-            ParsedTypeExpr::Array(_)
-        ));
-        assert!(matches!(
-            parse_type_expr("#{int}", &span).expect("map should parse"),
-            ParsedTypeExpr::Map(_)
-        ));
+        let _ = parse_type_expr("int[]", &span).expect("array should parse");
+        let _ = parse_type_expr("#{int}", &span).expect("map should parse");
+
+        let reserved_return = xml_element(
+            "function",
+            &[("name", "f"), ("return", "int:__sl_out")],
+            vec![xml_text("__sl_out = 1;")],
+        );
+        let error = parse_function_return(&reserved_return).expect_err("reserved return binding");
+        assert_eq!(error.code, "NAME_RESERVED_PREFIX");
+
+        let invalid_return = xml_element(
+            "function",
+            &[("name", "f"), ("return", "#{ }:out")],
+            vec![xml_text("out = 1;")],
+        );
+        let error = parse_function_return(&invalid_return).expect_err("invalid return type");
+        assert_eq!(error.code, "TYPE_PARSE_ERROR");
     }
 
     #[test]
@@ -954,25 +1009,21 @@ mod script_compile_tests {
             .get(&root_group)
             .expect("root group should exist");
         assert_eq!(group.nodes.len(), 2);
-        assert!(matches!(group.nodes[1], ScriptNode::Input { .. }));
-
-        assert!(matches!(group.nodes[0], ScriptNode::If { .. }));
-        let mut then_group_id = None;
-        if let ScriptNode::If {
-            then_group_id: child_group_id,
-            ..
-        } = &group.nodes[0]
-        {
-            then_group_id = Some(child_group_id.clone());
-        }
-        let then_group_id = then_group_id.expect("group node should compile into an if wrapper");
+        let extract_then_group_id = |node: &ScriptNode| match node {
+            ScriptNode::If {
+                then_group_id: child_group_id,
+                ..
+            } => Some(child_group_id.clone()),
+            _ => None,
+        };
+        let then_group_id = extract_then_group_id(&group.nodes[0])
+            .expect("group node should compile into an if wrapper");
+        assert!(extract_then_group_id(&group.nodes[1]).is_none());
         let scoped_group = builder
             .groups
             .get(&then_group_id)
             .expect("group child should exist");
         assert_eq!(scoped_group.nodes.len(), 2);
-        assert!(matches!(scoped_group.nodes[0], ScriptNode::Var { .. }));
-        assert!(matches!(scoped_group.nodes[1], ScriptNode::Text { .. }));
     }
 
     #[test]
@@ -1086,6 +1137,291 @@ mod script_compile_tests {
         )
         .expect_err("unknown node should fail");
         assert_eq!(error.code, "XML_NODE_UNSUPPORTED");
+
+        let bad_text_inline = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element("text", &[], Vec::new()))],
+        );
+        let mut builder = GroupBuilder::new("main.script.xml");
+        let group_id = builder.next_group_id();
+        let error = compile_group(
+            &group_id,
+            None,
+            &bad_text_inline,
+            &mut builder,
+            &visible_types,
+            &local_var_types,
+            CompileGroupMode::new(0, false),
+        )
+        .expect_err("text inline content should be required");
+        assert_eq!(error.code, "XML_EMPTY_NODE_CONTENT");
+
+        let bad_code_inline = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element("code", &[], Vec::new()))],
+        );
+        let mut builder = GroupBuilder::new("main.script.xml");
+        let group_id = builder.next_group_id();
+        let error = compile_group(
+            &group_id,
+            None,
+            &bad_code_inline,
+            &mut builder,
+            &visible_types,
+            &local_var_types,
+            CompileGroupMode::new(0, false),
+        )
+        .expect_err("code inline content should be required");
+        assert_eq!(error.code, "XML_EMPTY_NODE_CONTENT");
+
+        let bad_if_then = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element(
+                "if",
+                &[("when", "true")],
+                vec![XmlNode::Element(xml_element("loop", &[], Vec::new()))],
+            ))],
+        );
+        let mut builder = GroupBuilder::new("main.script.xml");
+        let group_id = builder.next_group_id();
+        let error = compile_group(
+            &group_id,
+            None,
+            &bad_if_then,
+            &mut builder,
+            &visible_types,
+            &local_var_types,
+            CompileGroupMode::new(0, false),
+        )
+        .expect_err("if then group child compile errors should propagate");
+        assert_eq!(error.code, "XML_LOOP_INTERNAL");
+
+        let bad_if_else = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element(
+                "if",
+                &[("when", "true")],
+                vec![XmlNode::Element(xml_element(
+                    "else",
+                    &[],
+                    vec![XmlNode::Element(xml_element("loop", &[], Vec::new()))],
+                ))],
+            ))],
+        );
+        let mut builder = GroupBuilder::new("main.script.xml");
+        let group_id = builder.next_group_id();
+        let error = compile_group(
+            &group_id,
+            None,
+            &bad_if_else,
+            &mut builder,
+            &visible_types,
+            &local_var_types,
+            CompileGroupMode::new(0, false),
+        )
+        .expect_err("if else group child compile errors should propagate");
+        assert_eq!(error.code, "XML_LOOP_INTERNAL");
+
+        let bad_while_body = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element(
+                "while",
+                &[("when", "true")],
+                vec![XmlNode::Element(xml_element("loop", &[], Vec::new()))],
+            ))],
+        );
+        let mut builder = GroupBuilder::new("main.script.xml");
+        let group_id = builder.next_group_id();
+        let error = compile_group(
+            &group_id,
+            None,
+            &bad_while_body,
+            &mut builder,
+            &visible_types,
+            &local_var_types,
+            CompileGroupMode::new(0, false),
+        )
+        .expect_err("while body compile errors should propagate");
+        assert_eq!(error.code, "XML_LOOP_INTERNAL");
+
+        let bad_choice_text = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element(
+                "choice",
+                &[],
+                vec![XmlNode::Element(xml_element(
+                    "option",
+                    &[("text", "a")],
+                    Vec::new(),
+                ))],
+            ))],
+        );
+        let mut builder = GroupBuilder::new("main.script.xml");
+        let group_id = builder.next_group_id();
+        let error = compile_group(
+            &group_id,
+            None,
+            &bad_choice_text,
+            &mut builder,
+            &visible_types,
+            &local_var_types,
+            CompileGroupMode::new(0, false),
+        )
+        .expect_err("choice text should be required");
+        assert_eq!(error.code, "XML_MISSING_ATTR");
+
+        let bad_option_fall_over_bool = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element(
+                "choice",
+                &[("text", "c")],
+                vec![XmlNode::Element(xml_element(
+                    "option",
+                    &[("text", "a"), ("fall_over", "bad")],
+                    Vec::new(),
+                ))],
+            ))],
+        );
+        let mut builder = GroupBuilder::new("main.script.xml");
+        let group_id = builder.next_group_id();
+        let error = compile_group(
+            &group_id,
+            None,
+            &bad_option_fall_over_bool,
+            &mut builder,
+            &visible_types,
+            &local_var_types,
+            CompileGroupMode::new(0, false),
+        )
+        .expect_err("option fall_over bool should be validated");
+        assert_eq!(error.code, "XML_ATTR_BOOL_INVALID");
+
+        let bad_dynamic_template_bool = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element(
+                "choice",
+                &[("text", "c")],
+                vec![XmlNode::Element(xml_element(
+                    "dynamic-options",
+                    &[("array", "arr"), ("item", "it")],
+                    vec![XmlNode::Element(xml_element(
+                        "option",
+                        &[("text", "t"), ("once", "bad")],
+                        Vec::new(),
+                    ))],
+                ))],
+            ))],
+        );
+        let mut builder = GroupBuilder::new("main.script.xml");
+        let group_id = builder.next_group_id();
+        let error = compile_group(
+            &group_id,
+            None,
+            &bad_dynamic_template_bool,
+            &mut builder,
+            &visible_types,
+            &local_var_types,
+            CompileGroupMode::new(0, false),
+        )
+        .expect_err("dynamic template bool should be validated");
+        assert_eq!(error.code, "XML_ATTR_BOOL_INVALID");
+
+        let bad_choice_option_body = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element(
+                "choice",
+                &[("text", "c")],
+                vec![XmlNode::Element(xml_element(
+                    "option",
+                    &[("text", "a")],
+                    vec![XmlNode::Element(xml_element("loop", &[], Vec::new()))],
+                ))],
+            ))],
+        );
+        let mut builder = GroupBuilder::new("main.script.xml");
+        let group_id = builder.next_group_id();
+        let error = compile_group(
+            &group_id,
+            None,
+            &bad_choice_option_body,
+            &mut builder,
+            &visible_types,
+            &local_var_types,
+            CompileGroupMode::new(0, false),
+        )
+        .expect_err("choice option body compile errors should propagate");
+        assert_eq!(error.code, "XML_LOOP_INTERNAL");
+
+        let bad_dynamic_fall_over_bool = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element(
+                "choice",
+                &[("text", "c")],
+                vec![XmlNode::Element(xml_element(
+                    "dynamic-options",
+                    &[("array", "arr"), ("item", "it")],
+                    vec![XmlNode::Element(xml_element(
+                        "option",
+                        &[("text", "t"), ("fall_over", "bad")],
+                        Vec::new(),
+                    ))],
+                ))],
+            ))],
+        );
+        let mut builder = GroupBuilder::new("main.script.xml");
+        let group_id = builder.next_group_id();
+        let error = compile_group(
+            &group_id,
+            None,
+            &bad_dynamic_fall_over_bool,
+            &mut builder,
+            &visible_types,
+            &local_var_types,
+            CompileGroupMode::new(0, false),
+        )
+        .expect_err("dynamic template fall_over bool should be validated");
+        assert_eq!(error.code, "XML_ATTR_BOOL_INVALID");
+
+        let bad_dynamic_template_body = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element(
+                "choice",
+                &[("text", "c")],
+                vec![XmlNode::Element(xml_element(
+                    "dynamic-options",
+                    &[("array", "arr"), ("item", "it")],
+                    vec![XmlNode::Element(xml_element(
+                        "option",
+                        &[("text", "t")],
+                        vec![XmlNode::Element(xml_element("loop", &[], Vec::new()))],
+                    ))],
+                ))],
+            ))],
+        );
+        let mut builder = GroupBuilder::new("main.script.xml");
+        let group_id = builder.next_group_id();
+        let error = compile_group(
+            &group_id,
+            None,
+            &bad_dynamic_template_body,
+            &mut builder,
+            &visible_types,
+            &local_var_types,
+            CompileGroupMode::new(0, false),
+        )
+        .expect_err("dynamic option template body errors should propagate");
+        assert_eq!(error.code, "XML_LOOP_INTERNAL");
     }
 
     #[test]
@@ -1335,6 +1671,134 @@ mod script_compile_tests {
                     )]),
                     "XML_LOOP_TIMES_TEMPLATE_UNSUPPORTED",
                 ),
+                (
+                    "text inline required",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><text/></script>",
+                    )]),
+                    "XML_EMPTY_NODE_CONTENT",
+                ),
+                (
+                    "text once bool invalid",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><text once=\"bad\">x</text></script>",
+                    )]),
+                    "XML_ATTR_BOOL_INVALID",
+                ),
+                (
+                    "if missing when",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><if><text>x</text></if></script>",
+                    )]),
+                    "XML_MISSING_ATTR",
+                ),
+                (
+                    "while missing when",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><while><text>x</text></while></script>",
+                    )]),
+                    "XML_MISSING_ATTR",
+                ),
+                (
+                    "choice option text required",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><choice text=\"c\"><option><text>x</text></option></choice></script>",
+                    )]),
+                    "XML_MISSING_ATTR",
+                ),
+                (
+                    "choice option once bool invalid",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><choice text=\"c\"><option text=\"a\" once=\"bad\"/></choice></script>",
+                    )]),
+                    "XML_ATTR_BOOL_INVALID",
+                ),
+                (
+                    "dynamic options array required",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><choice text=\"c\"><dynamic-options item=\"it\"><option text=\"a\"/></dynamic-options></choice></script>",
+                    )]),
+                    "XML_MISSING_ATTR",
+                ),
+                (
+                    "dynamic options item required",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><choice text=\"c\"><dynamic-options array=\"arr\"><option text=\"a\"/></dynamic-options></choice></script>",
+                    )]),
+                    "XML_MISSING_ATTR",
+                ),
+                (
+                    "dynamic option text required",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><choice text=\"c\"><dynamic-options array=\"arr\" item=\"it\"><option/></dynamic-options></choice></script>",
+                    )]),
+                    "XML_MISSING_ATTR",
+                ),
+                (
+                    "input var missing",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><input text=\"p\"/></script>",
+                    )]),
+                    "XML_MISSING_ATTR",
+                ),
+                (
+                    "input text missing",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><var name=\"n\" type=\"string\">\"\"</var><input var=\"n\"/></script>",
+                    )]),
+                    "XML_MISSING_ATTR",
+                ),
+                (
+                    "call script missing",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><call/></script>",
+                    )]),
+                    "XML_MISSING_ATTR",
+                ),
+                (
+                    "return args parse error",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><return script=\"s\" args=\"ref:\"/></script>",
+                    )]),
+                    "CALL_ARGS_PARSE_ERROR",
+                ),
+                (
+                    "var missing name",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><var type=\"int\">1</var></script>",
+                    )]),
+                    "XML_MISSING_ATTR",
+                ),
+                (
+                    "var missing type",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><var name=\"x\">1</var></script>",
+                    )]),
+                    "XML_MISSING_ATTR",
+                ),
+                (
+                    "var type parse error",
+                    map(&[(
+                        "main.script.xml",
+                        "<script name=\"main\"><var name=\"x\" type=\"#{ }\">1</var></script>",
+                    )]),
+                    "TYPE_PARSE_ERROR",
+                ),
             ];
 
         for (name, files, expected_code) in cases {
@@ -1347,6 +1811,20 @@ mod script_compile_tests {
 
     #[test]
     fn compiler_private_helpers_cover_remaining_paths() {
+        assert_eq!(
+            script_type_kind(&ScriptType::Primitive {
+                name: "int".to_string()
+            }),
+            "primitive"
+        );
+        assert_eq!(
+            script_type_kind(&ScriptType::Object {
+                type_name: "Obj".to_string(),
+                fields: BTreeMap::new()
+            }),
+            "object"
+        );
+
         assert_eq!(
             resolve_include_path("scripts/main.script.xml", "/shared.defs.xml"),
             "shared.defs.xml"
@@ -1444,7 +1922,7 @@ mod script_compile_tests {
             &span,
         )
         .expect("array lookup should resolve");
-        assert!(matches!(array_ty, ScriptType::Array { .. }));
+        assert_eq!(script_type_kind(&array_ty), "array");
         let map_ty = resolve_type_expr_with_lookup(
             &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Primitive("string".to_string()))),
             &BTreeMap::new(),
@@ -1453,7 +1931,7 @@ mod script_compile_tests {
             &span,
         )
         .expect("map lookup should resolve");
-        assert!(matches!(map_ty, ScriptType::Map { .. }));
+        assert_eq!(script_type_kind(&map_ty), "map");
 
         let array = resolve_type_expr(
             &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Primitive("int".to_string()))),
@@ -1461,14 +1939,14 @@ mod script_compile_tests {
             &span,
         )
         .expect("array should resolve");
-        assert!(matches!(array, ScriptType::Array { .. }));
+        assert_eq!(script_type_kind(&array), "array");
         let map_resolved = resolve_type_expr(
             &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Primitive("int".to_string()))),
             &BTreeMap::new(),
             &span,
         )
         .expect("map should resolve");
-        assert!(matches!(map_resolved, ScriptType::Map { .. }));
+        assert_eq!(script_type_kind(&map_resolved), "map");
 
         let non_script_root = xml_element("defs", &[("name", "x")], Vec::new());
         let compile_root_error = compile_script(
@@ -1511,9 +1989,7 @@ mod script_compile_tests {
         assert!(root_group
             .nodes
             .iter()
-            .any(|node| matches!(node, ScriptNode::Input { .. })
-                || matches!(node, ScriptNode::Call { .. })
-                || matches!(node, ScriptNode::If { .. })));
+            .any(|node| matches!(node, ScriptNode::If { .. })));
 
         let defs_resolution = map(&[
             (

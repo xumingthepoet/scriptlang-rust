@@ -274,6 +274,29 @@ mod snapshot_tests {
     use super::*;
     use crate::engine::runtime_test_support::*;
 
+    fn output_kind(output: &EngineOutput) -> &'static str {
+        match output {
+            EngineOutput::Text { .. } => "text",
+            EngineOutput::Choices { .. } => "choices",
+            EngineOutput::Input { .. } => "input",
+            EngineOutput::End => "end",
+        }
+    }
+
+    fn pending_kind(pending: &PendingBoundary) -> &'static str {
+        match pending {
+            PendingBoundary::Choice { .. } => "choice",
+            PendingBoundary::Input { .. } => "input",
+        }
+    }
+
+    fn pending_node_id(pending: &PendingBoundary) -> String {
+        match pending {
+            PendingBoundary::Choice { node_id, .. } => node_id.clone(),
+            PendingBoundary::Input { node_id, .. } => node_id.clone(),
+        }
+    }
+
     #[test]
     pub(super) fn snapshot_resume_choice_roundtrip() {
         let mut engine = engine_from_sources(map(&[(
@@ -290,7 +313,7 @@ mod snapshot_tests {
         engine.start("main", None).expect("start");
 
         let first = engine.next_output().expect("next");
-        assert!(matches!(first, EngineOutput::Choices { .. }));
+        assert_eq!(output_kind(&first), "choices");
         let snapshot = engine.snapshot().expect("snapshot");
 
         let mut resumed = engine_from_sources(map(&[(
@@ -307,7 +330,7 @@ mod snapshot_tests {
         resumed.resume(snapshot).expect("resume");
         resumed.choose(0).expect("choose");
         let next = resumed.next_output().expect("next");
-        assert!(matches!(next, EngineOutput::Text { .. }));
+        assert_eq!(output_kind(&next), "text");
     }
 
     #[test]
@@ -329,24 +352,18 @@ mod snapshot_tests {
 
         let mut engine = engine_from_sources(files.clone());
         engine.start("main", None).expect("start");
-        assert!(matches!(
-            engine.next_output().expect("text"),
-            EngineOutput::Text { .. }
-        ));
-        assert!(matches!(
-            engine.next_output().expect("choice"),
-            EngineOutput::Choices { .. }
-        ));
+        assert_eq!(output_kind(&engine.next_output().expect("text")), "text");
+        assert_eq!(
+            output_kind(&engine.next_output().expect("choice")),
+            "choices"
+        );
         let snapshot = engine.snapshot().expect("snapshot");
         assert!(!snapshot.once_state_by_script.is_empty());
 
         let mut resumed = engine_from_sources(files);
         resumed.resume(snapshot).expect("resume");
         resumed.choose(0).expect("choose should pass");
-        assert!(matches!(
-            resumed.next_output().expect("end"),
-            EngineOutput::End
-        ));
+        assert_eq!(output_kind(&resumed.next_output().expect("end")), "end");
     }
 
     #[test]
@@ -364,23 +381,14 @@ mod snapshot_tests {
 
         let mut engine = engine_from_sources(files.clone());
         engine.start("main", None).expect("start");
-        assert!(matches!(
-            engine.next_output().expect("input"),
-            EngineOutput::Input { .. }
-        ));
+        assert_eq!(output_kind(&engine.next_output().expect("input")), "input");
         let snapshot = engine.snapshot().expect("snapshot");
 
         let mut resumed = engine_from_sources(files);
         resumed.resume(snapshot).expect("resume");
-        assert!(matches!(
-            resumed.next_output().expect("input"),
-            EngineOutput::Input { .. }
-        ));
+        assert_eq!(output_kind(&resumed.next_output().expect("input")), "input");
         resumed.submit_input("Guild").expect("submit input");
-        assert!(matches!(
-            resumed.next_output().expect("text"),
-            EngineOutput::Text { .. }
-        ));
+        assert_eq!(output_kind(&resumed.next_output().expect("text")), "text");
     }
 
     #[test]
@@ -410,7 +418,7 @@ mod snapshot_tests {
         let mut base = engine_from_sources(sources.clone());
         base.start("main", None).expect("start");
         let first = base.next_output().expect("next");
-        assert!(matches!(first, EngineOutput::Choices { .. }));
+        assert_eq!(output_kind(&first), "choices");
         let snapshot = base.snapshot().expect("snapshot");
 
         let mut schema_mismatch = engine_from_sources(sources.clone());
@@ -445,12 +453,9 @@ mod snapshot_tests {
         let mut engine = engine_from_sources(sources.clone());
         engine.start("main", None).expect("start");
         let first = engine.next_output().expect("next");
-        assert!(matches!(first, EngineOutput::Choices { .. }));
+        assert_eq!(output_kind(&first), "choices");
         let mut snapshot = engine.snapshot().expect("snapshot");
-        assert!(matches!(
-            snapshot.pending_boundary,
-            PendingBoundary::Choice { .. }
-        ));
+        assert_eq!(pending_kind(&snapshot.pending_boundary), "choice");
         snapshot.pending_boundary = PendingBoundary::Choice {
             node_id: "invalid-node-id".to_string(),
             items: Vec::new(),
@@ -524,19 +529,12 @@ mod snapshot_tests {
         )]));
         input_engine.start("main", None).expect("start");
         let input = input_engine.next_output().expect("input boundary");
-        assert!(matches!(input, EngineOutput::Input { .. }));
+        assert_eq!(output_kind(&input), "input");
         let input_snapshot = input_engine.snapshot().expect("snapshot");
 
         let mut choice_on_input = input_snapshot.clone();
-        assert!(matches!(
-            choice_on_input.pending_boundary,
-            PendingBoundary::Input { .. }
-        ));
-        let mut input_node_id = None;
-        if let PendingBoundary::Input { node_id, .. } = &choice_on_input.pending_boundary {
-            input_node_id = Some(node_id.clone());
-        }
-        let input_node_id = input_node_id.expect("snapshot should contain input boundary");
+        assert_eq!(pending_kind(&choice_on_input.pending_boundary), "input");
+        let input_node_id = pending_node_id(&choice_on_input.pending_boundary);
         choice_on_input.pending_boundary = PendingBoundary::Choice {
             node_id: input_node_id,
             items: Vec::new(),
@@ -572,15 +570,8 @@ mod snapshot_tests {
         let choice_snapshot = choice_engine.snapshot().expect("snapshot");
 
         let mut input_on_choice = choice_snapshot.clone();
-        assert!(matches!(
-            input_on_choice.pending_boundary,
-            PendingBoundary::Choice { .. }
-        ));
-        let mut choice_node_id = None;
-        if let PendingBoundary::Choice { node_id, .. } = &input_on_choice.pending_boundary {
-            choice_node_id = Some(node_id.clone());
-        }
-        let choice_node_id = choice_node_id.expect("snapshot should contain choice boundary");
+        assert_eq!(pending_kind(&input_on_choice.pending_boundary), "choice");
+        let choice_node_id = pending_node_id(&input_on_choice.pending_boundary);
         input_on_choice.pending_boundary = PendingBoundary::Input {
             node_id: choice_node_id,
             target_var: "name".to_string(),
@@ -603,10 +594,7 @@ mod snapshot_tests {
         assert_eq!(error.code, "SNAPSHOT_PENDING_BOUNDARY");
 
         let mut input_mismatch = input_snapshot.clone();
-        assert!(matches!(
-            input_mismatch.pending_boundary,
-            PendingBoundary::Input { .. }
-        ));
+        assert_eq!(pending_kind(&input_mismatch.pending_boundary), "input");
         input_mismatch.pending_boundary = PendingBoundary::Input {
             node_id: "missing-input-node".to_string(),
             target_var: "name".to_string(),
@@ -635,7 +623,7 @@ mod snapshot_tests {
             default_text: "d".to_string(),
         };
         let output = resume_mismatch.boundary_output(&pending);
-        assert!(matches!(output, EngineOutput::Input { .. }));
+        assert_eq!(output_kind(&output), "input");
 
         let mut with_resume = choice_snapshot.clone();
         let frame = with_resume
@@ -686,7 +674,7 @@ mod snapshot_tests {
         let mut engine = engine_from_sources(files.clone());
         engine.start("main", None).expect("start");
         let first = engine.next_output().expect("choice");
-        assert!(matches!(first, EngineOutput::Choices { .. }));
+        assert_eq!(output_kind(&first), "choices");
         let snapshot = engine.snapshot().expect("snapshot");
         assert_eq!(
             snapshot.defs_globals.get("shared.hp"),
@@ -727,7 +715,7 @@ mod snapshot_tests {
         let mut engine = engine_from_sources(files.clone());
         engine.start("main", None).expect("start");
         let first = engine.next_output().expect("choice");
-        assert!(matches!(first, EngineOutput::Choices { .. }));
+        assert_eq!(output_kind(&first), "choices");
         let snapshot = engine.snapshot().expect("snapshot");
 
         let mut unknown = snapshot.clone();
@@ -822,5 +810,68 @@ mod snapshot_tests {
         resumed.choose(0).expect("choose");
         let out = resumed.next_output().expect("text");
         assert!(matches!(out, EngineOutput::Text { text, .. } if text == "5:0"));
+    }
+
+    #[test]
+    pub(super) fn resume_preserves_sequence_rng_mode() {
+        let sources = map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <choice text="Pick">
+        <option text="A"><text>A</text></option>
+      </choice>
+    </script>
+    "#,
+        )]);
+        let compiled = compile_project_from_sources(sources);
+        let mut source = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts.clone(),
+            global_json: compiled.global_json.clone(),
+            defs_global_declarations: compiled.defs_global_declarations.clone(),
+            defs_global_init_order: compiled.defs_global_init_order.clone(),
+            host_functions: None,
+            random_seed: Some(1),
+            random_sequence: Some(vec![7, 9]),
+            random_sequence_index: Some(0),
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        })
+        .expect("source engine");
+        source.start("main", None).expect("start");
+        assert_eq!(
+            output_kind(&source.next_output().expect("choice")),
+            "choices"
+        );
+        let snapshot = source.snapshot().expect("snapshot");
+
+        let mut target = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_json: compiled.global_json,
+            defs_global_declarations: compiled.defs_global_declarations,
+            defs_global_init_order: compiled.defs_global_init_order,
+            host_functions: None,
+            random_seed: Some(1),
+            random_sequence: Some(vec![7, 9]),
+            random_sequence_index: Some(0),
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        })
+        .expect("target engine");
+        target.resume(snapshot).expect("resume");
+        let random_state_pair = |view: RandomStateView| match view {
+            RandomStateView::Sequence { values, index } => (values, index),
+            RandomStateView::Seeded { .. } => (Vec::new(), usize::MAX),
+        };
+        let (values, index) = random_state_pair(target.random_state_snapshot());
+        assert_eq!(values, vec![7, 9]);
+        assert_eq!(index, 0);
+        let (fallback_values, fallback_index) = random_state_pair(
+            engine_from_sources(map(&[(
+                "main.script.xml",
+                r#"<script name="main"><text>x</text></script>"#,
+            )]))
+            .random_state_snapshot(),
+        );
+        assert!(fallback_values.is_empty());
+        assert_eq!(fallback_index, usize::MAX);
     }
 }

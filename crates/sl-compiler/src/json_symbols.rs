@@ -295,10 +295,11 @@ pub(crate) fn extract_text_interpolations(template: &str) -> Vec<String> {
 
 pub(crate) fn extract_local_bindings(source: &str) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
-    for caps in local_binding_regex().captures_iter(source) {
-        if let Some(name) = caps.get(1) {
-            out.insert(name.as_str().to_string());
-        }
+    for name in local_binding_regex()
+        .captures_iter(source)
+        .filter_map(|caps| caps.get(1))
+    {
+        out.insert(name.as_str().to_string());
     }
     out
 }
@@ -804,5 +805,121 @@ mod json_symbols_tests {
 
         compile_project_bundle_from_xml_map(&files)
             .expect("validation should pass when hidden json is not referenced");
+    }
+
+    #[test]
+    fn compile_script_rejects_reserved_script_name() {
+        let root = xml_element("script", &[("name", "__sl_main")], vec![xml_text("x")]);
+        let error = compile_script(
+            "main.script.xml",
+            &root,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeSet::new(),
+        )
+        .expect_err("reserved script name should fail");
+        assert_eq!(error.code, "NAME_RESERVED_PREFIX");
+    }
+
+    #[test]
+    fn compile_script_reports_missing_name_and_reserved_var_errors() {
+        let missing_name_root = xml_element("script", &[], vec![xml_text("x")]);
+        let error = compile_script(
+            "main.script.xml",
+            &missing_name_root,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeSet::new(),
+        )
+        .expect_err("script name should be required");
+        assert_eq!(error.code, "XML_MISSING_ATTR");
+
+        let reserved_var_root = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element(
+                "var",
+                &[("name", "__sl_v"), ("type", "int")],
+                vec![xml_text("1")],
+            ))],
+        );
+        let error = compile_script(
+            "main.script.xml",
+            &reserved_var_root,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeSet::new(),
+        )
+        .expect_err("reserved var declaration should fail");
+        assert_eq!(error.code, "NAME_RESERVED_PREFIX");
+    }
+
+    #[test]
+    fn validate_json_symbol_visibility_error_paths_are_covered() {
+        let cases = vec![
+            (
+                "code",
+                r#"<script name="main"><code>x = secret.hp;</code></script>"#,
+            ),
+            (
+                "var init",
+                r#"<script name="main"><var name="x" type="int">secret.hp</var></script>"#,
+            ),
+            (
+                "while",
+                r#"<script name="main"><while when="secret.hp > 0"><text>x</text></while></script>"#,
+            ),
+            (
+                "if",
+                r#"<script name="main"><if when="secret.hp > 0"><text>x</text></if></script>"#,
+            ),
+            (
+                "static choice when",
+                r#"<script name="main"><choice text="c"><option text="a" when="secret.hp > 0"><text>x</text></option></choice></script>"#,
+            ),
+            (
+                "dynamic choice array",
+                r#"<script name="main"><choice text="c"><dynamic-options array="secret.list" item="it"><option text="x"><text>x</text></option></dynamic-options></choice></script>"#,
+            ),
+            (
+                "dynamic choice when",
+                r#"<script name="main"><var name="arr" type="int[]">[1]</var><choice text="c"><dynamic-options array="arr" item="it"><option text="x" when="secret.hp > 0"><text>x</text></option></dynamic-options></choice></script>"#,
+            ),
+            (
+                "call args",
+                r#"<script name="main"><call script="next" args="secret.hp"/></script>"#,
+            ),
+            (
+                "return args",
+                r#"<script name="main"><return script="next" args="secret.hp"/></script>"#,
+            ),
+        ];
+
+        for (_, script_source) in cases {
+            let files = map(&[
+                ("visible.json", r#"{ "hp": 1 }"#),
+                ("secret.json", r#"{ "hp": 9, "list": [1] }"#),
+                (
+                    "next.script.xml",
+                    r#"<script name="next" args="int:n"><text>${n}</text></script>"#,
+                ),
+                ("main.script.xml", script_source),
+            ]);
+            let error = compile_project_bundle_from_xml_map(&files)
+                .expect_err("hidden json usage should fail");
+            assert_eq!(error.code, "JSON_SYMBOL_NOT_VISIBLE");
+        }
+
+        let locals = extract_local_bindings("let game = 1; const score = game + 1;");
+        assert!(locals.contains("game"));
+        assert!(locals.contains("score"));
+        let single = extract_local_bindings("let only = 1;");
+        assert_eq!(single, BTreeSet::from(["only".to_string()]));
     }
 }

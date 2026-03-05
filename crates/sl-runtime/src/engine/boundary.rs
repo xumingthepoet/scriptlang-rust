@@ -225,6 +225,120 @@ mod boundary_tests {
     use super::runtime_test_support::*;
     use super::*;
 
+    fn output_kind(output: &EngineOutput) -> &'static str {
+        match output {
+            EngineOutput::Text { .. } => "text",
+            EngineOutput::Choices { .. } => "choices",
+            EngineOutput::Input { .. } => "input",
+            EngineOutput::End => "end",
+        }
+    }
+
+    fn pending_kind(pending: &Option<PendingBoundary>) -> &'static str {
+        match pending {
+            Some(PendingBoundary::Choice { .. }) => "choice",
+            Some(PendingBoundary::Input { .. }) => "input",
+            None => "none",
+        }
+    }
+
+    fn pending_choice_options_mut(
+        pending: &mut PendingBoundary,
+    ) -> Option<&mut Vec<super::lifecycle::PendingChoiceOption>> {
+        match pending {
+            PendingBoundary::Choice { options, .. } => Some(options),
+            PendingBoundary::Input { .. } => None,
+        }
+    }
+
+    fn pending_choice_once_key(pending: &PendingBoundary) -> Option<String> {
+        match pending {
+            PendingBoundary::Choice { options, .. } => options
+                .first()
+                .map(|option| format!("option:{}", option.item.id)),
+            PendingBoundary::Input { .. } => None,
+        }
+    }
+
+    fn pending_input_target_var_mut(pending: &mut PendingBoundary) -> Option<&mut String> {
+        match pending {
+            PendingBoundary::Input { target_var, .. } => Some(target_var),
+            PendingBoundary::Choice { .. } => None,
+        }
+    }
+
+    #[test]
+    pub(super) fn helper_kind_functions_cover_all_variants() {
+        assert_eq!(
+            output_kind(&EngineOutput::Text {
+                text: "x".to_string()
+            }),
+            "text"
+        );
+        assert_eq!(
+            output_kind(&EngineOutput::Choices {
+                items: Vec::new(),
+                prompt_text: None
+            }),
+            "choices"
+        );
+        assert_eq!(
+            output_kind(&EngineOutput::Input {
+                prompt_text: "p".to_string(),
+                default_text: "d".to_string()
+            }),
+            "input"
+        );
+        assert_eq!(output_kind(&EngineOutput::End), "end");
+
+        assert_eq!(pending_kind(&None), "none");
+        assert_eq!(
+            pending_kind(&Some(PendingBoundary::Input {
+                frame_id: 1,
+                node_id: "i".to_string(),
+                target_var: "v".to_string(),
+                prompt_text: "p".to_string(),
+                default_text: "d".to_string()
+            })),
+            "input"
+        );
+        assert_eq!(
+            pending_kind(&Some(PendingBoundary::Choice {
+                frame_id: 1,
+                node_id: "c".to_string(),
+                options: Vec::new(),
+                prompt_text: None
+            })),
+            "choice"
+        );
+        let mut input_pending = PendingBoundary::Input {
+            frame_id: 1,
+            node_id: "n".to_string(),
+            target_var: "name".to_string(),
+            prompt_text: "p".to_string(),
+            default_text: "d".to_string(),
+        };
+        assert!(pending_choice_options_mut(&mut input_pending).is_none());
+        assert!(pending_choice_once_key(&input_pending).is_none());
+        assert!(pending_input_target_var_mut(&mut input_pending).is_some());
+        let mut choice_pending = PendingBoundary::Choice {
+            frame_id: 1,
+            node_id: "c".to_string(),
+            options: vec![super::lifecycle::PendingChoiceOption {
+                item: ChoiceItem {
+                    index: 0,
+                    id: "id".to_string(),
+                    text: "text".to_string(),
+                },
+                dynamic_binding: None,
+            }],
+            prompt_text: None,
+        };
+        assert!(pending_choice_options_mut(&mut choice_pending).is_some());
+        assert!(pending_choice_once_key(&choice_pending).is_some());
+        assert!(pending_input_target_var_mut(&mut choice_pending).is_none());
+    }
+
     #[test]
     pub(super) fn choose_and_input_validate_pending_boundary_state() {
         let mut engine = engine_from_sources(map(&[(
@@ -253,7 +367,7 @@ mod boundary_tests {
         )]));
         engine.start("main", None).expect("start");
         let first = engine.next_output().expect("next");
-        assert!(matches!(first, EngineOutput::Choices { .. }));
+        assert_eq!(output_kind(&first), "choices");
         let error = engine.choose(9).expect_err("index out of range");
         assert_eq!(error.code, "ENGINE_CHOICE_INDEX");
     }
@@ -272,10 +386,14 @@ mod boundary_tests {
         )]));
         engine.start("main", None).expect("start");
         let first = engine.next_output().expect("next");
-        assert!(matches!(first, EngineOutput::Input { .. }));
+        assert_eq!(output_kind(&first), "input");
         engine.submit_input("   ").expect("submit input");
         let second = engine.next_output().expect("next");
-        assert!(matches!(second, EngineOutput::Text { ref text } if text == "Hello Traveler"));
+        assert_eq!(output_kind(&second), "text");
+        assert!(matches!(
+            second,
+            EngineOutput::Text { text } if text == "Hello Traveler"
+        ));
     }
 
     #[test]
@@ -292,10 +410,14 @@ mod boundary_tests {
         )]));
         engine.start("main", None).expect("start");
         let first = engine.next_output().expect("next");
-        assert!(matches!(first, EngineOutput::Input { .. }));
+        assert_eq!(output_kind(&first), "input");
         engine.submit_input("Guild").expect("submit input");
         let second = engine.next_output().expect("next");
-        assert!(matches!(second, EngineOutput::Text { ref text } if text == "Hello Guild"));
+        assert_eq!(output_kind(&second), "text");
+        assert!(matches!(
+            second,
+            EngineOutput::Text { text } if text == "Hello Guild"
+        ));
     }
 
     #[test]
@@ -315,10 +437,7 @@ mod boundary_tests {
             .choose(0)
             .expect_err("wrong boundary kind should fail");
         assert_eq!(error.code, "ENGINE_NO_PENDING_CHOICE");
-        assert!(matches!(
-            wrong_kind.pending_boundary,
-            Some(PendingBoundary::Input { .. })
-        ));
+        assert_eq!(pending_kind(&wrong_kind.pending_boundary), "input");
 
         let mut lookup_fail = engine_from_sources(map(&[(
             "main.script.xml",
@@ -331,10 +450,10 @@ mod boundary_tests {
     "#,
         )]));
         lookup_fail.start("main", None).expect("start");
-        assert!(matches!(
-            lookup_fail.next_output().expect("choice"),
-            EngineOutput::Choices { .. }
-        ));
+        assert_eq!(
+            output_kind(&lookup_fail.next_output().expect("choice")),
+            "choices"
+        );
         let frame_index = lookup_fail
             .find_frame_index(lookup_fail.top_frame_id().expect("frame"))
             .expect("frame index");
@@ -343,10 +462,7 @@ mod boundary_tests {
             .choose(0)
             .expect_err("lookup failure should keep boundary");
         assert_eq!(error.code, "ENGINE_GROUP_NOT_FOUND");
-        assert!(matches!(
-            lookup_fail.pending_boundary,
-            Some(PendingBoundary::Choice { .. })
-        ));
+        assert_eq!(pending_kind(&lookup_fail.pending_boundary), "choice");
 
         let mut node_missing = engine_from_sources(map(&[(
             "main.script.xml",
@@ -359,10 +475,10 @@ mod boundary_tests {
     "#,
         )]));
         node_missing.start("main", None).expect("start");
-        assert!(matches!(
-            node_missing.next_output().expect("choice"),
-            EngineOutput::Choices { .. }
-        ));
+        assert_eq!(
+            output_kind(&node_missing.next_output().expect("choice")),
+            "choices"
+        );
         let frame_index = node_missing
             .find_frame_index(node_missing.top_frame_id().expect("frame"))
             .expect("frame index");
@@ -371,10 +487,7 @@ mod boundary_tests {
             .choose(0)
             .expect_err("node missing should keep boundary");
         assert_eq!(error.code, "ENGINE_CHOICE_NODE_MISSING");
-        assert!(matches!(
-            node_missing.pending_boundary,
-            Some(PendingBoundary::Choice { .. })
-        ));
+        assert_eq!(pending_kind(&node_missing.pending_boundary), "choice");
 
         let mut option_missing = engine_from_sources(map(&[(
             "main.script.xml",
@@ -387,42 +500,42 @@ mod boundary_tests {
     "#,
         )]));
         option_missing.start("main", None).expect("start");
-        assert!(matches!(
-            option_missing.next_output().expect("choice"),
-            EngineOutput::Choices { .. }
-        ));
+        assert_eq!(
+            output_kind(&option_missing.next_output().expect("choice")),
+            "choices"
+        );
         let pending = option_missing
             .pending_boundary
             .as_mut()
             .expect("pending choice should exist");
-        assert!(matches!(pending, PendingBoundary::Choice { .. }));
-        if let PendingBoundary::Choice { options, .. } = pending {
-            options[0].item.id = "missing".to_string();
-        }
+        let options =
+            pending_choice_options_mut(pending).expect("pending boundary should be choice");
+        options[0].item.id = "missing".to_string();
         let error = option_missing
             .choose(0)
             .expect_err("option missing should keep boundary");
         assert_eq!(error.code, "ENGINE_CHOICE_NOT_FOUND");
-        assert!(matches!(
-            option_missing.pending_boundary,
-            Some(PendingBoundary::Choice { .. })
-        ));
+        assert_eq!(pending_kind(&option_missing.pending_boundary), "choice");
 
         let mut push_fail = engine_from_sources(map(&[(
             "main.script.xml",
             r#"
     <script name="main">
+      <var name="arr" type="int[]">[]</var>
       <choice text="Pick">
+        <dynamic-options array="arr" item="it">
+          <option text="${it}"><text>X</text></option>
+        </dynamic-options>
         <option text="A" once="true"><text>A</text></option>
       </choice>
     </script>
     "#,
         )]));
         push_fail.start("main", None).expect("start");
-        assert!(matches!(
-            push_fail.next_output().expect("choice"),
-            EngineOutput::Choices { .. }
-        ));
+        assert_eq!(
+            output_kind(&push_fail.next_output().expect("choice")),
+            "choices"
+        );
         let frame_id = push_fail.top_frame_id().expect("frame");
         let frame_index = push_fail.find_frame_index(frame_id).expect("frame index");
         let before_node_index = push_fail.frames[frame_index].node_index;
@@ -433,19 +546,18 @@ mod boundary_tests {
             .pending_boundary
             .as_ref()
             .expect("pending choice should exist");
-        assert!(matches!(pending, PendingBoundary::Choice { .. }));
-        let mut once_key = None;
-        if let PendingBoundary::Choice { options, .. } = pending {
-            once_key = Some(format!("option:{}", options[0].item.id));
-        }
-        let once_key = once_key.expect("choice options should exist");
+        assert_eq!(pending_kind(&push_fail.pending_boundary), "choice");
+        let once_key = pending_choice_once_key(pending).expect("choice options should exist");
         assert!(!push_fail.has_once_state(&script_name, &once_key));
         for script in push_fail.scripts.values_mut() {
             for group in script.groups.values_mut() {
                 for node in &mut group.nodes {
                     if let ScriptNode::Choice { entries, .. } = node {
-                        if let Some(ChoiceEntry::Static { option }) = entries.first_mut() {
-                            option.group_id = "missing-group".to_string();
+                        for entry in entries {
+                            if let ChoiceEntry::Static { option } = entry {
+                                option.group_id = "missing-group".to_string();
+                                break;
+                            }
                         }
                     }
                 }
@@ -457,10 +569,7 @@ mod boundary_tests {
         assert_eq!(error.code, "ENGINE_GROUP_NOT_FOUND");
         assert_eq!(push_fail.frames[frame_index].node_index, before_node_index);
         assert!(!push_fail.has_once_state(&script_name, &once_key));
-        assert!(matches!(
-            push_fail.pending_boundary,
-            Some(PendingBoundary::Choice { .. })
-        ));
+        assert_eq!(pending_kind(&push_fail.pending_boundary), "choice");
     }
 
     #[test]
@@ -486,10 +595,7 @@ mod boundary_tests {
             .submit_input("x")
             .expect_err("wrong boundary kind should fail");
         assert_eq!(error.code, "ENGINE_NO_PENDING_INPUT");
-        assert!(matches!(
-            wrong_kind.pending_boundary,
-            Some(PendingBoundary::Choice { .. })
-        ));
+        assert_eq!(pending_kind(&wrong_kind.pending_boundary), "choice");
 
         let mut write_fail = engine_from_sources(map(&[(
             "main.script.xml",
@@ -501,25 +607,21 @@ mod boundary_tests {
     "#,
         )]));
         write_fail.start("main", None).expect("start");
-        assert!(matches!(
-            write_fail.next_output().expect("input"),
-            EngineOutput::Input { .. }
-        ));
+        assert_eq!(
+            output_kind(&write_fail.next_output().expect("input")),
+            "input"
+        );
         let pending = write_fail
             .pending_boundary
             .as_mut()
             .expect("pending input should exist");
-        assert!(matches!(pending, PendingBoundary::Input { .. }));
-        if let PendingBoundary::Input { target_var, .. } = pending {
-            *target_var = "missingVar".to_string();
-        }
+        let target_var =
+            pending_input_target_var_mut(pending).expect("pending boundary should be input");
+        *target_var = "missingVar".to_string();
         let error = write_fail
             .submit_input("Guild")
             .expect_err("write path should fail");
         assert_eq!(error.code, "ENGINE_VAR_WRITE");
-        assert!(matches!(
-            write_fail.pending_boundary,
-            Some(PendingBoundary::Input { .. })
-        ));
+        assert_eq!(pending_kind(&write_fail.pending_boundary), "input");
     }
 }

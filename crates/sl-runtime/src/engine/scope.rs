@@ -352,7 +352,7 @@ mod scope_tests {
         let second = engine.next_output().expect("second text");
         assert!(matches!(second, EngineOutput::Text { text, .. } if text == "2"));
         let end = engine.next_output().expect("end");
-        assert!(matches!(end, EngineOutput::End));
+        assert_eq!(format!("{:?}", end), format!("{:?}", EngineOutput::End));
     }
 
     #[test]
@@ -584,5 +584,25 @@ mod scope_tests {
             .read_variable("shared.hp")
             .expect("read should succeed");
         assert_eq!(value, SlValue::Number(20.0));
+    }
+
+    #[test]
+    pub(super) fn scope_helper_none_and_missing_root_paths_are_covered() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>x</text></script>"#,
+        )]));
+        engine.frames.clear();
+        assert!(engine.resolve_current_script_name().is_none());
+        assert!(engine.resolve_defs_global_alias(None, "hp").is_none());
+
+        let error = engine
+            .read_path("missing.value")
+            .expect_err("missing root read should fail");
+        assert_eq!(error.code, "ENGINE_VAR_READ");
+        let error = engine
+            .write_path("missing.value", SlValue::Number(1.0))
+            .expect_err("missing root write should fail");
+        assert_eq!(error.code, "ENGINE_VAR_READ");
     }
 }

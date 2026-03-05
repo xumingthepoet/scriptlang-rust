@@ -274,9 +274,11 @@ pub(crate) fn resolve_visible_defs(
 
     let mut visible_types = resolved_types.clone();
     for (alias, qualified_name) in &type_aliases {
-        if let Some(ty) = resolved_types.get(qualified_name).cloned() {
-            visible_types.insert(alias.clone(), ty);
-        }
+        let ty = resolved_types
+            .get(qualified_name)
+            .cloned()
+            .expect("resolved type aliases must point to resolved types");
+        visible_types.insert(alias.clone(), ty);
     }
 
     let mut functions: BTreeMap<String, FunctionDecl> = BTreeMap::new();
@@ -452,9 +454,11 @@ pub(crate) fn collect_defs_globals_for_bundle(
 
     let mut visible_types = resolved_types.clone();
     for (alias, qualified_name) in &type_aliases {
-        if let Some(ty) = resolved_types.get(qualified_name).cloned() {
-            visible_types.insert(alias.clone(), ty);
-        }
+        let ty = resolved_types
+            .get(qualified_name)
+            .cloned()
+            .expect("resolved type aliases must point to resolved types");
+        visible_types.insert(alias.clone(), ty);
     }
 
     let mut defs_globals = BTreeMap::new();
@@ -549,6 +553,15 @@ mod defs_resolver_tests {
     use super::*;
     use crate::compiler_test_support::*;
 
+    fn script_type_kind(ty: &ScriptType) -> &'static str {
+        match ty {
+            ScriptType::Primitive { .. } => "primitive",
+            ScriptType::Array { .. } => "array",
+            ScriptType::Map { .. } => "map",
+            ScriptType::Object { .. } => "object",
+        }
+    }
+
     #[test]
     fn resolve_visible_defs_builds_function_signatures() {
         let span = SourceSpan::synthetic();
@@ -591,10 +604,7 @@ mod defs_resolver_tests {
         let function = functions.get("make").expect("function should exist");
         assert_eq!(function.params.len(), 1);
         assert!(defs_globals.is_empty());
-        assert!(matches!(
-            function.return_binding.r#type,
-            ScriptType::Object { .. }
-        ));
+        assert_eq!(script_type_kind(&function.return_binding.r#type), "object");
     }
 
     #[test]
@@ -1079,5 +1089,297 @@ mod defs_resolver_tests {
         assert!(bad_function_error
             .message
             .contains("In file \"bad-function.defs.xml\":"));
+    }
+
+    #[test]
+    fn parse_defs_global_var_declaration_covers_success_and_error_paths() {
+        let node = xml_element(
+            "var",
+            &[("name", "hp"), ("type", "int")],
+            vec![xml_text("1")],
+        );
+        let parsed = parse_defs_global_var_declaration(&node, "shared").expect("parse defs var");
+        assert_eq!(parsed.qualified_name, "shared.hp");
+        assert_eq!(parsed.initial_value_expr.as_deref(), Some("1"));
+
+        let reserved_name = xml_element(
+            "var",
+            &[("name", "__sl_hp"), ("type", "int")],
+            vec![xml_text("1")],
+        );
+        let error = parse_defs_global_var_declaration(&reserved_name, "shared")
+            .expect_err("reserved name should fail");
+        assert_eq!(error.code, "NAME_RESERVED_PREFIX");
+
+        let invalid_type = xml_element(
+            "var",
+            &[("name", "hp"), ("type", "#{ }")],
+            vec![xml_text("1")],
+        );
+        let error =
+            parse_defs_global_var_declaration(&invalid_type, "shared").expect_err("bad type");
+        assert_eq!(error.code, "TYPE_PARSE_ERROR");
+
+        let missing_name = xml_element("var", &[("type", "int")], vec![xml_text("1")]);
+        let error = parse_defs_global_var_declaration(&missing_name, "shared")
+            .expect_err("name should be required");
+        assert_eq!(error.code, "XML_MISSING_ATTR");
+
+        let missing_type = xml_element("var", &[("name", "hp")], vec![xml_text("1")]);
+        let error = parse_defs_global_var_declaration(&missing_type, "shared")
+            .expect_err("type should be required");
+        assert_eq!(error.code, "XML_MISSING_ATTR");
+
+        let mut invalid_sources = BTreeMap::new();
+        invalid_sources.insert(
+            "/".to_string(),
+            SourceFile {
+                kind: SourceKind::Json,
+                includes: Vec::new(),
+                xml_root: None,
+                json_value: Some(SlValue::Number(1.0)),
+            },
+        );
+        let error = collect_global_json(&invalid_sources).expect_err("invalid json symbol path");
+        assert_eq!(error.code, "JSON_SYMBOL_INVALID");
+
+        let reachable = BTreeSet::from(["/".to_string()]);
+        let error = collect_visible_json_symbols(&reachable, &invalid_sources)
+            .expect_err("invalid visible json symbol path");
+        assert_eq!(error.code, "JSON_SYMBOL_INVALID");
+    }
+
+    #[test]
+    fn resolve_visible_defs_error_propagation_and_alias_paths_are_covered() {
+        let span = SourceSpan::synthetic();
+        let defs_with_alias = BTreeMap::from([(
+            "one.defs.xml".to_string(),
+            DefsDeclarations {
+                type_decls: vec![ParsedTypeDecl {
+                    name: "Obj".to_string(),
+                    qualified_name: "one.Obj".to_string(),
+                    fields: vec![ParsedTypeFieldDecl {
+                        name: "v".to_string(),
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        location: span.clone(),
+                    }],
+                    location: span.clone(),
+                }],
+                function_decls: vec![ParsedFunctionDecl {
+                    name: "make".to_string(),
+                    qualified_name: "one.make".to_string(),
+                    params: vec![ParsedFunctionParamDecl {
+                        name: "x".to_string(),
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        location: span.clone(),
+                    }],
+                    return_binding: ParsedFunctionParamDecl {
+                        name: "ret".to_string(),
+                        type_expr: ParsedTypeExpr::Custom("Obj".to_string()),
+                        location: span.clone(),
+                    },
+                    code: "ret = #{v: x};".to_string(),
+                    location: span.clone(),
+                }],
+                defs_global_var_decls: vec![ParsedDefsGlobalVarDecl {
+                    namespace: "one".to_string(),
+                    name: "hp".to_string(),
+                    qualified_name: "one.hp".to_string(),
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    initial_value_expr: None,
+                    location: span.clone(),
+                }],
+            },
+        )]);
+        let reachable = BTreeSet::from(["one.defs.xml".to_string()]);
+        let (types, functions, defs_globals) =
+            resolve_visible_defs(&reachable, &defs_with_alias).expect("resolve aliases");
+        assert!(types.contains_key("Obj"));
+        assert!(functions.contains_key("make"));
+        assert!(defs_globals.contains_key("hp"));
+        assert_eq!(
+            script_type_kind(
+                types
+                    .get("Obj")
+                    .expect("short type alias should be visible in resolved map")
+            ),
+            "object"
+        );
+
+        let defs_for_bundle = BTreeMap::from([(
+            "bundle.defs.xml".to_string(),
+            DefsDeclarations {
+                type_decls: vec![ParsedTypeDecl {
+                    name: "T".to_string(),
+                    qualified_name: "bundle.T".to_string(),
+                    fields: vec![ParsedTypeFieldDecl {
+                        name: "v".to_string(),
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        location: span.clone(),
+                    }],
+                    location: span.clone(),
+                }],
+                function_decls: Vec::new(),
+                defs_global_var_decls: vec![ParsedDefsGlobalVarDecl {
+                    namespace: "bundle".to_string(),
+                    name: "item".to_string(),
+                    qualified_name: "bundle.item".to_string(),
+                    type_expr: ParsedTypeExpr::Custom("T".to_string()),
+                    initial_value_expr: None,
+                    location: span.clone(),
+                }],
+            },
+        )]);
+        let (bundle_globals, init_order) =
+            collect_defs_globals_for_bundle(&defs_for_bundle).expect("bundle alias should resolve");
+        assert!(bundle_globals.contains_key("bundle.item"));
+        assert_eq!(init_order, vec!["bundle.item".to_string()]);
+
+        let bad_type_decl = BTreeMap::from([(
+            "bad_type.defs.xml".to_string(),
+            DefsDeclarations {
+                type_decls: vec![ParsedTypeDecl {
+                    name: "Broken".to_string(),
+                    qualified_name: "bad_type.Broken".to_string(),
+                    fields: vec![ParsedTypeFieldDecl {
+                        name: "v".to_string(),
+                        type_expr: ParsedTypeExpr::Custom("Missing".to_string()),
+                        location: span.clone(),
+                    }],
+                    location: span.clone(),
+                }],
+                function_decls: Vec::new(),
+                defs_global_var_decls: Vec::new(),
+            },
+        )]);
+        let reachable = BTreeSet::from(["bad_type.defs.xml".to_string()]);
+        let error = resolve_visible_defs(&reachable, &bad_type_decl)
+            .expect_err("type resolution in visible loop should fail");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+
+        let alias_already_exists = BTreeMap::from([(
+            "alias.defs.xml".to_string(),
+            DefsDeclarations {
+                type_decls: Vec::new(),
+                function_decls: vec![ParsedFunctionDecl {
+                    name: "make".to_string(),
+                    qualified_name: "make".to_string(),
+                    params: Vec::new(),
+                    return_binding: ParsedFunctionParamDecl {
+                        name: "ret".to_string(),
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        location: span.clone(),
+                    },
+                    code: "ret = 1;".to_string(),
+                    location: span.clone(),
+                }],
+                defs_global_var_decls: Vec::new(),
+            },
+        )]);
+        let reachable = BTreeSet::from(["alias.defs.xml".to_string()]);
+        let (_types, alias_functions, _defs_globals) =
+            resolve_visible_defs(&reachable, &alias_already_exists)
+                .expect("existing alias key should skip insertion branch");
+        assert!(alias_functions.contains_key("make"));
+
+        let bad_param = BTreeMap::from([(
+            "bad.defs.xml".to_string(),
+            DefsDeclarations {
+                type_decls: Vec::new(),
+                function_decls: vec![ParsedFunctionDecl {
+                    name: "f".to_string(),
+                    qualified_name: "bad.f".to_string(),
+                    params: vec![ParsedFunctionParamDecl {
+                        name: "x".to_string(),
+                        type_expr: ParsedTypeExpr::Custom("Missing".to_string()),
+                        location: span.clone(),
+                    }],
+                    return_binding: ParsedFunctionParamDecl {
+                        name: "ret".to_string(),
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        location: span.clone(),
+                    },
+                    code: "ret = 1;".to_string(),
+                    location: span.clone(),
+                }],
+                defs_global_var_decls: Vec::new(),
+            },
+        )]);
+        let reachable = BTreeSet::from(["bad.defs.xml".to_string()]);
+        let error = resolve_visible_defs(&reachable, &bad_param)
+            .expect_err("function param type should resolve");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+
+        let bad_return = BTreeMap::from([(
+            "bad.defs.xml".to_string(),
+            DefsDeclarations {
+                type_decls: Vec::new(),
+                function_decls: vec![ParsedFunctionDecl {
+                    name: "f".to_string(),
+                    qualified_name: "bad.f".to_string(),
+                    params: Vec::new(),
+                    return_binding: ParsedFunctionParamDecl {
+                        name: "ret".to_string(),
+                        type_expr: ParsedTypeExpr::Custom("Missing".to_string()),
+                        location: span.clone(),
+                    },
+                    code: "ret = 1;".to_string(),
+                    location: span.clone(),
+                }],
+                defs_global_var_decls: Vec::new(),
+            },
+        )]);
+        let reachable = BTreeSet::from(["bad.defs.xml".to_string()]);
+        let error = resolve_visible_defs(&reachable, &bad_return)
+            .expect_err("function return type should resolve");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+
+        let bad_global_type = BTreeMap::from([(
+            "bad.defs.xml".to_string(),
+            DefsDeclarations {
+                type_decls: Vec::new(),
+                function_decls: Vec::new(),
+                defs_global_var_decls: vec![ParsedDefsGlobalVarDecl {
+                    namespace: "bad".to_string(),
+                    name: "hp".to_string(),
+                    qualified_name: "bad.hp".to_string(),
+                    type_expr: ParsedTypeExpr::Custom("Missing".to_string()),
+                    initial_value_expr: None,
+                    location: span.clone(),
+                }],
+            },
+        )]);
+        let reachable = BTreeSet::from(["bad.defs.xml".to_string()]);
+        let error = resolve_visible_defs(&reachable, &bad_global_type)
+            .expect_err("defs global type should resolve");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+
+        let bundle_error = collect_defs_globals_for_bundle(&bad_global_type)
+            .expect_err("bundle defs global type should resolve");
+        assert_eq!(bundle_error.code, "TYPE_UNKNOWN");
+
+        assert_eq!(
+            script_type_kind(&ScriptType::Primitive {
+                name: "int".to_string()
+            }),
+            "primitive"
+        );
+        assert_eq!(
+            script_type_kind(&ScriptType::Array {
+                element_type: Box::new(ScriptType::Primitive {
+                    name: "int".to_string()
+                })
+            }),
+            "array"
+        );
+        assert_eq!(
+            script_type_kind(&ScriptType::Map {
+                key_type: "string".to_string(),
+                value_type: Box::new(ScriptType::Primitive {
+                    name: "int".to_string()
+                })
+            }),
+            "map"
+        );
     }
 }

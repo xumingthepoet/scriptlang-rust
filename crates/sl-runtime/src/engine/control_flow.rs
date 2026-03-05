@@ -236,4 +236,61 @@ mod control_flow_tests {
             .expect("context lookup should pass");
         assert!(context.is_some());
     }
+
+    #[test]
+    pub(super) fn control_flow_lookup_group_error_paths_are_covered() {
+        let mut break_engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>x</text></script>"#,
+        )]));
+        break_engine.frames = vec![
+            RuntimeFrame {
+                frame_id: 1,
+                group_id: "missing-owner-group".to_string(),
+                node_index: 0,
+                scope: BTreeMap::new(),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: None,
+                var_types: BTreeMap::new(),
+            },
+            RuntimeFrame {
+                frame_id: 2,
+                group_id: "missing-body-group".to_string(),
+                node_index: 0,
+                scope: BTreeMap::new(),
+                completion: CompletionKind::WhileBody,
+                script_root: false,
+                return_continuation: None,
+                var_types: BTreeMap::new(),
+            },
+        ];
+        let error = break_engine
+            .execute_break()
+            .expect_err("missing owner group should fail");
+        assert_eq!(error.code, "ENGINE_GROUP_NOT_FOUND");
+
+        let mut continue_engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>x</text></script>"#,
+        )]));
+        continue_engine.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id: "missing-group".to_string(),
+            node_index: 1,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::new(),
+        }];
+        let error = continue_engine
+            .find_choice_continue_context()
+            .expect_err("missing group in context lookup should fail");
+        assert_eq!(error.code, "ENGINE_GROUP_NOT_FOUND");
+        let error = continue_engine
+            .execute_continue_choice()
+            .expect_err("continue choice should surface lookup error");
+        assert_eq!(error.code, "ENGINE_GROUP_NOT_FOUND");
+    }
 }

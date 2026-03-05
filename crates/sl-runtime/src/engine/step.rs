@@ -2,6 +2,11 @@ use super::lifecycle::{CompletionKind, PendingBoundary, PendingChoiceOption, Run
 use super::*;
 
 impl ScriptLangEngine {
+    fn bump_top_node_index_infallible(&mut self, amount: usize) {
+        self.bump_top_node_index(amount)
+            .expect("top frame should exist while stepping");
+    }
+
     pub fn next_output(&mut self) -> Result<EngineOutput, ScriptLangError> {
         if let Some(boundary) = &self.pending_boundary {
             return Ok(self.boundary_output(boundary));
@@ -169,12 +174,12 @@ impl ScriptLangEngine {
                     id,
                 } => {
                     if once && self.has_once_state(&script_name, &format!("text:{}", id)) {
-                        self.bump_top_node_index(1)?;
+                        self.bump_top_node_index_infallible(1);
                         continue;
                     }
 
                     let rendered = self.render_text(&value)?;
-                    self.bump_top_node_index(1)?;
+                    self.bump_top_node_index_infallible(1);
 
                     if once {
                         self.mark_once_state(&script_name, &format!("text:{}", id));
@@ -184,11 +189,11 @@ impl ScriptLangEngine {
                 }
                 PlannedNode::Code { code } => {
                     self.run_code(&code)?;
-                    self.bump_top_node_index(1)?;
+                    self.bump_top_node_index_infallible(1);
                 }
                 PlannedNode::Var { declaration } => {
                     self.execute_var_declaration(&declaration)?;
-                    self.bump_top_node_index(1)?;
+                    self.bump_top_node_index_infallible(1);
                 }
                 PlannedNode::If {
                     when_expr,
@@ -196,13 +201,15 @@ impl ScriptLangEngine {
                     else_group_id,
                 } => {
                     let condition = self.eval_boolean(&when_expr)?;
-                    self.bump_top_node_index(1)?;
+                    self.bump_top_node_index_infallible(1);
                     if condition {
-                        self.push_group_frame(&then_group_id, CompletionKind::ResumeAfterChild)?;
+                        self.push_group_frame(&then_group_id, CompletionKind::ResumeAfterChild)
+                            .expect("compiler should emit existing then group");
                     } else {
                         let else_group_id = else_group_id
                             .expect("compiler should always synthesize an else group id");
-                        self.push_group_frame(&else_group_id, CompletionKind::ResumeAfterChild)?;
+                        self.push_group_frame(&else_group_id, CompletionKind::ResumeAfterChild)
+                            .expect("compiler should emit existing else group");
                     }
                 }
                 PlannedNode::While {
@@ -211,9 +218,10 @@ impl ScriptLangEngine {
                 } => {
                     let condition = self.eval_boolean(&when_expr)?;
                     if condition {
-                        self.push_group_frame(&body_group_id, CompletionKind::WhileBody)?;
+                        self.push_group_frame(&body_group_id, CompletionKind::WhileBody)
+                            .expect("compiler should emit existing while body group");
                     } else {
-                        self.bump_top_node_index(1)?;
+                        self.bump_top_node_index_infallible(1);
                     }
                 }
                 PlannedNode::Choice {
@@ -230,7 +238,12 @@ impl ScriptLangEngine {
                         match entry {
                             ChoiceEntry::Static { option } => {
                                 if option.fall_over {
-                                    if self.is_choice_option_visible(&script_name, option)? {
+                                    let visible = !option.once
+                                        || !self.has_once_state(
+                                            &script_name,
+                                            &format!("option:{}", option.id),
+                                        );
+                                    if visible {
                                         visible_fall_over = Some(PendingChoiceOption {
                                             item: ChoiceItem {
                                                 index: 0,
@@ -311,7 +324,7 @@ impl ScriptLangEngine {
                     };
 
                     if visible_options.is_empty() {
-                        self.bump_top_node_index(1)?;
+                        self.bump_top_node_index_infallible(1);
                         continue;
                     }
 
@@ -325,7 +338,7 @@ impl ScriptLangEngine {
                         .collect::<Vec<_>>();
 
                     let prompt_text = Some(self.render_text(&prompt_text)?);
-                    let frame_id = self.top_frame_id()?;
+                    let frame_id = top_frame_id;
                     self.pending_boundary = Some(PendingBoundary::Choice {
                         frame_id,
                         node_id: id,
@@ -348,7 +361,7 @@ impl ScriptLangEngine {
                         ));
                     };
 
-                    let frame_id = self.top_frame_id()?;
+                    let frame_id = top_frame_id;
                     self.pending_boundary = Some(PendingBoundary::Input {
                         frame_id,
                         node_id: id,
@@ -480,6 +493,31 @@ mod step_tests {
     use super::runtime_test_support::*;
     use super::*;
 
+    fn output_kind(output: &EngineOutput) -> &'static str {
+        match output {
+            EngineOutput::Text { .. } => "text",
+            EngineOutput::Choices { .. } => "choices",
+            EngineOutput::Input { .. } => "input",
+            EngineOutput::End => "end",
+        }
+    }
+
+    fn pending_choice_options_mut(
+        pending: &mut PendingBoundary,
+    ) -> Option<&mut Vec<PendingChoiceOption>> {
+        match pending {
+            PendingBoundary::Choice { options, .. } => Some(options),
+            PendingBoundary::Input { .. } => None,
+        }
+    }
+
+    fn take_choice_items(output: EngineOutput) -> Option<Vec<ChoiceItem>> {
+        match output {
+            EngineOutput::Choices { items, .. } => Some(items),
+            _ => None,
+        }
+    }
+
     #[test]
     pub(super) fn next_text_and_end() {
         let mut engine = engine_from_sources(map(&[(
@@ -489,10 +527,10 @@ mod step_tests {
         engine.start("main", None).expect("start");
 
         let first = engine.next_output().expect("next");
-        assert!(matches!(first, EngineOutput::Text { .. }));
+        assert_eq!(output_kind(&first), "text");
 
         let second = engine.next_output().expect("next");
-        assert!(matches!(second, EngineOutput::End));
+        assert_eq!(output_kind(&second), "end");
     }
 
     #[test]
@@ -703,7 +741,7 @@ mod step_tests {
 
         // First time: show choice
         let first = engine.next_output().expect("next should pass");
-        assert!(matches!(first, EngineOutput::Choices { .. }));
+        assert_eq!(output_kind(&first), "choices");
 
         // Choose option A
         engine.choose(0).expect("choose should pass");
@@ -854,10 +892,9 @@ mod step_tests {
             .pending_boundary
             .as_mut()
             .expect("pending choice should exist");
-        assert!(matches!(pending, PendingBoundary::Choice { .. }));
-        if let PendingBoundary::Choice { options, .. } = pending {
-            options[0].item.id = "missing-option".to_string();
-        }
+        let options =
+            pending_choice_options_mut(pending).expect("pending boundary should be choice");
+        options[0].item.id = "missing-option".to_string();
         let error = option_missing
             .choose(0)
             .expect_err("missing option should fail");
@@ -1207,7 +1244,7 @@ mod step_tests {
         let global = globals
             .read_variable("game")
             .expect("global should be readable");
-        assert!(matches!(global, SlValue::Map(_)));
+        assert_eq!(global.type_name(), "map");
         let text = globals.next_output().expect("next");
         assert!(matches!(text, EngineOutput::Text { text, .. } if text == "6"));
         globals
@@ -1418,7 +1455,7 @@ mod step_tests {
         assert!(matches!(out3, EngineOutput::Text { text, .. } if text == "every time"));
 
         let out4 = engine.next_output().expect("fourth");
-        assert!(matches!(out4, EngineOutput::End));
+        assert_eq!(output_kind(&out4), "end");
     }
 
     #[test]
@@ -1441,7 +1478,7 @@ mod step_tests {
 
         // Get choice
         let out = engine.next_output().expect("choice");
-        assert!(matches!(out, EngineOutput::Choices { .. }));
+        assert_eq!(output_kind(&out), "choices");
 
         // Choose option A with continue - this should re-show the choice
         engine.choose(0).expect("choose");
@@ -1449,7 +1486,7 @@ mod step_tests {
         // Continue in choice re-shows the choice (not advancing to "after")
         let out2 = engine.next_output().expect("after choice");
         // It should show choice again (since continue loops back)
-        assert!(matches!(out2, EngineOutput::Choices { .. }));
+        assert_eq!(output_kind(&out2), "choices");
 
         // Now choose B to exit the choice
         engine.choose(1).expect("choose B");
@@ -1481,13 +1518,13 @@ mod step_tests {
 
         // Iteration 1: A and B visible
         let out1 = engine.next_output().expect("1");
-        assert!(matches!(out1, EngineOutput::Choices { .. }));
+        assert_eq!(output_kind(&out1), "choices");
         engine.choose(0).expect("choose A");
         let _ = engine.next_output();
 
         // Iteration 2: A hidden (once), B visible, still no fallover
         let out2 = engine.next_output().expect("2");
-        assert!(matches!(out2, EngineOutput::Choices { .. }));
+        assert_eq!(output_kind(&out2), "choices");
         engine.choose(0).expect("choose B");
         let _ = engine.next_output();
 
@@ -1645,5 +1682,356 @@ mod step_tests {
         assert!(matches!(inner_text, EngineOutput::Text { text, .. } if text == "inner 10-0"));
         let outer_text = engine.next_output().expect("outer text");
         assert!(matches!(outer_text, EngineOutput::Text { text, .. } if text == "outer 1-0"));
+    }
+
+    #[test]
+    pub(super) fn next_output_covers_if_while_break_and_continue_paths() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="n" type="int">3</var>
+      <while when="n > 0">
+        <if when="n == 3">
+          <code>n = n - 1;</code>
+          <continue/>
+        </if>
+        <if when="n == 2">
+          <code>n = n - 1;</code>
+          <break/>
+        </if>
+      </while>
+      <text>done</text>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+        let out = engine.next_output().expect("next");
+        assert!(matches!(out, EngineOutput::Text { ref text } if text == "done"));
+    }
+
+    #[test]
+    pub(super) fn next_output_covers_choice_dynamic_fall_over_and_input_type_error() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="arr" type="int[]">[1, 2]</var>
+      <choice text="Pick ${arr[0]}">
+        <option text="Hidden" when="false"><text>hidden</text></option>
+        <dynamic-options array="arr" item="it" index="i">
+          <option text="D${it}" when="i == 1"><text>dynamic ${it}</text></option>
+        </dynamic-options>
+      </choice>
+      <choice text="Fallback">
+        <option text="Nope" when="false"><text>nope</text></option>
+        <option text="F" fall_over="true"><text>fall</text></option>
+      </choice>
+      <var name="x" type="int">1</var>
+      <input var="x" text="input"/>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        let first = engine.next_output().expect("choice 1");
+        assert_eq!(output_kind(&first), "choices");
+        let items = take_choice_items(first).expect("expected first choice");
+        assert_eq!(items.len(), 1);
+        assert!(items[0].id.starts_with("dyn:"));
+        engine.choose(0).expect("choose dynamic");
+        let dynamic_text = engine.next_output().expect("dynamic text");
+        assert!(matches!(dynamic_text, EngineOutput::Text { ref text } if text == "dynamic 2"));
+
+        let second = engine.next_output().expect("choice 2");
+        assert_eq!(output_kind(&second), "choices");
+        let items = take_choice_items(second).expect("expected second choice");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].text, "F");
+        engine.choose(0).expect("choose fall_over");
+        let fall = engine.next_output().expect("fall text");
+        assert!(matches!(fall, EngineOutput::Text { ref text } if text == "fall"));
+
+        let error = engine
+            .next_output()
+            .expect_err("input target must be string");
+        assert_eq!(error.code, "ENGINE_INPUT_VAR_TYPE");
+        assert!(take_choice_items(EngineOutput::End).is_none());
+    }
+
+    #[test]
+    pub(super) fn output_kind_includes_input_variant() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <var name="heroName" type="string">&quot;Traveler&quot;</var>
+      <input var="heroName" text="Name"/>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+        let output = engine.next_output().expect("input");
+        assert_eq!(output_kind(&output), "input");
+        let mut pending = PendingBoundary::Input {
+            frame_id: 1,
+            node_id: "n".to_string(),
+            target_var: "name".to_string(),
+            prompt_text: "p".to_string(),
+            default_text: "d".to_string(),
+        };
+        assert!(pending_choice_options_mut(&mut pending).is_none());
+    }
+
+    #[test]
+    pub(super) fn next_output_error_branches_are_covered() {
+        let mut missing_group = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>x</text></script>"#,
+        )]));
+        missing_group.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id: "missing-group".to_string(),
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::new(),
+        }];
+        let error = missing_group
+            .next_output()
+            .expect_err("missing group should fail during planning");
+        assert_eq!(error.code, "ENGINE_GROUP_NOT_FOUND");
+
+        let mut finish_error = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>x</text></script>"#,
+        )]));
+        let group_id = finish_error
+            .group_lookup
+            .keys()
+            .next()
+            .expect("group key")
+            .to_string();
+        finish_error.frames = vec![
+            RuntimeFrame {
+                frame_id: 10,
+                group_id: group_id.clone(),
+                node_index: 0,
+                scope: BTreeMap::new(),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: None,
+                var_types: BTreeMap::new(),
+            },
+            RuntimeFrame {
+                frame_id: 11,
+                group_id,
+                node_index: usize::MAX,
+                scope: BTreeMap::new(),
+                completion: CompletionKind::None,
+                script_root: true,
+                return_continuation: Some(ContinuationFrame {
+                    resume_frame_id: 10,
+                    next_node_index: 1,
+                    ref_bindings: BTreeMap::from([("src".to_string(), "dst".to_string())]),
+                }),
+                var_types: BTreeMap::new(),
+            },
+        ];
+        let error = finish_error
+            .next_output()
+            .expect_err("finish frame branch should surface ref value missing");
+        assert_eq!(error.code, "ENGINE_REF_VALUE_MISSING");
+
+        let mut while_non_bool = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><while when="1"><text>x</text></while></script>"#,
+        )]));
+        while_non_bool.start("main", None).expect("start");
+        let error = while_non_bool
+            .next_output()
+            .expect_err("while condition must be bool");
+        assert_eq!(error.code, "ENGINE_BOOLEAN_EXPECTED");
+
+        let mut fallover_text_error = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><choice text="Pick"><option text="${bad +}" fall_over="true"><text>F</text></option></choice></script>"#,
+        )]));
+        fallover_text_error.start("main", None).expect("start");
+        let error = fallover_text_error
+            .next_output()
+            .expect_err("fallover text render error should bubble");
+        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
+
+        let mut regular_text_error = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><choice text="Pick"><option text="${bad +}"><text>A</text></option></choice></script>"#,
+        )]));
+        regular_text_error.start("main", None).expect("start");
+        let error = regular_text_error
+            .next_output()
+            .expect_err("regular option text render error should bubble");
+        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
+
+        let mut dynamic_array_eval_error = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><choice text="Pick"><dynamic-options array="bad +" item="it"><option text="${it}"><text>x</text></option></dynamic-options></choice></script>"#,
+        )]));
+        dynamic_array_eval_error.start("main", None).expect("start");
+        let error = dynamic_array_eval_error
+            .next_output()
+            .expect_err("dynamic array expression eval error should bubble");
+        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
+
+        let mut dynamic_when_error = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><var name="arr" type="int[]">[1]</var><choice text="Pick"><dynamic-options array="arr" item="it"><option text="${it}" when="bad +"><text>x</text></option></dynamic-options></choice></script>"#,
+        )]));
+        dynamic_when_error.start("main", None).expect("start");
+        let error = dynamic_when_error
+            .next_output()
+            .expect_err("dynamic when eval error should bubble");
+        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
+
+        let mut dynamic_text_error = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><var name="arr" type="int[]">[1]</var><choice text="Pick"><dynamic-options array="arr" item="it"><option text="${bad +}"><text>x</text></option></dynamic-options></choice></script>"#,
+        )]));
+        dynamic_text_error.start("main", None).expect("start");
+        let error = dynamic_text_error
+            .next_output()
+            .expect_err("dynamic text render error should bubble");
+        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
+
+        let mut prompt_error = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><choice text="${bad +}"><option text="A"><text>A</text></option></choice></script>"#,
+        )]));
+        prompt_error.start("main", None).expect("start");
+        let error = prompt_error
+            .next_output()
+            .expect_err("choice prompt render error should bubble");
+        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
+
+        let mut input_read_error = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><input var="missing" text="input"/></script>"#,
+        )]));
+        input_read_error.start("main", None).expect("start");
+        let error = input_read_error
+            .next_output()
+            .expect_err("input target read should fail");
+        assert_eq!(error.code, "ENGINE_VAR_READ");
+
+        let mut break_error = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><while when="true"><break/></while></script>"#,
+        )]));
+        let break_group_id = break_error
+            .scripts
+            .values()
+            .flat_map(|script| script.groups.values())
+            .find_map(|group| {
+                group
+                    .nodes
+                    .iter()
+                    .any(|node| matches!(node, ScriptNode::Break { .. }))
+                    .then(|| group.group_id.clone())
+            })
+            .expect("break group");
+        break_error.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id: break_group_id,
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::new(),
+        }];
+        let error = break_error
+            .next_output()
+            .expect_err("break without while body context should fail");
+        assert_eq!(error.code, "ENGINE_WHILE_CONTROL_TARGET_MISSING");
+
+        let mut continue_while_error = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><while when="true"><continue/></while></script>"#,
+        )]));
+        let continue_while_group_id = continue_while_error
+            .scripts
+            .values()
+            .flat_map(|script| script.groups.values())
+            .find_map(|group| {
+                group
+                    .nodes
+                    .iter()
+                    .any(|node| {
+                        matches!(
+                            node,
+                            ScriptNode::Continue {
+                                target: ContinueTarget::While,
+                                ..
+                            }
+                        )
+                    })
+                    .then(|| group.group_id.clone())
+            })
+            .expect("continue while group");
+        continue_while_error.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id: continue_while_group_id,
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::new(),
+        }];
+        let error = continue_while_error
+            .next_output()
+            .expect_err("continue while without context should fail");
+        assert_eq!(error.code, "ENGINE_WHILE_CONTROL_TARGET_MISSING");
+
+        let mut continue_choice_error = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><choice text="Pick"><option text="A"><continue/></option></choice></script>"#,
+        )]));
+        let continue_choice_group_id = continue_choice_error
+            .scripts
+            .values()
+            .flat_map(|script| script.groups.values())
+            .find_map(|group| {
+                group
+                    .nodes
+                    .iter()
+                    .any(|node| {
+                        matches!(
+                            node,
+                            ScriptNode::Continue {
+                                target: ContinueTarget::Choice,
+                                ..
+                            }
+                        )
+                    })
+                    .then(|| group.group_id.clone())
+            })
+            .expect("continue choice group");
+        continue_choice_error.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id: continue_choice_group_id,
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::new(),
+        }];
+        let error = continue_choice_error
+            .next_output()
+            .expect_err("continue choice without context should fail");
+        assert_eq!(error.code, "ENGINE_CHOICE_CONTINUE_TARGET_MISSING");
     }
 }

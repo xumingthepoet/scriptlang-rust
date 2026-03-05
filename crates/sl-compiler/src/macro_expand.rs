@@ -198,4 +198,81 @@ mod macro_expand_tests {
             .iter()
             .any(|node| matches!(node, ScriptNode::While { .. })));
     }
+
+    #[test]
+    fn macro_expand_validation_error_paths_are_covered() {
+        let reserved_var = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element(
+                "var",
+                &[("name", "__sl_bad"), ("type", "int")],
+                vec![xml_text("1")],
+            ))],
+        );
+        let error = validate_reserved_prefix_in_user_var_declarations(&reserved_var)
+            .expect_err("reserved var name should fail");
+        assert_eq!(error.code, "NAME_RESERVED_PREFIX");
+
+        let bad_loop = xml_element(
+            "loop",
+            &[("times", "${n}")],
+            vec![XmlNode::Element(xml_element(
+                "text",
+                &[],
+                vec![xml_text("x")],
+            ))],
+        );
+        let error = parse_loop_times_expr(&bad_loop).expect_err("template times should fail");
+        assert_eq!(error.code, "XML_LOOP_TIMES_TEMPLATE_UNSUPPORTED");
+
+        let missing_times = xml_element("loop", &[], vec![xml_text("x")]);
+        let error = parse_loop_times_expr(&missing_times).expect_err("times is required");
+        assert_eq!(error.code, "XML_MISSING_ATTR");
+
+        let plain = xml_element(
+            "text",
+            &[],
+            vec![
+                xml_text("hello"),
+                XmlNode::Element(xml_element("x", &[], Vec::new())),
+            ],
+        );
+        let mut context = MacroExpansionContext {
+            used_var_names: BTreeSet::new(),
+            loop_counter: 0,
+        };
+        let expanded = expand_element_with_macros(&plain, &mut context).expect("expand plain node");
+        assert_eq!(expanded.len(), 1);
+        assert_eq!(expanded[0].name, "text");
+
+        let plain_with_bad_child = xml_element(
+            "text",
+            &[],
+            vec![XmlNode::Element(xml_element(
+                "loop",
+                &[("times", "${n}")],
+                vec![xml_text("x")],
+            ))],
+        );
+        let error = expand_element_with_macros(&plain_with_bad_child, &mut context)
+            .expect_err("non-loop node child expansion should propagate errors");
+        assert_eq!(error.code, "XML_LOOP_TIMES_TEMPLATE_UNSUPPORTED");
+
+        let loop_with_bad_child = xml_element(
+            "loop",
+            &[("times", "2")],
+            vec![XmlNode::Element(xml_element(
+                "loop",
+                &[("times", "${n}")],
+                vec![xml_text("x")],
+            ))],
+        );
+        let error = expand_element_with_macros(&loop_with_bad_child, &mut context)
+            .expect_err("loop body child expansion should propagate errors");
+        assert_eq!(error.code, "XML_LOOP_TIMES_TEMPLATE_UNSUPPORTED");
+
+        let chosen = next_loop_temp_var_name(&mut context);
+        assert!(chosen.starts_with(LOOP_TEMP_VAR_PREFIX));
+    }
 }

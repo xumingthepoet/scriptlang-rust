@@ -267,6 +267,15 @@ mod type_expr_tests {
     use super::*;
     use crate::compiler_test_support::*;
 
+    fn script_type_kind(ty: &ScriptType) -> &'static str {
+        match ty {
+            ScriptType::Primitive { .. } => "primitive",
+            ScriptType::Array { .. } => "array",
+            ScriptType::Map { .. } => "map",
+            ScriptType::Object { .. } => "object",
+        }
+    }
+
     #[test]
     fn type_resolution_helpers_cover_nested_array_and_map_paths() {
         let span = SourceSpan::synthetic();
@@ -294,7 +303,7 @@ mod type_expr_tests {
             &span,
         )
         .expect("array custom type should resolve");
-        assert!(matches!(array, ScriptType::Array { .. }));
+        assert_eq!(script_type_kind(&array), "array");
 
         let map = resolve_type_expr_with_lookup(
             &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Custom("Obj".to_string()))),
@@ -304,7 +313,7 @@ mod type_expr_tests {
             &span,
         )
         .expect("map custom type should resolve");
-        assert!(matches!(map, ScriptType::Map { .. }));
+        assert_eq!(script_type_kind(&map), "map");
 
         let array_err = resolve_type_expr_with_lookup(
             &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Custom("Missing".to_string()))),
@@ -326,8 +335,13 @@ mod type_expr_tests {
         .expect_err("unknown map value type should fail");
         assert_eq!(map_err.code, "TYPE_UNKNOWN");
 
-        let nested = parse_type_expr("#{int[]}", &span).expect("type should parse");
-        assert!(matches!(nested, ParsedTypeExpr::Map(_)));
+        let _ = parse_type_expr("#{int[]}", &span).expect("type should parse");
+        let nested_array_error =
+            parse_type_expr("Custom[]]", &span).expect_err("invalid nested array syntax");
+        assert_eq!(nested_array_error.code, "TYPE_PARSE_ERROR");
+        let nested_map_error =
+            parse_type_expr("#{#{}}", &span).expect_err("invalid nested map syntax");
+        assert_eq!(nested_map_error.code, "TYPE_PARSE_ERROR");
 
         let type_node = xml_element(
             "type",
@@ -340,5 +354,154 @@ mod type_expr_tests {
         );
         let parsed = parse_type_declaration_node(&type_node).expect("type node should parse");
         assert_eq!(parsed.fields.len(), 1);
+
+        let mut resolved_types = BTreeMap::new();
+        resolved_types.insert(
+            "Obj".to_string(),
+            ScriptType::Object {
+                type_name: "Obj".to_string(),
+                fields: BTreeMap::new(),
+            },
+        );
+        let resolved_array = resolve_type_expr(
+            &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Custom("Obj".to_string()))),
+            &resolved_types,
+            &span,
+        )
+        .expect("resolve array custom type");
+        assert_eq!(script_type_kind(&resolved_array), "array");
+        let resolved_map = resolve_type_expr(
+            &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Custom("Obj".to_string()))),
+            &resolved_types,
+            &span,
+        )
+        .expect("resolve map custom type");
+        assert_eq!(script_type_kind(&resolved_map), "map");
+
+        let type_node_reserved = xml_element(
+            "type",
+            &[("name", "Bag")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("name", "__sl_bad"), ("type", "int")],
+                Vec::new(),
+            ))],
+        );
+        let field_error =
+            parse_type_declaration_node(&type_node_reserved).expect_err("reserved field name");
+        assert_eq!(field_error.code, "NAME_RESERVED_PREFIX");
+
+        let unknown_in_array = resolve_type_expr(
+            &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Custom("Missing".to_string()))),
+            &resolved_types,
+            &span,
+        )
+        .expect_err("unknown custom type in array should fail");
+        assert_eq!(unknown_in_array.code, "TYPE_UNKNOWN");
+        let unknown_in_map = resolve_type_expr(
+            &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Custom("Missing".to_string()))),
+            &resolved_types,
+            &span,
+        )
+        .expect_err("unknown custom type in map should fail");
+        assert_eq!(unknown_in_map.code, "TYPE_UNKNOWN");
+
+        let type_missing_name = parse_type_declaration_node(&xml_element(
+            "type",
+            &[],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("name", "v"), ("type", "int")],
+                Vec::new(),
+            ))],
+        ))
+        .expect_err("type name should be required");
+        assert_eq!(type_missing_name.code, "XML_MISSING_ATTR");
+
+        let type_reserved_name = parse_type_declaration_node(&xml_element(
+            "type",
+            &[("name", "__sl_type")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("name", "v"), ("type", "int")],
+                Vec::new(),
+            ))],
+        ))
+        .expect_err("type name cannot be reserved");
+        assert_eq!(type_reserved_name.code, "NAME_RESERVED_PREFIX");
+
+        let field_missing_name = parse_type_declaration_node(&xml_element(
+            "type",
+            &[("name", "T")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("type", "int")],
+                Vec::new(),
+            ))],
+        ))
+        .expect_err("field name should be required");
+        assert_eq!(field_missing_name.code, "XML_MISSING_ATTR");
+
+        let field_missing_type = parse_type_declaration_node(&xml_element(
+            "type",
+            &[("name", "T")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("name", "v")],
+                Vec::new(),
+            ))],
+        ))
+        .expect_err("field type should be required");
+        assert_eq!(field_missing_type.code, "XML_MISSING_ATTR");
+
+        let field_bad_type = parse_type_declaration_node(&xml_element(
+            "type",
+            &[("name", "T")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("name", "v"), ("type", "#{ }")],
+                Vec::new(),
+            ))],
+        ))
+        .expect_err("field type syntax should be valid");
+        assert_eq!(field_bad_type.code, "TYPE_PARSE_ERROR");
+
+        let function_missing_name = parse_function_declaration_node(&xml_element(
+            "function",
+            &[("return", "int:r")],
+            vec![xml_text("r = 1;")],
+        ))
+        .expect_err("function name should be required");
+        assert_eq!(function_missing_name.code, "XML_MISSING_ATTR");
+
+        let function_reserved_name = parse_function_declaration_node(&xml_element(
+            "function",
+            &[("name", "__sl_f"), ("return", "int:r")],
+            vec![xml_text("r = 1;")],
+        ))
+        .expect_err("function name cannot be reserved");
+        assert_eq!(function_reserved_name.code, "NAME_RESERVED_PREFIX");
+
+        let function_child_error = parse_function_declaration_node(&xml_element(
+            "function",
+            &[("name", "f"), ("return", "int:r")],
+            vec![XmlNode::Element(xml_element("x", &[], Vec::new()))],
+        ))
+        .expect_err("function code cannot contain child nodes");
+        assert_eq!(function_child_error.code, "XML_FUNCTION_CHILD_NODE_INVALID");
+
+        assert_eq!(
+            script_type_kind(&ScriptType::Primitive {
+                name: "int".to_string()
+            }),
+            "primitive"
+        );
+        assert_eq!(
+            script_type_kind(&ScriptType::Object {
+                type_name: "Obj".to_string(),
+                fields: BTreeMap::new()
+            }),
+            "object"
+        );
     }
 }

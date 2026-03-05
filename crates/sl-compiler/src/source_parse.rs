@@ -110,18 +110,17 @@ mod source_parse_tests {
 
     #[test]
     fn source_kind_and_path_helpers_cover_common_cases() {
-        assert!(matches!(
-            detect_source_kind("a.script.xml"),
-            Some(SourceKind::ScriptXml)
-        ));
-        assert!(matches!(
-            detect_source_kind("a.defs.xml"),
-            Some(SourceKind::DefsXml)
-        ));
-        assert!(matches!(
-            detect_source_kind("a.json"),
-            Some(SourceKind::Json)
-        ));
+        let kind_name = |kind: SourceKind| match kind {
+            SourceKind::ScriptXml => "script",
+            SourceKind::DefsXml => "defs",
+            SourceKind::Json => "json",
+        };
+        let script_kind = detect_source_kind("a.script.xml").expect("script kind");
+        let defs_kind = detect_source_kind("a.defs.xml").expect("defs kind");
+        let json_kind = detect_source_kind("a.json").expect("json kind");
+        assert_eq!(kind_name(script_kind), "script");
+        assert_eq!(kind_name(defs_kind), "defs");
+        assert_eq!(kind_name(json_kind), "json");
         assert!(detect_source_kind("a.txt").is_none());
 
         assert_eq!(
