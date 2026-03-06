@@ -511,7 +511,7 @@ JSON 全局符号必须在 include 闭包内可见，否则编译失败。
 - 出现 `&` 必须写 `&amp;`
 - 需要保留原始文本时可用 `<![CDATA[...]]>`
 
-当前约定下，属性值内不会再嵌套引号内容，因此不展开 `&quot;` / `&apos;` 用法。
+`when="..."` 中如果需要字符串字面量，建议统一写成 `&quot;...&quot;`，避免单引号在不同执行路径下出现兼容性问题。
 
 示例 1：`<if when="...">` 中的比较和逻辑表达式
 
@@ -522,7 +522,7 @@ JSON 全局符号必须在 include 闭包内可见，否则编译失败。
 ```
 
 ```xml
-<if when="hp &lt;= 10 &amp;&amp; name == 'Rin'">
+<if when="hp &lt;= 10 &amp;&amp; name == &quot;Rin&quot;">
   <text>danger</text>
 </if>
 ```

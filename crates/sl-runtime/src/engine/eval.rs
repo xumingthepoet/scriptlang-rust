@@ -212,7 +212,10 @@ impl ScriptLangEngine {
             let binding = mutable_bindings
                 .get(name)
                 .expect("mutable order should only contain known bindings");
-            scope.push_dynamic(name.to_string(), slvalue_to_dynamic(&binding.value));
+            scope.push_dynamic(
+                name.to_string(),
+                slvalue_to_dynamic_with_type(&binding.value, binding.declared_type.as_ref()),
+            );
         }
 
         let mut defs_namespace_snapshot = BTreeMap::new();
@@ -262,7 +265,11 @@ impl ScriptLangEngine {
                         format!("Defs global \"{}\" is not initialized.", qualified_name),
                     )
                 })?;
-            scope.push_dynamic(alias.clone(), slvalue_to_dynamic(&value));
+            let declared_type = self.defs_globals_type.get(&qualified_name);
+            scope.push_dynamic(
+                alias.clone(),
+                slvalue_to_dynamic_with_type(&value, declared_type),
+            );
             short_defs_aliases.insert(alias, (qualified_name, value));
         }
 
@@ -553,6 +560,7 @@ impl ScriptLangEngine {
                     name.clone(),
                     BindingOwner {
                         value: value.clone(),
+                        declared_type: frame.var_types.get(name).cloned(),
                     },
                 );
                 order.push(name.clone());

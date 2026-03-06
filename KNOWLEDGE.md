@@ -24,3 +24,12 @@
 - “把 README 改了”
 
 ## Log（只在最下面追加）
+### 2026-03-06 — 失败模式 — `CARGO_MANIFEST_DIR` 路径归一化
+- 发现：在 workspace 维度执行 `cargo test --workspace --all-targets --all-features` 时，测试内直接用 `env!("CARGO_MANIFEST_DIR")` 拼路径可能不稳定。
+- 细节：涉及跨目录断言（如 workspace 根路径、examples 目录）时，先把 manifest 目录归一化成绝对路径，再做 `join("..")` 等计算；否则会出现 `exists()/is_dir()` 偶发失败。
+- 证据：`sl-test-example` 的 `workspace_root/examples_root` 断言在单包测试可通过，但在 workspace 全量测试下失败。
+
+### 2026-03-06 — 失败模式 — Rhai 数值桥接需保留 `int` 语义
+- 发现：把 `SlValue::Number` 无差别转成 Rhai `FLOAT` 会破坏数组下标等 `INT` 语义，导致运行时报 `Data type incorrect: f64 (expecting i64)`。
+- 细节：向 Rhai scope 注入变量时应带类型上下文；声明为 `int` 的值（含对象/数组内对应字段）需转成 Rhai `INT`，不能仅靠运行后类型检查兜底。
+- 证据：`ref:int` 跨脚本更新后用于 `arr[idx]` 的路径在修复前可稳定复现，修复后由回归测试覆盖。

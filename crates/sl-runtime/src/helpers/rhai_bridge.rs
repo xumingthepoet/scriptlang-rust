@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 use regex::Regex;
 use rhai::{Array, Dynamic, ImmutableString, Map, FLOAT, INT};
-use sl_core::{ScriptLangError, SlValue};
+use sl_core::{ScriptLangError, ScriptType, SlValue};
 
 pub(crate) fn rhai_function_symbol(name: &str) -> String {
     let mut out = String::with_capacity(name.len());
@@ -136,21 +136,47 @@ pub(crate) fn slvalue_to_text(value: &SlValue) -> String {
 }
 
 pub(crate) fn slvalue_to_dynamic(value: &SlValue) -> Dynamic {
+    slvalue_to_dynamic_with_type(value, None)
+}
+
+pub(crate) fn slvalue_to_dynamic_with_type(value: &SlValue, ty: Option<&ScriptType>) -> Dynamic {
     match value {
         SlValue::Bool(value) => Dynamic::from_bool(*value),
-        SlValue::Number(value) => Dynamic::from_float(*value as FLOAT),
+        SlValue::Number(value) => {
+            if matches!(
+                ty,
+                Some(ScriptType::Primitive { name }) if name == "int"
+            ) && value.is_finite()
+                && value.fract().abs() < f64::EPSILON
+            {
+                return Dynamic::from_int(*value as INT);
+            }
+            Dynamic::from_float(*value as FLOAT)
+        }
         SlValue::String(value) => Dynamic::from(value.clone()),
         SlValue::Array(values) => {
             let mut array = Array::new();
             for value in values {
-                array.push(slvalue_to_dynamic(value));
+                let element_type = match ty {
+                    Some(ScriptType::Array { element_type }) => Some(element_type.as_ref()),
+                    _ => None,
+                };
+                array.push(slvalue_to_dynamic_with_type(value, element_type));
             }
             Dynamic::from_array(array)
         }
         SlValue::Map(values) => {
             let mut map = Map::new();
             for (key, value) in values {
-                map.insert(key.clone().into(), slvalue_to_dynamic(value));
+                let value_type = match ty {
+                    Some(ScriptType::Map { value_type, .. }) => Some(value_type.as_ref()),
+                    Some(ScriptType::Object { fields, .. }) => fields.get(key),
+                    _ => None,
+                };
+                map.insert(
+                    key.clone().into(),
+                    slvalue_to_dynamic_with_type(value, value_type),
+                );
             }
             Dynamic::from_map(map)
         }
@@ -355,6 +381,35 @@ mod rhai_bridge_tests {
         ]));
         let dynamic = slvalue_to_dynamic(&map);
         assert!(dynamic.is::<Map>());
+    }
+
+    #[test]
+    fn slvalue_to_dynamic_with_type_int_uses_rhai_int() {
+        let int_ty = ScriptType::Primitive {
+            name: "int".to_string(),
+        };
+        let dynamic = slvalue_to_dynamic_with_type(&SlValue::Number(2.0), Some(&int_ty));
+        assert!(dynamic.is::<INT>());
+        assert_eq!(dynamic.cast::<INT>(), 2);
+    }
+
+    #[test]
+    fn slvalue_to_dynamic_with_object_type_uses_field_types() {
+        let object_ty = ScriptType::Object {
+            type_name: "Obj".to_string(),
+            fields: BTreeMap::from([(
+                "idx".to_string(),
+                ScriptType::Primitive {
+                    name: "int".to_string(),
+                },
+            )]),
+        };
+        let value = SlValue::Map(BTreeMap::from([("idx".to_string(), SlValue::Number(3.0))]));
+        let dynamic = slvalue_to_dynamic_with_type(&value, Some(&object_ty));
+        let map = dynamic.cast::<Map>();
+        let idx = map.get("idx").expect("idx field");
+        assert!(idx.is::<INT>());
+        assert_eq!(idx.clone().cast::<INT>(), 3);
     }
 
     #[test]

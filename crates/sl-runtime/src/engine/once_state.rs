@@ -36,4 +36,5 @@ impl ScriptLangEngine {
 #[derive(Debug, Clone)]
 pub(crate) struct BindingOwner {
     pub(crate) value: SlValue,
+    pub(crate) declared_type: Option<ScriptType>,
 }

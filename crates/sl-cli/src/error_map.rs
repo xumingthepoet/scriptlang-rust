@@ -5,7 +5,39 @@ fn map_error(code: &'static str, error: impl Display) -> ScriptLangError {
     ScriptLangError::new(code, error.to_string())
 }
 
+fn hint_for_error(code: &str, message: &str) -> Option<&'static str> {
+    if code == "XML_PARSE_ERROR" && message.contains("invalid name token") {
+        return Some(
+            "Hint: XML attributes require escaping. Use '&lt;' for '<', '&amp;&amp;' for '&&', and prefer '&quot;...&quot;' for string literals in when=\"...\".",
+        );
+    }
+
+    if code == "TYPE_UNKNOWN" && message.contains("Unknown custom type") {
+        return Some(
+            "Hint: custom types are visible by include-closure, not auto inheritance. Add the required *.defs.xml include in each script file that references the type.",
+        );
+    }
+
+    if message.contains("Data type incorrect: f64 (expecting i64)") {
+        return Some(
+            "Hint: this can indicate a runtime int-index stability bug on some paths (for example ref:int across call + array index). If this script should be int-safe, upgrade to a version containing the fix or report a minimal repro.",
+        );
+    }
+
+    None
+}
+
+fn with_hint(error: ScriptLangError) -> ScriptLangError {
+    let mut message = error.message;
+    if let Some(hint) = hint_for_error(&error.code, &message) {
+        message.push('\n');
+        message.push_str(hint);
+    }
+    ScriptLangError::new(error.code, message)
+}
+
 pub(crate) fn emit_error(error: ScriptLangError) -> i32 {
+    let error = with_hint(error);
     println!("RESULT:ERROR");
     println!("ERROR_CODE:{}", error.code);
     println!(
@@ -81,5 +113,41 @@ mod error_map_tests {
 
         let invalid = serde_json::from_str::<serde_json::Value>("{").expect_err("invalid json");
         assert_eq!(map_cli_state_invalid(invalid).code, "CLI_STATE_INVALID");
+    }
+
+    #[test]
+    fn with_hint_adds_xml_escape_suggestion() {
+        let enriched = with_hint(ScriptLangError::new(
+            "XML_PARSE_ERROR",
+            "invalid name token at 1:23",
+        ));
+        assert!(enriched.message.contains("Use '&lt;' for '<'"));
+        assert!(enriched.message.contains("'&amp;&amp;' for '&&'"));
+    }
+
+    #[test]
+    fn with_hint_adds_type_visibility_suggestion() {
+        let enriched = with_hint(ScriptLangError::new(
+            "TYPE_UNKNOWN",
+            "Unknown custom type \"game.WorldState\"",
+        ));
+        assert!(enriched.message.contains("not auto inheritance"));
+        assert!(enriched.message.contains("*.defs.xml include"));
+    }
+
+    #[test]
+    fn with_hint_adds_runtime_numeric_drift_suggestion() {
+        let enriched = with_hint(ScriptLangError::new(
+            "RUNTIME_ERROR",
+            "Data type incorrect: f64 (expecting i64)",
+        ));
+        assert!(enriched.message.contains("runtime int-index stability bug"));
+        assert!(enriched.message.contains("report a minimal repro"));
+    }
+
+    #[test]
+    fn with_hint_keeps_message_when_no_rule_matches() {
+        let enriched = with_hint(ScriptLangError::new("ANY", "plain"));
+        assert_eq!(enriched.message, "plain");
     }
 }

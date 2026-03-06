@@ -237,3 +237,29 @@ cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/06-snap
 1. 直接进入 `tui`
 2. 通过快捷键交互
 3. 用 `save/load` 做中断恢复测试
+
+### 5.4 推荐验证闭环（避免“仅编译通过”）
+1. 先执行 `agent compile --dry-run`，尽早发现 include/类型/XML 语法问题
+2. 再执行 `agent replay --rand "<固定序列>" --step ...`，覆盖真实运行路径
+3. 将同一组 `--rand` 与 `--step` 固化到 CI/回归脚本，避免随机路径漏测
+
+---
+
+## 6. 高频报错与修复建议
+
+1. `XML_PARSE_ERROR ... invalid name token`
+- 常见原因：属性值里直接写了 `<` 或 `&&`
+- 修复：把 `<` 写成 `&lt;`，把 `&&` 写成 `&amp;&amp;`
+
+2. `TYPE_UNKNOWN: Unknown custom type "game.WorldState"`
+- 常见原因：子脚本里用了类型，但该脚本自身没有 include 对应 `*.defs.xml`
+- 修复：在每个使用该类型的 `.script.xml`/`.defs.xml` 文件都显式 `<!-- include: ... -->`
+
+3. `when` 字符串比较表达式异常
+- 常见原因：`when="..."` 中使用单引号字符串导致执行路径兼容性问题
+- 修复：统一写 `&quot;xxx&quot;`，例如 `name == &quot;Rin&quot;`
+
+4. `Data type incorrect: f64 (expecting i64)`
+- 归类：运行时类型稳定性 bug（不是脚本作者的预期行为）
+- 触发链路（典型）：`ref:int` 跨脚本传递并在 `<code>` 更新后，再用于数组下标
+- 建议：优先升级到包含修复的版本；如仍复现，请附最小复现脚本反馈给开发者

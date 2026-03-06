@@ -60,14 +60,23 @@ pub enum SlTestExampleError {
     EventSerialize(serde_json::Error),
 }
 
+fn manifest_dir() -> PathBuf {
+    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if manifest.is_absolute() {
+        return manifest;
+    }
+
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(manifest)
+}
+
 pub fn workspace_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
+    manifest_dir().join("..").join("..")
 }
 
 pub fn examples_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples")
+    manifest_dir().join("examples")
 }
 
 pub fn example_dir(name: &str) -> PathBuf {
@@ -81,6 +90,12 @@ pub fn testcase_path(name: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manifest_dir_points_to_package_directory() {
+        let manifest = manifest_dir();
+        assert!(manifest.join("Cargo.toml").exists());
+    }
 
     #[test]
     fn workspace_root_points_to_workspace() {

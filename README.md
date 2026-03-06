@@ -130,3 +130,10 @@ cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/06-snap
 ## Examples
 Rhai-authored smoke scenarios live in `crates/sl-test-example/examples`.
 Each example directory also carries a `testcase.json` consumed by `sl-test-example`.
+
+## User Pitfalls And Guardrails
+- XML attribute escaping is mandatory: use `&lt;` for `<`, `&amp;&amp;` for `&&`.
+- Type visibility is per include-closure: scripts under `actions/locations/events` must each include needed `*.defs.xml`.
+- In `when="..."`, prefer string literals as `&quot;...&quot;` instead of single quotes.
+- `Data type incorrect: f64 (expecting i64)` in array indexing is treated as a runtime type-stability bug; prioritize runtime fix/upgrade over user-side workarounds.
+- Validation should be `compile --dry-run` + `replay --rand "<fixed-seq>"` together; compile-only is not enough for runtime-path safety.

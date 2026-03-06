@@ -1196,4 +1196,35 @@ mod callstack_tests {
             .expect_err("return target scope creation should fail");
         assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
     }
+
+    #[test]
+    pub(super) fn ref_int_index_remains_usable_for_array_lookup_after_call() {
+        let mut engine = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+<!-- include: bump.script.xml -->
+<script name="main">
+  <var name="arr" type="int[]">[10, 20, 30]</var>
+  <var name="idx" type="int">0</var>
+  <call script="bump" args="ref:idx"/>
+  <text>${arr[idx]}</text>
+</script>
+"#,
+            ),
+            (
+                "bump.script.xml",
+                r#"
+<script name="bump" args="ref:int:i">
+  <code>i += 1;</code>
+  <return/>
+</script>
+"#,
+            ),
+        ]));
+
+        engine.start("main", None).expect("start");
+        let output = engine.next_output().expect("next output");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "20"));
+    }
 }

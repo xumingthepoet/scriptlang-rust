@@ -12,7 +12,7 @@ use std::sync::{Arc, OnceLock};
 use crate::helpers::rhai_bridge::{
     defs_namespace_symbol, dynamic_to_slvalue, replace_defs_global_symbol,
     rewrite_defs_global_qualified_access, rewrite_function_calls, rhai_function_symbol,
-    slvalue_to_dynamic, slvalue_to_rhai_literal, slvalue_to_text,
+    slvalue_to_dynamic, slvalue_to_dynamic_with_type, slvalue_to_rhai_literal, slvalue_to_text,
 };
 use crate::helpers::value_path::{assign_nested_path, parse_ref_path};
 use regex::Regex;
