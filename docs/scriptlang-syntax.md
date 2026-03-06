@@ -36,7 +36,41 @@
 </defs>
 ```
 
-## 1.3 `*.json`（全局只读数据）
+`*.defs.xml` 可以理解为“不允许声明 `<script>` 的 module 兼容形式”。适合只放类型、函数、全局变量的共享声明。
+
+## 1.3 `*.module.xml`（命名空间模块）
+
+要求根节点是 `<module name="...">`。
+
+```xml
+<module name="battle">
+  <type name="Combatant">
+    <field name="hp" type="int"/>
+  </type>
+  <function name="boost" args="int:x" return="int:out">
+    out = x + 1;
+  </function>
+  <var name="baseHp" type="int">100</var>
+  <script name="main">
+    <var name="hero" type="Combatant">#{hp: baseHp}</var>
+    <call script="next"/>
+  </script>
+  <script name="next">
+    <text>${boost(hero.hp)}</text>
+  </script>
+</module>
+```
+
+规则：
+- 一个 `*.module.xml` 文件内可以有多个 `<script>`。
+- `<module>` 下允许的直接子节点只有：`<type>`、`<function>`、`<var>`、`<script>`。
+- module 名只取自 `<module name="...">`，不从文件名推导。
+- module 内脚本对外注册名是 `moduleName.scriptName`，例如 `battle.main`。
+- module 内 `type/function/var` 仍属于同一命名空间，例如 `battle.Combatant`、`battle.boost`、`battle.baseHp`。
+- 同一个 module 内部，脚本可以直接用短名访问本 module 的 `type/function/var`，也可以用短名调用 sibling script。
+- 跨 module 调用脚本时，应使用限定名，例如 `<call script="battle.main"/>`。
+
+## 1.4 `*.json`（全局只读数据）
 
 通过 include 进入可见闭包后，以“文件名（去扩展名）”作为符号使用。
 
@@ -65,11 +99,11 @@
 ```
 
 规则：
-- 允许在 `.script.xml` 和 `.defs.xml` 中声明 include。
+- 允许在 `.script.xml`、`.defs.xml` 和 `.module.xml` 中声明 include。
 - 路径相对当前文件。
 - `<!-- include: file.ext -->` 表示单文件 include，保持现有行为。
 - `<!-- include: dir/ -->` 用尾随 `/` 表示目录 include。
-- 目录 include 会递归纳入该目录及其子目录下所有 `*.script.xml`、`*.defs.xml`、`*.json`。
+- 目录 include 会递归纳入该目录及其子目录下所有 `*.script.xml`、`*.defs.xml`、`*.module.xml`、`*.json`。
 - 目录展开顺序按规范化相对路径字典序固定，保证结果稳定。
 - 目录 include 只会在当前编译输入的虚拟文件集合内展开，不会直接扫描真实文件系统。
 - include 缺失、目录未匹配到任何受支持源码文件、或循环依赖都会编译报错。
@@ -78,7 +112,7 @@
 
 ## 3.1 `name`（必填）
 
-脚本名，全工程必须唯一。
+普通 `*.script.xml` 中，脚本名按原样注册，全工程必须唯一。
 
 ```xml
 <script name="main">
@@ -96,7 +130,28 @@
 </script>
 ```
 
-## 4. `<defs>` 顶层属性
+## 3.3 module 内 `<script>` 的命名
+
+当 `<script>` 出现在 `<module name="battle">` 内：
+- 局部名仍然写在 `name` 上，例如 `<script name="main">`
+- 编译后的公开脚本名是 `battle.main`
+- `entry_script`、`<call script="...">`、`<return script="...">` 对外都应使用 `battle.main` 这种限定名
+- 但在同一个 module 内部，可以写 `<call script="next"/>`，它会解析到当前 module 下的 `battle.next`
+
+示例：
+
+```xml
+<module name="battle">
+  <script name="main">
+    <call script="next"/>
+  </script>
+  <script name="next">
+    <text>done</text>
+  </script>
+</module>
+```
+
+## 4. `<defs>` / `<module>` 顶层属性
 
 ## 4.1 `name`（必填）
 
@@ -110,9 +165,15 @@
 </defs>
 ```
 
-## 4.2 `<defs><var>`（全局可写变量）
+对于 `<module name="battle">`，这个名字同时决定：
+- `battle.Type`
+- `battle.func`
+- `battle.var`
+- `battle.script`
 
-`<defs>` 下可以声明全局变量：
+## 4.2 `<defs><var>` / `<module><var>`（全局可写变量）
+
+`<defs>` 或 `<module>` 下都可以声明全局变量：
 
 ```xml
 <defs name="shared">
@@ -127,6 +188,11 @@
 - 访问方式：短名（如 `hp`）和全名（如 `shared.hp`）。
 - 若短名冲突（多个 namespace 同名），短名不可用，只能用全名。
 - defs 全局初始化表达式可以引用“前面已声明并已初始化”的 defs 全局；前向引用会编译失败。
+
+补充：
+- `<module><var>` 与 `<defs><var>` 使用同一套运行时模型。
+- 它们都会参与 snapshot / resume。
+- module 内脚本天然可以看到本 module 的这些全局变量。
 
 ## 5. 类型语法
 
@@ -152,7 +218,7 @@ key 固定是 string。
 <var name="dict" type="#{int}">#{a: 1, b: 2}</var>
 ```
 
-## 5.4 自定义类型（来自 defs）
+## 5.4 自定义类型（来自 defs/module）
 
 可用全名 `ns.Type`，或在无歧义场景下用短名。
 
@@ -375,6 +441,11 @@ key 固定是 string。
 <call script="${nextScene}" args="hp"/>
 ```
 
+module 相关规则：
+- 对外调用 module 脚本时，推荐直接写限定名，例如 `<call script="battle.main"/>`
+- 在同 module 内调用 sibling script 时，可写短名，例如 `<call script="next"/>`
+- 若 `script` 使用 `${expr}` 动态插值，则按运行时结果查找，不自动补 module 前缀
+
 ## 6.15 `<return>`
 
 用途：从当前脚本返回，或转移到新脚本。  
@@ -398,6 +469,11 @@ key 固定是 string。
 <return script="scene-${chapter}"/>
 ```
 
+module 相关规则与 `<call>` 相同：
+- 对外跳转到 module 脚本时使用 `battle.next`
+- 同 module 内可写短名 `next`
+- 动态目标 `${expr}` 不做静态补前缀
+
 ## 6.16 `<group>`
 
 用途：语句分组容器，创建块级作用域。  
@@ -416,13 +492,14 @@ key 固定是 string。
 </group>
 ```
 
-## 7. `<defs>` 声明语法点
+## 7. `<defs>` / `<module>` 声明语法点
 
 ## 7.1 `<type>`
 
 用途：声明对象类型。  
 属性：`name`（必填）。  
 子节点：`<field>`。  
+可出现位置：`<defs>` 或 `<module>` 直接子节点。  
 
 ```xml
 <defs name="shared">
@@ -444,7 +521,7 @@ key 固定是 string。
 
 ## 7.3 `<function>`
 
-用途：声明 defs 函数。  
+用途：声明命名空间函数。  
 属性：
 - `name`（必填）
 - `args`（可选，`type:name`）
@@ -462,6 +539,28 @@ key 固定是 string。
   </function>
 </defs>
 ```
+
+## 7.4 `<module><script>`
+
+用途：在 module 内声明可执行脚本。  
+可出现位置：仅 `<module>` 直接子节点。  
+
+```xml
+<module name="camp">
+  <script name="main">
+    <text>Camp</text>
+  </script>
+  <script name="rest">
+    <text>Rest</text>
+  </script>
+</module>
+```
+
+规则：
+- `name` 必填，且在同一 module 下不能重复。
+- 同名局部脚本可以存在于不同 module 中，例如 `a.main` 和 `b.main` 可以共存。
+- module 内 `<script>` 的正文语法，与普通 `*.script.xml` 的 `<script>` 完全一致。
+- 只要某脚本所在的 `.module.xml` 被 include，该脚本天然看到同文件同 module 的 `type/function/var`。
 
 ## 8. JSON 全局可见性语法点
 
