@@ -355,7 +355,7 @@ key 固定是 string。
 
 用途：调用其他脚本。  
 属性：
-- `script`（必填）
+- `script`（必填，支持 `${expr}` 模板插值）
 - `args`（可选，位置参数）
 
 `args` 支持：
@@ -366,11 +366,15 @@ key 固定是 string。
 <call script="battle" args="hp, ref:score"/>
 ```
 
+```xml
+<call script="${nextScene}" args="hp"/>
+```
+
 ## 6.15 `<return>`
 
 用途：从当前脚本返回，或转移到新脚本。  
 属性：
-- `script`（可选）
+- `script`（可选，支持 `${expr}` 模板插值）
 - `args`（可选）
 
 规则：
@@ -383,6 +387,10 @@ key 固定是 string。
 
 ```xml
 <return script="nextScene" args="heroName, hp"/>
+```
+
+```xml
+<return script="scene-${chapter}"/>
 ```
 
 ## 6.16 `<group>`

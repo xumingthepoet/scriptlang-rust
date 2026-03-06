@@ -79,6 +79,11 @@ All code must be written with testability in mind:
 - `<debug>` does not support attributes (`once/tag` etc. are rejected at compile time).
 - CLI hides debug events by default; pass `--show-debug` to emit `DEBUG_JSON` / `DEBUG: ...`.
 
+## Dynamic Call/Return Targets
+- `<call script="...">` and `<return script="...">` accept `${expr}` interpolation in `script`.
+- Existing static names like `script="battle"` remain unchanged.
+- Target resolution happens at runtime and must resolve to a non-empty compiled script name.
+
 ## Commands
 - `make check`: `cargo check --workspace --all-targets --all-features`
 - `make fmt`: `cargo fmt --all -- --check`

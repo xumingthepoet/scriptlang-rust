@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "sl-tool-case",
+  "entryScript": "main",
+  "actions": [],
+  "expectedEvents": [
+    { "kind": "text", "text": "before" },
+    { "kind": "text", "text": "middle" },
+    { "kind": "text", "text": "after" },
+    { "kind": "end" }
+  ]
+}

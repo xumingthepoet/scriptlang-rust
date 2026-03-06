@@ -184,8 +184,30 @@ pub(crate) fn validate_json_symbol_visibility(
                         }
                     }
                 }
-                ScriptNode::Call { args, location, .. }
-                | ScriptNode::Return { args, location, .. } => {
+                ScriptNode::Call {
+                    target_script,
+                    args,
+                    location,
+                    ..
+                } => {
+                    for expr in extract_text_interpolations(target_script) {
+                        ensure_script_node_safe(&expr, "call target template", location)?;
+                    }
+                    for arg in args {
+                        ensure_script_node_safe(&arg.value_expr, "call/return argument", location)?;
+                    }
+                }
+                ScriptNode::Return {
+                    target_script,
+                    args,
+                    location,
+                    ..
+                } => {
+                    if let Some(target_script) = target_script {
+                        for expr in extract_text_interpolations(target_script) {
+                            ensure_script_node_safe(&expr, "return target template", location)?;
+                        }
+                    }
                     for arg in args {
                         ensure_script_node_safe(&arg.value_expr, "call/return argument", location)?;
                     }
@@ -671,7 +693,38 @@ mod json_symbols_tests {
     }
 
     #[test]
-    fn validate_json_visibility_covers_code_if_while_and_call_paths() {
+    fn validate_json_visibility_allows_return_without_target_script() {
+        let span = SourceSpan::synthetic();
+        let script_ir = ScriptIr {
+            script_path: "main.script.xml".to_string(),
+            script_name: "main".to_string(),
+            params: Vec::new(),
+            root_group_id: "g0".to_string(),
+            groups: BTreeMap::from([(
+                "g0".to_string(),
+                ImplicitGroup {
+                    group_id: "g0".to_string(),
+                    parent_group_id: None,
+                    entry_node_id: None,
+                    nodes: vec![ScriptNode::Return {
+                        id: "r1".to_string(),
+                        target_script: None,
+                        args: Vec::new(),
+                        location: span.clone(),
+                    }],
+                },
+            )]),
+            visible_json_globals: Vec::new(),
+            visible_functions: BTreeMap::new(),
+            visible_defs_globals: BTreeMap::new(),
+        };
+
+        validate_json_symbol_visibility(&script_ir, &BTreeSet::from(["secret".to_string()]))
+            .expect("return without target should skip target template checks");
+    }
+
+    #[test]
+    fn validate_json_visibility_covers_code_if_while_call_and_return_paths() {
         let span = SourceSpan::synthetic();
         let script_ir = ScriptIr {
             script_path: "main.script.xml".to_string(),
@@ -712,7 +765,16 @@ mod json_symbols_tests {
                         },
                         ScriptNode::Call {
                             id: "call".to_string(),
-                            target_script: "next".to_string(),
+                            target_script: "next-${hp}".to_string(),
+                            args: vec![CallArgument {
+                                value_expr: "hp".to_string(),
+                                is_ref: false,
+                            }],
+                            location: span.clone(),
+                        },
+                        ScriptNode::Return {
+                            id: "return".to_string(),
+                            target_script: Some("done-${hp}".to_string()),
                             args: vec![CallArgument {
                                 value_expr: "hp".to_string(),
                                 is_ref: false,
@@ -729,6 +791,31 @@ mod json_symbols_tests {
         let all_json_symbols = BTreeSet::from(["secret".to_string()]);
         validate_json_symbol_visibility(&script_ir, &all_json_symbols)
             .expect("safe expressions should not trip hidden json check");
+    }
+
+    #[test]
+    fn compile_bundle_reports_hidden_json_in_dynamic_call_and_return_targets() {
+        let files = map(&[
+            ("secret.json", r#"{ "nextScene": "battle" }"#),
+            (
+                "main.script.xml",
+                r#"<script name="main"><call script="${secret.nextScene}"/></script>"#,
+            ),
+        ]);
+        let error =
+            compile_project_bundle_from_xml_map(&files).expect_err("hidden json in call target");
+        assert_eq!(error.code, "JSON_SYMBOL_NOT_VISIBLE");
+
+        let files = map(&[
+            ("secret.json", r#"{ "nextScene": "battle" }"#),
+            (
+                "main.script.xml",
+                r#"<script name="main"><return script="${secret.nextScene}"/></script>"#,
+            ),
+        ]);
+        let error =
+            compile_project_bundle_from_xml_map(&files).expect_err("hidden json in return target");
+        assert_eq!(error.code, "JSON_SYMBOL_NOT_VISIBLE");
     }
 
     #[test]

@@ -2,6 +2,19 @@ use super::lifecycle::{CompletionKind, RuntimeFrame};
 use super::*;
 
 impl ScriptLangEngine {
+    fn resolve_target_script(
+        &mut self,
+        template: &str,
+        missing_code: &str,
+        missing_message: &str,
+    ) -> Result<String, ScriptLangError> {
+        let target_script = self.render_text(template)?;
+        if target_script.trim().is_empty() {
+            return Err(ScriptLangError::new(missing_code, missing_message));
+        }
+        Ok(target_script)
+    }
+
     pub(super) fn execute_var_declaration(
         &mut self,
         decl: &sl_core::VarDeclaration,
@@ -49,6 +62,11 @@ impl ScriptLangEngine {
         target_script: &str,
         args: &[sl_core::CallArgument],
     ) -> Result<(), ScriptLangError> {
+        let target_script = self.resolve_target_script(
+            target_script,
+            "ENGINE_CALL_TARGET_EMPTY",
+            "Call target script cannot resolve to empty.",
+        )?;
         let caller_index = self.frames.len().checked_sub(1).ok_or_else(|| {
             ScriptLangError::new("ENGINE_CALL_NO_FRAME", "No frame available for <call>.")
         })?;
@@ -59,7 +77,7 @@ impl ScriptLangEngine {
             caller_group.nodes.len()
         };
 
-        let Some(target) = self.scripts.get(target_script).cloned() else {
+        let Some(target) = self.scripts.get(&target_script).cloned() else {
             return Err(ScriptLangError::new(
                 "ENGINE_CALL_TARGET",
                 format!("Call target script \"{}\" not found.", target_script),
@@ -118,7 +136,7 @@ impl ScriptLangEngine {
         if is_tail_at_root {
             let inherited = caller.return_continuation.clone();
             self.frames.pop();
-            let (scope, var_types) = self.create_script_root_scope(target_script, arg_values)?;
+            let (scope, var_types) = self.create_script_root_scope(&target_script, arg_values)?;
             self.push_root_frame(&target.root_group_id, scope, inherited, var_types);
             return Ok(());
         }
@@ -129,7 +147,7 @@ impl ScriptLangEngine {
             ref_bindings,
         };
 
-        let (scope, var_types) = self.create_script_root_scope(target_script, arg_values)?;
+        let (scope, var_types) = self.create_script_root_scope(&target_script, arg_values)?;
         self.push_root_frame(&target.root_group_id, scope, Some(continuation), var_types);
         Ok(())
     }
@@ -147,7 +165,12 @@ impl ScriptLangEngine {
         let mut resolved_return_target: Option<(String, ScriptIr)> = None;
 
         if let Some(target_name) = target_script.as_ref() {
-            let Some(target) = self.scripts.get(target_name).cloned() else {
+            let target_name = self.resolve_target_script(
+                target_name,
+                "ENGINE_RETURN_TARGET_EMPTY",
+                "Return target script cannot resolve to empty.",
+            )?;
+            let Some(target) = self.scripts.get(&target_name).cloned() else {
                 return Err(ScriptLangError::new(
                     "ENGINE_RETURN_TARGET",
                     format!("Return target script \"{}\" not found.", target_name),
@@ -168,7 +191,7 @@ impl ScriptLangEngine {
                     .insert(param.name.clone(), self.eval_expression(&arg.value_expr)?);
             }
 
-            resolved_return_target = Some((target_name.clone(), target));
+            resolved_return_target = Some((target_name, target));
         }
 
         self.frames.truncate(root_index);
@@ -265,6 +288,29 @@ mod callstack_tests {
 
         let output = engine.next_output().expect("next should pass");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "Hi"));
+
+        let mut dynamic_engine = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: greeting.script.xml -->
+    <script name="main">
+      <var name="nextScene" type="string">&quot;greeting&quot;</var>
+      <call script="${nextScene}"/>
+    </script>
+    "#,
+            ),
+            (
+                "greeting.script.xml",
+                r#"<script name="greeting"><text>Dynamic hi</text></script>"#,
+            ),
+        ]));
+        dynamic_engine.start("main", None).expect("start");
+
+        let output = dynamic_engine
+            .next_output()
+            .expect("dynamic next should pass");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "Dynamic hi"));
     }
 
     #[test]
@@ -278,6 +324,26 @@ mod callstack_tests {
             .next_output()
             .expect_err("missing call target should fail");
         assert_eq!(error.code, "ENGINE_CALL_TARGET");
+
+        let mut call_empty_target = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><var name="dst" type="string">&quot;&quot;</var><call script="${dst}"/></script>"#,
+        )]));
+        call_empty_target.start("main", None).expect("start");
+        let error = call_empty_target
+            .next_output()
+            .expect_err("empty call target should fail");
+        assert_eq!(error.code, "ENGINE_CALL_TARGET_EMPTY");
+
+        let mut call_bad_template = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><call script="${bad +}"/></script>"#,
+        )]));
+        call_bad_template.start("main", None).expect("start");
+        let error = call_bad_template
+            .next_output()
+            .expect_err("invalid call target template should fail");
+        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
 
         let mut call_arg_mismatch = engine_from_sources(map(&[
             (
@@ -310,6 +376,26 @@ mod callstack_tests {
             .next_output()
             .expect_err("missing return target should fail");
         assert_eq!(error.code, "ENGINE_RETURN_TARGET");
+
+        let mut return_empty_target = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><var name="dst" type="string">&quot;&quot;</var><return script="${dst}"/></script>"#,
+        )]));
+        return_empty_target.start("main", None).expect("start");
+        let error = return_empty_target
+            .next_output()
+            .expect_err("empty return target should fail");
+        assert_eq!(error.code, "ENGINE_RETURN_TARGET_EMPTY");
+
+        let mut return_bad_template = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><return script="${bad +}"/></script>"#,
+        )]));
+        return_bad_template.start("main", None).expect("start");
+        let error = return_bad_template
+            .next_output()
+            .expect_err("invalid return target template should fail");
+        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
     }
 
     #[test]
@@ -661,6 +747,28 @@ mod callstack_tests {
             .find_current_root_frame_index()
             .expect("root should be found after skipping non-root frame");
         assert_eq!(root_index, 0);
+
+        let mut dynamic_return = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: next.script.xml -->
+    <script name="main">
+      <var name="nextScene" type="string">&quot;next&quot;</var>
+      <return script="${nextScene}"/>
+    </script>
+    "#,
+            ),
+            (
+                "next.script.xml",
+                r#"<script name="next"><text>moved</text></script>"#,
+            ),
+        ]));
+        dynamic_return.start("main", None).expect("start");
+        let output = dynamic_return
+            .next_output()
+            .expect("dynamic return should pass");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "moved"));
     }
 
     #[test]

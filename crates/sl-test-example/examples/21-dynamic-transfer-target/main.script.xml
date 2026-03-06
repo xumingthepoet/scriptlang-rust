@@ -1,0 +1,7 @@
+<!-- include: middle.script.xml -->
+<!-- include: end.script.xml -->
+<script name="main">
+  <var name="callTarget" type="string">&quot;middle&quot;</var>
+  <text>before</text>
+  <call script="${callTarget}"/>
+</script>
