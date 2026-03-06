@@ -48,6 +48,7 @@ cargo run -p sl-cli -- agent start \
 - `--entry-script <name>`：入口脚本，默认 `main`
 - `--state-out <path>`：状态输出文件（必填）
 - `--rand <csv>`：可选随机序列（例如 `12,3,1,4`）
+- `--show-debug`：显示 `<debug>` 输出（默认隐藏）
 
 ### 2.2 `agent choose`
 
@@ -65,6 +66,7 @@ cargo run -p sl-cli -- agent choose \
 - `--choice <index>`：选择索引（必填）
 - `--state-out <path>`：新状态输出文件（必填）
 - `--rand <csv>`：可选随机序列覆盖（命令行优先于 state）
+- `--show-debug`：显示 `<debug>` 输出（默认隐藏）
 
 ### 2.3 `agent input`
 
@@ -82,6 +84,7 @@ cargo run -p sl-cli -- agent input \
 - `--text <text>`：输入文本（必填）
 - `--state-out <path>`：新状态输出文件（必填）
 - `--rand <csv>`：可选随机序列覆盖（命令行优先于 state）
+- `--show-debug`：显示 `<debug>` 输出（默认隐藏）
 
 ### 2.4 `agent replay`
 
@@ -114,6 +117,7 @@ cargo run -p sl-cli -- agent replay \
 - `--entry-script <name>`：入口脚本，默认 `main`
 - `--step <action>`：可重复，按出现顺序消费
 - `--rand <csv>`：可选随机序列（例如 `12,3,1,4`）
+- `--show-debug`：显示 `<debug>` 输出（默认隐藏）
 
 `--step` 语法：
 - `choose:<index>`（例：`choose:0`）
@@ -159,6 +163,7 @@ cargo run -p sl-cli -- agent compile \
 - `EVENT:CHOICES|INPUT|END`
 - `TEXT_JSON:...`
 - `TEXT_TAG_JSON:...`（可选；仅当对应 `TEXT_JSON` 来自 `<text tag="...">` 时输出）
+- `DEBUG_JSON:...`（可选；仅 `--show-debug` 时输出）
 - `PROMPT_JSON:...`
 - `CHOICE:<index>|<json_text>`
 - `INPUT_DEFAULT_JSON:...`
@@ -171,6 +176,7 @@ cargo run -p sl-cli -- agent compile \
 - `RESULT:OK`
 - `MODE:REPLAY`
 - `TEXT: ...`
+- `DEBUG: ...`（仅 `--show-debug`）
 - `CHOICES: ...` 后跟 `- [index] text`
 - `INPUT: ...`
 - `DEFAULT: ...`
@@ -200,6 +206,7 @@ cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/06-snap
 - `--entry-script <name>`：入口脚本，默认 `main`
 - `--state-file <path>`：状态文件，默认 `.scriptlang/save.json`
 - `--rand <csv>`：可选随机序列（例如 `12,3,1,4`）
+- `--show-debug`：显示 `<debug>` 输出（默认隐藏）
 
 全屏模式快捷键：
 - `Up/Down`：选择选项

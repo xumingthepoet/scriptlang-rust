@@ -148,6 +148,11 @@ pub enum ScriptNode {
         once: bool,
         location: SourceSpan,
     },
+    Debug {
+        id: String,
+        value: String,
+        location: SourceSpan,
+    },
     Code {
         id: String,
         code: String,
@@ -322,6 +327,9 @@ pub enum EngineOutput {
         text: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tag: Option<String>,
+    },
+    Debug {
+        text: String,
     },
     Choices {
         items: Vec<ChoiceItem>,

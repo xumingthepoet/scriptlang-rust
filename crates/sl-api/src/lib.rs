@@ -220,10 +220,19 @@ mod tests {
     fn output_kind(output: &EngineOutput) -> &'static str {
         match output {
             EngineOutput::Text { .. } => "text",
+            EngineOutput::Debug { .. } => "debug",
             EngineOutput::Choices { .. } => "choices",
             EngineOutput::Input { .. } => "input",
             EngineOutput::End => "end",
         }
+    }
+
+    #[test]
+    fn output_kind_supports_debug_variant() {
+        let kind = output_kind(&EngineOutput::Debug {
+            text: "dbg".to_string(),
+        });
+        assert_eq!(kind, "debug");
     }
     use sl_core::EngineOutput;
     use std::sync::Arc;

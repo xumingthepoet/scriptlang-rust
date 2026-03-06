@@ -17,6 +17,7 @@ pub(crate) struct TuiActionContext<'a> {
     pub(crate) scenario: &'a LoadedScenario,
     pub(crate) entry_script: &'a str,
     pub(crate) random_sequence: Option<Vec<u32>>,
+    pub(crate) show_debug: bool,
 }
 
 pub(crate) fn handle_key(
@@ -48,7 +49,7 @@ pub(crate) fn handle_key(
                 },
             )?;
             *engine = next;
-            let boundary = run_to_boundary(engine)?;
+            let boundary = run_to_boundary(engine, context.show_debug)?;
             ui.replace_boundary(boundary);
             ui.status = "restarted".to_string();
             return Ok(false);
@@ -69,7 +70,7 @@ pub(crate) fn handle_key(
                 context.scenario,
             )?;
             *engine = resumed;
-            let boundary = run_to_boundary(engine)?;
+            let boundary = run_to_boundary(engine, context.show_debug)?;
             ui.append_boundary(boundary);
             ui.status = format!("loaded from {}", context.state_file);
             return Ok(false);
@@ -132,7 +133,8 @@ pub(crate) fn handle_key(
                 return Ok(false);
             }
             if input_mode {
-                let boundary = submit_current_input(engine, ui.input_buffer.as_str())?;
+                let boundary =
+                    submit_current_input(engine, ui.input_buffer.as_str(), context.show_debug)?;
                 ui.append_boundary(boundary);
                 ui.status = "submitted input".to_string();
                 return Ok(false);
@@ -145,7 +147,7 @@ pub(crate) fn handle_key(
                 .choices
                 .get(ui.selected_choice_index)
                 .ok_or_else(|| ScriptLangError::new("TUI_CHOICE_PARSE", "No choices available"))?;
-            let boundary = choose_current(engine, selected.index)?;
+            let boundary = choose_current(engine, selected.index, context.show_debug)?;
             ui.append_boundary(boundary);
             ui.status = format!("chose {}", ui.selected_choice_index);
             return Ok(false);
@@ -167,15 +169,17 @@ pub(crate) fn handle_key(
 fn choose_current(
     engine: &mut sl_api::ScriptLangEngine,
     choice_index: usize,
+    show_debug: bool,
 ) -> Result<crate::BoundaryResult, ScriptLangError> {
     engine.choose(choice_index)?;
-    run_to_boundary(engine)
+    run_to_boundary(engine, show_debug)
 }
 
 fn submit_current_input(
     engine: &mut sl_api::ScriptLangEngine,
     input: &str,
+    show_debug: bool,
 ) -> Result<crate::BoundaryResult, ScriptLangError> {
     engine.submit_input(input)?;
-    run_to_boundary(engine)
+    run_to_boundary(engine, show_debug)
 }

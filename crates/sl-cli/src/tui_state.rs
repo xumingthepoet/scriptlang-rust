@@ -1,4 +1,4 @@
-use crate::{BoundaryEvent, BoundaryResult};
+use crate::{BoundaryEvent, BoundaryResult, OutputEvent};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ChoiceRow {
@@ -69,20 +69,21 @@ impl TuiUiState {
     }
 
     pub(crate) fn append_boundary(&mut self, boundary: BoundaryResult) {
-        if !boundary.texts.is_empty() {
-            self.pending_lines
-                .extend(boundary.texts.iter().map(|event| event.text.clone()));
+        if !boundary.outputs.is_empty() {
+            self.pending_lines.extend(
+                boundary
+                    .outputs
+                    .iter()
+                    .map(boundary_output_line)
+                    .collect::<Vec<_>>(),
+            );
         }
         self.set_boundary_state(boundary);
     }
 
     pub(crate) fn replace_boundary(&mut self, boundary: BoundaryResult) {
         self.rendered_lines.clear();
-        self.pending_lines = boundary
-            .texts
-            .iter()
-            .map(|event| event.text.clone())
-            .collect();
+        self.pending_lines = boundary.outputs.iter().map(boundary_output_line).collect();
         self.typing_line = None;
         self.typing_chars = 0;
         self.set_boundary_state(boundary);
@@ -116,5 +117,12 @@ impl TuiUiState {
         }
         self.typing_chars += 1;
         true
+    }
+}
+
+fn boundary_output_line(output: &OutputEvent) -> String {
+    match output {
+        OutputEvent::Text(event) => event.text.clone(),
+        OutputEvent::Debug(event) => format!("[debug] {}", event.text),
     }
 }

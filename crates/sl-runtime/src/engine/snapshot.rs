@@ -277,10 +277,19 @@ mod snapshot_tests {
     fn output_kind(output: &EngineOutput) -> &'static str {
         match output {
             EngineOutput::Text { .. } => "text",
+            EngineOutput::Debug { .. } => "debug",
             EngineOutput::Choices { .. } => "choices",
             EngineOutput::Input { .. } => "input",
             EngineOutput::End => "end",
         }
+    }
+
+    #[test]
+    fn output_kind_supports_debug_variant() {
+        let kind = output_kind(&EngineOutput::Debug {
+            text: "dbg".to_string(),
+        });
+        assert_eq!(kind, "debug");
     }
 
     fn pending_kind(pending: &PendingBoundary) -> &'static str {
@@ -810,6 +819,36 @@ mod snapshot_tests {
         resumed.choose(0).expect("choose");
         let out = resumed.next_output().expect("text");
         assert!(matches!(out, EngineOutput::Text { text, .. } if text == "5:0"));
+    }
+
+    #[test]
+    pub(super) fn snapshot_resume_keeps_debug_event_flow() {
+        let files = map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <choice text="Pick">
+        <option text="A">
+          <debug>dbg=${1+1}</debug>
+          <text>ok</text>
+        </option>
+      </choice>
+    </script>
+    "#,
+        )]);
+
+        let mut engine = engine_from_sources(files.clone());
+        engine.start("main", None).expect("start");
+        let _ = engine.next_output().expect("choice");
+        let snapshot = engine.snapshot().expect("snapshot");
+
+        let mut resumed = engine_from_sources(files);
+        resumed.resume(snapshot).expect("resume");
+        resumed.choose(0).expect("choose");
+        let debug = resumed.next_output().expect("debug");
+        assert!(matches!(debug, EngineOutput::Debug { text } if text == "dbg=2"));
+        let text = resumed.next_output().expect("text");
+        assert!(matches!(text, EngineOutput::Text { text, .. } if text == "ok"));
     }
 
     #[test]

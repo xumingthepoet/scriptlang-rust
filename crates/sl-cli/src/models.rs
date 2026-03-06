@@ -48,9 +48,20 @@ pub(crate) struct TextEvent {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct DebugEvent {
+    pub(crate) text: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum OutputEvent {
+    Text(TextEvent),
+    Debug(DebugEvent),
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct BoundaryResult {
     pub(crate) event: BoundaryEvent,
-    pub(crate) texts: Vec<TextEvent>,
+    pub(crate) outputs: Vec<OutputEvent>,
     pub(crate) choices: Vec<(usize, String)>,
     pub(crate) choice_prompt_text: Option<String>,
     pub(crate) input_prompt_text: Option<String>,

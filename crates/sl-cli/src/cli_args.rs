@@ -57,6 +57,9 @@ pub(crate) struct StartArgs {
     #[arg(long = "rand")]
     #[arg(help = "Comma-separated random sequence, e.g. 12,3,1")]
     pub(crate) rand: Option<String>,
+    #[arg(long = "show-debug")]
+    #[arg(help = "Show <debug> output events")]
+    pub(crate) show_debug: bool,
 }
 
 #[derive(Debug, Args)]
@@ -73,6 +76,9 @@ pub(crate) struct ChooseArgs {
     #[arg(long = "rand")]
     #[arg(help = "Comma-separated random sequence override, e.g. 12,3,1")]
     pub(crate) rand: Option<String>,
+    #[arg(long = "show-debug")]
+    #[arg(help = "Show <debug> output events")]
+    pub(crate) show_debug: bool,
 }
 
 #[derive(Debug, Args)]
@@ -89,6 +95,9 @@ pub(crate) struct InputArgs {
     #[arg(long = "rand")]
     #[arg(help = "Comma-separated random sequence override, e.g. 12,3,1")]
     pub(crate) rand: Option<String>,
+    #[arg(long = "show-debug")]
+    #[arg(help = "Show <debug> output events")]
+    pub(crate) show_debug: bool,
 }
 
 #[derive(Debug, Args)]
@@ -108,6 +117,9 @@ pub(crate) struct ReplayArgs {
     #[arg(long = "rand")]
     #[arg(help = "Comma-separated random sequence, e.g. 12,3,1")]
     pub(crate) rand: Option<String>,
+    #[arg(long = "show-debug")]
+    #[arg(help = "Show <debug> output events")]
+    pub(crate) show_debug: bool,
 }
 
 #[derive(Debug, Args)]
@@ -125,6 +137,9 @@ pub(crate) struct TuiArgs {
     #[arg(long = "rand")]
     #[arg(help = "Comma-separated random sequence, e.g. 12,3,1")]
     pub(crate) rand: Option<String>,
+    #[arg(long = "show-debug")]
+    #[arg(help = "Show <debug> output events")]
+    pub(crate) show_debug: bool,
 }
 
 #[derive(Debug, Args)]

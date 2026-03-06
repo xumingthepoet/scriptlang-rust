@@ -119,6 +119,20 @@ pub(crate) fn validate_json_symbol_visibility(
                         )?;
                     }
                 }
+                ScriptNode::Debug {
+                    value, location, ..
+                } => {
+                    for expr in extract_text_interpolations(value) {
+                        ensure_no_hidden_json_symbol(
+                            &expr,
+                            &hidden_json,
+                            &script_allowed,
+                            &script_ir.script_name,
+                            "debug interpolation",
+                            location,
+                        )?;
+                    }
+                }
                 ScriptNode::Code { code, location, .. } => {
                     ensure_script_node_safe(code, "code block", location)?;
                 }
@@ -874,6 +888,14 @@ mod json_symbols_tests {
             (
                 "while",
                 r#"<script name="main"><while when="secret.hp > 0"><text>x</text></while></script>"#,
+            ),
+            (
+                "text interpolation",
+                r#"<script name="main"><text>${secret.hp}</text></script>"#,
+            ),
+            (
+                "debug interpolation",
+                r#"<script name="main"><debug>${secret.hp}</debug></script>"#,
             ),
             (
                 "if",

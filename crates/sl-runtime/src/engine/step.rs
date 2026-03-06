@@ -40,6 +40,9 @@ impl ScriptLangEngine {
                     once: bool,
                     id: String,
                 },
+                Debug {
+                    value: String,
+                },
                 Code {
                     code: String,
                 },
@@ -100,6 +103,9 @@ impl ScriptLangEngine {
                             tag: tag.clone(),
                             once: *once,
                             id: id.clone(),
+                        },
+                        ScriptNode::Debug { value, .. } => PlannedNode::Debug {
+                            value: value.clone(),
                         },
                         ScriptNode::Code { code, .. } => PlannedNode::Code { code: code.clone() },
                         ScriptNode::Var { declaration, .. } => PlannedNode::Var {
@@ -196,6 +202,11 @@ impl ScriptLangEngine {
                         text: rendered,
                         tag,
                     });
+                }
+                PlannedNode::Debug { value } => {
+                    let rendered = self.render_text(&value)?;
+                    self.bump_top_node_index_infallible(1);
+                    return Ok(EngineOutput::Debug { text: rendered });
                 }
                 PlannedNode::Code { code } => {
                     self.run_code(&code)?;
@@ -506,10 +517,19 @@ mod step_tests {
     fn output_kind(output: &EngineOutput) -> &'static str {
         match output {
             EngineOutput::Text { .. } => "text",
+            EngineOutput::Debug { .. } => "debug",
             EngineOutput::Choices { .. } => "choices",
             EngineOutput::Input { .. } => "input",
             EngineOutput::End => "end",
         }
+    }
+
+    #[test]
+    fn output_kind_supports_debug_variant() {
+        let kind = output_kind(&EngineOutput::Debug {
+            text: "dbg".to_string(),
+        });
+        assert_eq!(kind, "debug");
     }
 
     fn pending_choice_options_mut(
@@ -541,6 +561,49 @@ mod step_tests {
 
         let second = engine.next_output().expect("next");
         assert_eq!(output_kind(&second), "end");
+    }
+
+    #[test]
+    pub(super) fn next_debug_interpolates_and_keeps_order_with_text() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <var name="hp" type="int">2</var>
+  <debug>dbg hp=${hp}</debug>
+  <text>text hp=${hp}</text>
+</script>
+"#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        let first = engine.next_output().expect("next");
+        assert!(matches!(
+            first,
+            EngineOutput::Debug { text } if text == "dbg hp=2"
+        ));
+
+        let second = engine.next_output().expect("next");
+        assert!(matches!(
+            second,
+            EngineOutput::Text { text, .. } if text == "text hp=2"
+        ));
+
+        let third = engine.next_output().expect("next");
+        assert_eq!(output_kind(&third), "end");
+    }
+
+    #[test]
+    pub(super) fn next_debug_propagates_interpolation_errors() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><debug>${missing}</debug></script>"#,
+        )]));
+        engine.start("main", None).expect("start");
+        let error = engine
+            .next_output()
+            .expect_err("missing variable should fail");
+        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
     }
 
     #[test]
@@ -581,6 +644,7 @@ mod step_tests {
                 r#"
 <script name="main">
   <var name="name" type="string">"Traveler"</var>
+  <debug>dbg=${name}</debug>
   <choice text="Pick">
     <option text="A"><text>A</text></option>
   </choice>
@@ -679,6 +743,7 @@ mod step_tests {
             "main.script.xml",
             r#"
 <script name="main">
+  <debug>dbg</debug>
   <choice text="Pick">
     <option text="A"><text>A</text></option>
   </choice>
@@ -697,6 +762,9 @@ mod step_tests {
             match output {
                 EngineOutput::Text { text, .. } => {
                     println!("Text: {}", text);
+                }
+                EngineOutput::Debug { text } => {
+                    println!("Debug: {}", text);
                 }
                 EngineOutput::Choices { items, .. } => {
                     println!("Choices: {} items", items.len());

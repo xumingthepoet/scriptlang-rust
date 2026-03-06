@@ -184,7 +184,7 @@ mod session_ops_tests {
 
         let mut engine = create_engine_for_scenario(&scenario, "main", RandConfig::default())
             .expect("engine should build");
-        let boundary = run_to_boundary(&mut engine).expect("boundary should resolve");
+        let boundary = run_to_boundary(&mut engine, false).expect("boundary should resolve");
         let state_file = temp_path("session-ops-state.json");
         save_engine_state(&state_file, &engine, &scenario.id, DEFAULT_COMPILER_VERSION)
             .expect("state save should pass");
@@ -228,7 +228,7 @@ mod session_ops_tests {
 
         let mut engine = create_engine_for_scenario(&other, "main", RandConfig::default())
             .expect("engine build");
-        let _ = run_to_boundary(&mut engine).expect("boundary");
+        let _ = run_to_boundary(&mut engine, false).expect("boundary");
         let state_file = temp_path("session-ops-mismatch-state.json");
         save_engine_state(&state_file, &engine, &other.id, DEFAULT_COMPILER_VERSION)
             .expect("state save");

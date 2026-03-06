@@ -51,6 +51,7 @@ mod rich {
         scenario: &LoadedScenario,
         entry_script: &str,
         random_sequence: Option<Vec<u32>>,
+        show_debug: bool,
         engine: &mut sl_api::ScriptLangEngine,
     ) -> Result<i32, ScriptLangError> {
         let mut terminal = TuiTerminal::new()?;
@@ -58,7 +59,7 @@ mod rich {
             status: "ready".to_string(),
             ..TuiUiState::default()
         };
-        let boundary = run_to_boundary(engine)?;
+        let boundary = run_to_boundary(engine, show_debug)?;
         ui.replace_boundary(boundary);
 
         let tick = Duration::from_millis(TYPEWRITER_TICK_MS);
@@ -68,6 +69,7 @@ mod rich {
             scenario,
             entry_script,
             random_sequence,
+            show_debug,
         };
 
         loop {
@@ -116,6 +118,7 @@ pub(super) fn run_tui_ratatui_mode(
     scenario: &super::LoadedScenario,
     entry_script: &str,
     random_sequence: Option<Vec<u32>>,
+    show_debug: bool,
     engine: &mut sl_api::ScriptLangEngine,
 ) -> Result<i32, sl_api::ScriptLangError> {
     use std::io::IsTerminal;
@@ -129,8 +132,16 @@ pub(super) fn run_tui_ratatui_mode(
             scenario,
             entry_script,
             random_sequence,
+            show_debug,
             engine,
         );
     }
-    rich::run_tui_ratatui_mode(state_file, scenario, entry_script, random_sequence, engine)
+    rich::run_tui_ratatui_mode(
+        state_file,
+        scenario,
+        entry_script,
+        random_sequence,
+        show_debug,
+        engine,
+    )
 }

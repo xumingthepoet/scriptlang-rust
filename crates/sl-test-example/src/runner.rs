@@ -41,6 +41,7 @@ pub fn run_case(example_dir: &Path, case: &TestCase) -> Result<RunReport, SlTest
             sl_core::EngineOutput::Text { text, tag } => {
                 observed_events.push(ExpectedEvent::Text { text, tag });
             }
+            sl_core::EngineOutput::Debug { .. } => {}
             sl_core::EngineOutput::Choices { items, prompt_text } => {
                 let choices = items.into_iter().map(|item| item.text).collect();
                 observed_events.push(ExpectedEvent::Choices {

@@ -14,6 +14,7 @@ pub(crate) fn run_tui_line_mode(
     scenario: &LoadedScenario,
     entry_script: &str,
     random_sequence: Option<Vec<u32>>,
+    show_debug: bool,
     engine: &mut sl_api::ScriptLangEngine,
 ) -> Result<i32, ScriptLangError> {
     let stdin = io::stdin();
@@ -24,17 +25,20 @@ pub(crate) fn run_tui_line_mode(
         scenario,
         entry_script,
         random_sequence,
+        show_debug,
         engine,
         &mut reader,
         &mut writer,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_tui_line_mode_with_io(
     state_file: &str,
     scenario: &LoadedScenario,
     entry_script: &str,
     random_sequence: Option<Vec<u32>>,
+    show_debug: bool,
     engine: &mut sl_api::ScriptLangEngine,
     reader: &mut dyn BufRead,
     writer: &mut dyn Write,
@@ -55,6 +59,12 @@ pub(crate) fn run_tui_line_mode_with_io(
                 println!("{}", text);
                 if let Some(tag) = tag {
                     println!("[tag: {}]", tag);
+                }
+            }
+            EngineOutput::Debug { text } => {
+                if show_debug {
+                    println!();
+                    println!("[debug] {}", text);
                 }
             }
             EngineOutput::Choices { items, prompt_text } => {
@@ -244,6 +254,7 @@ mod line_tui_tests {
             &choice_input_scenario,
             "main",
             None,
+            false,
             &mut engine,
             &mut reader,
             &mut writer,
@@ -269,6 +280,7 @@ mod line_tui_tests {
             &choice_quit_scenario,
             "main",
             None,
+            false,
             &mut engine,
             &mut reader,
             &mut writer,
@@ -284,6 +296,7 @@ mod line_tui_tests {
             &choice_quit_scenario,
             "main",
             None,
+            false,
             &mut engine,
             &mut reader,
             &mut writer,
@@ -309,6 +322,7 @@ mod line_tui_tests {
             &input_quit_scenario,
             "main",
             None,
+            false,
             &mut engine,
             &mut reader,
             &mut writer,
@@ -324,6 +338,7 @@ mod line_tui_tests {
             &input_quit_scenario,
             "main",
             None,
+            false,
             &mut engine,
             &mut reader,
             &mut writer,
@@ -339,6 +354,7 @@ mod line_tui_tests {
             &choice_quit_scenario,
             "main",
             None,
+            false,
             &mut engine,
             &mut reader,
             &mut writer,
@@ -360,7 +376,7 @@ mod line_tui_tests {
 "#,
         );
         let mut engine = create_engine_for_tests(&scenario);
-        let _ = run_to_boundary(&mut engine).expect("boundary should resolve");
+        let _ = run_to_boundary(&mut engine, false).expect("boundary should resolve");
 
         let state_file = temp_path("line-tui-commands-save.json");
         let state_file_str = state_file.to_string_lossy().to_string();

@@ -23,6 +23,7 @@
 
 - `EngineOutput`（来自 `sl-core`）：
   - `Text { text, tag }`（`tag` 为可选元数据，供宿主扩展）
+  - `Debug { text }`（调试输出事件，独立于 `Text`）
   - `Choices { items, prompt_text }`
   - `Input { prompt_text, default_text }`
   - `End`
@@ -326,6 +327,9 @@ loop {
     match engine.next_output()? {
         sl_core::EngineOutput::Text { text } => {
             println!("{}", text);
+        }
+        sl_core::EngineOutput::Debug { text } => {
+            eprintln!("[debug] {}", text);
         }
         sl_core::EngineOutput::Choices { items, .. } => {
             let selected = items[0].index;

@@ -105,6 +105,7 @@ pub(super) mod runtime_test_support {
         for _ in 0..5_000usize {
             match engine.next_output().expect("next should pass") {
                 EngineOutput::Text { .. } => {}
+                EngineOutput::Debug { .. } => {}
                 EngineOutput::Choices { items, .. } => {
                     let index = items.first().map(|item| item.index).unwrap_or(0);
                     engine.choose(index).expect("choose should pass");

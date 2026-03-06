@@ -38,7 +38,7 @@ pub(super) fn run_start(args: StartArgs) -> Result<i32, ScriptLangError> {
         },
     )?;
 
-    let boundary = run_to_boundary(&mut engine)?;
+    let boundary = run_to_boundary(&mut engine, args.show_debug)?;
     emit_boundary_with_saved_state(
         &engine,
         boundary,
@@ -50,16 +50,24 @@ pub(super) fn run_start(args: StartArgs) -> Result<i32, ScriptLangError> {
 
 pub(super) fn run_choose(args: ChooseArgs) -> Result<i32, ScriptLangError> {
     let random_sequence = parse_rand_sequence(args.rand.as_deref())?;
-    run_state_transition(&args.state_in, &args.state_out, random_sequence, |engine| {
-        engine.choose(args.choice)
-    })
+    run_state_transition(
+        &args.state_in,
+        &args.state_out,
+        random_sequence,
+        args.show_debug,
+        |engine| engine.choose(args.choice),
+    )
 }
 
 pub(super) fn run_input(args: InputArgs) -> Result<i32, ScriptLangError> {
     let random_sequence = parse_rand_sequence(args.rand.as_deref())?;
-    run_state_transition(&args.state_in, &args.state_out, random_sequence, |engine| {
-        engine.submit_input(&args.text)
-    })
+    run_state_transition(
+        &args.state_in,
+        &args.state_out,
+        random_sequence,
+        args.show_debug,
+        |engine| engine.submit_input(&args.text),
+    )
 }
 
 pub(super) fn run_compile(args: CompileArgs) -> Result<i32, ScriptLangError> {
@@ -147,7 +155,7 @@ pub(super) fn run_replay(args: ReplayArgs) -> Result<i32, ScriptLangError> {
         },
     )?;
     let actions = parse_replay_steps(&args.step)?;
-    let result = run_replay_sequence(&mut engine, &actions)?;
+    let result = run_replay_sequence(&mut engine, &actions, args.show_debug)?;
 
     println!("RESULT:OK");
     println!("MODE:REPLAY");
@@ -200,6 +208,7 @@ fn parse_replay_steps(steps: &[String]) -> Result<Vec<ReplayAction>, ScriptLangE
 fn run_replay_sequence(
     engine: &mut ScriptLangEngine,
     actions: &[ReplayAction],
+    show_debug: bool,
 ) -> Result<ReplayResult, ScriptLangError> {
     let mut lines = Vec::new();
     let mut action_index = 0usize;
@@ -210,6 +219,11 @@ fn run_replay_sequence(
                 lines.push(format!("TEXT: {}", text));
                 if let Some(tag) = tag {
                     lines.push(format!("TEXT_TAG: {}", tag));
+                }
+            }
+            EngineOutput::Debug { text } => {
+                if show_debug {
+                    lines.push(format!("DEBUG: {}", text));
                 }
             }
             EngineOutput::Choices { items, prompt_text } => {
@@ -300,13 +314,14 @@ fn run_state_transition(
     state_in: &str,
     state_out: &str,
     random_sequence: Option<Vec<u32>>,
+    show_debug: bool,
     transition: impl FnOnce(&mut sl_api::ScriptLangEngine) -> Result<(), ScriptLangError>,
 ) -> Result<i32, ScriptLangError> {
     let state = load_player_state(Path::new(state_in))?;
     let scenario = load_source_by_ref(&state.scenario_id)?;
     let mut engine = resume_engine_for_state(&scenario, &state, random_sequence)?;
     transition(&mut engine)?;
-    let boundary = run_to_boundary(&mut engine)?;
+    let boundary = run_to_boundary(&mut engine, show_debug)?;
     emit_boundary_with_saved_state(
         &engine,
         boundary,
@@ -334,6 +349,7 @@ mod agent_tests {
             entry_script: Some("main".to_string()),
             state_out: state_in.to_string_lossy().to_string(),
             rand: None,
+            show_debug: false,
         })
         .expect("start should pass");
 
@@ -343,6 +359,7 @@ mod agent_tests {
                 text: "Guild".to_string(),
                 state_out: state_out.to_string_lossy().to_string(),
                 rand: None,
+                show_debug: false,
             }),
         })
         .expect("input dispatch should pass");
@@ -358,9 +375,31 @@ mod agent_tests {
             entry_script: Some("main".to_string()),
             step: Vec::new(),
             rand: None,
+            show_debug: false,
         };
         let code = run_replay(args).expect("replay should pass");
         assert_eq!(code, 0);
+    }
+
+    #[test]
+    fn run_replay_hides_or_shows_debug_lines_by_flag() {
+        let root = temp_path("agent-replay-debug-flag");
+        fs::create_dir_all(&root).expect("root should be created");
+        write_file(
+            &root.join("main.script.xml"),
+            r#"<script name="main"><debug>dbg=${1+1}</debug><text>ok</text></script>"#,
+        );
+        let scenario =
+            load_source_by_scripts_dir(root.to_string_lossy().as_ref(), "main").expect("scenario");
+        let mut engine =
+            create_engine_for_scenario(&scenario, "main", RandConfig::default()).expect("engine");
+        let hidden = run_replay_sequence(&mut engine, &[], false).expect("hidden replay");
+        assert!(hidden.lines.iter().all(|line| !line.starts_with("DEBUG: ")));
+
+        let mut engine =
+            create_engine_for_scenario(&scenario, "main", RandConfig::default()).expect("engine");
+        let shown = run_replay_sequence(&mut engine, &[], true).expect("shown replay");
+        assert!(shown.lines.iter().any(|line| line == "DEBUG: dbg=2"));
     }
 
     #[test]
@@ -390,7 +429,7 @@ mod agent_tests {
         .expect("engine should create");
         let actions = parse_replay_steps(&["choose:0".to_string(), "input:Guild".to_string()])
             .expect("steps should parse");
-        let result = run_replay_sequence(&mut engine, &actions).expect("replay should pass");
+        let result = run_replay_sequence(&mut engine, &actions, false).expect("replay should pass");
         assert_eq!(result.actions_used, 2);
         assert_eq!(result.actions_total, 2);
         assert_eq!(result.stop_at, ReplayStopAt::End);
@@ -420,7 +459,7 @@ mod agent_tests {
         let mut engine =
             create_engine_for_scenario(&scenario, "main", RandConfig::default()).expect("engine");
         let actions = parse_replay_steps(&["choose:0".to_string()]).expect("steps should parse");
-        let result = run_replay_sequence(&mut engine, &actions).expect("replay should pass");
+        let result = run_replay_sequence(&mut engine, &actions, false).expect("replay should pass");
         assert_eq!(result.actions_used, 1);
         assert_eq!(result.actions_total, 1);
         assert_eq!(result.stop_at, ReplayStopAt::Input);
@@ -443,7 +482,8 @@ mod agent_tests {
         let mut engine =
             create_engine_for_scenario(&scenario, "main", RandConfig::default()).expect("engine");
         let actions = parse_replay_steps(&["choose:0".to_string()]).expect("steps should parse");
-        let error = run_replay_sequence(&mut engine, &actions).expect_err("mismatch should fail");
+        let error =
+            run_replay_sequence(&mut engine, &actions, false).expect_err("mismatch should fail");
         assert_eq!(error.code, "CLI_REPLAY_ACTION_KIND_MISMATCH");
     }
 
@@ -454,7 +494,8 @@ mod agent_tests {
         let mut engine =
             create_engine_for_scenario(&scenario, "main", RandConfig::default()).expect("engine");
         let actions = parse_replay_steps(&["input:Guild".to_string()]).expect("steps should parse");
-        let error = run_replay_sequence(&mut engine, &actions).expect_err("unused should fail");
+        let error =
+            run_replay_sequence(&mut engine, &actions, false).expect_err("unused should fail");
         assert_eq!(error.code, "CLI_REPLAY_UNUSED_ACTIONS");
     }
 
@@ -484,6 +525,7 @@ mod agent_tests {
             entry_script: Some("main".to_string()),
             state_out: state_1.to_string_lossy().to_string(),
             rand: Some("12,3".to_string()),
+            show_debug: false,
         })
         .expect("start should pass");
 
@@ -493,6 +535,7 @@ mod agent_tests {
             choice: 0,
             state_out: state_2.to_string_lossy().to_string(),
             rand: None,
+            show_debug: false,
         })
         .expect("choose should pass");
 
@@ -528,6 +571,7 @@ mod agent_tests {
             entry_script: Some("main".to_string()),
             state_out: state_1.to_string_lossy().to_string(),
             rand: Some("12,3".to_string()),
+            show_debug: false,
         })
         .expect("start should pass");
 
@@ -537,6 +581,7 @@ mod agent_tests {
             choice: 0,
             state_out: state_2.to_string_lossy().to_string(),
             rand: Some("9,8,7".to_string()),
+            show_debug: false,
         })
         .expect("choose should pass");
 

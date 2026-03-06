@@ -1,19 +1,27 @@
 use sl_api::{EngineOutput, ScriptLangError};
 
-use crate::{BoundaryEvent, BoundaryResult, TextEvent};
+use crate::{BoundaryEvent, BoundaryResult, DebugEvent, OutputEvent, TextEvent};
 
 pub(crate) fn run_to_boundary(
     engine: &mut sl_api::ScriptLangEngine,
+    show_debug: bool,
 ) -> Result<BoundaryResult, ScriptLangError> {
-    let mut texts = Vec::new();
+    let mut outputs = Vec::new();
 
     loop {
         match engine.next_output()? {
-            EngineOutput::Text { text, tag } => texts.push(TextEvent { text, tag }),
+            EngineOutput::Text { text, tag } => {
+                outputs.push(OutputEvent::Text(TextEvent { text, tag }))
+            }
+            EngineOutput::Debug { text } => {
+                if show_debug {
+                    outputs.push(OutputEvent::Debug(DebugEvent { text }));
+                }
+            }
             EngineOutput::Choices { items, prompt_text } => {
                 return Ok(BoundaryResult {
                     event: BoundaryEvent::Choices,
-                    texts,
+                    outputs,
                     choices: items
                         .into_iter()
                         .map(|item| (item.index, item.text))
@@ -29,7 +37,7 @@ pub(crate) fn run_to_boundary(
             } => {
                 return Ok(BoundaryResult {
                     event: BoundaryEvent::Input,
-                    texts,
+                    outputs,
                     choices: Vec::new(),
                     choice_prompt_text: None,
                     input_prompt_text: Some(prompt_text),
@@ -39,7 +47,7 @@ pub(crate) fn run_to_boundary(
             EngineOutput::End => {
                 return Ok(BoundaryResult {
                     event: BoundaryEvent::End,
-                    texts,
+                    outputs,
                     choices: Vec::new(),
                     choice_prompt_text: None,
                     input_prompt_text: None,
@@ -58,16 +66,26 @@ pub(crate) fn emit_boundary(boundary: BoundaryResult, state_out: Option<String>)
         BoundaryEvent::End => println!("EVENT:END"),
     }
 
-    for text_event in boundary.texts {
-        println!(
-            "TEXT_JSON:{}",
-            serde_json::to_string(&text_event.text).expect("string json")
-        );
-        if let Some(tag) = text_event.tag {
-            println!(
-                "TEXT_TAG_JSON:{}",
-                serde_json::to_string(&tag).expect("string json")
-            );
+    for output in boundary.outputs {
+        match output {
+            OutputEvent::Text(text_event) => {
+                println!(
+                    "TEXT_JSON:{}",
+                    serde_json::to_string(&text_event.text).expect("string json")
+                );
+                if let Some(tag) = text_event.tag {
+                    println!(
+                        "TEXT_TAG_JSON:{}",
+                        serde_json::to_string(&tag).expect("string json")
+                    );
+                }
+            }
+            OutputEvent::Debug(debug_event) => {
+                println!(
+                    "DEBUG_JSON:{}",
+                    serde_json::to_string(&debug_event.text).expect("string json")
+                );
+            }
         }
     }
 
@@ -134,7 +152,7 @@ mod boundary_runner_tests {
         })
         .expect("engine should build");
 
-        let boundary = run_to_boundary(&mut engine).expect("boundary should be emitted");
+        let boundary = run_to_boundary(&mut engine, false).expect("boundary should be emitted");
         assert_eq!(boundary.event, BoundaryEvent::Choices);
         assert!(!boundary.choices.is_empty());
 
@@ -147,15 +165,18 @@ mod boundary_runner_tests {
         emit_boundary(
             BoundaryResult {
                 event: BoundaryEvent::End,
-                texts: vec![
-                    TextEvent {
+                outputs: vec![
+                    OutputEvent::Text(TextEvent {
                         text: "plain".to_string(),
                         tag: None,
-                    },
-                    TextEvent {
+                    }),
+                    OutputEvent::Debug(DebugEvent {
+                        text: "dbg".to_string(),
+                    }),
+                    OutputEvent::Text(TextEvent {
                         text: "sfx/path.ogg".to_string(),
                         tag: Some("sound".to_string()),
-                    },
+                    }),
                 ],
                 choices: Vec::new(),
                 choice_prompt_text: None,
@@ -164,5 +185,45 @@ mod boundary_runner_tests {
             },
             None,
         );
+    }
+
+    #[test]
+    fn run_to_boundary_hides_or_shows_debug_events_by_flag() {
+        let mut hidden = create_engine_from_xml(CreateEngineFromXmlOptions {
+            scripts_xml: std::collections::BTreeMap::from([(
+                "main.script.xml".to_string(),
+                r#"<script name="main"><debug>dbg</debug><text>ok</text></script>"#.to_string(),
+            )]),
+            entry_script: Some("main".to_string()),
+            entry_args: None,
+            host_functions: None,
+            random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        })
+        .expect("engine should build");
+        let hidden_boundary = run_to_boundary(&mut hidden, false).expect("boundary hidden");
+        assert_eq!(hidden_boundary.outputs.len(), 1);
+        assert!(matches!(hidden_boundary.outputs[0], OutputEvent::Text(_)));
+
+        let mut shown = create_engine_from_xml(CreateEngineFromXmlOptions {
+            scripts_xml: std::collections::BTreeMap::from([(
+                "main.script.xml".to_string(),
+                r#"<script name="main"><debug>dbg</debug><text>ok</text></script>"#.to_string(),
+            )]),
+            entry_script: Some("main".to_string()),
+            entry_args: None,
+            host_functions: None,
+            random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        })
+        .expect("engine should build");
+        let shown_boundary = run_to_boundary(&mut shown, true).expect("boundary shown");
+        assert_eq!(shown_boundary.outputs.len(), 2);
+        assert!(matches!(shown_boundary.outputs[0], OutputEvent::Debug(_)));
+        assert!(matches!(shown_boundary.outputs[1], OutputEvent::Text(_)));
     }
 }

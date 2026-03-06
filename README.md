@@ -74,6 +74,11 @@ All code must be written with testability in mind:
 - Runtime and API expose it via `EngineOutput::Text { text, tag }`.
 - CLI machine output keeps `TEXT_JSON` and emits optional `TEXT_TAG_JSON`.
 
+## Debug Node
+- `<debug>...</debug>` supports `${expr}` interpolation and emits `EngineOutput::Debug { text }`.
+- `<debug>` does not support attributes (`once/tag` etc. are rejected at compile time).
+- CLI hides debug events by default; pass `--show-debug` to emit `DEBUG_JSON` / `DEBUG: ...`.
+
 ## Commands
 - `make check`: `cargo check --workspace --all-targets --all-features`
 - `make fmt`: `cargo fmt --all -- --check`

@@ -144,6 +144,20 @@ pub(crate) fn compile_group_nodes(
                 once: parse_bool_attr(child, "once", false)?,
                 location: child.location.clone(),
             },
+            "debug" => {
+                if !child.attributes.is_empty() {
+                    return Err(ScriptLangError::with_span(
+                        "XML_ATTR_NOT_ALLOWED",
+                        "<debug> does not support attributes. Use inline content only.",
+                        child.location.clone(),
+                    ));
+                }
+                ScriptNode::Debug {
+                    id: builder.next_node_id("debug"),
+                    value: parse_inline_required(child)?,
+                    location: child.location.clone(),
+                }
+            }
             "code" => ScriptNode::Code {
                 id: builder.next_node_id("code"),
                 code: parse_inline_required(child)?,
@@ -525,6 +539,7 @@ pub(crate) fn compile_group_nodes(
 pub(crate) fn node_id(node: &ScriptNode) -> &str {
     match node {
         ScriptNode::Text { id, .. }
+        | ScriptNode::Debug { id, .. }
         | ScriptNode::Code { id, .. }
         | ScriptNode::Var { id, .. }
         | ScriptNode::If { id, .. }
@@ -966,6 +981,77 @@ mod script_compile_tests {
             .expect("root group should exist");
         assert!(group.entry_node_id.is_some());
         assert_eq!(group.nodes.len(), 3);
+    }
+
+    #[test]
+    fn compile_group_supports_debug_and_rejects_debug_attributes() {
+        let mut builder = GroupBuilder::new("debug.script.xml");
+        let root_group = builder.next_group_id();
+        let container = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element(
+                "debug",
+                &[],
+                vec![xml_text("hp=${hp}")],
+            ))],
+        );
+        compile_group(
+            &root_group,
+            None,
+            &container,
+            &mut builder,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            CompileGroupMode::new(0, false),
+        )
+        .expect("debug should compile");
+        let group = builder.groups.get(&root_group).expect("group");
+        assert_eq!(group.nodes.len(), 1);
+
+        for attrs in [[("text", "x")], [("once", "true")], [("tag", "x")]] {
+            let mut bad_builder = GroupBuilder::new("debug-attr.script.xml");
+            let bad_root = bad_builder.next_group_id();
+            let bad_container = xml_element(
+                "script",
+                &[("name", "main")],
+                vec![XmlNode::Element(xml_element(
+                    "debug",
+                    &attrs,
+                    vec![xml_text("hp=${hp}")],
+                ))],
+            );
+            let error = compile_group(
+                &bad_root,
+                None,
+                &bad_container,
+                &mut bad_builder,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                CompileGroupMode::new(0, false),
+            )
+            .expect_err("debug attrs should fail");
+            assert_eq!(error.code, "XML_ATTR_NOT_ALLOWED");
+        }
+
+        let mut empty_builder = GroupBuilder::new("debug-empty.script.xml");
+        let empty_root = empty_builder.next_group_id();
+        let empty_container = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element("debug", &[], vec![]))],
+        );
+        let error = compile_group(
+            &empty_root,
+            None,
+            &empty_container,
+            &mut empty_builder,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            CompileGroupMode::new(0, false),
+        )
+        .expect_err("empty debug body should fail");
+        assert_eq!(error.code, "XML_EMPTY_NODE_CONTENT");
     }
 
     #[test]

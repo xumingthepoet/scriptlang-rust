@@ -178,6 +178,16 @@ key 固定是 string。
 <text tag="sound">sfx/open-door.ogg</text>
 ```
 
+## 6.2.1 `<debug>`
+
+用途：输出调试文本。支持 `${expr}` 插值。  
+属性：不支持任何属性（`once/tag` 都不支持）。  
+说明：运行时会产出独立 `Debug` 事件，不并入普通 `Text` 事件。  
+
+```xml
+<debug>hp=${hp}, round=${round}</debug>
+```
+
 ## 6.3 `<code>`
 
 用途：执行 Rhai 代码。  

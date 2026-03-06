@@ -34,8 +34,8 @@ pub(crate) use line_tui::run_tui_line_mode;
 #[cfg(test)]
 pub(crate) use line_tui::{handle_line_cmd, handle_tui_command};
 pub(crate) use models::{
-    BoundaryEvent, BoundaryResult, LoadedScenario, PlayerRandomMode, PlayerState, TextEvent,
-    TuiCommandAction, TuiCommandContext, PLAYER_STATE_SCHEMA,
+    BoundaryEvent, BoundaryResult, DebugEvent, LoadedScenario, OutputEvent, PlayerRandomMode,
+    PlayerState, TextEvent, TuiCommandAction, TuiCommandContext, PLAYER_STATE_SCHEMA,
 };
 pub(crate) use session_ops::{
     create_engine_for_scenario, emit_boundary_with_saved_state, load_engine_from_state_for_ref,
@@ -159,6 +159,7 @@ fn run_tui(args: TuiArgs) -> Result<i32, ScriptLangError> {
         &scenario,
         &entry_script,
         random_sequence,
+        args.show_debug,
         &mut engine,
     )
 }
@@ -257,6 +258,7 @@ mod lib_tests {
                     entry_script: Some("main".to_string()),
                     state_out: start_state.to_string_lossy().to_string(),
                     rand: None,
+                    show_debug: false,
                 }),
             }),
         })
@@ -269,6 +271,7 @@ mod lib_tests {
                 choice: 0,
                 state_out: choose_state.to_string_lossy().to_string(),
                 rand: None,
+                show_debug: false,
             }),
         })
         .expect("agent choose should pass");
@@ -279,6 +282,7 @@ mod lib_tests {
             entry_script: Some("main".to_string()),
             state_out: input_state_1.to_string_lossy().to_string(),
             rand: None,
+            show_debug: false,
         })
         .expect("input scenario start should pass");
         assert_eq!(input_start_code, 0);
@@ -288,6 +292,7 @@ mod lib_tests {
             text: "Guild".to_string(),
             state_out: input_state_2.to_string_lossy().to_string(),
             rand: None,
+            show_debug: false,
         })
         .expect("agent input should pass");
         assert_eq!(input_code, 0);
@@ -298,6 +303,7 @@ mod lib_tests {
                 entry_script: Some("main".to_string()),
                 step: vec!["input:Guild".to_string()],
                 rand: None,
+                show_debug: false,
             }),
         })
         .expect("agent replay should pass");
@@ -308,6 +314,7 @@ mod lib_tests {
             entry_script: Some("main".to_string()),
             state_file: Some(tui_state_str.clone()),
             rand: None,
+            show_debug: false,
         })
         .expect("tui should pass in line mode");
         assert_eq!(tui_code, 0);
@@ -324,7 +331,7 @@ mod lib_tests {
             compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
         })
         .expect("engine should build");
-        let _ = run_to_boundary(&mut engine).expect("boundary");
+        let _ = run_to_boundary(&mut engine, false).expect("boundary");
 
         let mut emitted = Vec::new();
         let mut emit = |line: String| emitted.push(line);
@@ -447,6 +454,7 @@ mod lib_tests {
                 entry_script: None,
                 state_file: Some(state_file.to_string_lossy().to_string()),
                 rand: None,
+                show_debug: false,
             }),
         })
         .expect("tui dispatch should pass");
