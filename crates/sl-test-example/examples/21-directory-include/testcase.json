@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "sl-tool-case",
+  "entryScript": "main",
+  "actions": [],
+  "expectedEvents": [
+    { "kind": "text", "text": "main=7" },
+    { "kind": "text", "text": "battle=7" },
+    { "kind": "end" }
+  ]
+}

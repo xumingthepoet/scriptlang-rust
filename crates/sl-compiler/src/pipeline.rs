@@ -154,6 +154,47 @@ mod pipeline_tests {
     }
 
     #[test]
+    fn compile_bundle_supports_directory_includes() {
+        let files = map(&[
+            (
+                "shared/support/types.defs.xml",
+                r#"
+<defs name="shared">
+  <function name="boost" args="int:x" return="int:out">
+    out = x + 1;
+  </function>
+</defs>
+"#,
+            ),
+            ("shared/support/config.json", r#"{"base": 3}"#),
+            (
+                "shared/nested/battle.script.xml",
+                r#"
+<!-- include: ../support/ -->
+<script name="battle">
+  <text>battle=${shared.boost(config.base)}</text>
+</script>
+"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared/ -->
+<script name="main">
+  <text>main=${shared.boost(config.base)}</text>
+  <call script="battle"/>
+</script>
+"#,
+            ),
+        ]);
+
+        let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        assert!(bundle.scripts.contains_key("main"));
+        assert!(bundle.scripts.contains_key("battle"));
+        assert!(bundle.global_json.contains_key("config"));
+    }
+
+    #[test]
     fn compile_scripts_from_xml_map_returns_script_only_bundle() {
         let files = map(&[
             (
@@ -199,6 +240,18 @@ mod pipeline_tests {
             .expect_err("missing include should fail");
         assert_eq!(missing.code, "INCLUDE_NOT_FOUND");
 
+        let empty_directory_include = map(&[(
+            "main.script.xml",
+            r#"
+    <!-- include: missing/ -->
+    <script name="main"></script>
+    "#,
+        )]);
+        let empty_directory = compile_project_bundle_from_xml_map(&empty_directory_include)
+            .expect_err("empty directory include should fail");
+        assert_eq!(empty_directory.code, "INCLUDE_DIR_EMPTY");
+        assert!(empty_directory.message.contains("main.script.xml"));
+
         let cycle = map(&[
             (
                 "a.script.xml",
@@ -218,6 +271,26 @@ mod pipeline_tests {
         let cycle_error =
             compile_project_bundle_from_xml_map(&cycle).expect_err("include cycle should fail");
         assert_eq!(cycle_error.code, "INCLUDE_CYCLE");
+
+        let directory_cycle = map(&[
+            (
+                "main.script.xml",
+                r#"
+    <!-- include: shared/ -->
+    <script name="main"></script>
+    "#,
+            ),
+            (
+                "shared/loop.script.xml",
+                r#"
+    <!-- include: ../main.script.xml -->
+    <script name="loop"></script>
+    "#,
+            ),
+        ]);
+        let directory_cycle_error = compile_project_bundle_from_xml_map(&directory_cycle)
+            .expect_err("directory include cycle should fail");
+        assert_eq!(directory_cycle_error.code, "INCLUDE_CYCLE");
     }
 
     #[test]

@@ -113,6 +113,7 @@ mod tests {
         let source = r#"
 <!-- include: a.script.xml -->
 <!-- include:   nested/b.script.xml   -->
+<!-- include: assets/ -->
 <!-- include:    -->
 <script name="main"></script>
 "#;
@@ -122,7 +123,8 @@ mod tests {
             includes,
             vec![
                 "a.script.xml".to_string(),
-                "nested/b.script.xml".to_string()
+                "nested/b.script.xml".to_string(),
+                "assets/".to_string()
             ]
         );
     }

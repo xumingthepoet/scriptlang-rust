@@ -260,7 +260,7 @@ cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/06-snap
 
 2. `TYPE_UNKNOWN: Unknown custom type "game.WorldState"`
 - 常见原因：子脚本里用了类型，但该脚本自身没有 include 对应 `*.defs.xml`
-- 修复：在每个使用该类型的 `.script.xml`/`.defs.xml` 文件都显式 `<!-- include: ... -->`
+- 修复：在每个使用该类型的 `.script.xml`/`.defs.xml` 文件都显式 `<!-- include: ... -->`，或在该文件里 include 一个覆盖所需 defs 的目录（如 `<!-- include: shared/ -->`）
 
 3. `when` 字符串比较表达式异常
 - 常见原因：`when="..."` 中使用单引号字符串导致执行路径兼容性问题

@@ -52,13 +52,13 @@
 
 ```xml
 <!-- include: relative/path.ext -->
+<!-- include: relative/dir/ -->
 ```
 
 示例：
 
 ```xml
-<!-- include: shared.defs.xml -->
-<!-- include: game.json -->
+<!-- include: shared/ -->
 <script name="main">
   <text>${shared.add(1, game.bonus)}</text>
 </script>
@@ -67,7 +67,12 @@
 规则：
 - 允许在 `.script.xml` 和 `.defs.xml` 中声明 include。
 - 路径相对当前文件。
-- include 缺失或循环依赖会编译报错。
+- `<!-- include: file.ext -->` 表示单文件 include，保持现有行为。
+- `<!-- include: dir/ -->` 用尾随 `/` 表示目录 include。
+- 目录 include 会递归纳入该目录及其子目录下所有 `*.script.xml`、`*.defs.xml`、`*.json`。
+- 目录展开顺序按规范化相对路径字典序固定，保证结果稳定。
+- 目录 include 只会在当前编译输入的虚拟文件集合内展开，不会直接扫描真实文件系统。
+- include 缺失、目录未匹配到任何受支持源码文件、或循环依赖都会编译报错。
 
 ## 3. `<script>` 顶层属性
 

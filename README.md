@@ -57,6 +57,7 @@ All code must be written with testability in mind:
 - defs prelude generation is cached per script in runtime, so repeated expression/code evaluation does not rebuild identical prelude text.
 - parser/compiler/runtime regex usage for stable patterns is lazily initialized once via static caches.
 - `sl-compiler` memoizes per-script reachable include closures during project compilation to avoid repeated DFS work.
+- include supports both single files and directory expansion via `<!-- include: dir/ -->`; directory expansion is recursive and uses stable path-sorted ordering.
 
 ## Defs Globals (`<defs><var>`)
 - `*.defs.xml` now supports `<var name="..." type="...">expr</var>` as writable globals.
@@ -143,7 +144,7 @@ Each example directory also carries a `testcase.json` consumed by `sl-test-examp
 
 ## User Pitfalls And Guardrails
 - XML attribute escaping is mandatory: use `&lt;` for `<`, `&amp;&amp;` for `&&`.
-- Type visibility is per include-closure: scripts under `actions/locations/events` must each include needed `*.defs.xml`.
+- Type visibility is per include-closure: scripts under `actions/locations/events` must each include needed `*.defs.xml`, or include a directory that expands to those defs for that script.
 - In `when="..."`, prefer string literals as `&quot;...&quot;` instead of single quotes.
 - `Data type incorrect: f64 (expecting i64)` in array indexing is treated as a runtime type-stability bug; prioritize runtime fix/upgrade over user-side workarounds.
 - Validation should be `compile --dry-run` + `replay --rand "<fixed-seq>"` together; compile-only is not enough for runtime-path safety.
