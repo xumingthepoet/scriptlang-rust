@@ -34,7 +34,7 @@ pub(crate) fn parse_sources(
                     json_value: Some(slvalue_from_json(parsed)),
                 }
             }
-            SourceKind::ScriptXml | SourceKind::DefsXml => {
+            SourceKind::ScriptXml | SourceKind::DefsXml | SourceKind::ModuleXml => {
                 let document = parse_xml_document(source_text)
                     .map_err(|error| with_file_context(error, &file_path))?;
                 let includes =
@@ -70,6 +70,8 @@ pub(crate) fn detect_source_kind(path: &str) -> Option<SourceKind> {
         Some(SourceKind::ScriptXml)
     } else if path.ends_with(".defs.xml") {
         Some(SourceKind::DefsXml)
+    } else if path.ends_with(".module.xml") {
+        Some(SourceKind::ModuleXml)
     } else if path.ends_with(".json") {
         Some(SourceKind::Json)
     } else {
@@ -189,13 +191,16 @@ mod source_parse_tests {
         let kind_name = |kind: SourceKind| match kind {
             SourceKind::ScriptXml => "script",
             SourceKind::DefsXml => "defs",
+            SourceKind::ModuleXml => "module",
             SourceKind::Json => "json",
         };
         let script_kind = detect_source_kind("a.script.xml").expect("script kind");
         let defs_kind = detect_source_kind("a.defs.xml").expect("defs kind");
+        let module_kind = detect_source_kind("a.module.xml").expect("module kind");
         let json_kind = detect_source_kind("a.json").expect("json kind");
         assert_eq!(kind_name(script_kind), "script");
         assert_eq!(kind_name(defs_kind), "defs");
+        assert_eq!(kind_name(module_kind), "module");
         assert_eq!(kind_name(json_kind), "json");
         assert!(detect_source_kind("a.txt").is_none());
 

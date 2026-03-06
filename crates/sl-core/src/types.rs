@@ -230,6 +230,10 @@ pub struct ImplicitGroup {
 pub struct ScriptIr {
     pub script_path: String,
     pub script_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_script_name: Option<String>,
     pub params: Vec<ScriptParam>,
     pub root_group_id: String,
     pub groups: BTreeMap<String, ImplicitGroup>,

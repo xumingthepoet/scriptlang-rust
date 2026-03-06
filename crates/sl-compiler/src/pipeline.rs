@@ -13,6 +13,7 @@ pub fn compile_project_bundle_from_xml_map(
     validate_include_graph(&sources)?;
 
     let defs_by_path = parse_defs_files(&sources)?;
+    let module_scripts_by_path = parse_module_scripts(&sources)?;
     let global_json = collect_global_json(&sources)?;
     let all_json_symbols = global_json.keys().cloned().collect::<BTreeSet<_>>();
     let (defs_global_declarations, defs_global_init_order) =
@@ -22,24 +23,8 @@ pub fn compile_project_bundle_from_xml_map(
     let mut reachable_cache = HashMap::new();
 
     for (file_path, source) in &sources {
-        if !matches!(source.kind, SourceKind::ScriptXml) {
+        if !matches!(source.kind, SourceKind::ScriptXml | SourceKind::ModuleXml) {
             continue;
-        }
-
-        let script_root = source
-            .xml_root
-            .as_ref()
-            .expect("script/defs sources should always carry parsed xml root");
-
-        if script_root.name != "script" {
-            return Err(ScriptLangError::with_span(
-                "XML_ROOT_INVALID",
-                format!(
-                    "Expected <script> root in file \"{}\", got <{}>.",
-                    file_path, script_root.name
-                ),
-                script_root.location.clone(),
-            ));
         }
 
         let reachable = reachable_cache
@@ -50,25 +35,30 @@ pub fn compile_project_bundle_from_xml_map(
                 .map_err(|error| with_file_context(error, file_path))?;
         let visible_json_symbols = collect_visible_json_symbols(reachable, &sources)
             .expect("collect_visible_json_symbols should be infallible after collect_global_json");
-        let ir = compile_script(
-            file_path,
-            script_root,
-            &visible_types,
-            &visible_functions,
-            &visible_defs_globals,
-            &visible_json_symbols,
-            &all_json_symbols,
-        )
-        .map_err(|error| with_file_context(error, file_path))?;
-        if scripts.contains_key(&ir.script_name) {
-            return Err(ScriptLangError::with_span(
-                "SCRIPT_NAME_DUPLICATE",
-                format!("Duplicate script name \"{}\".", ir.script_name),
-                script_root.location.clone(),
-            ));
-        }
+        let script_roots = collect_source_scripts(source, file_path, &module_scripts_by_path)?;
+        for script_decl in script_roots {
+            let ir = compile_script(CompileScriptOptions {
+                script_path: file_path,
+                root: &script_decl.root,
+                qualified_script_name: script_decl.qualified_script_name.as_deref(),
+                module_name: script_decl.module_name.as_deref(),
+                visible_types: &visible_types,
+                visible_functions: &visible_functions,
+                visible_defs_globals: &visible_defs_globals,
+                visible_json_globals: &visible_json_symbols,
+                all_json_symbols: &all_json_symbols,
+            })
+            .map_err(|error| with_file_context(error, file_path))?;
+            if scripts.contains_key(&ir.script_name) {
+                return Err(ScriptLangError::with_span(
+                    "SCRIPT_NAME_DUPLICATE",
+                    format!("Duplicate script name \"{}\".", ir.script_name),
+                    script_decl.root.location.clone(),
+                ));
+            }
 
-        scripts.insert(ir.script_name.clone(), ir);
+            scripts.insert(ir.script_name.clone(), ir);
+        }
     }
 
     Ok(CompileProjectBundleResult {
@@ -77,6 +67,65 @@ pub fn compile_project_bundle_from_xml_map(
         defs_global_declarations,
         defs_global_init_order,
     })
+}
+
+#[derive(Clone)]
+struct SourceScriptToCompile {
+    root: XmlElementNode,
+    qualified_script_name: Option<String>,
+    module_name: Option<String>,
+}
+
+fn collect_source_scripts(
+    source: &SourceFile,
+    file_path: &str,
+    module_scripts_by_path: &BTreeMap<String, Vec<ParsedModuleScript>>,
+) -> Result<Vec<SourceScriptToCompile>, ScriptLangError> {
+    match source.kind {
+        SourceKind::ScriptXml => {
+            let script_root = source
+                .xml_root
+                .as_ref()
+                .expect("script sources should always carry parsed xml root");
+
+            if script_root.name != "script" {
+                return Err(ScriptLangError::with_span(
+                    "XML_ROOT_INVALID",
+                    format!(
+                        "Expected <script> root in file \"{}\", got <{}>.",
+                        file_path, script_root.name
+                    ),
+                    script_root.location.clone(),
+                ));
+            }
+
+            Ok(vec![SourceScriptToCompile {
+                root: script_root.clone(),
+                qualified_script_name: None,
+                module_name: None,
+            }])
+        }
+        SourceKind::ModuleXml => Ok(module_scripts_by_path
+            .get(file_path)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|script| {
+                let module_name = script
+                    .qualified_script_name
+                    .split('.')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                SourceScriptToCompile {
+                    root: script.root,
+                    qualified_script_name: Some(script.qualified_script_name),
+                    module_name: Some(module_name),
+                }
+            })
+            .collect()),
+        _ => Ok(Vec::new()),
+    }
 }
 
 pub(crate) fn with_file_context(error: ScriptLangError, file_path: &str) -> ScriptLangError {
@@ -151,6 +200,96 @@ mod pipeline_tests {
         assert!(bundle.scripts.contains_key("main"));
         assert!(bundle.scripts.contains_key("battle"));
         assert!(bundle.global_json.contains_key("config"));
+    }
+
+    #[test]
+    fn compile_bundle_supports_module_files_and_qualified_script_names() {
+        let files = map(&[(
+            "battle.module.xml",
+            r#"
+<module name="battle">
+  <type name="Combatant">
+    <field name="hp" type="int"/>
+  </type>
+  <function name="boost" args="int:x" return="int:out">out = x + 1;</function>
+  <var name="baseHp" type="int">40</var>
+  <script name="main">
+    <var name="hero" type="Combatant">#{hp: baseHp}</var>
+    <call script="next"/>
+  </script>
+  <script name="next">
+    <text>${boost(hero.hp)}</text>
+  </script>
+</module>
+"#,
+        )]);
+
+        let bundle = compile_project_bundle_from_xml_map(&files).expect("module compile");
+        assert!(bundle.scripts.contains_key("battle.main"));
+        assert!(bundle.scripts.contains_key("battle.next"));
+        let main = bundle.scripts.get("battle.main").expect("qualified main");
+        assert_eq!(main.module_name.as_deref(), Some("battle"));
+        assert_eq!(main.local_script_name.as_deref(), Some("main"));
+
+        let root_group = main.groups.get(&main.root_group_id).expect("root group");
+        let has_qualified_call = root_group.nodes.iter().any(|node| {
+            matches!(
+                node,
+                ScriptNode::Call { target_script, .. } if target_script == "battle.next"
+            )
+        });
+        assert!(
+            has_qualified_call,
+            "local module call should be qualified at compile time"
+        );
+        assert!(main.visible_functions.contains_key("boost"));
+        assert!(main.visible_defs_globals.contains_key("baseHp"));
+    }
+
+    #[test]
+    fn compile_bundle_allows_same_local_script_name_across_modules() {
+        let files = map(&[
+            (
+                "a.module.xml",
+                r#"<module name="a"><script name="main"><text>A</text></script></module>"#,
+            ),
+            (
+                "b.module.xml",
+                r#"<module name="b"><script name="main"><text>B</text></script></module>"#,
+            ),
+        ]);
+
+        let bundle = compile_project_bundle_from_xml_map(&files)
+            .expect("duplicate local names across modules should pass");
+        assert!(bundle.scripts.contains_key("a.main"));
+        assert!(bundle.scripts.contains_key("b.main"));
+    }
+
+    #[test]
+    fn compile_bundle_rejects_invalid_module_shapes() {
+        let missing_name = map(&[(
+            "bad.module.xml",
+            r#"<module><script name="main"><text>x</text></script></module>"#,
+        )]);
+        let missing_name_error =
+            compile_project_bundle_from_xml_map(&missing_name).expect_err("module name required");
+        assert_eq!(missing_name_error.code, "XML_MISSING_ATTR");
+
+        let invalid_child = map(&[(
+            "bad.module.xml",
+            r#"<module name="bad"><unknown/></module>"#,
+        )]);
+        let invalid_child_error =
+            compile_project_bundle_from_xml_map(&invalid_child).expect_err("invalid child");
+        assert_eq!(invalid_child_error.code, "XML_MODULE_CHILD_INVALID");
+
+        let duplicate = map(&[(
+            "bad.module.xml",
+            r#"<module name="bad"><script name="main"/><script name="main"/></module>"#,
+        )]);
+        let duplicate_error =
+            compile_project_bundle_from_xml_map(&duplicate).expect_err("duplicate qualified name");
+        assert_eq!(duplicate_error.code, "SCRIPT_NAME_DUPLICATE");
     }
 
     #[test]
@@ -307,6 +446,36 @@ mod pipeline_tests {
         let duplicate_error = compile_project_bundle_from_xml_map(&duplicate_script_name)
             .expect_err("duplicate script names should fail");
         assert_eq!(duplicate_error.code, "SCRIPT_NAME_DUPLICATE");
+    }
+
+    #[test]
+    fn collect_source_scripts_and_module_parse_helpers_cover_non_happy_paths() {
+        let defs_source = SourceFile {
+            kind: SourceKind::DefsXml,
+            includes: Vec::new(),
+            xml_root: Some(xml_element("defs", &[("name", "shared")], Vec::new())),
+            json_value: None,
+        };
+        let collected = collect_source_scripts(&defs_source, "shared.defs.xml", &BTreeMap::new())
+            .expect("defs sources should return no scripts");
+        assert!(collected.is_empty());
+
+        let only_scripts = parse_sources(&map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>x</text></script>"#,
+        )]))
+        .expect("sources parse");
+        let parsed =
+            parse_module_scripts(&only_scripts).expect("non-module sources should be ignored");
+        assert!(parsed.is_empty());
+
+        let bad_module = map(&[(
+            "bad.module.xml",
+            r#"<module name="bad"><script><text>x</text></script></module>"#,
+        )]);
+        let error = compile_project_bundle_from_xml_map(&bad_module)
+            .expect_err("module script validation should propagate through pipeline");
+        assert_eq!(error.code, "XML_MISSING_ATTR");
     }
 
     #[test]

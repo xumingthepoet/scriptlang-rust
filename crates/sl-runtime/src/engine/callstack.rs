@@ -8,7 +8,20 @@ impl ScriptLangEngine {
         missing_code: &str,
         missing_message: &str,
     ) -> Result<String, ScriptLangError> {
-        let target_script = self.render_text(template)?;
+        let rendered_target = self.render_text(template)?;
+        let mut target_script = rendered_target.trim().to_string();
+        if !target_script.contains('.') {
+            if let Some(current_script_name) = self.resolve_current_script_name() {
+                if let Some(script) = self.scripts.get(&current_script_name) {
+                    if let Some(module_name) = script.module_name.as_deref() {
+                        let module_qualified = format!("{}.{}", module_name, target_script);
+                        if self.scripts.contains_key(&module_qualified) {
+                            target_script = module_qualified;
+                        }
+                    }
+                }
+            }
+        }
         if target_script.trim().is_empty() {
             return Err(ScriptLangError::new(missing_code, missing_message));
         }
@@ -1334,5 +1347,79 @@ mod callstack_tests {
         engine.start("main", None).expect("start");
         let output = engine.next_output().expect("next output");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "20"));
+    }
+
+    #[test]
+    pub(super) fn resolve_target_script_qualifies_module_local_names_only_when_available() {
+        let mut engine = engine_from_sources(map(&[(
+            "battle.module.xml",
+            r#"
+<module name="battle">
+  <script name="main"><var name="cmd" type="string">""</var><input var="cmd" text="go"/></script>
+  <script name="next"><text>x</text></script>
+</module>
+"#,
+        )]));
+        engine.start("battle.main", None).expect("start");
+
+        let qualified = engine
+            .resolve_target_script("next", "ERR", "err")
+            .expect("module local name should qualify");
+        assert_eq!(qualified, "battle.next");
+
+        let explicit = engine
+            .resolve_target_script("battle.next", "ERR", "err")
+            .expect("explicit qualified target should stay as is");
+        assert_eq!(explicit, "battle.next");
+
+        let missing_local = engine
+            .resolve_target_script("other", "ERR", "err")
+            .expect("unknown local name should remain short");
+        assert_eq!(missing_local, "other");
+
+        let mut plain_engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><var name="cmd" type="string">""</var><input var="cmd" text="go"/></script>"#,
+        )]));
+        plain_engine.start("main", None).expect("start");
+        let plain = plain_engine
+            .resolve_target_script("next", "ERR", "err")
+            .expect("non-module scripts should keep short names");
+        assert_eq!(plain, "next");
+
+        let mut idle_engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>x</text></script>"#,
+        )]));
+        let idle = idle_engine
+            .resolve_target_script("next", "ERR", "err")
+            .expect("target resolution without active frame should still work");
+        assert_eq!(idle, "next");
+
+        let mut missing_script_engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>x</text></script>"#,
+        )]));
+        let root_group_id = missing_script_engine
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        missing_script_engine.frames.push(RuntimeFrame {
+            frame_id: 1,
+            group_id: root_group_id,
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::new(),
+        });
+        missing_script_engine.scripts.remove("main");
+        let missing_script_result = missing_script_engine
+            .resolve_target_script("next", "ERR", "err")
+            .expect("missing current script metadata should fall back to short name");
+        assert_eq!(missing_script_result, "next");
     }
 }

@@ -12,7 +12,7 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 ## Workspace Crates
 - `crates/sl-core`: shared types, values, errors, snapshot/player schemas.
 - `crates/sl-parser`: XML parser + include directive extraction.
-- `crates/sl-compiler`: include graph validation + defs/json/script compilation to compiled artifact.
+- `crates/sl-compiler`: include graph validation + defs/module/json/script compilation to compiled artifact.
 - `crates/sl-runtime`: execution engine (`next/choose/submit_input/snapshot/resume`).
 - `crates/sl-api`: high-level create/compile/resume API.
 - `crates/sl-cli`: host-side CLI (`agent` and `tui` modes).
@@ -59,8 +59,16 @@ All code must be written with testability in mind:
 - `sl-compiler` memoizes per-script reachable include closures during project compilation to avoid repeated DFS work.
 - include supports both single files and directory expansion via `<!-- include: dir/ -->`; directory expansion is recursive and uses stable path-sorted ordering.
 
-## Defs Globals (`<defs><var>`)
+## Modules And Defs
+- `*.module.xml` uses `<module name="...">` and may contain `<type>`, `<function>`, `<var>`, and multiple `<script>` nodes.
+- Module scripts compile to qualified names like `battle.main`; host entry/call/return targets should use that qualified form.
+- Inside the same module, scripts may reference sibling scripts with short names (`<call script="next"/>`), which compiles to the qualified module target.
+- Module `<var>` behaves like existing defs globals: writable, snapshotted, and visible through include-closure rules.
+- `*.defs.xml` remains supported as a compatibility form of “module without `<script>`”.
+
+## Defs Globals (`<defs><var>` / `<module><var>`)
 - `*.defs.xml` now supports `<var name="..." type="...">expr</var>` as writable globals.
+- `*.module.xml` `<var>` shares the same runtime model and namespace-qualified access rules.
 - globals initialize on `engine.start`, support short name and `ns.var` access, and follow include-closure visibility.
 - when short names conflict across namespaces, only fully-qualified `ns.var` remains available.
 
@@ -83,6 +91,7 @@ All code must be written with testability in mind:
 ## Dynamic Call/Return Targets
 - `<call script="...">` and `<return script="...">` accept `${expr}` interpolation in `script`.
 - Existing static names like `script="battle"` remain unchanged.
+- Module-qualified static names such as `script="battle.main"` are first-class, and module-local short names resolve against the current module when possible.
 - Target resolution happens at runtime and must resolve to a non-empty compiled script name.
 
 ## Commands
@@ -100,7 +109,7 @@ All code must be written with testability in mind:
 
 ScriptLang now supports a clear two-step host flow:
 
-1. Compile source files (`*.script.xml` / `*.defs.xml` / `*.json`) into `CompiledProjectArtifact`.
+1. Compile source files (`*.script.xml` / `*.defs.xml` / `*.module.xml` / `*.json`) into `CompiledProjectArtifact`.
 2. Run or resume engine from that artifact.
 
 Recommended API entry points are in `sl-api`:

@@ -15,6 +15,7 @@ pub struct CompileProjectBundleResult {
 pub(crate) enum SourceKind {
     ScriptXml,
     DefsXml,
+    ModuleXml,
     Json,
 }
 
@@ -81,6 +82,30 @@ pub(crate) struct DefsDeclarations {
     pub(crate) type_decls: Vec<ParsedTypeDecl>,
     pub(crate) function_decls: Vec<ParsedFunctionDecl>,
     pub(crate) defs_global_var_decls: Vec<ParsedDefsGlobalVarDecl>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ParsedModuleScript {
+    pub(crate) qualified_script_name: String,
+    pub(crate) root: XmlElementNode,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ModuleDeclarations {
+    pub(crate) defs: DefsDeclarations,
+    pub(crate) scripts: Vec<ParsedModuleScript>,
+}
+
+pub(crate) struct CompileScriptOptions<'a> {
+    pub(crate) script_path: &'a str,
+    pub(crate) root: &'a XmlElementNode,
+    pub(crate) qualified_script_name: Option<&'a str>,
+    pub(crate) module_name: Option<&'a str>,
+    pub(crate) visible_types: &'a BTreeMap<String, ScriptType>,
+    pub(crate) visible_functions: &'a BTreeMap<String, FunctionDecl>,
+    pub(crate) visible_defs_globals: &'a BTreeMap<String, DefsGlobalVarDecl>,
+    pub(crate) visible_json_globals: &'a [String],
+    pub(crate) all_json_symbols: &'a BTreeSet<String>,
 }
 
 pub(crate) type VisibleTypeMap = BTreeMap<String, ScriptType>;

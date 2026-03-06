@@ -325,6 +325,22 @@ mod tests {
     }
 
     #[test]
+    fn compile_project_from_xml_map_supports_module_entry() {
+        let scripts = map(&[(
+            "battle.module.xml",
+            r#"
+<module name="battle">
+  <script name="main"><text>Battle</text></script>
+</module>
+"#,
+        )]);
+        let project = compile_project_from_xml_map(&scripts, Some("battle.main".to_string()))
+            .expect("module entry should compile");
+        assert_eq!(project.entry_script, "battle.main");
+        assert!(project.scripts.contains_key("battle.main"));
+    }
+
+    #[test]
     fn compile_project_from_xml_map_returns_error_for_missing_explicit_entry() {
         let scripts = map(&[(
             "foo.script.xml",
@@ -554,6 +570,61 @@ mod tests {
         resumed.choose(0).expect("choose should succeed");
         let next = resumed.next_output().expect("next should succeed");
         assert_eq!(output_kind(&next), "text");
+    }
+
+    #[test]
+    fn create_and_resume_engine_from_xml_support_module_scripts_and_globals() {
+        let scripts = map(&[(
+            "battle.module.xml",
+            r#"
+<module name="battle">
+  <var name="score" type="int">1</var>
+  <function name="boost" args="int:x" return="int:out">out = x + 1;</function>
+  <script name="main">
+    <var name="cmd" type="string">""</var>
+    <input var="cmd" text="Go"/>
+    <code>score = boost(score);</code>
+    <call script="next"/>
+  </script>
+  <script name="next">
+    <text>${score}</text>
+  </script>
+</module>
+"#,
+        )]);
+
+        let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
+            scripts_xml: scripts.clone(),
+            entry_script: Some("battle.main".to_string()),
+            entry_args: None,
+            host_functions: None,
+            random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: Some("player".to_string()),
+        })
+        .expect("module engine should build");
+        let first = engine.next_output().expect("input output");
+        assert_eq!(output_kind(&first), "input");
+        let snapshot = engine.snapshot().expect("snapshot should succeed");
+
+        let mut resumed = resume_engine_from_xml(ResumeEngineFromXmlOptions {
+            scripts_xml: scripts,
+            snapshot,
+            host_functions: None,
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: Some("player".to_string()),
+        })
+        .expect("resume should succeed");
+        resumed.submit_input("go").expect("input should succeed");
+        assert_eq!(
+            resumed.next_output().expect("text output"),
+            EngineOutput::Text {
+                text: "2".to_string(),
+                tag: None,
+            }
+        );
     }
 
     #[test]

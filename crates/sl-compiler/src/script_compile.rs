@@ -2038,15 +2038,17 @@ mod script_compile_tests {
         assert_eq!(script_type_kind(&map_resolved), "map");
 
         let non_script_root = xml_element("defs", &[("name", "x")], Vec::new());
-        let compile_root_error = compile_script(
-            "x.script.xml",
-            &non_script_root,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &[],
-            &BTreeSet::new(),
-        )
+        let compile_root_error = compile_script(CompileScriptOptions {
+            script_path: "x.script.xml",
+            root: &non_script_root,
+            qualified_script_name: None,
+            module_name: None,
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_defs_globals: &BTreeMap::new(),
+            visible_json_globals: &[],
+            all_json_symbols: &BTreeSet::new(),
+        })
         .expect_err("compile_script should require script root");
         assert_eq!(compile_root_error.code, "XML_ROOT_INVALID");
 

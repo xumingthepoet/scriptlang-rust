@@ -24,6 +24,7 @@ pub fn read_scripts_xml_from_dir(
         let path_str = path.to_string_lossy();
         if !(path_str.ends_with(".script.xml")
             || path_str.ends_with(".defs.xml")
+            || path_str.ends_with(".module.xml")
             || path_str.ends_with(".json"))
         {
             continue;
@@ -107,13 +108,18 @@ mod source_tests {
             &root.join("shared.defs.xml"),
             "<defs name=\"shared\"></defs>",
         );
+        write_file(
+            &root.join("battle.module.xml"),
+            "<module name=\"battle\"></module>",
+        );
         write_file(&root.join("game.json"), "{}");
         write_file(&root.join("ignore.txt"), "skip");
 
         let files = read_scripts_xml_from_dir(&root).expect("scan should pass");
-        assert_eq!(files.len(), 3);
+        assert_eq!(files.len(), 4);
         assert!(files.contains_key("main.script.xml"));
         assert!(files.contains_key("shared.defs.xml"));
+        assert!(files.contains_key("battle.module.xml"));
         assert!(files.contains_key("game.json"));
     }
 

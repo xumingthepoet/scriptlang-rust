@@ -1204,9 +1204,15 @@ mod eval_tests {
             "main.script.xml",
             r#"<script name="main"><text>Hello</text></script>"#,
         )]));
+        let root_group_id = engine
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
         engine.frames = vec![RuntimeFrame {
             frame_id: 1,
-            group_id: "main.script.xml::g0".to_string(),
+            group_id: root_group_id.clone(),
             node_index: 0,
             scope: BTreeMap::new(),
             completion: CompletionKind::WhileBody,
@@ -1224,10 +1230,16 @@ mod eval_tests {
             "main.script.xml",
             r#"<script name="main"><text>Hello</text></script>"#,
         )]));
+        let root_group_id = engine
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
         engine.frames = vec![
             RuntimeFrame {
                 frame_id: 1,
-                group_id: "main.script.xml::g0".to_string(),
+                group_id: root_group_id.clone(),
                 node_index: 0,
                 scope: BTreeMap::new(),
                 completion: CompletionKind::None,
@@ -1237,7 +1249,7 @@ mod eval_tests {
             },
             RuntimeFrame {
                 frame_id: 2,
-                group_id: "main.script.xml::g0".to_string(),
+                group_id: root_group_id,
                 node_index: 0,
                 scope: BTreeMap::new(),
                 completion: CompletionKind::WhileBody,

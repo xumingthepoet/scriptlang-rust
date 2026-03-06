@@ -6,72 +6,133 @@ pub(crate) fn parse_defs_files(
     let mut defs_by_path = BTreeMap::new();
 
     for (file_path, source) in sources {
-        if !matches!(source.kind, SourceKind::DefsXml) {
+        if !matches!(source.kind, SourceKind::DefsXml | SourceKind::ModuleXml) {
             continue;
         }
 
-        let root = source
-            .xml_root
-            .as_ref()
-            .expect("defs sources should always carry parsed xml root");
-
-        if root.name != "defs" {
-            return Err(ScriptLangError::with_span(
-                "XML_ROOT_INVALID",
-                format!("Expected <defs> root in file \"{}\".", file_path),
-                root.location.clone(),
-            ));
-        }
-
-        let collection_name = get_required_non_empty_attr(root, "name")
-            .map_err(|error| with_file_context(error, file_path))?;
-        assert_name_not_reserved(&collection_name, "defs", root.location.clone())
-            .map_err(|error| with_file_context(error, file_path))?;
-
-        let mut type_decls = Vec::new();
-        let mut function_decls = Vec::new();
-        let mut defs_global_var_decls = Vec::new();
-
-        for child in element_children(root) {
-            match child.name.as_str() {
-                "type" => type_decls.push(
-                    parse_type_declaration_node_with_namespace(child, &collection_name)
-                        .map_err(|error| with_file_context(error, file_path))?,
-                ),
-                "function" => {
-                    let function_decl =
-                        parse_function_declaration_node_with_namespace(child, &collection_name)
-                            .map_err(|error| with_file_context(error, file_path))?;
-                    function_decls.push(function_decl);
-                }
-                "var" => defs_global_var_decls.push(
-                    parse_defs_global_var_declaration(child, &collection_name)
-                        .map_err(|error| with_file_context(error, file_path))?,
-                ),
-                _ => {
-                    return Err(with_file_context(
-                        ScriptLangError::with_span(
-                            "XML_DEFS_CHILD_INVALID",
-                            format!("Unsupported child <{}> under <defs>.", child.name),
-                            child.location.clone(),
-                        ),
-                        file_path,
-                    ))
-                }
-            }
-        }
-
-        defs_by_path.insert(
-            file_path.clone(),
-            DefsDeclarations {
-                type_decls,
-                function_decls,
-                defs_global_var_decls,
-            },
-        );
+        let module = parse_module_source(source, file_path, false)?;
+        defs_by_path.insert(file_path.clone(), module.defs);
     }
 
     Ok(defs_by_path)
+}
+
+pub(crate) fn parse_module_scripts(
+    sources: &BTreeMap<String, SourceFile>,
+) -> Result<BTreeMap<String, Vec<ParsedModuleScript>>, ScriptLangError> {
+    let mut scripts_by_path = BTreeMap::new();
+
+    for (file_path, source) in sources {
+        if !matches!(source.kind, SourceKind::ModuleXml) {
+            continue;
+        }
+
+        let module = parse_module_source(source, file_path, true)?;
+        scripts_by_path.insert(file_path.clone(), module.scripts);
+    }
+
+    Ok(scripts_by_path)
+}
+
+fn parse_module_source(
+    source: &SourceFile,
+    file_path: &str,
+    validate_scripts: bool,
+) -> Result<ModuleDeclarations, ScriptLangError> {
+    let root = source
+        .xml_root
+        .as_ref()
+        .expect("script/defs/module sources should always carry parsed xml root");
+
+    let (expected_root, child_error_code, namespace_label, allow_scripts) = match source.kind {
+        SourceKind::DefsXml => ("defs", "XML_DEFS_CHILD_INVALID", "defs", false),
+        SourceKind::ModuleXml => ("module", "XML_MODULE_CHILD_INVALID", "module", true),
+        _ => {
+            return Err(ScriptLangError::new(
+                "SOURCE_KIND_UNSUPPORTED",
+                format!(
+                    "Unsupported source kind for module parsing in file \"{}\".",
+                    file_path
+                ),
+            ))
+        }
+    };
+
+    if root.name != expected_root {
+        return Err(ScriptLangError::with_span(
+            "XML_ROOT_INVALID",
+            format!(
+                "Expected <{}> root in file \"{}\"{}",
+                expected_root,
+                file_path,
+                if expected_root == "defs" {
+                    ".".to_string()
+                } else {
+                    format!(", got <{}>.", root.name)
+                }
+            ),
+            root.location.clone(),
+        ));
+    }
+
+    let namespace = get_required_non_empty_attr(root, "name")
+        .map_err(|error| with_file_context(error, file_path))?;
+    assert_name_not_reserved(&namespace, namespace_label, root.location.clone())
+        .map_err(|error| with_file_context(error, file_path))?;
+
+    let mut type_decls = Vec::new();
+    let mut function_decls = Vec::new();
+    let mut defs_global_var_decls = Vec::new();
+    let mut scripts = Vec::new();
+
+    for child in element_children(root) {
+        match child.name.as_str() {
+            "type" => type_decls.push(
+                parse_type_declaration_node_with_namespace(child, &namespace)
+                    .map_err(|error| with_file_context(error, file_path))?,
+            ),
+            "function" => {
+                let function_decl =
+                    parse_function_declaration_node_with_namespace(child, &namespace)
+                        .map_err(|error| with_file_context(error, file_path))?;
+                function_decls.push(function_decl);
+            }
+            "var" => defs_global_var_decls.push(
+                parse_defs_global_var_declaration(child, &namespace)
+                    .map_err(|error| with_file_context(error, file_path))?,
+            ),
+            "script" if allow_scripts && validate_scripts => {
+                let script_name = get_required_non_empty_attr(child, "name")
+                    .map_err(|error| with_file_context(error, file_path))?;
+                assert_name_not_reserved(&script_name, "script", child.location.clone())
+                    .map_err(|error| with_file_context(error, file_path))?;
+                scripts.push(ParsedModuleScript {
+                    qualified_script_name: format!("{}.{}", namespace, script_name),
+                    root: child.clone(),
+                });
+            }
+            "script" if allow_scripts => {}
+            _ => {
+                return Err(with_file_context(
+                    ScriptLangError::with_span(
+                        child_error_code,
+                        format!("Unsupported child <{}> under <{}>.", child.name, root.name),
+                        child.location.clone(),
+                    ),
+                    file_path,
+                ))
+            }
+        }
+    }
+
+    Ok(ModuleDeclarations {
+        defs: DefsDeclarations {
+            type_decls,
+            function_decls,
+            defs_global_var_decls,
+        },
+        scripts,
+    })
 }
 
 fn with_file_context(error: ScriptLangError, file_path: &str) -> ScriptLangError {
@@ -1381,5 +1442,126 @@ mod defs_resolver_tests {
             }),
             "map"
         );
+    }
+
+    #[test]
+    fn parse_module_helpers_cover_module_specific_paths() {
+        let sources = parse_sources(&compiler_test_support::map(&[
+            (
+                "battle.module.xml",
+                r#"<module name="battle"><script name="main"><text>x</text></script></module>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"<script name="main"><text>x</text></script>"#,
+            ),
+        ]))
+        .expect("sources should parse");
+
+        let module_scripts = parse_module_scripts(&sources).expect("module scripts should parse");
+        assert_eq!(module_scripts["battle.module.xml"].len(), 1);
+        assert!(parse_defs_files(&sources).is_ok());
+
+        let bad_defs = SourceFile {
+            kind: SourceKind::DefsXml,
+            includes: Vec::new(),
+            xml_root: Some(compiler_test_support::xml_element(
+                "module",
+                &[("name", "x")],
+                Vec::new(),
+            )),
+            json_value: None,
+        };
+        let bad_defs_error = parse_module_source(&bad_defs, "bad.defs.xml", false)
+            .expect_err("defs root should fail");
+        assert_eq!(bad_defs_error.code, "XML_ROOT_INVALID");
+
+        let bad_module = SourceFile {
+            kind: SourceKind::ModuleXml,
+            includes: Vec::new(),
+            xml_root: Some(compiler_test_support::xml_element(
+                "defs",
+                &[("name", "x")],
+                Vec::new(),
+            )),
+            json_value: None,
+        };
+        let bad_module_error = parse_module_source(&bad_module, "bad.module.xml", true)
+            .expect_err("module root should fail");
+        assert_eq!(bad_module_error.code, "XML_ROOT_INVALID");
+
+        let reserved_script = SourceFile {
+            kind: SourceKind::ModuleXml,
+            includes: Vec::new(),
+            xml_root: Some(compiler_test_support::xml_element(
+                "module",
+                &[("name", "battle")],
+                vec![XmlNode::Element(compiler_test_support::xml_element(
+                    "script",
+                    &[("name", "__sl_main")],
+                    Vec::new(),
+                ))],
+            )),
+            json_value: None,
+        };
+        let reserved_script_error =
+            parse_module_source(&reserved_script, "battle.module.xml", true)
+                .expect_err("reserved module script should fail");
+        assert_eq!(reserved_script_error.code, "NAME_RESERVED_PREFIX");
+
+        let missing_script_name = SourceFile {
+            kind: SourceKind::ModuleXml,
+            includes: Vec::new(),
+            xml_root: Some(compiler_test_support::xml_element(
+                "module",
+                &[("name", "battle")],
+                vec![XmlNode::Element(compiler_test_support::xml_element(
+                    "script",
+                    &[],
+                    Vec::new(),
+                ))],
+            )),
+            json_value: None,
+        };
+        let missing_script_name_error =
+            parse_module_source(&missing_script_name, "battle.module.xml", true)
+                .expect_err("module script name should be required");
+        assert_eq!(missing_script_name_error.code, "XML_MISSING_ATTR");
+
+        let unsupported_kind = SourceFile {
+            kind: SourceKind::ScriptXml,
+            includes: Vec::new(),
+            xml_root: Some(compiler_test_support::xml_element(
+                "script",
+                &[("name", "main")],
+                Vec::new(),
+            )),
+            json_value: None,
+        };
+        let unsupported_kind_error =
+            parse_module_source(&unsupported_kind, "main.script.xml", true)
+                .expect_err("script source kind should fail");
+        assert_eq!(unsupported_kind_error.code, "SOURCE_KIND_UNSUPPORTED");
+
+        let bad_module_sources = BTreeMap::from([(
+            "bad.module.xml".to_string(),
+            SourceFile {
+                kind: SourceKind::ModuleXml,
+                includes: Vec::new(),
+                xml_root: Some(compiler_test_support::xml_element(
+                    "module",
+                    &[("name", "battle")],
+                    vec![XmlNode::Element(compiler_test_support::xml_element(
+                        "script",
+                        &[],
+                        Vec::new(),
+                    ))],
+                )),
+                json_value: None,
+            },
+        )]);
+        let parse_module_scripts_error =
+            parse_module_scripts(&bad_module_sources).expect_err("bad module scripts should fail");
+        assert_eq!(parse_module_scripts_error.code, "XML_MISSING_ATTR");
     }
 }

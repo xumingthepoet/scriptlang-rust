@@ -1,14 +1,19 @@
 use crate::*;
 
 pub(crate) fn compile_script(
-    script_path: &str,
-    root: &XmlElementNode,
-    visible_types: &BTreeMap<String, ScriptType>,
-    visible_functions: &BTreeMap<String, FunctionDecl>,
-    visible_defs_globals: &BTreeMap<String, DefsGlobalVarDecl>,
-    visible_json_globals: &[String],
-    all_json_symbols: &BTreeSet<String>,
+    options: CompileScriptOptions<'_>,
 ) -> Result<ScriptIr, ScriptLangError> {
+    let CompileScriptOptions {
+        script_path,
+        root,
+        qualified_script_name,
+        module_name,
+        visible_types,
+        visible_functions,
+        visible_defs_globals,
+        visible_json_globals,
+        all_json_symbols,
+    } = options;
     if root.name != "script" {
         return Err(ScriptLangError::with_span(
             "XML_ROOT_INVALID",
@@ -17,8 +22,11 @@ pub(crate) fn compile_script(
         ));
     }
 
-    let script_name = get_required_non_empty_attr(root, "name")?;
-    assert_name_not_reserved(&script_name, "script", root.location.clone())?;
+    let local_script_name = get_required_non_empty_attr(root, "name")?;
+    assert_name_not_reserved(&local_script_name, "script", root.location.clone())?;
+    let script_name = qualified_script_name
+        .unwrap_or(&local_script_name)
+        .to_string();
 
     let params = parse_script_args(root, visible_types)?;
     validate_reserved_prefix_in_user_var_declarations(root)?;
@@ -31,7 +39,7 @@ pub(crate) fn compile_script(
 
     let expanded_root = expand_script_macros(root, &reserved_names)?;
 
-    let mut builder = GroupBuilder::new(script_path);
+    let mut builder = GroupBuilder::new(format!("{}::{}", script_path, script_name));
     let root_group_id = builder.next_group_id();
 
     let mut visible_var_types = BTreeMap::new();
@@ -49,9 +57,15 @@ pub(crate) fn compile_script(
         CompileGroupMode::new(0, false),
     )?;
 
+    if let Some(module_name) = module_name {
+        qualify_local_script_targets(&mut builder.groups, module_name);
+    }
+
     let ir = ScriptIr {
         script_path: script_path.to_string(),
         script_name,
+        module_name: module_name.map(|value| value.to_string()),
+        local_script_name: module_name.map(|_| local_script_name.clone()),
         params,
         root_group_id,
         groups: builder.groups,
@@ -62,6 +76,35 @@ pub(crate) fn compile_script(
 
     validate_json_symbol_visibility(&ir, all_json_symbols)?;
     Ok(ir)
+}
+
+fn qualify_local_script_targets(groups: &mut BTreeMap<String, ImplicitGroup>, module_name: &str) {
+    for group in groups.values_mut() {
+        for node in &mut group.nodes {
+            match node {
+                ScriptNode::Call { target_script, .. } => {
+                    qualify_static_script_target(target_script, module_name);
+                }
+                ScriptNode::Return {
+                    target_script: Some(target_script),
+                    ..
+                } => {
+                    qualify_static_script_target(target_script, module_name);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn qualify_static_script_target(target_script: &mut String, module_name: &str) {
+    if target_script.contains('.')
+        || target_script.contains("${")
+        || target_script.trim().is_empty()
+    {
+        return;
+    }
+    *target_script = format!("{}.{}", module_name, target_script);
 }
 
 pub(crate) fn validate_json_symbol_visibility(
@@ -569,6 +612,8 @@ mod json_symbols_tests {
         let script_ir = ScriptIr {
             script_path: "main.script.xml".to_string(),
             script_name: "main".to_string(),
+            module_name: None,
+            local_script_name: None,
             params: Vec::new(),
             root_group_id: "g0".to_string(),
             groups: BTreeMap::from([(
@@ -625,6 +670,8 @@ mod json_symbols_tests {
         let script_ir = ScriptIr {
             script_path: "main.script.xml".to_string(),
             script_name: "main".to_string(),
+            module_name: None,
+            local_script_name: None,
             params: Vec::new(),
             root_group_id: "g0".to_string(),
             groups: BTreeMap::from([(
@@ -698,6 +745,8 @@ mod json_symbols_tests {
         let script_ir = ScriptIr {
             script_path: "main.script.xml".to_string(),
             script_name: "main".to_string(),
+            module_name: None,
+            local_script_name: None,
             params: Vec::new(),
             root_group_id: "g0".to_string(),
             groups: BTreeMap::from([(
@@ -729,6 +778,8 @@ mod json_symbols_tests {
         let script_ir = ScriptIr {
             script_path: "main.script.xml".to_string(),
             script_name: "main".to_string(),
+            module_name: None,
+            local_script_name: None,
             params: vec![ScriptParam {
                 name: "hp".to_string(),
                 r#type: ScriptType::Primitive {
@@ -911,15 +962,17 @@ mod json_symbols_tests {
     #[test]
     fn compile_script_rejects_reserved_script_name() {
         let root = xml_element("script", &[("name", "__sl_main")], vec![xml_text("x")]);
-        let error = compile_script(
-            "main.script.xml",
-            &root,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &[],
-            &BTreeSet::new(),
-        )
+        let error = compile_script(CompileScriptOptions {
+            script_path: "main.script.xml",
+            root: &root,
+            qualified_script_name: None,
+            module_name: None,
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_defs_globals: &BTreeMap::new(),
+            visible_json_globals: &[],
+            all_json_symbols: &BTreeSet::new(),
+        })
         .expect_err("reserved script name should fail");
         assert_eq!(error.code, "NAME_RESERVED_PREFIX");
     }
@@ -927,15 +980,17 @@ mod json_symbols_tests {
     #[test]
     fn compile_script_reports_missing_name_and_reserved_var_errors() {
         let missing_name_root = xml_element("script", &[], vec![xml_text("x")]);
-        let error = compile_script(
-            "main.script.xml",
-            &missing_name_root,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &[],
-            &BTreeSet::new(),
-        )
+        let error = compile_script(CompileScriptOptions {
+            script_path: "main.script.xml",
+            root: &missing_name_root,
+            qualified_script_name: None,
+            module_name: None,
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_defs_globals: &BTreeMap::new(),
+            visible_json_globals: &[],
+            all_json_symbols: &BTreeSet::new(),
+        })
         .expect_err("script name should be required");
         assert_eq!(error.code, "XML_MISSING_ATTR");
 
@@ -948,15 +1003,17 @@ mod json_symbols_tests {
                 vec![xml_text("1")],
             ))],
         );
-        let error = compile_script(
-            "main.script.xml",
-            &reserved_var_root,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &[],
-            &BTreeSet::new(),
-        )
+        let error = compile_script(CompileScriptOptions {
+            script_path: "main.script.xml",
+            root: &reserved_var_root,
+            qualified_script_name: None,
+            module_name: None,
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_defs_globals: &BTreeMap::new(),
+            visible_json_globals: &[],
+            all_json_symbols: &BTreeSet::new(),
+        })
         .expect_err("reserved var declaration should fail");
         assert_eq!(error.code, "NAME_RESERVED_PREFIX");
     }
@@ -1030,5 +1087,63 @@ mod json_symbols_tests {
         assert!(locals.contains("score"));
         let single = extract_local_bindings("let only = 1;");
         assert_eq!(single, BTreeSet::from(["only".to_string()]));
+    }
+
+    #[test]
+    fn qualify_module_script_targets_only_rewrites_plain_static_names() {
+        let span = SourceSpan::synthetic();
+        let mut groups = BTreeMap::from([(
+            "g0".to_string(),
+            ImplicitGroup {
+                group_id: "g0".to_string(),
+                parent_group_id: None,
+                entry_node_id: None,
+                nodes: vec![
+                    ScriptNode::Call {
+                        id: "c1".to_string(),
+                        target_script: "next".to_string(),
+                        args: Vec::new(),
+                        location: span.clone(),
+                    },
+                    ScriptNode::Call {
+                        id: "c2".to_string(),
+                        target_script: "battle.next".to_string(),
+                        args: Vec::new(),
+                        location: span.clone(),
+                    },
+                    ScriptNode::Return {
+                        id: "r1".to_string(),
+                        target_script: Some("${next}".to_string()),
+                        args: Vec::new(),
+                        location: span.clone(),
+                    },
+                    ScriptNode::Return {
+                        id: "r2".to_string(),
+                        target_script: Some("".to_string()),
+                        args: Vec::new(),
+                        location: span,
+                    },
+                ],
+            },
+        )]);
+
+        qualify_local_script_targets(&mut groups, "battle");
+        let group = groups.get("g0").expect("group");
+        assert!(matches!(
+            &group.nodes[0],
+            ScriptNode::Call { target_script, .. } if target_script == "battle.next"
+        ));
+        assert!(matches!(
+            &group.nodes[1],
+            ScriptNode::Call { target_script, .. } if target_script == "battle.next"
+        ));
+        assert!(matches!(
+            &group.nodes[2],
+            ScriptNode::Return { target_script: Some(target_script), .. } if target_script == "${next}"
+        ));
+        assert!(matches!(
+            &group.nodes[3],
+            ScriptNode::Return { target_script: Some(target_script), .. } if target_script.is_empty()
+        ));
     }
 }
