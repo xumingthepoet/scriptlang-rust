@@ -1,0 +1,12 @@
+<!-- include: shared.xml -->
+<!-- include: battle.xml -->
+<module name="main">
+<script name="main">
+  <var name="hp" type="int">10</var>
+  <text>main.local.before=${hp}</text>
+  <text>main.global.before=${shared.hp}</text>
+  <call script="battle.battle"/>
+  <text>main.local.after=${hp}</text>
+  <text>main.global.after=${shared.hp}</text>
+</script>
+</module>

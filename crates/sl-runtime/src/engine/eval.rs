@@ -783,7 +783,7 @@ mod eval_tests {
         })
         .expect("engine");
         let error = host_blocked
-            .start("main", None)
+            .start("main.main", None)
             .expect_err("initializer should reject host function mode");
         assert_eq!(error.code, "ENGINE_HOST_FUNCTION_UNSUPPORTED");
 
@@ -808,7 +808,7 @@ mod eval_tests {
             ),
         ]);
         let mut initializer_engine = engine_from_sources(initializer_files);
-        initializer_engine.start("main", None).expect("start");
+        initializer_engine.start("main.main", None).expect("start");
         assert_eq!(
             initializer_engine.defs_globals_value.get("shared.b"),
             Some(&SlValue::Number(6.0))
@@ -829,7 +829,7 @@ mod eval_tests {
         ]);
         let mut bad_initializer_engine = engine_from_sources(bad_initializer);
         let error = bad_initializer_engine
-            .start("main", None)
+            .start("main.main", None)
             .expect_err("bad initializer should fail");
         assert_eq!(error.code, "ENGINE_EVAL_ERROR");
 
@@ -850,7 +850,7 @@ mod eval_tests {
         ]);
         let mut readonly_initializer_engine = engine_from_sources(readonly_initializer);
         let error = readonly_initializer_engine
-            .start("main", None)
+            .start("main.main", None)
             .expect_err("json mutation in initializer should fail");
         assert_eq!(error.code, "ENGINE_GLOBAL_READONLY");
 
@@ -871,7 +871,7 @@ mod eval_tests {
             ),
         ]);
         let mut defs_engine = engine_from_sources(defs_files.clone());
-        defs_engine.start("main", None).expect("start");
+        defs_engine.start("main.main", None).expect("start");
         defs_engine.defs_globals_value.clear();
         let error = defs_engine
             .eval_expression("shared.hp")
@@ -879,12 +879,14 @@ mod eval_tests {
         assert_eq!(error.code, "ENGINE_DEFS_GLOBAL_MISSING");
 
         let mut invalid_visible_defs = engine_from_sources(defs_files.clone());
-        invalid_visible_defs.start("main", None).expect("start");
+        invalid_visible_defs
+            .start("main.main", None)
+            .expect("start");
         invalid_visible_defs
             .visible_defs_by_script
-            .insert("main".to_string(), BTreeSet::from(["bad".to_string()]));
+            .insert("main.main".to_string(), BTreeSet::from(["bad".to_string()]));
         invalid_visible_defs.defs_global_alias_by_script.insert(
-            "main".to_string(),
+            "main.main".to_string(),
             BTreeMap::from([("hp".to_string(), "bad".to_string())]),
         );
         invalid_visible_defs.defs_globals_value.clear();
@@ -908,7 +910,7 @@ mod eval_tests {
             ),
         ]);
         let mut json_shadow_engine = engine_from_sources(json_shadow);
-        json_shadow_engine.start("main", None).expect("start");
+        json_shadow_engine.start("main.main", None).expect("start");
         let output = json_shadow_engine.next_output().expect("text");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "2"));
 
@@ -929,7 +931,7 @@ mod eval_tests {
         ]);
         let mut namespace_type_error_engine = engine_from_sources(namespace_type_error);
         namespace_type_error_engine
-            .start("main", None)
+            .start("main.main", None)
             .expect("start");
         let error = namespace_type_error_engine
             .next_output()
@@ -953,12 +955,14 @@ mod eval_tests {
             ),
         ]);
         let mut namespace_extra_engine = engine_from_sources(namespace_extra_field);
-        namespace_extra_engine.start("main", None).expect("start");
+        namespace_extra_engine
+            .start("main.main", None)
+            .expect("start");
         let text = namespace_extra_engine.next_output().expect("text");
         assert!(matches!(text, EngineOutput::Text { text, .. } if text == "7"));
 
         let mut missing_decl_engine = engine_from_sources(defs_files.clone());
-        missing_decl_engine.start("main", None).expect("start");
+        missing_decl_engine.start("main.main", None).expect("start");
         missing_decl_engine.defs_globals_type.clear();
         let error = missing_decl_engine
             .next_output()
@@ -981,7 +985,9 @@ mod eval_tests {
             ),
         ]);
         let mut mismatch_full_engine = engine_from_sources(full_alias_type_mismatch);
-        mismatch_full_engine.start("main", None).expect("start");
+        mismatch_full_engine
+            .start("main.main", None)
+            .expect("start");
         let error = mismatch_full_engine
             .next_output()
             .expect_err("full-name type mismatch should fail");
@@ -1005,7 +1011,7 @@ mod eval_tests {
         ]);
         let mut missing_short_decl_engine = engine_from_sources(short_alias_files.clone());
         missing_short_decl_engine
-            .start("main", None)
+            .start("main.main", None)
             .expect("start");
         missing_short_decl_engine.defs_globals_type.clear();
         let error = missing_short_decl_engine
@@ -1030,7 +1036,7 @@ mod eval_tests {
         ]);
         let mut short_alias_type_mismatch_engine = engine_from_sources(short_alias_type_mismatch);
         short_alias_type_mismatch_engine
-            .start("main", None)
+            .start("main.main", None)
             .expect("start");
         let error = short_alias_type_mismatch_engine
             .next_output()
@@ -1038,14 +1044,14 @@ mod eval_tests {
         assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
 
         let mut map_helpers_engine = engine_from_sources(defs_files);
-        map_helpers_engine.start("main", None).expect("start");
+        map_helpers_engine.start("main.main", None).expect("start");
         assert!(map_helpers_engine
             .build_defs_global_qualified_rewrite_map("missing")
             .is_empty());
         map_helpers_engine
             .visible_defs_by_script
-            .insert("main".to_string(), BTreeSet::from(["bad".to_string()]));
-        let rewritten = map_helpers_engine.build_defs_global_qualified_rewrite_map("main");
+            .insert("main.main".to_string(), BTreeSet::from(["bad".to_string()]));
+        let rewritten = map_helpers_engine.build_defs_global_qualified_rewrite_map("main.main");
         assert!(rewritten.is_empty());
 
         map_helpers_engine.defs_global_declarations.insert(
@@ -1099,7 +1105,7 @@ mod eval_tests {
         invalid_initializer_engine.defs_global_init_order =
             vec!["bad".to_string(), "shared.ok".to_string()];
         invalid_initializer_engine
-            .start("main", None)
+            .start("main.main", None)
             .expect("start");
 
         let mut alias_visibility_engine = engine_from_sources(map(&[
@@ -1115,9 +1121,11 @@ mod eval_tests {
 "#,
             ),
         ]));
-        alias_visibility_engine.start("main", None).expect("start");
+        alias_visibility_engine
+            .start("main.main", None)
+            .expect("start");
         alias_visibility_engine.defs_global_alias_by_script.insert(
-            "main".to_string(),
+            "main.main".to_string(),
             BTreeMap::from([
                 ("ghost".to_string(), "ghost.hp".to_string()),
                 ("hp".to_string(), "shared.hp".to_string()),
@@ -1132,15 +1140,15 @@ mod eval_tests {
             r#"<script name="main"><text>ok</text></script>"#,
         )]));
         short_decl_missing_engine
-            .start("main", None)
+            .start("main.main", None)
             .expect("start");
         short_decl_missing_engine
             .visible_defs_by_script
-            .insert("main".to_string(), BTreeSet::from(["bad".to_string()]));
+            .insert("main.main".to_string(), BTreeSet::from(["bad".to_string()]));
         short_decl_missing_engine
             .defs_global_alias_by_script
             .insert(
-                "main".to_string(),
+                "main.main".to_string(),
                 BTreeMap::from([("hp".to_string(), "bad".to_string())]),
             );
         short_decl_missing_engine
@@ -1413,11 +1421,11 @@ mod eval_tests {
     "#,
             ),
         ]));
-        missing_symbol.start("main", None).expect("start");
+        missing_symbol.start("main.main", None).expect("start");
         missing_symbol.defs_prelude_by_script.clear();
         missing_symbol
             .visible_function_symbols_by_script
-            .insert("main".to_string(), BTreeMap::new());
+            .insert("main.main".to_string(), BTreeMap::new());
         let error = missing_symbol
             .eval_expression("1")
             .expect_err("missing defs symbol map should fail");
@@ -1436,18 +1444,20 @@ mod eval_tests {
     "#,
             ),
         ]));
-        prelude_missing_global.start("main", None).expect("start");
+        prelude_missing_global
+            .start("main.main", None)
+            .expect("start");
         prelude_missing_global
             .visible_json_by_script
-            .entry("main".to_string())
+            .entry("main.main".to_string())
             .or_default()
             .insert("ghost".to_string());
         let prelude = prelude_missing_global
             .build_defs_prelude(
-                "main",
+                "main.main",
                 prelude_missing_global
                     .visible_function_symbols_by_script
-                    .get("main")
+                    .get("main.main")
                     .expect("symbol map"),
             )
             .expect("prelude build should ignore missing global binding");

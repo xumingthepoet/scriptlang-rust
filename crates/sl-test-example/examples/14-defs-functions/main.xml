@@ -1,0 +1,9 @@
+<!-- include: shared.xml -->
+<module name="main">
+<script name="main">
+  <var name="base" type="int">2</var>
+  <var name="obj" type="shared.CustomType">#{value: 5}</var>
+  <code>base = shared.addWithGameBonus(base, obj);</code>
+  <text>Result ${shared.addWithGameBonus(base, obj)}</text>
+</script>
+</module>

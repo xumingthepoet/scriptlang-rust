@@ -218,13 +218,13 @@ mod line_tui_tests {
 
     fn load_temp_scenario(name: &str, script_xml: &str) -> LoadedScenario {
         let scripts_dir = temp_path(name);
-        write_file(&scripts_dir.join("main.script.xml"), script_xml);
+        write_file(&scripts_dir.join("main.xml"), script_xml);
         let scripts_dir_str = scripts_dir.to_string_lossy().to_string();
-        load_source_by_scripts_dir(&scripts_dir_str, "main").expect("scenario should load")
+        load_source_by_scripts_dir(&scripts_dir_str, "main.main").expect("scenario should load")
     }
 
     fn create_engine_for_tests(scenario: &LoadedScenario) -> sl_api::ScriptLangEngine {
-        create_engine_for_scenario(scenario, "main", RandConfig::default())
+        create_engine_for_scenario(scenario, "main.main", RandConfig::default())
             .expect("engine should be created")
     }
 
@@ -233,6 +233,7 @@ mod line_tui_tests {
         let choice_input_scenario = load_temp_scenario(
             "line-tui-choice-input",
             r#"
+<module name="main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -241,7 +242,7 @@ mod line_tui_tests {
   <input var="name" text="Name"/>
   <text>${name}</text>
 </script>
-"#,
+</module>"#,
         );
         let state_file = temp_path("line-tui-choice-input-save.json");
         let state_file_str = state_file.to_string_lossy().to_string();
@@ -252,7 +253,7 @@ mod line_tui_tests {
         let code = run_tui_line_mode_with_io(
             &state_file_str,
             &choice_input_scenario,
-            "main",
+            "main.main",
             None,
             false,
             &mut engine,
@@ -265,12 +266,13 @@ mod line_tui_tests {
         let choice_quit_scenario = load_temp_scenario(
             "line-tui-choice-quit",
             r#"
+<module name="main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
   </choice>
 </script>
-"#,
+</module>"#,
         );
         let mut engine = create_engine_for_tests(&choice_quit_scenario);
         let mut reader = Cursor::new(b":quit\n".to_vec());
@@ -278,7 +280,7 @@ mod line_tui_tests {
         let code = run_tui_line_mode_with_io(
             &state_file_str,
             &choice_quit_scenario,
-            "main",
+            "main.main",
             None,
             false,
             &mut engine,
@@ -294,7 +296,7 @@ mod line_tui_tests {
         let code = run_tui_line_mode_with_io(
             &state_file_str,
             &choice_quit_scenario,
-            "main",
+            "main.main",
             None,
             false,
             &mut engine,
@@ -307,12 +309,13 @@ mod line_tui_tests {
         let input_quit_scenario = load_temp_scenario(
             "line-tui-input-quit",
             r#"
+<module name="main">
 <script name="main">
   <var name="name" type="string">"Traveler"</var>
   <input var="name" text="Name"/>
   <text>${name}</text>
 </script>
-"#,
+</module>"#,
         );
         let mut engine = create_engine_for_tests(&input_quit_scenario);
         let mut reader = Cursor::new(b":quit\n".to_vec());
@@ -320,7 +323,7 @@ mod line_tui_tests {
         let code = run_tui_line_mode_with_io(
             &state_file_str,
             &input_quit_scenario,
-            "main",
+            "main.main",
             None,
             false,
             &mut engine,
@@ -336,7 +339,7 @@ mod line_tui_tests {
         let code = run_tui_line_mode_with_io(
             &state_file_str,
             &input_quit_scenario,
-            "main",
+            "main.main",
             None,
             false,
             &mut engine,
@@ -352,7 +355,7 @@ mod line_tui_tests {
         let error = run_tui_line_mode_with_io(
             &state_file_str,
             &choice_quit_scenario,
-            "main",
+            "main.main",
             None,
             false,
             &mut engine,
@@ -368,12 +371,13 @@ mod line_tui_tests {
         let scenario = load_temp_scenario(
             "line-tui-commands",
             r#"
+<module name="main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
   </choice>
 </script>
-"#,
+</module>"#,
         );
         let mut engine = create_engine_for_tests(&scenario);
         let _ = run_to_boundary(&mut engine, false).expect("boundary should resolve");
@@ -387,7 +391,7 @@ mod line_tui_tests {
             ":save",
             &state_file_str,
             &scenario,
-            "main",
+            "main.main",
             None,
             &mut engine,
             &mut emit,
@@ -400,7 +404,7 @@ mod line_tui_tests {
             ":load",
             &state_file_str,
             &scenario,
-            "main",
+            "main.main",
             None,
             &mut engine,
             &mut emit,
@@ -416,7 +420,7 @@ mod line_tui_tests {
             ":restart",
             &state_file_str,
             &scenario,
-            "main",
+            "main.main",
             None,
             &mut engine,
             &mut emit,
@@ -432,7 +436,7 @@ mod line_tui_tests {
             ":unknown",
             &state_file_str,
             &scenario,
-            "main",
+            "main.main",
             None,
             &mut engine,
             &mut emit,
@@ -445,14 +449,16 @@ mod line_tui_tests {
     fn handle_line_cmd_delegates_to_tui_command_handler() {
         let scenario = load_temp_scenario(
             "line-tui-handle-line",
-            r#"<script name="main"><text>ok</text></script>"#,
+            r#"<module name="main">
+<script name="main"><text>ok</text></script>
+</module>"#,
         );
         let state_file = temp_path("line-tui-handle-line-state.json");
         let state_file_str = state_file.to_string_lossy().to_string();
         let context = TuiCommandContext {
             state_file: &state_file_str,
             scenario: &scenario,
-            entry_script: "main",
+            entry_script: "main.main",
             random_sequence: None,
         };
         let mut engine = create_engine_for_tests(&scenario);

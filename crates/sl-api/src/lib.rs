@@ -175,7 +175,7 @@ pub fn resume_engine_from_xml(
         artifact: CompiledProjectArtifact {
             schema_version: sl_core::COMPILED_PROJECT_SCHEMA.to_string(),
             compiler_version: sl_compiler::DEFAULT_COMPILER_VERSION.to_string(),
-            entry_script: "main".to_string(),
+            entry_script: "main.main".to_string(),
             scripts: compiled.scripts,
             global_json: compiled.global_json,
             defs_global_declarations: compiled.defs_global_declarations,
@@ -203,13 +203,13 @@ fn resolve_entry_script(
         return Ok(entry);
     }
 
-    if scripts.contains_key("main") {
-        return Ok("main".to_string());
+    if scripts.contains_key("main.main") {
+        return Ok("main.main".to_string());
     }
 
     Err(ScriptLangError::new(
         "API_ENTRY_MAIN_NOT_FOUND",
-        "Expected script with name=\"main\" as default entry.",
+        "Expected script with name=\"main.main\" as default entry.",
     ))
 }
 
@@ -274,60 +274,64 @@ mod tests {
     #[test]
     fn compile_scripts_from_xml_map_compiles_single_script() {
         let scripts = map(&[(
-            "main.script.xml",
+            "main.xml",
             r#"
+<module name="main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
     <option text="B"><text>B</text></option>
   </choice>
 </script>
+</module>
 "#,
         )]);
         let compiled = compile_scripts_from_xml_map(&scripts).expect("compile should pass");
-        assert!(compiled.contains_key("main"));
+        assert!(compiled.contains_key("main.main"));
     }
 
     #[test]
     fn compile_project_from_xml_map_uses_default_main_entry() {
         let scripts = map(&[(
-            "main.script.xml",
+            "main.xml",
             r#"
+<module name="main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
     <option text="B"><text>B</text></option>
   </choice>
 </script>
+</module>
 "#,
         )]);
         let project = compile_project_from_xml_map(&scripts, None).expect("compile should pass");
-        assert_eq!(project.entry_script, "main");
-        assert!(project.scripts.contains_key("main"));
+        assert_eq!(project.entry_script, "main.main");
+        assert!(project.scripts.contains_key("main.main"));
     }
 
     #[test]
     fn compile_project_from_xml_map_accepts_explicit_entry() {
         let scripts = map(&[
             (
-                "main.script.xml",
-                r#"<script name="main"><text>Main</text></script>"#,
+                "main.xml",
+                r#"<module name="main"><script name="main"><text>Main</text></script></module>"#,
             ),
             (
-                "alt.script.xml",
-                r#"<script name="alt"><text>Alt</text></script>"#,
+                "alt.xml",
+                r#"<module name="alt"><script name="alt"><text>Alt</text></script></module>"#,
             ),
         ]);
-        let project = compile_project_from_xml_map(&scripts, Some("alt".to_string()))
+        let project = compile_project_from_xml_map(&scripts, Some("alt.alt".to_string()))
             .expect("compile should pass with explicit entry");
-        assert_eq!(project.entry_script, "alt");
-        assert!(project.scripts.contains_key("alt"));
+        assert_eq!(project.entry_script, "alt.alt");
+        assert!(project.scripts.contains_key("alt.alt"));
     }
 
     #[test]
     fn compile_project_from_xml_map_supports_module_entry() {
         let scripts = map(&[(
-            "battle.module.xml",
+            "battle.xml",
             r#"
 <module name="battle">
   <script name="main"><text>Battle</text></script>
@@ -343,8 +347,8 @@ mod tests {
     #[test]
     fn compile_project_from_xml_map_returns_error_for_missing_explicit_entry() {
         let scripts = map(&[(
-            "foo.script.xml",
-            r#"<script name="foo"><text>Hello</text></script>"#,
+            "foo.xml",
+            r#"<module name="foo"><script name="foo"><text>Hello</text></script></module>"#,
         )]);
         let error = compile_project_from_xml_map(&scripts, Some("missing".to_string()))
             .expect_err("missing entry should fail");
@@ -354,8 +358,8 @@ mod tests {
     #[test]
     fn compile_project_from_xml_map_returns_error_without_main_when_entry_missing() {
         let scripts = map(&[(
-            "foo.script.xml",
-            r#"<script name="foo"><text>Hello</text></script>"#,
+            "foo.xml",
+            r#"<module name="foo"><script name="foo"><text>Hello</text></script></module>"#,
         )]);
         let error =
             compile_project_from_xml_map(&scripts, None).expect_err("default main should fail");
@@ -365,22 +369,24 @@ mod tests {
     #[test]
     fn compile_artifact_from_xml_map_builds_v1_artifact() {
         let scripts = map(&[(
-            "main.script.xml",
-            r#"<script name="main"><text>Main</text></script>"#,
+            "main.xml",
+            r#"<module name="main"><script name="main"><text>Main</text></script></module>"#,
         )]);
         let artifact = compile_artifact_from_xml_map(&scripts, None).expect("compile artifact");
         assert_eq!(artifact.schema_version, sl_core::COMPILED_PROJECT_SCHEMA);
-        assert_eq!(artifact.entry_script, "main");
+        assert_eq!(artifact.entry_script, "main.main");
     }
 
     #[test]
     fn create_engine_from_artifact_starts_engine_and_validates_entry() {
         let scripts = map(&[(
-            "main.script.xml",
+            "main.xml",
             r#"
+<module name="main">
 <script name="main">
   <choice text="Pick"><option text="A"><text>A</text></option></choice>
 </script>
+</module>
 "#,
         )]);
         let artifact = compile_artifact_from_xml_map(&scripts, None).expect("compile artifact");
@@ -423,11 +429,13 @@ mod tests {
     #[test]
     fn resume_engine_from_artifact_resumes_from_snapshot() {
         let scripts = map(&[(
-            "main.script.xml",
+            "main.xml",
             r#"
+<module name="main">
 <script name="main">
   <choice text="Pick"><option text="A"><text>A</text></option></choice>
 </script>
+</module>
 "#,
         )]);
 
@@ -463,14 +471,16 @@ mod tests {
     #[test]
     fn create_engine_from_xml_starts_engine() {
         let scripts = map(&[(
-            "main.script.xml",
+            "main.xml",
             r#"
+<module name="main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
     <option text="B"><text>B</text></option>
   </choice>
 </script>
+</module>
 "#,
         )]);
         let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
@@ -492,14 +502,16 @@ mod tests {
     #[test]
     fn create_engine_from_xml_supports_random_sequence_override() {
         let scripts = map(&[(
-            "main.script.xml",
+            "main.xml",
             r#"
+<module name="main">
 <script name="main">
   <var name="a" type="int">random(5)</var>
   <text>${a}</text>
   <var name="b" type="int">random(5)</var>
   <text>${b}</text>
 </script>
+</module>
 "#,
         )]);
         let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
@@ -533,13 +545,15 @@ mod tests {
     #[test]
     fn resume_engine_from_xml_resumes_from_snapshot() {
         let scripts = map(&[(
-            "main.script.xml",
+            "main.xml",
             r#"
+<module name="main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
   </choice>
 </script>
+</module>
 "#,
         )]);
 
@@ -575,7 +589,7 @@ mod tests {
     #[test]
     fn create_and_resume_engine_from_xml_support_module_scripts_and_globals() {
         let scripts = map(&[(
-            "battle.module.xml",
+            "battle.xml",
             r#"
 <module name="battle">
   <var name="score" type="int">1</var>
@@ -630,14 +644,16 @@ mod tests {
     #[test]
     fn create_and_resume_engine_from_xml_propagate_engine_new_errors() {
         let scripts = map(&[(
-            "main.script.xml",
+            "main.xml",
             r#"
+<module name="main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
     <option text="B"><text>B</text></option>
   </choice>
 </script>
+</module>
 "#,
         )]);
         let error = create_engine_from_xml(CreateEngineFromXmlOptions {
@@ -688,17 +704,19 @@ mod tests {
 
     #[test]
     fn api_error_propagation_paths_are_covered() {
-        let bad_xml = map(&[("main.script.xml", "<script>")]);
+        let bad_xml = map(&[("main.xml", "<module>")]);
         let compile_error =
             compile_project_from_xml_map(&bad_xml, None).expect_err("compile should fail");
         assert_eq!(compile_error.code, "XML_PARSE_ERROR");
 
         let scripts = map(&[(
-            "main.script.xml",
+            "main.xml",
             r#"
+<module name="main">
 <script name="main">
   <var name="x" type="int">1</var>
 </script>
+</module>
 "#,
         )]);
         let artifact = compile_artifact_from_xml_map(&scripts, None).expect("artifact");
@@ -801,12 +819,14 @@ mod tests {
     #[test]
     fn create_engine_from_xml_can_emit_input_output() {
         let scripts = map(&[(
-            "main.script.xml",
+            "main.xml",
             r#"
+<module name="main">
 <script name="main">
   <var name="name" type="string">"Traveler"</var>
   <input var="name" text="Name"/>
 </script>
+</module>
 "#,
         )]);
         let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {

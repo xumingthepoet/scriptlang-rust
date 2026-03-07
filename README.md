@@ -60,16 +60,17 @@ All code must be written with testability in mind:
 - `sl-compiler` memoizes per-script reachable include closures during project compilation to avoid repeated DFS work.
 - include supports both single files and directory expansion via `<!-- include: dir/ -->`; directory expansion is recursive and uses stable path-sorted ordering.
 
-## Modules And Defs
-- `*.module.xml` uses `<module name="...">` and may contain `<type>`, `<function>`, `<var>`, and multiple `<script>` nodes.
+## Module Sources
+- XML source files now use plain `*.xml` names and must have a `<module name="...">` root.
+- `<module>` may contain `<type>`, `<function>`, `<var>`, and multiple `<script>` nodes.
+- Legacy `*.script.xml`, `*.defs.xml`, and `*.module.xml` inputs are rejected; migrate them to `<module>` in `name.xml`.
 - Module scripts compile to qualified names like `battle.main`; host entry/call/return targets should use that qualified form.
-- Inside the same module, scripts may reference sibling scripts with short names (`<call script="next"/>`), which compiles to the qualified module target.
-- Module `<var>` behaves like existing defs globals: writable, snapshotted, and visible through include-closure rules.
-- `*.defs.xml` remains supported as a compatibility form of “module without `<script>`”.
+- Default host entry is `main.main`.
+- Inside the same module, scripts may reference sibling scripts with short names (`<call script="next"/>`), which resolves to the qualified module target.
+- Module `<var>` is the only global-variable source in XML and remains writable, snapshotted, and visible through include-closure rules.
 
-## Defs Globals (`<defs><var>` / `<module><var>`)
-- `*.defs.xml` now supports `<var name="..." type="...">expr</var>` as writable globals.
-- `*.module.xml` `<var>` shares the same runtime model and namespace-qualified access rules.
+## Module Globals (`<module><var>`)
+- `<module><var name="..." type="...">expr</var>` defines writable module globals.
 - globals initialize on `engine.start`, support short name and `ns.var` access, and follow include-closure visibility.
 - when short names conflict across namespaces, only fully-qualified `ns.var` remains available.
 
@@ -110,7 +111,7 @@ All code must be written with testability in mind:
 
 ScriptLang now supports a clear two-step host flow:
 
-1. Compile source files (`*.script.xml` / `*.defs.xml` / `*.module.xml` / `*.json`) into `CompiledProjectArtifact`.
+1. Compile source files (`*.xml` / `*.json`) into `CompiledProjectArtifact`.
 2. Run or resume engine from that artifact.
 
 Recommended API entry points are in `sl-api`:
@@ -154,7 +155,7 @@ Each example directory also carries a `testcase.json` consumed by `sl-test-examp
 
 ## User Pitfalls And Guardrails
 - XML attribute escaping is mandatory: use `&lt;` for `<`, `&amp;&amp;` for `&&`.
-- Type visibility is per include-closure: scripts under `actions/locations/events` must each include needed `*.defs.xml`, or include a directory that expands to those defs for that script.
+- Type visibility is per include-closure: each module must include the other `*.xml` sources it depends on, directly or through directory includes.
 - In `when="..."`, prefer string literals as `&quot;...&quot;` instead of single quotes.
 - `Data type incorrect: f64 (expecting i64)` in array indexing is treated as a runtime type-stability bug; prioritize runtime fix/upgrade over user-side workarounds.
 - Validation should be `compile --dry-run` + `replay --rand "<fixed-seq>"` together; compile-only is not enough for runtime-path safety.

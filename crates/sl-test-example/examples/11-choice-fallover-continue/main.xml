@@ -1,0 +1,17 @@
+<module name="main">
+<script name="main">
+  <var name="hasKey" type="boolean">false</var>
+  <choice text="Open the gate">
+    <option text="Search nearby" when="!hasKey" once="true">
+      <text>You keep searching...</text>
+      <continue/>
+    </option>
+    <option text="Use key" when="hasKey">
+      <text>The gate opens.</text>
+    </option>
+    <option text="Leave for now" fall_over="true">
+      <text>Nothing else can be done here.</text>
+    </option>
+  </choice>
+</script>
+</module>

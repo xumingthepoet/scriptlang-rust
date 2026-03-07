@@ -143,7 +143,7 @@ impl ScriptLangEngine {
             ));
         }
 
-        let mut group_lookup = HashMap::new();
+        let mut group_lookup: HashMap<String, GroupLookup> = HashMap::new();
         let mut visible_json_by_script = HashMap::new();
         let mut visible_defs_by_script = HashMap::new();
         let mut defs_global_alias_by_script = HashMap::new();
@@ -151,13 +151,24 @@ impl ScriptLangEngine {
 
         for (script_name, script) in &options.scripts {
             for group_id in script.groups.keys() {
-                group_lookup.insert(
-                    group_id.clone(),
-                    GroupLookup {
-                        script_name: script_name.clone(),
-                        group_id: group_id.clone(),
-                    },
-                );
+                let should_replace = match group_lookup.get(group_id) {
+                    None => true,
+                    Some(existing_lookup) => options
+                        .scripts
+                        .get(&existing_lookup.script_name)
+                        .is_none_or(|existing_script| {
+                            script.module_name.is_some() || existing_script.module_name.is_none()
+                        }),
+                };
+                if should_replace {
+                    group_lookup.insert(
+                        group_id.clone(),
+                        GroupLookup {
+                            script_name: script_name.clone(),
+                            group_id: group_id.clone(),
+                        },
+                    );
+                }
             }
             visible_json_by_script.insert(
                 script_name.clone(),

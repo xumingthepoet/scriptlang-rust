@@ -67,8 +67,101 @@ pub(super) mod runtime_test_support {
     pub(super) fn map(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
         entries
             .iter()
-            .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+            .map(|(key, value)| {
+                let normalized_key = normalize_test_source_path(key);
+                let normalized_value = normalize_test_source_content(value);
+                (normalized_key, normalized_value)
+            })
             .collect()
+    }
+
+    fn normalize_test_source_path(path: &str) -> String {
+        path.replace(".script.xml", ".xml")
+            .replace(".defs.xml", ".xml")
+            .replace(".module.xml", ".xml")
+    }
+
+    fn normalize_test_source_content(source: &str) -> String {
+        let mut normalized = source
+            .replace(".script.xml", ".xml")
+            .replace(".defs.xml", ".xml")
+            .replace(".module.xml", ".xml");
+
+        let trimmed = normalized.trim_start();
+        if !trimmed.starts_with("<module") && normalized.trim_end().ends_with("</module>") {
+            if trimmed.starts_with("<script") {
+                let end_regex =
+                    Regex::new(r"</module>\s*\z").expect("stray module close regex should compile");
+                normalized = end_regex.replace(&normalized, "").into_owned();
+            } else if trimmed.starts_with("<defs") {
+                let end_regex =
+                    Regex::new(r"</module>\s*\z").expect("stray defs close regex should compile");
+                normalized = end_regex.replace(&normalized, "</defs>").into_owned();
+            }
+        }
+
+        if normalize_wrapped_root(&normalized, "module").is_some() {
+            return normalized;
+        }
+
+        if let Some(wrapped) = normalize_wrapped_root(&normalized, "script") {
+            return wrapped;
+        }
+
+        if let Some(wrapped) = normalize_wrapped_defs(&normalized) {
+            return wrapped;
+        }
+
+        normalized
+    }
+
+    fn normalize_wrapped_root(source: &str, root_name: &str) -> Option<String> {
+        let pattern = format!(r#"\A(\s*(?:<!--.*?-->\s*)*)<{root_name}\b([^>]*)>"#);
+        let regex = Regex::new(&pattern).expect("test root regex should compile");
+        let captures = regex.captures(source)?;
+        if root_name == "module" {
+            return Some(source.to_string());
+        }
+        let prefix = captures.get(1).map(|m| m.as_str()).unwrap_or_default();
+        let attrs = captures.get(2).map(|m| m.as_str()).unwrap_or_default();
+        let attr_regex = Regex::new(r#"name="([^"]+)""#).expect("attribute regex should compile");
+        let module_name = attr_regex
+            .captures(attrs)
+            .and_then(|caps| caps.get(1).map(|m| m.as_str().to_string()))?;
+        let replaced_open = regex.replace(
+            source,
+            format!(
+                r#"{prefix}<module name="{module_name}">
+<{root_name}{attrs}>"#
+            ),
+        );
+        let closing = format!("</{root_name}>");
+        let end_regex =
+            Regex::new(&format!(r"{closing}\s*\z")).expect("closing regex should compile");
+        Some(
+            end_regex
+                .replace(replaced_open.as_ref(), format!("{closing}\n</module>"))
+                .into_owned(),
+        )
+    }
+
+    fn normalize_wrapped_defs(source: &str) -> Option<String> {
+        let regex = Regex::new(r#"\A(\s*(?:<!--.*?-->\s*)*)<defs\b([^>]*)>"#).expect("defs regex");
+        let captures = regex.captures(source)?;
+        let prefix = captures.get(1).map(|m| m.as_str()).unwrap_or_default();
+        let attrs = captures.get(2).map(|m| m.as_str()).unwrap_or_default();
+        let attr_regex = Regex::new(r#"name="([^"]+)""#).expect("defs attr regex should compile");
+        let module_name = attr_regex
+            .captures(attrs)
+            .and_then(|caps| caps.get(1).map(|m| m.as_str().to_string()))?;
+        let replaced_open =
+            regex.replace(source, format!(r#"{prefix}<module name="{module_name}">"#));
+        let end_regex = Regex::new(r"</defs>\s*\z").expect("defs close regex should compile");
+        Some(
+            end_regex
+                .replace(replaced_open.as_ref(), "</module>")
+                .into_owned(),
+        )
     }
 
     pub(super) fn engine_from_sources(files: BTreeMap<String, String>) -> ScriptLangEngine {
@@ -92,9 +185,31 @@ pub(super) mod runtime_test_support {
     ) -> sl_core::CompileProjectResult {
         let bundle = sl_compiler::compile_project_bundle_from_xml_map(&files)
             .expect("compile project should pass");
+        let mut scripts = bundle.scripts;
+        let mut local_candidates: BTreeMap<String, Vec<ScriptIr>> = BTreeMap::new();
+        scripts
+            .values()
+            .filter_map(|script| {
+                script
+                    .local_script_name
+                    .clone()
+                    .map(|local_name| (local_name, script.clone()))
+            })
+            .for_each(|(local_name, script)| {
+                local_candidates.entry(local_name).or_default().push(script);
+            });
+        for (local_name, candidates) in local_candidates {
+            if candidates.len() == 1 && !scripts.contains_key(&local_name) {
+                let mut alias = candidates[0].clone();
+                alias.script_name = local_name.clone();
+                alias.module_name = None;
+                alias.local_script_name = Some(local_name.clone());
+                scripts.insert(local_name, alias);
+            }
+        }
         sl_core::CompileProjectResult {
-            scripts: bundle.scripts,
-            entry_script: "main".to_string(),
+            scripts,
+            entry_script: "main.main".to_string(),
             global_json: bundle.global_json,
             defs_global_declarations: bundle.defs_global_declarations,
             defs_global_init_order: bundle.defs_global_init_order,
@@ -116,5 +231,52 @@ pub(super) mod runtime_test_support {
                 EngineOutput::End => return,
             }
         }
+    }
+
+    #[test]
+    fn test_source_normalization_covers_stray_closing_and_missing_name_paths() {
+        let normalized_script =
+            normalize_test_source_content("<script name=\"main\"><text>x</text></script></module>");
+        assert!(normalized_script.contains("<module name=\"main\">"));
+        assert!(!normalized_script.contains("</module></module>"));
+
+        let normalized_defs = normalize_test_source_content("<defs name=\"shared\"></module>");
+        assert_eq!(normalized_defs, "<module name=\"shared\"></module>");
+        assert_eq!(
+            normalize_test_source_content("<other></module>"),
+            "<other></module>"
+        );
+
+        assert_eq!(
+            normalize_wrapped_root("<module name=\"main\"></module>", "module"),
+            Some("<module name=\"main\"></module>".to_string())
+        );
+        assert_eq!(normalize_wrapped_root("<script></script>", "script"), None);
+        assert_eq!(normalize_wrapped_defs("<defs></defs>"), None);
+    }
+
+    #[test]
+    fn compile_project_from_sources_adds_unique_local_alias_only_once() {
+        let unique = compile_project_from_sources(map(&[(
+            "battle.module.xml",
+            r#"<module name="battle"><script name="main"><text>x</text></script></module>"#,
+        )]));
+        assert!(unique.scripts.contains_key("battle.main"));
+        assert!(unique.scripts.contains_key("main"));
+        assert_eq!(unique.entry_script, "main.main");
+
+        let duplicate = compile_project_from_sources(map(&[
+            (
+                "a.module.xml",
+                r#"<module name="a"><script name="main"><text>a</text></script></module>"#,
+            ),
+            (
+                "b.module.xml",
+                r#"<module name="b"><script name="main"><text>b</text></script></module>"#,
+            ),
+        ]));
+        assert!(duplicate.scripts.contains_key("a.main"));
+        assert!(duplicate.scripts.contains_key("b.main"));
+        assert!(!duplicate.scripts.contains_key("main"));
     }
 }

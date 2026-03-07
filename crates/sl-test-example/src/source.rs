@@ -22,11 +22,7 @@ pub fn read_scripts_xml_from_dir(
 
         let path = entry.path();
         let path_str = path.to_string_lossy();
-        if !(path_str.ends_with(".script.xml")
-            || path_str.ends_with(".defs.xml")
-            || path_str.ends_with(".module.xml")
-            || path_str.ends_with(".json"))
-        {
+        if !(path_str.ends_with(".xml") || path_str.ends_with(".json")) {
             continue;
         }
 
@@ -104,15 +100,15 @@ mod source_tests {
         fs::create_dir_all(&root).expect("root should be created");
 
         write_file(
-            &root.join("main.script.xml"),
-            "<script name=\"main\"><text>x</text></script>",
+            &root.join("main.xml"),
+            "<module name=\"main\"><script name=\"main\"><text>x</text></script></module>",
         );
         write_file(
-            &root.join("shared.defs.xml"),
-            "<defs name=\"shared\"></defs>",
+            &root.join("shared.xml"),
+            "<module name=\"shared\"></module>",
         );
         write_file(
-            &root.join("battle.module.xml"),
+            &root.join("battle.xml"),
             "<module name=\"battle\"></module>",
         );
         write_file(&root.join("game.json"), "{}");
@@ -120,9 +116,9 @@ mod source_tests {
 
         let files = read_scripts_xml_from_dir(&root).expect("scan should pass");
         assert_eq!(files.len(), 4);
-        assert!(files.contains_key("main.script.xml"));
-        assert!(files.contains_key("shared.defs.xml"));
-        assert!(files.contains_key("battle.module.xml"));
+        assert!(files.contains_key("main.xml"));
+        assert!(files.contains_key("shared.xml"));
+        assert!(files.contains_key("battle.xml"));
         assert!(files.contains_key("game.json"));
     }
 
@@ -141,10 +137,10 @@ mod source_tests {
     fn read_scripts_xml_from_dir_reports_read_errors() {
         let root = temp_dir("read-error");
         fs::create_dir_all(&root).expect("root should be created");
-        let script_path = root.join("main.script.xml");
+        let script_path = root.join("main.xml");
         write_file(
             &script_path,
-            "<script name=\"main\"><text>x</text></script>",
+            "<module name=\"main\"><script name=\"main\"><text>x</text></script></module>",
         );
 
         let mut perms = fs::metadata(&script_path)
@@ -169,7 +165,7 @@ mod source_tests {
             &case_path,
             r#"{
   "schemaVersion":"sl-tool-case",
-  "entryScript":"main",
+  "entryScript":"main.main",
   "actions":[],
   "expectedEvents":[{"kind":"end"}]
 }"#,
@@ -177,7 +173,7 @@ mod source_tests {
 
         let parsed = read_test_case(&case_path).expect("case should parse");
         assert_eq!(parsed.schema_version, TESTCASE_SCHEMA);
-        assert_eq!(parsed.entry_script, "main");
+        assert_eq!(parsed.entry_script, "main.main");
         assert_eq!(parsed.expected_events.len(), 1);
     }
 

@@ -1,5 +1,0 @@
-<script name="middle">
-  <var name="returnTarget" type="string">&quot;end&quot;</var>
-  <text>middle</text>
-  <return script="${returnTarget}"/>
-</script>

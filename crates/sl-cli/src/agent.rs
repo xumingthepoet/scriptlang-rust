@@ -25,7 +25,7 @@ pub(super) fn run_agent(args: AgentArgs) -> Result<i32, ScriptLangError> {
 pub(super) fn run_start(args: StartArgs) -> Result<i32, ScriptLangError> {
     let scenario = load_source_by_scripts_dir(
         &args.scripts_dir,
-        args.entry_script.as_deref().unwrap_or("main"),
+        args.entry_script.as_deref().unwrap_or("main.main"),
     )?;
     let random_sequence = parse_rand_sequence(args.rand.as_deref())?;
     let mut engine = create_engine_for_scenario(
@@ -77,7 +77,7 @@ pub(super) fn run_compile(args: CompileArgs) -> Result<i32, ScriptLangError> {
     // 1. 加载源文件
     let scenario = load_source_by_scripts_dir(
         &args.scripts_dir,
-        args.entry_script.as_deref().unwrap_or("main"),
+        args.entry_script.as_deref().unwrap_or("main.main"),
     )?;
 
     // 2. 编译（在内存中进行）
@@ -142,7 +142,7 @@ struct ReplayResult {
 }
 
 pub(super) fn run_replay(args: ReplayArgs) -> Result<i32, ScriptLangError> {
-    let entry_script = args.entry_script.unwrap_or("main".to_string());
+    let entry_script = args.entry_script.unwrap_or("main.main".to_string());
     let scenario = load_source_by_scripts_dir(&args.scripts_dir, &entry_script)?;
     let random_sequence = parse_rand_sequence(args.rand.as_deref())?;
     let mut engine = create_engine_for_scenario(
@@ -346,7 +346,7 @@ mod agent_tests {
 
         run_start(StartArgs {
             scripts_dir,
-            entry_script: Some("main".to_string()),
+            entry_script: Some("main.main".to_string()),
             state_out: state_in.to_string_lossy().to_string(),
             rand: None,
             show_debug: false,
@@ -372,7 +372,7 @@ mod agent_tests {
         let scripts_dir = example_scripts_dir("01-text-code");
         let args = ReplayArgs {
             scripts_dir,
-            entry_script: Some("main".to_string()),
+            entry_script: Some("main.main".to_string()),
             step: Vec::new(),
             rand: None,
             show_debug: false,
@@ -386,18 +386,20 @@ mod agent_tests {
         let root = temp_path("agent-replay-debug-flag");
         fs::create_dir_all(&root).expect("root should be created");
         write_file(
-            &root.join("main.script.xml"),
-            r#"<script name="main"><debug>dbg=${1+1}</debug><text>ok</text></script>"#,
+            &root.join("main.xml"),
+            r#"<module name="main">
+<script name="main"><debug>dbg=${1+1}</debug><text>ok</text></script>
+</module>"#,
         );
-        let scenario =
-            load_source_by_scripts_dir(root.to_string_lossy().as_ref(), "main").expect("scenario");
-        let mut engine =
-            create_engine_for_scenario(&scenario, "main", RandConfig::default()).expect("engine");
+        let scenario = load_source_by_scripts_dir(root.to_string_lossy().as_ref(), "main.main")
+            .expect("scenario");
+        let mut engine = create_engine_for_scenario(&scenario, "main.main", RandConfig::default())
+            .expect("engine");
         let hidden = run_replay_sequence(&mut engine, &[], false).expect("hidden replay");
         assert!(hidden.lines.iter().all(|line| !line.starts_with("DEBUG: ")));
 
-        let mut engine =
-            create_engine_for_scenario(&scenario, "main", RandConfig::default()).expect("engine");
+        let mut engine = create_engine_for_scenario(&scenario, "main.main", RandConfig::default())
+            .expect("engine");
         let shown = run_replay_sequence(&mut engine, &[], true).expect("shown replay");
         assert!(shown.lines.iter().any(|line| line == "DEBUG: dbg=2"));
     }
@@ -407,8 +409,9 @@ mod agent_tests {
         let root = temp_path("agent-replay-choose-input");
         fs::create_dir_all(&root).expect("root should be created");
         write_file(
-            &root.join("main.script.xml"),
+            &root.join("main.xml"),
             r#"
+<module name="main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -417,13 +420,13 @@ mod agent_tests {
   <input var="name" text="Name"/>
   <text>${name}</text>
 </script>
-"#,
+</module>"#,
         );
 
         let mut engine = create_engine_for_scenario(
-            &load_source_by_scripts_dir(root.to_string_lossy().as_ref(), "main")
+            &load_source_by_scripts_dir(root.to_string_lossy().as_ref(), "main.main")
                 .expect("scenario should load"),
-            "main",
+            "main.main",
             RandConfig::default(),
         )
         .expect("engine should create");
@@ -443,8 +446,9 @@ mod agent_tests {
         let root = temp_path("agent-replay-next-boundary");
         fs::create_dir_all(&root).expect("root should be created");
         write_file(
-            &root.join("main.script.xml"),
+            &root.join("main.xml"),
             r#"
+<module name="main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -452,12 +456,12 @@ mod agent_tests {
   <var name="name" type="string">"Traveler"</var>
   <input var="name" text="Name"/>
 </script>
-"#,
+</module>"#,
         );
-        let scenario =
-            load_source_by_scripts_dir(root.to_string_lossy().as_ref(), "main").expect("scenario");
-        let mut engine =
-            create_engine_for_scenario(&scenario, "main", RandConfig::default()).expect("engine");
+        let scenario = load_source_by_scripts_dir(root.to_string_lossy().as_ref(), "main.main")
+            .expect("scenario");
+        let mut engine = create_engine_for_scenario(&scenario, "main.main", RandConfig::default())
+            .expect("engine");
         let actions = parse_replay_steps(&["choose:0".to_string()]).expect("steps should parse");
         let result = run_replay_sequence(&mut engine, &actions, false).expect("replay should pass");
         assert_eq!(result.actions_used, 1);
@@ -478,9 +482,9 @@ mod agent_tests {
     #[test]
     fn run_replay_reports_action_kind_mismatch() {
         let scripts_dir = example_scripts_dir("16-input-name");
-        let scenario = load_source_by_scripts_dir(&scripts_dir, "main").expect("scenario");
-        let mut engine =
-            create_engine_for_scenario(&scenario, "main", RandConfig::default()).expect("engine");
+        let scenario = load_source_by_scripts_dir(&scripts_dir, "main.main").expect("scenario");
+        let mut engine = create_engine_for_scenario(&scenario, "main.main", RandConfig::default())
+            .expect("engine");
         let actions = parse_replay_steps(&["choose:0".to_string()]).expect("steps should parse");
         let error =
             run_replay_sequence(&mut engine, &actions, false).expect_err("mismatch should fail");
@@ -490,9 +494,9 @@ mod agent_tests {
     #[test]
     fn run_replay_reports_unused_actions_if_end_reached_early() {
         let scripts_dir = example_scripts_dir("01-text-code");
-        let scenario = load_source_by_scripts_dir(&scripts_dir, "main").expect("scenario");
-        let mut engine =
-            create_engine_for_scenario(&scenario, "main", RandConfig::default()).expect("engine");
+        let scenario = load_source_by_scripts_dir(&scripts_dir, "main.main").expect("scenario");
+        let mut engine = create_engine_for_scenario(&scenario, "main.main", RandConfig::default())
+            .expect("engine");
         let actions = parse_replay_steps(&["input:Guild".to_string()]).expect("steps should parse");
         let error =
             run_replay_sequence(&mut engine, &actions, false).expect_err("unused should fail");
@@ -504,8 +508,9 @@ mod agent_tests {
         let root = temp_path("agent-rand-sequence-progress");
         fs::create_dir_all(&root).expect("root should be created");
         write_file(
-            &root.join("main.script.xml"),
+            &root.join("main.xml"),
             r#"
+<module name="main">
 <script name="main">
   <choice text="Pick">
     <option text="A">
@@ -516,13 +521,13 @@ mod agent_tests {
     </option>
   </choice>
 </script>
-"#,
+</module>"#,
         );
 
         let state_1 = temp_path("agent-rand-state-1.json");
         run_start(StartArgs {
             scripts_dir: root.to_string_lossy().to_string(),
-            entry_script: Some("main".to_string()),
+            entry_script: Some("main.main".to_string()),
             state_out: state_1.to_string_lossy().to_string(),
             rand: Some("12,3".to_string()),
             show_debug: false,
@@ -550,8 +555,9 @@ mod agent_tests {
         let root = temp_path("agent-rand-override");
         fs::create_dir_all(&root).expect("root should be created");
         write_file(
-            &root.join("main.script.xml"),
+            &root.join("main.xml"),
             r#"
+<module name="main">
 <script name="main">
   <choice text="Pick">
     <option text="A">
@@ -562,13 +568,13 @@ mod agent_tests {
     </option>
   </choice>
 </script>
-"#,
+</module>"#,
         );
 
         let state_1 = temp_path("agent-rand-override-state-1.json");
         run_start(StartArgs {
             scripts_dir: root.to_string_lossy().to_string(),
-            entry_script: Some("main".to_string()),
+            entry_script: Some("main.main".to_string()),
             state_out: state_1.to_string_lossy().to_string(),
             rand: Some("12,3".to_string()),
             show_debug: false,

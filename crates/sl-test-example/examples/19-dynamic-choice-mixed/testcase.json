@@ -1,6 +1,6 @@
 {
   "schemaVersion": "sl-tool-case",
-  "entryScript": "main",
+  "entryScript": "main.main",
   "actions": [
     { "kind": "choose", "index": 1 }
   ],

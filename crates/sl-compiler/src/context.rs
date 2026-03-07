@@ -13,8 +13,6 @@ pub struct CompileProjectBundleResult {
 
 #[derive(Debug, Clone)]
 pub(crate) enum SourceKind {
-    ScriptXml,
-    DefsXml,
     ModuleXml,
     Json,
 }

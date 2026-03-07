@@ -11,14 +11,14 @@ impl ScriptLangEngine {
         let rendered_target = self.render_text(template)?;
         let mut target_script = rendered_target.trim().to_string();
         if !target_script.contains('.') {
-            if let Some(current_script_name) = self.resolve_current_script_name() {
-                if let Some(script) = self.scripts.get(&current_script_name) {
-                    if let Some(module_name) = script.module_name.as_deref() {
-                        let module_qualified = format!("{}.{}", module_name, target_script);
-                        if self.scripts.contains_key(&module_qualified) {
-                            target_script = module_qualified;
-                        }
-                    }
+            if let Some(module_name) = self
+                .resolve_current_script_name()
+                .and_then(|current_script_name| self.scripts.get(&current_script_name).cloned())
+                .and_then(|script| script.module_name)
+            {
+                let module_qualified = format!("{}.{}", module_name, target_script);
+                if self.scripts.contains_key(&module_qualified) {
+                    target_script = module_qualified;
                 }
             }
         }
@@ -288,7 +288,7 @@ mod callstack_tests {
                 "main.script.xml",
                 r#"
     <script name="main">
-      <call script="greeting"/>
+      <call script="greeting.greeting"/>
     </script>
     "#,
             ),
@@ -297,7 +297,7 @@ mod callstack_tests {
                 r#"<script name="greeting"><text>Hi</text></script>"#,
             ),
         ]));
-        engine.start("main", None).expect("start");
+        engine.start("main.main", None).expect("start");
 
         let output = engine.next_output().expect("next should pass");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "Hi"));
@@ -308,7 +308,7 @@ mod callstack_tests {
                 r#"
     <!-- include: greeting.script.xml -->
     <script name="main">
-      <var name="nextScene" type="string">&quot;greeting&quot;</var>
+      <var name="nextScene" type="string">&quot;greeting.greeting&quot;</var>
       <call script="${nextScene}"/>
     </script>
     "#,
@@ -318,7 +318,7 @@ mod callstack_tests {
                 r#"<script name="greeting"><text>Dynamic hi</text></script>"#,
             ),
         ]));
-        dynamic_engine.start("main", None).expect("start");
+        dynamic_engine.start("main.main", None).expect("start");
 
         let output = dynamic_engine
             .next_output()
@@ -365,7 +365,7 @@ mod callstack_tests {
     <!-- include: callee.script.xml -->
     <script name="main">
       <var name="hp" type="int">1</var>
-      <call script="callee" args="hp"/>
+      <call script="callee.callee" args="hp"/>
     </script>
     "#,
             ),
@@ -374,7 +374,7 @@ mod callstack_tests {
                 r#"<script name="callee" args="ref:int:x"><return/></script>"#,
             ),
         ]));
-        call_arg_mismatch.start("main", None).expect("start");
+        call_arg_mismatch.start("main.main", None).expect("start");
         let error = call_arg_mismatch
             .next_output()
             .expect_err("ref mismatch should fail");
@@ -767,7 +767,7 @@ mod callstack_tests {
                 r#"
     <!-- include: next.script.xml -->
     <script name="main">
-      <var name="nextScene" type="string">&quot;next&quot;</var>
+      <var name="nextScene" type="string">&quot;next.next&quot;</var>
       <return script="${nextScene}"/>
     </script>
     "#,
@@ -777,7 +777,7 @@ mod callstack_tests {
                 r#"<script name="next"><text>moved</text></script>"#,
             ),
         ]));
-        dynamic_return.start("main", None).expect("start");
+        dynamic_return.start("main.main", None).expect("start");
         let output = dynamic_return
             .next_output()
             .expect("dynamic return should pass");
@@ -803,7 +803,7 @@ mod callstack_tests {
     <!-- include: callee.script.xml -->
     <script name="main">
       <var name="x" type="int">1</var>
-      <call script="callee" args="ref:x"/>
+      <call script="callee.callee" args="ref:x"/>
     </script>
     "#,
             ),
@@ -812,7 +812,7 @@ mod callstack_tests {
                 r#"<script name="callee" args="int:x"><return/></script>"#,
             ),
         ]));
-        ref_mismatch.start("main", None).expect("start");
+        ref_mismatch.start("main.main", None).expect("start");
         let error = ref_mismatch
             .next_output()
             .expect_err("non-ref param with ref arg should fail");
@@ -1079,7 +1079,7 @@ mod callstack_tests {
                 r#"
     <!-- include: callee.script.xml -->
     <script name="main">
-      <call script="callee" args="ref:missing.path"/>
+      <call script="callee.callee" args="ref:missing.path"/>
     </script>
     "#,
             ),
@@ -1088,7 +1088,7 @@ mod callstack_tests {
                 r#"<script name="callee" args="ref:int:x"><return/></script>"#,
             ),
         ]));
-        ref_read_error.start("main", None).expect("start");
+        ref_read_error.start("main.main", None).expect("start");
         let error = ref_read_error
             .next_output()
             .expect_err("ref read should fail");
@@ -1100,7 +1100,7 @@ mod callstack_tests {
                 r#"
     <!-- include: callee.script.xml -->
     <script name="main">
-      <call script="callee" args="unknown +"/>
+      <call script="callee.callee" args="unknown +"/>
     </script>
     "#,
             ),
@@ -1174,14 +1174,16 @@ mod callstack_tests {
         let mut return_arg_eval_error = engine_from_sources(map(&[
             (
                 "main.script.xml",
-                r#"<script name="main"><return script="next" args="bad +"/></script>"#,
+                r#"<script name="main"><return script="next.next" args="bad +"/></script>"#,
             ),
             (
                 "next.script.xml",
                 r#"<script name="next" args="int:x"><text>${x}</text></script>"#,
             ),
         ]));
-        return_arg_eval_error.start("main", None).expect("start");
+        return_arg_eval_error
+            .start("main.main", None)
+            .expect("start");
         let error = return_arg_eval_error
             .next_output()
             .expect_err("return arg eval should fail");
@@ -1304,14 +1306,16 @@ mod callstack_tests {
         let mut return_target_type_error = engine_from_sources(map(&[
             (
                 "main.script.xml",
-                r#"<script name="main"><return script="next" args="&quot;bad&quot;"/></script>"#,
+                r#"<script name="main"><return script="next.next" args="&quot;bad&quot;"/></script>"#,
             ),
             (
                 "next.script.xml",
                 r#"<script name="next" args="int:x"><text>${x}</text></script>"#,
             ),
         ]));
-        return_target_type_error.start("main", None).expect("start");
+        return_target_type_error
+            .start("main.main", None)
+            .expect("start");
         let error = return_target_type_error
             .next_output()
             .expect_err("return target scope creation should fail");
@@ -1328,7 +1332,7 @@ mod callstack_tests {
 <script name="main">
   <var name="arr" type="int[]">[10, 20, 30]</var>
   <var name="idx" type="int">0</var>
-  <call script="bump" args="ref:idx"/>
+  <call script="bump.bump" args="ref:idx"/>
   <text>${arr[idx]}</text>
 </script>
 "#,
@@ -1344,7 +1348,7 @@ mod callstack_tests {
             ),
         ]));
 
-        engine.start("main", None).expect("start");
+        engine.start("main.main", None).expect("start");
         let output = engine.next_output().expect("next output");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "20"));
     }
@@ -1381,7 +1385,7 @@ mod callstack_tests {
             "main.script.xml",
             r#"<script name="main"><var name="cmd" type="string">""</var><input var="cmd" text="go"/></script>"#,
         )]));
-        plain_engine.start("main", None).expect("start");
+        plain_engine.start("main.main", None).expect("start");
         let plain = plain_engine
             .resolve_target_script("next", "ERR", "err")
             .expect("non-module scripts should keep short names");
@@ -1421,5 +1425,27 @@ mod callstack_tests {
             .resolve_target_script("next", "ERR", "err")
             .expect("missing current script metadata should fall back to short name");
         assert_eq!(missing_script_result, "next");
+    }
+
+    #[test]
+    pub(super) fn resolve_target_script_keeps_short_name_for_alias_without_module() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><var name="cmd" type="string">""</var><input var="cmd" text="go"/></script>"#,
+        )]));
+        engine.start("main.main", None).expect("start");
+        let group_id = engine.frames.last().expect("frame").group_id.clone();
+        engine.group_lookup.insert(
+            group_id.clone(),
+            super::lifecycle::GroupLookup {
+                script_name: "main".to_string(),
+                group_id,
+            },
+        );
+
+        let target = engine
+            .resolve_target_script("next", "ERR", "err")
+            .expect("alias-backed current script should keep short name");
+        assert_eq!(target, "next");
     }
 }

@@ -57,9 +57,7 @@ pub(crate) fn compile_script(
         CompileGroupMode::new(0, false),
     )?;
 
-    if let Some(module_name) = module_name {
-        qualify_local_script_targets(&mut builder.groups, module_name);
-    }
+    qualify_local_script_targets_for_module(&mut builder.groups, module_name);
 
     let ir = ScriptIr {
         script_path: script_path.to_string(),
@@ -94,6 +92,15 @@ fn qualify_local_script_targets(groups: &mut BTreeMap<String, ImplicitGroup>, mo
                 _ => {}
             }
         }
+    }
+}
+
+fn qualify_local_script_targets_for_module(
+    groups: &mut BTreeMap<String, ImplicitGroup>,
+    module_name: Option<&str>,
+) {
+    if let Some(module_name) = module_name {
+        qualify_local_script_targets(groups, module_name);
     }
 }
 
@@ -450,11 +457,13 @@ mod json_symbols_tests {
             ("a/x.json", r#"{"v":1}"#),
             ("b/x.json", r#"{"v":2}"#),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
     <!-- include: a/x.json -->
     <!-- include: b/x.json -->
-    <script name="main"><text>x</text></script>
+    <module name="main">
+<script name="main"><text>x</text></script>
+</module>
     "#,
             ),
         ]))
@@ -516,8 +525,10 @@ mod json_symbols_tests {
         let files = map(&[
             ("game.json", r#"{ "hp": 5 }"#),
             (
-                "main.script.xml",
-                r#"<script name="main"><text>${game.hp}</text></script>"#,
+                "main.xml",
+                r#"<module name="main">
+<script name="main"><text>${game.hp}</text></script>
+</module>"#,
             ),
         ]);
 
@@ -531,23 +542,25 @@ mod json_symbols_tests {
         let files = map(&[
             ("game.json", r#"{ "hp": 5 }"#),
             (
-                "shared.defs.xml",
+                "shared.xml",
                 r#"
-    <defs name="shared">
+    <module name="shared">
       <function name="boost" return="int:out">
         out = game.hp;
       </function>
-    </defs>
+    </module>
     "#,
             ),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
-    <!-- include: shared.defs.xml -->
-    <script name="main">
+    <!-- include: shared.xml -->
+    <module name="main">
+<script name="main">
       <var name="hp" type="int">1</var>
       <code>hp = shared.boost();</code>
     </script>
+</module>
     "#,
             ),
         ]);
@@ -562,20 +575,22 @@ mod json_symbols_tests {
         let files = map(&[
             ("game.json", r#"{ "hp": 5 }"#),
             (
-                "shared.defs.xml",
+                "shared.xml",
                 r#"
-<defs name="shared">
+<module name="shared">
   <var name="bonus" type="int">game.hp + 1</var>
-</defs>
+</module>
 "#,
             ),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- include: shared.xml -->
+<module name="main">
 <script name="main">
   <text>ok</text>
 </script>
+</module>
 "#,
             ),
         ]);
@@ -590,14 +605,16 @@ mod json_symbols_tests {
         let files = map(&[
             ("secret.json", r#"{ "v": 9 }"#),
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int"/></defs>"#,
+                "shared.xml",
+                r#"<module name="shared"><var name="hp" type="int"/></module>"#,
             ),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- include: shared.xml -->
+<module name="main">
 <script name="main"><text>${shared.hp}</text></script>
+</module>
 "#,
             ),
         ]);
@@ -610,7 +627,7 @@ mod json_symbols_tests {
     fn validate_json_visibility_handles_var_initializer_and_choice_when_expr() {
         let span = SourceSpan::synthetic();
         let script_ir = ScriptIr {
-            script_path: "main.script.xml".to_string(),
+            script_path: "main.xml".to_string(),
             script_name: "main".to_string(),
             module_name: None,
             local_script_name: None,
@@ -668,7 +685,7 @@ mod json_symbols_tests {
     fn validate_json_visibility_handles_dynamic_choice_expressions() {
         let span = SourceSpan::synthetic();
         let script_ir = ScriptIr {
-            script_path: "main.script.xml".to_string(),
+            script_path: "main.xml".to_string(),
             script_name: "main".to_string(),
             module_name: None,
             local_script_name: None,
@@ -743,7 +760,7 @@ mod json_symbols_tests {
     fn validate_json_visibility_allows_return_without_target_script() {
         let span = SourceSpan::synthetic();
         let script_ir = ScriptIr {
-            script_path: "main.script.xml".to_string(),
+            script_path: "main.xml".to_string(),
             script_name: "main".to_string(),
             module_name: None,
             local_script_name: None,
@@ -776,7 +793,7 @@ mod json_symbols_tests {
     fn validate_json_visibility_covers_code_if_while_call_and_return_paths() {
         let span = SourceSpan::synthetic();
         let script_ir = ScriptIr {
-            script_path: "main.script.xml".to_string(),
+            script_path: "main.xml".to_string(),
             script_name: "main".to_string(),
             module_name: None,
             local_script_name: None,
@@ -849,8 +866,10 @@ mod json_symbols_tests {
         let files = map(&[
             ("secret.json", r#"{ "nextScene": "battle" }"#),
             (
-                "main.script.xml",
-                r#"<script name="main"><call script="${secret.nextScene}"/></script>"#,
+                "main.xml",
+                r#"<module name="main">
+<script name="main"><call script="${secret.nextScene}"/></script>
+</module>"#,
             ),
         ]);
         let error =
@@ -860,8 +879,10 @@ mod json_symbols_tests {
         let files = map(&[
             ("secret.json", r#"{ "nextScene": "battle" }"#),
             (
-                "main.script.xml",
-                r#"<script name="main"><return script="${secret.nextScene}"/></script>"#,
+                "main.xml",
+                r#"<module name="main">
+<script name="main"><return script="${secret.nextScene}"/></script>
+</module>"#,
             ),
         ]);
         let error =
@@ -874,12 +895,14 @@ mod json_symbols_tests {
         let visible = map(&[
             ("game.json", r#"{ "hp": 5 }"#),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
     <!-- include: game.json -->
-    <script name="main">
+    <module name="main">
+<script name="main">
       <text>${game.hp}</text>
     </script>
+</module>
     "#,
             ),
         ]);
@@ -888,12 +911,13 @@ mod json_symbols_tests {
         let shadowed = map(&[
             ("game.json", r#"{ "hp": 5 }"#),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
     <script name="main">
       <var name="game" type="int">1</var>
       <code>game = game + 1;</code>
     </script>
+</module>
     "#,
             ),
         ]);
@@ -907,30 +931,32 @@ mod json_symbols_tests {
             ("game.json", r#"{ "hp": 5 }"#),
             ("secret.json", r#"{ "v": 9 }"#),
             (
-                "helpers.defs.xml",
+                "helpers.xml",
                 r#"
     <defs name="helpers">
       <function name="boost" args="int:x" return="int:out">
         let local = x + game.hp;
         out = local;
       </function>
-    </defs>
+    </module>
     "#,
             ),
             (
-                "next.script.xml",
+                "next.xml",
                 r#"
     <script name="next" args="int:n">
       <text>${n}</text>
     </script>
+</module>
     "#,
             ),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
     <!-- include: game.json -->
-    <!-- include: helpers.defs.xml -->
-    <script name="main">
+    <!-- include: helpers.xml -->
+    <module name="main">
+<script name="main">
       <var name="hp" type="int">1</var>
       <var name="name" type="string">&quot;A&quot;</var>
       <if when="hp > 0">
@@ -951,6 +977,7 @@ mod json_symbols_tests {
       <call script="next" args="hp"/>
       <return script="next" args="hp"/>
     </script>
+</module>
     "#,
             ),
         ]);
@@ -963,7 +990,7 @@ mod json_symbols_tests {
     fn compile_script_rejects_reserved_script_name() {
         let root = xml_element("script", &[("name", "__sl_main")], vec![xml_text("x")]);
         let error = compile_script(CompileScriptOptions {
-            script_path: "main.script.xml",
+            script_path: "main.xml",
             root: &root,
             qualified_script_name: None,
             module_name: None,
@@ -981,7 +1008,7 @@ mod json_symbols_tests {
     fn compile_script_reports_missing_name_and_reserved_var_errors() {
         let missing_name_root = xml_element("script", &[], vec![xml_text("x")]);
         let error = compile_script(CompileScriptOptions {
-            script_path: "main.script.xml",
+            script_path: "main.xml",
             root: &missing_name_root,
             qualified_script_name: None,
             module_name: None,
@@ -1004,7 +1031,7 @@ mod json_symbols_tests {
             ))],
         );
         let error = compile_script(CompileScriptOptions {
-            script_path: "main.script.xml",
+            script_path: "main.xml",
             root: &reserved_var_root,
             qualified_script_name: None,
             module_name: None,
@@ -1023,47 +1050,69 @@ mod json_symbols_tests {
         let cases = vec![
             (
                 "code",
-                r#"<script name="main"><code>x = secret.hp;</code></script>"#,
+                r#"<module name="main">
+<script name="main"><code>x = secret.hp;</code></script>
+</module>"#,
             ),
             (
                 "var init",
-                r#"<script name="main"><var name="x" type="int">secret.hp</var></script>"#,
+                r#"<module name="main">
+<script name="main"><var name="x" type="int">secret.hp</var></script>
+</module>"#,
             ),
             (
                 "while",
-                r#"<script name="main"><while when="secret.hp > 0"><text>x</text></while></script>"#,
+                r#"<module name="main">
+<script name="main"><while when="secret.hp > 0"><text>x</text></while></script>
+</module>"#,
             ),
             (
                 "text interpolation",
-                r#"<script name="main"><text>${secret.hp}</text></script>"#,
+                r#"<module name="main">
+<script name="main"><text>${secret.hp}</text></script>
+</module>"#,
             ),
             (
                 "debug interpolation",
-                r#"<script name="main"><debug>${secret.hp}</debug></script>"#,
+                r#"<module name="main">
+<script name="main"><debug>${secret.hp}</debug></script>
+</module>"#,
             ),
             (
                 "if",
-                r#"<script name="main"><if when="secret.hp > 0"><text>x</text></if></script>"#,
+                r#"<module name="main">
+<script name="main"><if when="secret.hp > 0"><text>x</text></if></script>
+</module>"#,
             ),
             (
                 "static choice when",
-                r#"<script name="main"><choice text="c"><option text="a" when="secret.hp > 0"><text>x</text></option></choice></script>"#,
+                r#"<module name="main">
+<script name="main"><choice text="c"><option text="a" when="secret.hp > 0"><text>x</text></option></choice></script>
+</module>"#,
             ),
             (
                 "dynamic choice array",
-                r#"<script name="main"><choice text="c"><dynamic-options array="secret.list" item="it"><option text="x"><text>x</text></option></dynamic-options></choice></script>"#,
+                r#"<module name="main">
+<script name="main"><choice text="c"><dynamic-options array="secret.list" item="it"><option text="x"><text>x</text></option></dynamic-options></choice></script>
+</module>"#,
             ),
             (
                 "dynamic choice when",
-                r#"<script name="main"><var name="arr" type="int[]">[1]</var><choice text="c"><dynamic-options array="arr" item="it"><option text="x" when="secret.hp > 0"><text>x</text></option></dynamic-options></choice></script>"#,
+                r#"<module name="main">
+<script name="main"><var name="arr" type="int[]">[1]</var><choice text="c"><dynamic-options array="arr" item="it"><option text="x" when="secret.hp > 0"><text>x</text></option></dynamic-options></choice></script>
+</module>"#,
             ),
             (
                 "call args",
-                r#"<script name="main"><call script="next" args="secret.hp"/></script>"#,
+                r#"<module name="main">
+<script name="main"><call script="next" args="secret.hp"/></script>
+</module>"#,
             ),
             (
                 "return args",
-                r#"<script name="main"><return script="next" args="secret.hp"/></script>"#,
+                r#"<module name="main">
+<script name="main"><return script="next" args="secret.hp"/></script>
+</module>"#,
             ),
         ];
 
@@ -1072,10 +1121,12 @@ mod json_symbols_tests {
                 ("visible.json", r#"{ "hp": 1 }"#),
                 ("secret.json", r#"{ "hp": 9, "list": [1] }"#),
                 (
-                    "next.script.xml",
-                    r#"<script name="next" args="int:n"><text>${n}</text></script>"#,
+                    "next.xml",
+                    r#"<module name="next">
+<script name="next" args="int:n"><text>${n}</text></script>
+</module>"#,
                 ),
-                ("main.script.xml", script_source),
+                ("main.xml", script_source),
             ]);
             let error = compile_project_bundle_from_xml_map(&files)
                 .expect_err("hidden json usage should fail");
@@ -1144,6 +1195,67 @@ mod json_symbols_tests {
         assert!(matches!(
             &group.nodes[3],
             ScriptNode::Return { target_script: Some(target_script), .. } if target_script.is_empty()
+        ));
+    }
+
+    #[test]
+    fn qualify_module_script_targets_for_module_handles_some_and_none() {
+        let span = SourceSpan::synthetic();
+        let mut groups = BTreeMap::from([(
+            "g0".to_string(),
+            ImplicitGroup {
+                group_id: "g0".to_string(),
+                parent_group_id: None,
+                entry_node_id: None,
+                nodes: vec![ScriptNode::Call {
+                    id: "c1".to_string(),
+                    target_script: "next".to_string(),
+                    args: Vec::new(),
+                    location: span,
+                }],
+            },
+        )]);
+
+        qualify_local_script_targets_for_module(&mut groups, None);
+        assert!(matches!(
+            &groups.get("g0").expect("group").nodes[0],
+            ScriptNode::Call { target_script, .. } if target_script == "next"
+        ));
+
+        qualify_local_script_targets_for_module(&mut groups, Some("battle"));
+        assert!(matches!(
+            &groups.get("g0").expect("group").nodes[0],
+            ScriptNode::Call { target_script, .. } if target_script == "battle.next"
+        ));
+    }
+
+    #[test]
+    fn compile_script_qualifies_plain_local_targets_for_module_scripts() {
+        let root = parse_xml_document(
+            r#"<script name="main"><call script="next"/><return script="next"/></script>"#,
+        )
+        .expect("xml")
+        .root;
+        let ir = compile_script(CompileScriptOptions {
+            script_path: "battle.xml",
+            root: &root,
+            qualified_script_name: Some("battle.main"),
+            module_name: Some("battle"),
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_defs_globals: &BTreeMap::new(),
+            visible_json_globals: &[],
+            all_json_symbols: &BTreeSet::new(),
+        })
+        .expect("compile");
+        let root_group = ir.groups.get(&ir.root_group_id).expect("root group");
+        assert!(matches!(
+            &root_group.nodes[0],
+            ScriptNode::Call { target_script, .. } if target_script == "battle.next"
+        ));
+        assert!(matches!(
+            &root_group.nodes[1],
+            ScriptNode::Return { target_script: Some(target_script), .. } if target_script == "battle.next"
         ));
     }
 }

@@ -54,8 +54,102 @@ pub(crate) mod compiler_test_support {
     pub(crate) fn map(entries: &[(&str, &str)]) -> BTreeMap<String, String> {
         entries
             .iter()
-            .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+            .map(|(key, value)| {
+                let normalized_key = normalize_test_source_path(key);
+                let normalized_value = normalize_test_source_content(value);
+                (normalized_key, normalized_value)
+            })
             .collect()
+    }
+
+    fn normalize_test_source_path(path: &str) -> String {
+        path.replace(".script.xml", ".xml")
+            .replace(".defs.xml", ".xml")
+            .replace(".module.xml", ".xml")
+    }
+
+    fn normalize_test_source_content(source: &str) -> String {
+        let mut normalized = source
+            .replace(".script.xml", ".xml")
+            .replace(".defs.xml", ".xml")
+            .replace(".module.xml", ".xml");
+
+        let trimmed = normalized.trim_start();
+        if !trimmed.starts_with("<module") && normalized.trim_end().ends_with("</module>") {
+            if trimmed.starts_with("<script") {
+                let end_regex =
+                    Regex::new(r"</module>\s*\z").expect("stray module close regex should compile");
+                normalized = end_regex.replace(&normalized, "").into_owned();
+            } else if trimmed.starts_with("<defs") {
+                let end_regex =
+                    Regex::new(r"</module>\s*\z").expect("stray defs close regex should compile");
+                normalized = end_regex.replace(&normalized, "</defs>").into_owned();
+            }
+        }
+
+        if normalize_wrapped_root(&normalized, "module", None).is_some() {
+            return normalized;
+        }
+
+        if let Some(wrapped) = normalize_wrapped_root(&normalized, "script", None) {
+            return wrapped;
+        }
+
+        if let Some(wrapped) = normalize_wrapped_root(&normalized, "defs", None) {
+            return wrapped;
+        }
+
+        normalized
+    }
+
+    fn normalize_wrapped_root(
+        source: &str,
+        root_name: &str,
+        explicit_module_name_attr: Option<&str>,
+    ) -> Option<String> {
+        let pattern = format!(r"\A(\s*(?:<!--.*?-->\s*)*)<{}\b([^>]*)>", root_name);
+        let regex = Regex::new(&pattern).expect("test root regex should compile");
+        let captures = regex.captures(source)?;
+        let prefix = captures.get(1).map(|m| m.as_str()).unwrap_or_default();
+        let attrs = captures.get(2).map(|m| m.as_str()).unwrap_or_default();
+
+        if root_name == "module" {
+            return Some(source.to_string());
+        }
+
+        let attr_name = explicit_module_name_attr.unwrap_or("name");
+        let attr_regex = Regex::new(&format!(r#"{attr_name}="([^"]+)""#))
+            .expect("attribute regex should compile");
+        let module_name = attr_regex
+            .captures(attrs)
+            .and_then(|caps| caps.get(1).map(|m| m.as_str().to_string()))?;
+
+        let replaced_open = if root_name == "defs" {
+            regex.replace(source, format!(r#"{prefix}<module name="{module_name}">"#))
+        } else {
+            regex.replace(
+                source,
+                format!(
+                    r#"{prefix}<module name="{module_name}">
+<{root_name}{attrs}>"#
+                ),
+            )
+        };
+        let closing = format!("</{root_name}>");
+        let end_regex =
+            Regex::new(&format!(r"{closing}\s*\z")).expect("closing regex should compile");
+        Some(
+            end_regex
+                .replace(
+                    replaced_open.as_ref(),
+                    if root_name == "defs" {
+                        "</module>".to_string()
+                    } else {
+                        format!("{closing}\n</module>")
+                    },
+                )
+                .into_owned(),
+        )
     }
 
     pub(crate) fn xml_text(value: &str) -> XmlNode {

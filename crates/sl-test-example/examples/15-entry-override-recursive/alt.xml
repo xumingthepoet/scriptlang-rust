@@ -1,0 +1,8 @@
+<!-- include: shared.xml -->
+<!-- include: nested/config.json -->
+<module name="alt">
+<script name="alt" args="string:name">
+  <var name="who" type="string">name</var>
+  <text>Alt entry ${greet(who)}</text>
+</script>
+</module>

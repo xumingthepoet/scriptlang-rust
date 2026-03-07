@@ -1,5 +1,0 @@
-<!-- include: shared/ -->
-<script name="main">
-  <text>main=${shared.boost(config.base)}</text>
-  <call script="battle"/>
-</script>

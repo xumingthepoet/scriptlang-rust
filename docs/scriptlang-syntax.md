@@ -4,43 +4,9 @@
 
 ## 1. 文件类型
 
-## 1.1 `*.script.xml`（可执行脚本）
+## 1.1 `*.xml`（模块源码）
 
-要求根节点是 `<script>`，且**一个文件只能有一个 `<script>` 节点**（即只能有一个文档根元素）。
-
-```xml
-<script name="main">
-  <text>Hello</text>
-</script>
-```
-
-错误示例（单文件放了两个 `<script>`）：
-
-```xml
-<script name="main"><text>A</text></script>
-<script name="side"><text>B</text></script>
-```
-
-上面会触发 XML 解析错误（常见报错是“根节点后仍有内容”）。
-
-## 1.2 `*.defs.xml`（类型/函数/全局变量声明）
-
-要求根节点是 `<defs>`。
-
-```xml
-<defs name="shared">
-  <type name="Hero">
-    <field name="hp" type="int"/>
-  </type>
-  <var name="baseHp" type="int">100</var>
-</defs>
-```
-
-`*.defs.xml` 可以理解为“不允许声明 `<script>` 的 module 兼容形式”。适合只放类型、函数、全局变量的共享声明。
-
-## 1.3 `*.module.xml`（命名空间模块）
-
-要求根节点是 `<module name="...">`。
+XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<module name="...">`。
 
 ```xml
 <module name="battle">
@@ -62,15 +28,16 @@
 ```
 
 规则：
-- 一个 `*.module.xml` 文件内可以有多个 `<script>`。
+- 一个 `*.xml` 模块文件内可以有多个 `<script>`。
 - `<module>` 下允许的直接子节点只有：`<type>`、`<function>`、`<var>`、`<script>`。
 - module 名只取自 `<module name="...">`，不从文件名推导。
+- 不再支持顶层 `<script>` 或 `<defs>` 根；旧的 `*.script.xml`、`*.defs.xml`、`*.module.xml` 输入会直接报错。
 - module 内脚本对外注册名是 `moduleName.scriptName`，例如 `battle.main`。
 - module 内 `type/function/var` 仍属于同一命名空间，例如 `battle.Combatant`、`battle.boost`、`battle.baseHp`。
 - 同一个 module 内部，脚本可以直接用短名访问本 module 的 `type/function/var`，也可以用短名调用 sibling script。
 - 跨 module 调用脚本时，应使用限定名，例如 `<call script="battle.main"/>`。
 
-## 1.4 `*.json`（全局只读数据）
+## 1.2 `*.json`（全局只读数据）
 
 通过 include 进入可见闭包后，以“文件名（去扩展名）”作为符号使用。
 
@@ -93,17 +60,19 @@
 
 ```xml
 <!-- include: shared/ -->
-<script name="main">
-  <text>${shared.add(1, game.bonus)}</text>
-</script>
+<module name="main">
+  <script name="main">
+    <text>${shared.add(1, game.bonus)}</text>
+  </script>
+</module>
 ```
 
 规则：
-- 允许在 `.script.xml`、`.defs.xml` 和 `.module.xml` 中声明 include。
+- 允许在 `*.xml` 模块文件中声明 include。
 - 路径相对当前文件。
 - `<!-- include: file.ext -->` 表示单文件 include，保持现有行为。
 - `<!-- include: dir/ -->` 用尾随 `/` 表示目录 include。
-- 目录 include 会递归纳入该目录及其子目录下所有 `*.script.xml`、`*.defs.xml`、`*.module.xml`、`*.json`。
+- 目录 include 会递归纳入该目录及其子目录下所有 `*.xml`、`*.json`。
 - 目录展开顺序按规范化相对路径字典序固定，保证结果稳定。
 - 目录 include 只会在当前编译输入的虚拟文件集合内展开，不会直接扫描真实文件系统。
 - include 缺失、目录未匹配到任何受支持源码文件、或循环依赖都会编译报错。
@@ -112,12 +81,14 @@
 
 ## 3.1 `name`（必填）
 
-普通 `*.script.xml` 中，脚本名按原样注册，全工程必须唯一。
+`name` 是脚本的局部名；对外编译名是 `moduleName.name`。
 
 ```xml
-<script name="main">
-  <text>Main</text>
-</script>
+<module name="main">
+  <script name="main">
+    <text>Main</text>
+  </script>
+</module>
 ```
 
 ## 3.2 `args`（可选）
@@ -559,8 +530,8 @@ module 相关规则与 `<call>` 相同：
 规则：
 - `name` 必填，且在同一 module 下不能重复。
 - 同名局部脚本可以存在于不同 module 中，例如 `a.main` 和 `b.main` 可以共存。
-- module 内 `<script>` 的正文语法，与普通 `*.script.xml` 的 `<script>` 完全一致。
-- 只要某脚本所在的 `.module.xml` 被 include，该脚本天然看到同文件同 module 的 `type/function/var`。
+- module 内 `<script>` 的正文语法，与本文其他 `<script>` 节点语法完全一致。
+- 只要某个 `*.xml` 模块文件被 include，该模块内脚本天然看到同文件同 module 的 `type/function/var`。
 
 ## 8. JSON 全局可见性语法点
 
@@ -658,10 +629,11 @@ JSON 全局符号必须在 include 闭包内可见，否则编译失败。
 ## 11. 综合示例
 
 ```xml
-<!-- include: shared.defs.xml -->
+<!-- include: shared.xml -->
 <!-- include: game.json -->
-<script name="main" args="string:name">
-  <var name="hp" type="int">3</var>
+<module name="main">
+  <script name="main" args="string:name">
+    <var name="hp" type="int">3</var>
   <text once="true">你好，${name}</text>
 
   <loop times="2">
@@ -677,11 +649,12 @@ JSON 全局符号必须在 include 闭包内可见，否则编译失败。
         <continue/>
       </option>
       <option text="结束" fall_over="true">
-        <return script="result" args="name, hp"/>
+        <return script="main.result" args="name, hp"/>
       </option>
     </choice>
   </while>
-</script>
+  </script>
+</module>
 ```
 
 ## 12. 参考

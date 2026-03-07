@@ -6,11 +6,11 @@ pub(crate) fn parse_defs_files(
     let mut defs_by_path = BTreeMap::new();
 
     for (file_path, source) in sources {
-        if !matches!(source.kind, SourceKind::DefsXml | SourceKind::ModuleXml) {
+        if !matches!(source.kind, SourceKind::ModuleXml) {
             continue;
         }
 
-        let module = parse_module_source(source, file_path, false)?;
+        let module = parse_module_source(source, file_path)?;
         defs_by_path.insert(file_path.clone(), module.defs);
     }
 
@@ -27,7 +27,7 @@ pub(crate) fn parse_module_scripts(
             continue;
         }
 
-        let module = parse_module_source(source, file_path, true)?;
+        let module = parse_module_source(source, file_path)?;
         scripts_by_path.insert(file_path.clone(), module.scripts);
     }
 
@@ -37,39 +37,28 @@ pub(crate) fn parse_module_scripts(
 fn parse_module_source(
     source: &SourceFile,
     file_path: &str,
-    validate_scripts: bool,
 ) -> Result<ModuleDeclarations, ScriptLangError> {
+    if !matches!(source.kind, SourceKind::ModuleXml) {
+        return Err(ScriptLangError::new(
+            "SOURCE_KIND_UNSUPPORTED",
+            format!(
+                "Unsupported source kind for module parsing in file \"{}\".",
+                file_path
+            ),
+        ));
+    }
+
     let root = source
         .xml_root
         .as_ref()
-        .expect("script/defs/module sources should always carry parsed xml root");
+        .expect("module sources should always carry parsed xml root");
 
-    let (expected_root, child_error_code, namespace_label, allow_scripts) = match source.kind {
-        SourceKind::DefsXml => ("defs", "XML_DEFS_CHILD_INVALID", "defs", false),
-        SourceKind::ModuleXml => ("module", "XML_MODULE_CHILD_INVALID", "module", true),
-        _ => {
-            return Err(ScriptLangError::new(
-                "SOURCE_KIND_UNSUPPORTED",
-                format!(
-                    "Unsupported source kind for module parsing in file \"{}\".",
-                    file_path
-                ),
-            ))
-        }
-    };
-
-    if root.name != expected_root {
+    if root.name != "module" {
         return Err(ScriptLangError::with_span(
             "XML_ROOT_INVALID",
             format!(
-                "Expected <{}> root in file \"{}\"{}",
-                expected_root,
-                file_path,
-                if expected_root == "defs" {
-                    ".".to_string()
-                } else {
-                    format!(", got <{}>.", root.name)
-                }
+                "Expected <module> root in file \"{}\", got <{}>.",
+                file_path, root.name
             ),
             root.location.clone(),
         ));
@@ -77,7 +66,7 @@ fn parse_module_source(
 
     let namespace = get_required_non_empty_attr(root, "name")
         .map_err(|error| with_file_context(error, file_path))?;
-    assert_name_not_reserved(&namespace, namespace_label, root.location.clone())
+    assert_name_not_reserved(&namespace, "module", root.location.clone())
         .map_err(|error| with_file_context(error, file_path))?;
 
     let mut type_decls = Vec::new();
@@ -101,7 +90,7 @@ fn parse_module_source(
                 parse_defs_global_var_declaration(child, &namespace)
                     .map_err(|error| with_file_context(error, file_path))?,
             ),
-            "script" if allow_scripts && validate_scripts => {
+            "script" => {
                 let script_name = get_required_non_empty_attr(child, "name")
                     .map_err(|error| with_file_context(error, file_path))?;
                 assert_name_not_reserved(&script_name, "script", child.location.clone())
@@ -111,11 +100,10 @@ fn parse_module_source(
                     root: child.clone(),
                 });
             }
-            "script" if allow_scripts => {}
             _ => {
                 return Err(with_file_context(
                     ScriptLangError::with_span(
-                        child_error_code,
+                        "XML_MODULE_CHILD_INVALID",
                         format!("Unsupported child <{}> under <{}>.", child.name, root.name),
                         child.location.clone(),
                     ),
@@ -656,8 +644,8 @@ mod defs_resolver_tests {
             defs_global_var_decls: Vec::new(),
         };
 
-        let reachable = BTreeSet::from(["shared.defs.xml".to_string()]);
-        let defs_by_path = BTreeMap::from([("shared.defs.xml".to_string(), defs)]);
+        let reachable = BTreeSet::from(["shared.xml".to_string()]);
+        let defs_by_path = BTreeMap::from([("shared.xml".to_string(), defs)]);
 
         let (types, functions, defs_globals) =
             resolve_visible_defs(&reachable, &defs_by_path).expect("defs should resolve");
@@ -687,18 +675,17 @@ mod defs_resolver_tests {
             defs_global_var_decls: Vec::new(),
         };
         let duplicate_defs_by_path = BTreeMap::from([
-            ("a.defs.xml".to_string(), duplicate_qualified.clone()),
-            ("b.defs.xml".to_string(), duplicate_qualified),
+            ("a.xml".to_string(), duplicate_qualified.clone()),
+            ("b.xml".to_string(), duplicate_qualified),
         ]);
-        let duplicate_reachable =
-            BTreeSet::from(["a.defs.xml".to_string(), "b.defs.xml".to_string()]);
+        let duplicate_reachable = BTreeSet::from(["a.xml".to_string(), "b.xml".to_string()]);
         let duplicate_error = resolve_visible_defs(&duplicate_reachable, &duplicate_defs_by_path)
             .expect_err("duplicate qualified type should fail");
         assert_eq!(duplicate_error.code, "TYPE_DECL_DUPLICATE");
 
         let defs_by_path = BTreeMap::from([
             (
-                "a.defs.xml".to_string(),
+                "a.xml".to_string(),
                 DefsDeclarations {
                     type_decls: Vec::new(),
                     function_decls: vec![ParsedFunctionDecl {
@@ -717,7 +704,7 @@ mod defs_resolver_tests {
                 },
             ),
             (
-                "b.defs.xml".to_string(),
+                "b.xml".to_string(),
                 DefsDeclarations {
                     type_decls: Vec::new(),
                     function_decls: vec![ParsedFunctionDecl {
@@ -736,7 +723,7 @@ mod defs_resolver_tests {
                 },
             ),
         ]);
-        let reachable = BTreeSet::from(["a.defs.xml".to_string(), "b.defs.xml".to_string()]);
+        let reachable = BTreeSet::from(["a.xml".to_string(), "b.xml".to_string()]);
         let (_types, functions, defs_globals) =
             resolve_visible_defs(&reachable, &defs_by_path).expect("defs should resolve");
         assert!(functions.contains_key("a.doit"));
@@ -758,14 +745,14 @@ mod defs_resolver_tests {
         };
 
         let unique_defs = BTreeMap::from([(
-            "a.defs.xml".to_string(),
+            "a.xml".to_string(),
             DefsDeclarations {
                 type_decls: Vec::new(),
                 function_decls: Vec::new(),
                 defs_global_var_decls: vec![make_decl("a", "hp")],
             },
         )]);
-        let unique_reachable = BTreeSet::from(["a.defs.xml".to_string()]);
+        let unique_reachable = BTreeSet::from(["a.xml".to_string()]);
         let (_types, _functions, unique_globals) =
             resolve_visible_defs(&unique_reachable, &unique_defs).expect("defs should resolve");
         assert!(unique_globals.contains_key("a.hp"));
@@ -780,7 +767,7 @@ mod defs_resolver_tests {
 
         let collision_defs = BTreeMap::from([
             (
-                "a.defs.xml".to_string(),
+                "a.xml".to_string(),
                 DefsDeclarations {
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
@@ -788,7 +775,7 @@ mod defs_resolver_tests {
                 },
             ),
             (
-                "b.defs.xml".to_string(),
+                "b.xml".to_string(),
                 DefsDeclarations {
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
@@ -796,8 +783,7 @@ mod defs_resolver_tests {
                 },
             ),
         ]);
-        let collision_reachable =
-            BTreeSet::from(["a.defs.xml".to_string(), "b.defs.xml".to_string()]);
+        let collision_reachable = BTreeSet::from(["a.xml".to_string(), "b.xml".to_string()]);
         let (_types, _functions, collision_globals) =
             resolve_visible_defs(&collision_reachable, &collision_defs)
                 .expect("defs should resolve");
@@ -810,19 +796,21 @@ mod defs_resolver_tests {
     fn compile_bundle_rejects_defs_global_forward_reference() {
         let files = map(&[
             (
-                "shared.defs.xml",
+                "shared.xml",
                 r#"
-<defs name="shared">
+<module name="shared">
   <var name="a" type="int">b + 1</var>
   <var name="b" type="int">1</var>
-</defs>
+</module>
 "#,
             ),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- include: shared.xml -->
+<module name="main">
 <script name="main"><text>ok</text></script>
+</module>
 "#,
             ),
         ]);
@@ -836,19 +824,21 @@ mod defs_resolver_tests {
     fn compile_bundle_allows_defs_global_reference_to_initialized_symbol() {
         let files = map(&[
             (
-                "shared.defs.xml",
+                "shared.xml",
                 r#"
-<defs name="shared">
+<module name="shared">
   <var name="b" type="int">1</var>
   <var name="a" type="int">b + 1</var>
-</defs>
+</module>
 "#,
             ),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- include: shared.xml -->
+<module name="main">
 <script name="main"><text>ok</text></script>
+</module>
 "#,
             ),
         ]);
@@ -863,14 +853,16 @@ mod defs_resolver_tests {
     fn parse_defs_global_var_rejects_value_attr_and_child_elements() {
         let files_with_value = map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int" value="1"/></defs>"#,
+                "shared.xml",
+                r#"<module name="shared"><var name="hp" type="int" value="1"/></module>"#,
             ),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- include: shared.xml -->
+<module name="main">
 <script name="main"><text>ok</text></script>
+</module>
 "#,
             ),
         ]);
@@ -880,14 +872,16 @@ mod defs_resolver_tests {
 
         let files_with_child = map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int"><text>1</text></var></defs>"#,
+                "shared.xml",
+                r#"<module name="shared"><var name="hp" type="int"><text>1</text></var></module>"#,
             ),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- include: shared.xml -->
+<module name="main">
 <script name="main"><text>ok</text></script>
+</module>
 "#,
             ),
         ]);
@@ -900,12 +894,12 @@ mod defs_resolver_tests {
     fn defs_global_resolution_rejects_duplicates_and_allows_empty_initializer() {
         let duplicate_types_bundle = map(&[
             (
-                "a.defs.xml",
-                r#"<defs name="shared"><type name="T"><field name="v" type="int"/></type></defs>"#,
+                "a.xml",
+                r#"<module name="shared"><type name="T"><field name="v" type="int"/></type></module>"#,
             ),
             (
-                "b.defs.xml",
-                r#"<defs name="shared"><type name="T"><field name="v" type="int"/></type></defs>"#,
+                "b.xml",
+                r#"<module name="shared"><type name="T"><field name="v" type="int"/></type></module>"#,
             ),
         ]);
         let duplicate_types_error = compile_project_bundle_from_xml_map(&duplicate_types_bundle)
@@ -914,12 +908,12 @@ mod defs_resolver_tests {
 
         let duplicate_globals_bundle = map(&[
             (
-                "a.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int">1</var></defs>"#,
+                "a.xml",
+                r#"<module name="shared"><var name="hp" type="int">1</var></module>"#,
             ),
             (
-                "b.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int">2</var></defs>"#,
+                "b.xml",
+                r#"<module name="shared"><var name="hp" type="int">2</var></module>"#,
             ),
         ]);
         let duplicate_globals_error =
@@ -929,14 +923,16 @@ mod defs_resolver_tests {
 
         let empty_initializer = map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int"/></defs>"#,
+                "shared.xml",
+                r#"<module name="shared"><var name="hp" type="int"/></module>"#,
             ),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- include: shared.xml -->
+<module name="main">
 <script name="main"><text>${shared.hp}</text></script>
+</module>
 "#,
             ),
         ]);
@@ -961,7 +957,7 @@ mod defs_resolver_tests {
         };
         let defs_by_path = BTreeMap::from([
             (
-                "a.defs.xml".to_string(),
+                "a.xml".to_string(),
                 DefsDeclarations {
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
@@ -969,7 +965,7 @@ mod defs_resolver_tests {
                 },
             ),
             (
-                "b.defs.xml".to_string(),
+                "b.xml".to_string(),
                 DefsDeclarations {
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
@@ -977,7 +973,7 @@ mod defs_resolver_tests {
                 },
             ),
         ]);
-        let reachable = BTreeSet::from(["a.defs.xml".to_string(), "b.defs.xml".to_string()]);
+        let reachable = BTreeSet::from(["a.xml".to_string(), "b.xml".to_string()]);
         let error = resolve_visible_defs(&reachable, &defs_by_path)
             .expect_err("duplicate defs global should fail");
         assert_eq!(error.code, "DEFS_GLOBAL_VAR_DUPLICATE");
@@ -998,25 +994,30 @@ mod defs_resolver_tests {
 
     #[test]
     fn defs_and_type_resolution_helpers_cover_duplicate_and_recursive_errors() {
-        let bad_defs = map(&[("x.defs.xml", "<script name=\"x\"></script>")]);
+        let bad_defs = BTreeMap::from([(
+            "x.xml".to_string(),
+            "<script name=\"x\"></script>".to_string(),
+        )]);
         let error = compile_project_bundle_from_xml_map(&bad_defs).expect_err("bad defs root");
         assert_eq!(error.code, "XML_ROOT_INVALID");
 
         let duplicate_types = map(&[
             (
-                "a.defs.xml",
-                r#"<defs name="a"><type name="T"><field name="v" type="int"/></type></defs>"#,
+                "a.xml",
+                r#"<module name="a"><type name="T"><field name="v" type="int"/></type></module>"#,
             ),
             (
-                "b.defs.xml",
-                r#"<defs name="b"><type name="T"><field name="v" type="int"/></type></defs>"#,
+                "b.xml",
+                r#"<module name="b"><type name="T"><field name="v" type="int"/></type></module>"#,
             ),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
-    <!-- include: a.defs.xml -->
-    <!-- include: b.defs.xml -->
-    <script name="main"><var name="v" type="T"/></script>
+    <!-- include: a.xml -->
+    <!-- include: b.xml -->
+    <module name="main">
+<script name="main"><var name="v" type="T"/></script>
+</module>
     "#,
             ),
         ]);
@@ -1026,14 +1027,16 @@ mod defs_resolver_tests {
 
         let recursive = map(&[
             (
-                "x.defs.xml",
-                r#"<defs name="x"><type name="A"><field name="b" type="B"/></type><type name="B"><field name="a" type="A"/></type></defs>"#,
+                "x.xml",
+                r#"<module name="x"><type name="A"><field name="b" type="B"/></type><type name="B"><field name="a" type="A"/></type></module>"#,
             ),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
-    <!-- include: x.defs.xml -->
-    <script name="main"><var name="v" type="A"/></script>
+    <!-- include: x.xml -->
+    <module name="main">
+<script name="main"><var name="v" type="A"/></script>
+</module>
     "#,
             ),
         ]);
@@ -1047,42 +1050,44 @@ mod defs_resolver_tests {
         // Test defs function parsing (covers line 40)
         let files = map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared">
+                "shared.xml",
+                r#"<module name="shared">
   <function name="add" args="int:a,int:b" return="int:result">
     result = a + b;
   </function>
-</defs>"#,
+</module>"#,
             ),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- include: shared.xml -->
+<module name="main">
 <script name="main">
   <code>let x = shared.add(1, 2);</code>
   <text>${x}</text>
 </script>
+</module>
 "#,
             ),
         ]);
         let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
-        assert!(bundle.scripts.contains_key("main"));
+        assert!(bundle.scripts.contains_key("main.main"));
     }
 
     #[test]
     fn parse_defs_files_and_type_resolution_success_paths_are_covered() {
         let files = map(&[(
-            "shared.defs.xml",
-            r#"<defs name="shared">
+            "shared.xml",
+            r#"<module name="shared">
   <type name="Obj"><field name="value" type="int"/></type>
   <function name="make" args="int:seed" return="Obj:ret">
     ret = #{ value: seed };
   </function>
-</defs>"#,
+</module>"#,
         )]);
         let sources = parse_sources(&files).expect("parse sources");
         let defs_by_path = parse_defs_files(&sources).expect("parse defs");
-        let reachable = BTreeSet::from(["shared.defs.xml".to_string()]);
+        let reachable = BTreeSet::from(["shared.xml".to_string()]);
         let (types, functions, _) =
             resolve_visible_defs(&reachable, &defs_by_path).expect("resolve defs");
         assert!(types.contains_key("shared.Obj"));
@@ -1092,25 +1097,23 @@ mod defs_resolver_tests {
     #[test]
     fn parse_defs_files_attaches_file_path_for_defs_errors() {
         let files = map(&[(
-            "bad.defs.xml",
-            r#"<defs name="shared">
+            "bad.xml",
+            r#"<module name="shared">
   <oops/>
-</defs>"#,
+</module>"#,
         )]);
         let sources = parse_sources(&files).expect("parse sources");
         let error = parse_defs_files(&sources).expect_err("defs parse should fail");
-        assert_eq!(error.code, "XML_DEFS_CHILD_INVALID");
-        assert!(error.message.contains("In file \"bad.defs.xml\":"));
+        assert_eq!(error.code, "XML_MODULE_CHILD_INVALID");
+        assert!(error.message.contains("In file \"bad.xml\":"));
     }
 
     #[test]
     fn with_file_context_preserves_file_name_and_sets_synthetic_span_when_missing() {
         let error = ScriptLangError::new("SOME_CODE", "boom");
-        let wrapped = with_file_context(error, "broken.defs.xml");
+        let wrapped = with_file_context(error, "broken.xml");
         assert_eq!(wrapped.code, "SOME_CODE");
-        assert!(wrapped
-            .message
-            .contains("In file \"broken.defs.xml\": boom"));
+        assert!(wrapped.message.contains("In file \"broken.xml\": boom"));
         let span = wrapped.span.expect("span should be present");
         assert_eq!(span.start.line, 1);
         assert_eq!(span.start.column, 1);
@@ -1120,36 +1123,39 @@ mod defs_resolver_tests {
 
     #[test]
     fn parse_defs_files_wraps_attr_reserved_and_function_parse_errors_with_file_context() {
-        let missing_name = map(&[("missing-name.defs.xml", r#"<defs></defs>"#)]);
-        let missing_name_sources = parse_sources(&missing_name).expect("parse sources");
+        let missing_name_sources = parse_sources(&BTreeMap::from([(
+            "missing-name.xml".to_string(),
+            "<module></module>".to_string(),
+        )]))
+        .expect("parse sources");
         let missing_name_error =
             parse_defs_files(&missing_name_sources).expect_err("missing name should fail");
         assert!(missing_name_error
             .message
-            .contains("In file \"missing-name.defs.xml\":"));
+            .contains("In file \"missing-name.xml\":"));
 
-        let reserved_name = map(&[("reserved.defs.xml", r#"<defs name="__sl_bad"></defs>"#)]);
+        let reserved_name = map(&[("reserved.xml", r#"<module name="__sl_bad"></module>"#)]);
         let reserved_name_sources = parse_sources(&reserved_name).expect("parse sources");
         let reserved_name_error =
             parse_defs_files(&reserved_name_sources).expect_err("reserved name should fail");
         assert!(reserved_name_error
             .message
-            .contains("In file \"reserved.defs.xml\":"));
+            .contains("In file \"reserved.xml\":"));
 
         let bad_function = map(&[(
-            "bad-function.defs.xml",
-            r#"<defs name="shared">
+            "bad-function.xml",
+            r#"<module name="shared">
   <function name="bad" args="int:a" return="int">
     a = a + 1;
   </function>
-</defs>"#,
+</module>"#,
         )]);
         let bad_function_sources = parse_sources(&bad_function).expect("parse sources");
         let bad_function_error =
             parse_defs_files(&bad_function_sources).expect_err("bad function should fail");
         assert!(bad_function_error
             .message
-            .contains("In file \"bad-function.defs.xml\":"));
+            .contains("In file \"bad-function.xml\":"));
     }
 
     #[test]
@@ -1214,7 +1220,7 @@ mod defs_resolver_tests {
     fn resolve_visible_defs_error_propagation_and_alias_paths_are_covered() {
         let span = SourceSpan::synthetic();
         let defs_with_alias = BTreeMap::from([(
-            "one.defs.xml".to_string(),
+            "one.xml".to_string(),
             DefsDeclarations {
                 type_decls: vec![ParsedTypeDecl {
                     name: "Obj".to_string(),
@@ -1252,7 +1258,7 @@ mod defs_resolver_tests {
                 }],
             },
         )]);
-        let reachable = BTreeSet::from(["one.defs.xml".to_string()]);
+        let reachable = BTreeSet::from(["one.xml".to_string()]);
         let (types, functions, defs_globals) =
             resolve_visible_defs(&reachable, &defs_with_alias).expect("resolve aliases");
         assert!(types.contains_key("Obj"));
@@ -1268,7 +1274,7 @@ mod defs_resolver_tests {
         );
 
         let defs_for_bundle = BTreeMap::from([(
-            "bundle.defs.xml".to_string(),
+            "bundle.xml".to_string(),
             DefsDeclarations {
                 type_decls: vec![ParsedTypeDecl {
                     name: "T".to_string(),
@@ -1297,7 +1303,7 @@ mod defs_resolver_tests {
         assert_eq!(init_order, vec!["bundle.item".to_string()]);
 
         let bad_type_decl = BTreeMap::from([(
-            "bad_type.defs.xml".to_string(),
+            "bad_type.xml".to_string(),
             DefsDeclarations {
                 type_decls: vec![ParsedTypeDecl {
                     name: "Broken".to_string(),
@@ -1313,13 +1319,13 @@ mod defs_resolver_tests {
                 defs_global_var_decls: Vec::new(),
             },
         )]);
-        let reachable = BTreeSet::from(["bad_type.defs.xml".to_string()]);
+        let reachable = BTreeSet::from(["bad_type.xml".to_string()]);
         let error = resolve_visible_defs(&reachable, &bad_type_decl)
             .expect_err("type resolution in visible loop should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
 
         let alias_already_exists = BTreeMap::from([(
-            "alias.defs.xml".to_string(),
+            "alias.xml".to_string(),
             DefsDeclarations {
                 type_decls: Vec::new(),
                 function_decls: vec![ParsedFunctionDecl {
@@ -1337,14 +1343,14 @@ mod defs_resolver_tests {
                 defs_global_var_decls: Vec::new(),
             },
         )]);
-        let reachable = BTreeSet::from(["alias.defs.xml".to_string()]);
+        let reachable = BTreeSet::from(["alias.xml".to_string()]);
         let (_types, alias_functions, _defs_globals) =
             resolve_visible_defs(&reachable, &alias_already_exists)
                 .expect("existing alias key should skip insertion branch");
         assert!(alias_functions.contains_key("make"));
 
         let bad_param = BTreeMap::from([(
-            "bad.defs.xml".to_string(),
+            "bad.xml".to_string(),
             DefsDeclarations {
                 type_decls: Vec::new(),
                 function_decls: vec![ParsedFunctionDecl {
@@ -1366,13 +1372,13 @@ mod defs_resolver_tests {
                 defs_global_var_decls: Vec::new(),
             },
         )]);
-        let reachable = BTreeSet::from(["bad.defs.xml".to_string()]);
+        let reachable = BTreeSet::from(["bad.xml".to_string()]);
         let error = resolve_visible_defs(&reachable, &bad_param)
             .expect_err("function param type should resolve");
         assert_eq!(error.code, "TYPE_UNKNOWN");
 
         let bad_return = BTreeMap::from([(
-            "bad.defs.xml".to_string(),
+            "bad.xml".to_string(),
             DefsDeclarations {
                 type_decls: Vec::new(),
                 function_decls: vec![ParsedFunctionDecl {
@@ -1390,13 +1396,13 @@ mod defs_resolver_tests {
                 defs_global_var_decls: Vec::new(),
             },
         )]);
-        let reachable = BTreeSet::from(["bad.defs.xml".to_string()]);
+        let reachable = BTreeSet::from(["bad.xml".to_string()]);
         let error = resolve_visible_defs(&reachable, &bad_return)
             .expect_err("function return type should resolve");
         assert_eq!(error.code, "TYPE_UNKNOWN");
 
         let bad_global_type = BTreeMap::from([(
-            "bad.defs.xml".to_string(),
+            "bad.xml".to_string(),
             DefsDeclarations {
                 type_decls: Vec::new(),
                 function_decls: Vec::new(),
@@ -1410,7 +1416,7 @@ mod defs_resolver_tests {
                 }],
             },
         )]);
-        let reachable = BTreeSet::from(["bad.defs.xml".to_string()]);
+        let reachable = BTreeSet::from(["bad.xml".to_string()]);
         let error = resolve_visible_defs(&reachable, &bad_global_type)
             .expect_err("defs global type should resolve");
         assert_eq!(error.code, "TYPE_UNKNOWN");
@@ -1446,37 +1452,17 @@ mod defs_resolver_tests {
 
     #[test]
     fn parse_module_helpers_cover_module_specific_paths() {
-        let sources = parse_sources(&compiler_test_support::map(&[
-            (
-                "battle.module.xml",
-                r#"<module name="battle"><script name="main"><text>x</text></script></module>"#,
-            ),
-            (
-                "main.script.xml",
-                r#"<script name="main"><text>x</text></script>"#,
-            ),
-        ]))
+        let sources = parse_sources(&compiler_test_support::map(&[(
+            "battle.xml",
+            r#"<module name="battle"><script name="main"><text>x</text></script></module>"#,
+        )]))
         .expect("sources should parse");
 
         let module_scripts = parse_module_scripts(&sources).expect("module scripts should parse");
-        assert_eq!(module_scripts["battle.module.xml"].len(), 1);
+        assert_eq!(module_scripts["battle.xml"].len(), 1);
         assert!(parse_defs_files(&sources).is_ok());
 
-        let bad_defs = SourceFile {
-            kind: SourceKind::DefsXml,
-            includes: Vec::new(),
-            xml_root: Some(compiler_test_support::xml_element(
-                "module",
-                &[("name", "x")],
-                Vec::new(),
-            )),
-            json_value: None,
-        };
-        let bad_defs_error = parse_module_source(&bad_defs, "bad.defs.xml", false)
-            .expect_err("defs root should fail");
-        assert_eq!(bad_defs_error.code, "XML_ROOT_INVALID");
-
-        let bad_module = SourceFile {
+        let bad_root = SourceFile {
             kind: SourceKind::ModuleXml,
             includes: Vec::new(),
             xml_root: Some(compiler_test_support::xml_element(
@@ -1486,9 +1472,9 @@ mod defs_resolver_tests {
             )),
             json_value: None,
         };
-        let bad_module_error = parse_module_source(&bad_module, "bad.module.xml", true)
-            .expect_err("module root should fail");
-        assert_eq!(bad_module_error.code, "XML_ROOT_INVALID");
+        let bad_root_error =
+            parse_module_source(&bad_root, "bad.xml").expect_err("module root should fail");
+        assert_eq!(bad_root_error.code, "XML_ROOT_INVALID");
 
         let reserved_script = SourceFile {
             kind: SourceKind::ModuleXml,
@@ -1504,9 +1490,8 @@ mod defs_resolver_tests {
             )),
             json_value: None,
         };
-        let reserved_script_error =
-            parse_module_source(&reserved_script, "battle.module.xml", true)
-                .expect_err("reserved module script should fail");
+        let reserved_script_error = parse_module_source(&reserved_script, "battle.xml")
+            .expect_err("reserved module script should fail");
         assert_eq!(reserved_script_error.code, "NAME_RESERVED_PREFIX");
 
         let missing_script_name = SourceFile {
@@ -1523,28 +1508,22 @@ mod defs_resolver_tests {
             )),
             json_value: None,
         };
-        let missing_script_name_error =
-            parse_module_source(&missing_script_name, "battle.module.xml", true)
-                .expect_err("module script name should be required");
+        let missing_script_name_error = parse_module_source(&missing_script_name, "battle.xml")
+            .expect_err("module script name should be required");
         assert_eq!(missing_script_name_error.code, "XML_MISSING_ATTR");
 
         let unsupported_kind = SourceFile {
-            kind: SourceKind::ScriptXml,
+            kind: SourceKind::Json,
             includes: Vec::new(),
-            xml_root: Some(compiler_test_support::xml_element(
-                "script",
-                &[("name", "main")],
-                Vec::new(),
-            )),
-            json_value: None,
+            xml_root: None,
+            json_value: Some(SlValue::Bool(false)),
         };
-        let unsupported_kind_error =
-            parse_module_source(&unsupported_kind, "main.script.xml", true)
-                .expect_err("script source kind should fail");
+        let unsupported_kind_error = parse_module_source(&unsupported_kind, "main.json")
+            .expect_err("json source kind should fail");
         assert_eq!(unsupported_kind_error.code, "SOURCE_KIND_UNSUPPORTED");
 
         let bad_module_sources = BTreeMap::from([(
-            "bad.module.xml".to_string(),
+            "bad.xml".to_string(),
             SourceFile {
                 kind: SourceKind::ModuleXml,
                 includes: Vec::new(),

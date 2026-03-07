@@ -1,0 +1,5 @@
+<module name="shared">
+  <function name="boost" args="int:x" return="int:out">
+    out = x + 2;
+  </function>
+</module>

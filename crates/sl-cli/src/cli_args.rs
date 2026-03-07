@@ -46,10 +46,10 @@ pub(crate) enum AgentCommand {
 #[derive(Debug, Args)]
 pub(crate) struct StartArgs {
     #[arg(long = "scripts-dir")]
-    #[arg(help = "Directory containing *.script.xml / *.defs.xml / *.json")]
+    #[arg(help = "Directory containing *.xml / *.json")]
     pub(crate) scripts_dir: String,
     #[arg(long = "entry-script")]
-    #[arg(help = "Entry script name (default: main)")]
+    #[arg(help = "Entry script name (default: main.main)")]
     pub(crate) entry_script: Option<String>,
     #[arg(long = "state-out")]
     #[arg(help = "Path to write player state json")]
@@ -106,10 +106,10 @@ pub(crate) struct InputArgs {
 )]
 pub(crate) struct ReplayArgs {
     #[arg(long = "scripts-dir")]
-    #[arg(help = "Directory containing *.script.xml / *.defs.xml / *.json")]
+    #[arg(help = "Directory containing *.xml / *.json")]
     pub(crate) scripts_dir: String,
     #[arg(long = "entry-script")]
-    #[arg(help = "Entry script name (default: main)")]
+    #[arg(help = "Entry script name (default: main.main)")]
     pub(crate) entry_script: Option<String>,
     #[arg(long = "step")]
     #[arg(help = "Replay action: choose:<index> or input:<text>. Repeat to build a queue")]
@@ -126,10 +126,10 @@ pub(crate) struct ReplayArgs {
 #[command(about = "Interactive TUI mode (auto-fallback to line mode in non-TTY/test env)")]
 pub(crate) struct TuiArgs {
     #[arg(long = "scripts-dir")]
-    #[arg(help = "Directory containing *.script.xml / *.defs.xml / *.json")]
+    #[arg(help = "Directory containing *.xml / *.json")]
     pub(crate) scripts_dir: String,
     #[arg(long = "entry-script")]
-    #[arg(help = "Entry script name (default: main)")]
+    #[arg(help = "Entry script name (default: main.main)")]
     pub(crate) entry_script: Option<String>,
     #[arg(long = "state-file")]
     #[arg(help = "Path to save/load state (default: .scriptlang/save.json)")]
@@ -145,10 +145,10 @@ pub(crate) struct TuiArgs {
 #[derive(Debug, Args)]
 pub(crate) struct CompileArgs {
     #[arg(long = "scripts-dir")]
-    #[arg(help = "Directory containing *.script.xml / *.defs.xml / *.json")]
+    #[arg(help = "Directory containing *.xml / *.json")]
     pub(crate) scripts_dir: String,
     #[arg(long = "entry-script")]
-    #[arg(help = "Entry script name (default: main)")]
+    #[arg(help = "Entry script name (default: main.main)")]
     pub(crate) entry_script: Option<String>,
     #[arg(long = "output", short = 'o')]
     #[arg(help = "Output path for artifact JSON (required if not --dry-run)")]

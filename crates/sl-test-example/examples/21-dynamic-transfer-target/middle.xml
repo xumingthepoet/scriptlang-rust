@@ -1,0 +1,7 @@
+<module name="middle">
+<script name="middle">
+  <var name="returnTarget" type="string">&quot;end.end&quot;</var>
+  <text>middle</text>
+  <return script="${returnTarget}"/>
+</script>
+</module>

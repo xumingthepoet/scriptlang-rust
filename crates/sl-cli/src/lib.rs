@@ -138,7 +138,7 @@ fn run_agent(args: AgentArgs) -> Result<i32, ScriptLangError> {
 }
 
 fn run_tui(args: TuiArgs) -> Result<i32, ScriptLangError> {
-    let entry_script = args.entry_script.unwrap_or("main".to_string());
+    let entry_script = args.entry_script.unwrap_or("main.main".to_string());
     let state_file = args
         .state_file
         .unwrap_or(".scriptlang/save.json".to_string());
@@ -191,39 +191,42 @@ pub(crate) mod cli_test_support {
         match example {
             "01-text-code" => {
                 write_file(
-                    &root.join("main.script.xml"),
+                    &root.join("main.xml"),
                     r#"
+<module name="main">
 <script name="main">
   <var name="count" type="int">1</var>
   <text>Scenario 01: text + code</text>
   <code>count = count + 1;</code>
   <text>count=${count}</text>
 </script>
-"#,
+</module>"#,
                 );
             }
             "06-snapshot-flow" => {
                 write_file(
-                    &root.join("main.script.xml"),
+                    &root.join("main.xml"),
                     r#"
+<module name="main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
   </choice>
 </script>
-"#,
+</module>"#,
                 );
             }
             "16-input-name" => {
                 write_file(
-                    &root.join("main.script.xml"),
+                    &root.join("main.xml"),
                     r#"
+<module name="main">
 <script name="main">
   <var name="name" type="string">"Traveler"</var>
   <input var="name" text="Name"/>
   <text>${name}</text>
 </script>
-"#,
+</module>"#,
                 );
             }
             _ => panic!("unsupported test scenario: {}", example),
@@ -255,7 +258,7 @@ mod lib_tests {
             command: Mode::Agent(AgentArgs {
                 command: AgentCommand::Start(StartArgs {
                     scripts_dir: choice_scenario.clone(),
-                    entry_script: Some("main".to_string()),
+                    entry_script: Some("main.main".to_string()),
                     state_out: start_state.to_string_lossy().to_string(),
                     rand: None,
                     show_debug: false,
@@ -279,7 +282,7 @@ mod lib_tests {
 
         let input_start_code = agent::run_start(StartArgs {
             scripts_dir: input_scenario.clone(),
-            entry_script: Some("main".to_string()),
+            entry_script: Some("main.main".to_string()),
             state_out: input_state_1.to_string_lossy().to_string(),
             rand: None,
             show_debug: false,
@@ -300,7 +303,7 @@ mod lib_tests {
         let replay_code = run_agent(AgentArgs {
             command: AgentCommand::Replay(ReplayArgs {
                 scripts_dir: input_scenario.clone(),
-                entry_script: Some("main".to_string()),
+                entry_script: Some("main.main".to_string()),
                 step: vec!["input:Guild".to_string()],
                 rand: None,
                 show_debug: false,
@@ -311,7 +314,7 @@ mod lib_tests {
 
         let tui_code = run_tui(TuiArgs {
             scripts_dir: text_scenario,
-            entry_script: Some("main".to_string()),
+            entry_script: Some("main.main".to_string()),
             state_file: Some(tui_state_str.clone()),
             rand: None,
             show_debug: false,
@@ -319,10 +322,11 @@ mod lib_tests {
         .expect("tui should pass in line mode");
         assert_eq!(tui_code, 0);
 
-        let loaded = load_source_by_scripts_dir(&choice_scenario, "main").expect("load source");
+        let loaded =
+            load_source_by_scripts_dir(&choice_scenario, "main.main").expect("load source");
         let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
             scripts_xml: loaded.scripts_xml.clone(),
-            entry_script: Some("main".to_string()),
+            entry_script: Some("main.main".to_string()),
             entry_args: None,
             host_functions: None,
             random_seed: Some(1),
@@ -339,7 +343,7 @@ mod lib_tests {
             ":help",
             &tui_state_str,
             &loaded,
-            "main",
+            "main.main",
             None,
             &mut engine,
             &mut emit,
@@ -349,7 +353,7 @@ mod lib_tests {
         let context = TuiCommandContext {
             state_file: &tui_state_str,
             scenario: &loaded,
-            entry_script: "main",
+            entry_script: "main.main",
             random_sequence: None,
         };
         let action = handle_line_cmd(":quit", &context, &mut engine, &mut emit)

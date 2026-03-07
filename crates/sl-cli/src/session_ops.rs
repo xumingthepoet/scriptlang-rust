@@ -179,10 +179,10 @@ mod session_ops_tests {
     #[test]
     fn session_helpers_cover_create_save_load_and_emit_paths() {
         let scripts_dir = example_scripts_dir("06-snapshot-flow");
-        let scenario =
-            crate::load_source_by_scripts_dir(&scripts_dir, "main").expect("scenario should load");
+        let scenario = crate::load_source_by_scripts_dir(&scripts_dir, "main.main")
+            .expect("scenario should load");
 
-        let mut engine = create_engine_for_scenario(&scenario, "main", RandConfig::default())
+        let mut engine = create_engine_for_scenario(&scenario, "main.main", RandConfig::default())
             .expect("engine should build");
         let boundary = run_to_boundary(&mut engine, false).expect("boundary should resolve");
         let state_file = temp_path("session-ops-state.json");
@@ -223,10 +223,11 @@ mod session_ops_tests {
         let scenario_path = example_scripts_dir("06-snapshot-flow");
         let other_path = example_scripts_dir("16-input-name");
         let scenario =
-            crate::load_source_by_scripts_dir(&scenario_path, "main").expect("scenario load");
-        let other = crate::load_source_by_scripts_dir(&other_path, "main").expect("other load");
+            crate::load_source_by_scripts_dir(&scenario_path, "main.main").expect("scenario load");
+        let other =
+            crate::load_source_by_scripts_dir(&other_path, "main.main").expect("other load");
 
-        let mut engine = create_engine_for_scenario(&other, "main", RandConfig::default())
+        let mut engine = create_engine_for_scenario(&other, "main.main", RandConfig::default())
             .expect("engine build");
         let _ = run_to_boundary(&mut engine, false).expect("boundary");
         let state_file = temp_path("session-ops-mismatch-state.json");

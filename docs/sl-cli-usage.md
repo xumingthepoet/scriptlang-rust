@@ -45,7 +45,7 @@ cargo run -p sl-cli -- agent start \
 
 参数：
 - `--scripts-dir <path>`：脚本目录（必填）
-- `--entry-script <name>`：入口脚本，默认 `main`
+- `--entry-script <name>`：入口脚本，默认 `main.main`
 - `--state-out <path>`：状态输出文件（必填）
 - `--rand <csv>`：可选随机序列（例如 `12,3,1,4`）
 - `--show-debug`：显示 `<debug>` 输出（默认隐藏）
@@ -114,7 +114,7 @@ cargo run -p sl-cli -- agent replay \
 
 参数：
 - `--scripts-dir <path>`：脚本目录（必填）
-- `--entry-script <name>`：入口脚本，默认 `main`
+- `--entry-script <name>`：入口脚本，默认 `main.main`
 - `--step <action>`：可重复，按出现顺序消费
 - `--rand <csv>`：可选随机序列（例如 `12,3,1,4`）
 - `--show-debug`：显示 `<debug>` 输出（默认隐藏）
@@ -148,7 +148,7 @@ cargo run -p sl-cli -- agent compile \
 
 参数：
 - `--scripts-dir <path>`：脚本目录（必填）
-- `--entry-script <name>`：入口脚本，默认 `main`
+- `--entry-script <name>`：入口脚本，默认 `main.main`
 - `-o, --output <path>`：输出文件路径（非 dry-run 必填）
 - `--dry-run`：仅在内存中编译，不写入文件
 - `--rand <csv>`：可选随机序列（compile 命令中未使用，为保持一致性）
@@ -203,7 +203,7 @@ cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/06-snap
 
 参数：
 - `--scripts-dir <path>`：脚本目录（必填）
-- `--entry-script <name>`：入口脚本，默认 `main`
+- `--entry-script <name>`：入口脚本，默认 `main.main`
 - `--state-file <path>`：状态文件，默认 `.scriptlang/save.json`
 - `--rand <csv>`：可选随机序列（例如 `12,3,1,4`）
 - `--show-debug`：显示 `<debug>` 输出（默认隐藏）
@@ -259,8 +259,8 @@ cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/06-snap
 - 修复：把 `<` 写成 `&lt;`，把 `&&` 写成 `&amp;&amp;`
 
 2. `TYPE_UNKNOWN: Unknown custom type "game.WorldState"`
-- 常见原因：子脚本里用了类型，但该脚本自身没有 include 对应 `*.defs.xml`
-- 修复：在每个使用该类型的 `.script.xml`/`.defs.xml` 文件都显式 `<!-- include: ... -->`，或在该文件里 include 一个覆盖所需 defs 的目录（如 `<!-- include: shared/ -->`）
+- 常见原因：脚本所在模块没有 include 对应的 `*.xml` 定义文件
+- 修复：在每个使用该类型的模块文件里显式 `<!-- include: ... -->`，或 include 一个覆盖所需定义的目录（如 `<!-- include: shared/ -->`）
 
 3. `when` 字符串比较表达式异常
 - 常见原因：`when="..."` 中使用单引号字符串导致执行路径兼容性问题

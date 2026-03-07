@@ -1,0 +1,6 @@
+<module name="actors">
+  <type name="Combatant">
+    <field name="name" type="string"/>
+    <field name="hp" type="int"/>
+  </type>
+</module>

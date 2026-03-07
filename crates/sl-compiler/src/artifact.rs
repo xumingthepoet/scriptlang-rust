@@ -82,13 +82,13 @@ fn resolve_entry_script(
         return Ok(entry);
     }
 
-    if scripts.contains_key("main") {
-        return Ok("main".to_string());
+    if scripts.contains_key("main.main") {
+        return Ok("main.main".to_string());
     }
 
     Err(ScriptLangError::new(
         "ARTIFACT_ENTRY_MAIN_NOT_FOUND",
-        "Expected script with name=\"main\" as default entry.",
+        "Expected script with name=\"main.main\" as default entry.",
     ))
 }
 
@@ -109,22 +109,26 @@ mod artifact_tests {
     #[test]
     fn compile_artifact_from_xml_map_builds_v1_artifact() {
         let files = compiler_test_support::map(&[(
-            "main.script.xml",
-            r#"<script name="main"><text>Hello</text></script>"#,
+            "main.xml",
+            r#"<module name="main">
+<script name="main"><text>Hello</text></script>
+</module>"#,
         )]);
 
         let artifact = compile_artifact_from_xml_map(&files, None).expect("compile artifact");
         assert_eq!(artifact.schema_version, COMPILED_PROJECT_SCHEMA);
         assert_eq!(artifact.compiler_version, DEFAULT_COMPILER_VERSION);
-        assert_eq!(artifact.entry_script, "main");
-        assert!(artifact.scripts.contains_key("main"));
+        assert_eq!(artifact.entry_script, "main.main");
+        assert!(artifact.scripts.contains_key("main.main"));
     }
 
     #[test]
     fn compile_artifact_from_xml_map_validates_entry_script() {
         let files = compiler_test_support::map(&[(
-            "main.script.xml",
-            r#"<script name="main"><text>Hello</text></script>"#,
+            "main.xml",
+            r#"<module name="main">
+<script name="main"><text>Hello</text></script>
+</module>"#,
         )]);
 
         let error = compile_artifact_from_xml_map(&files, Some("missing".to_string()))
@@ -136,21 +140,27 @@ mod artifact_tests {
     fn compile_artifact_from_xml_map_accepts_explicit_entry_and_reports_missing_main() {
         let files = compiler_test_support::map(&[
             (
-                "main.script.xml",
-                r#"<script name="main"><text>Main</text></script>"#,
+                "main.xml",
+                r#"<module name="main">
+<script name="main"><text>Main</text></script>
+</module>"#,
             ),
             (
-                "alt.script.xml",
-                r#"<script name="alt"><text>Alt</text></script>"#,
+                "alt.xml",
+                r#"<module name="alt">
+<script name="alt"><text>Alt</text></script>
+</module>"#,
             ),
         ]);
-        let artifact = compile_artifact_from_xml_map(&files, Some("alt".to_string()))
+        let artifact = compile_artifact_from_xml_map(&files, Some("alt.alt".to_string()))
             .expect("explicit entry should pass");
-        assert_eq!(artifact.entry_script, "alt");
+        assert_eq!(artifact.entry_script, "alt.alt");
 
         let no_main = compiler_test_support::map(&[(
-            "alt.script.xml",
-            r#"<script name="alt"><text>Alt</text></script>"#,
+            "alt.xml",
+            r#"<module name="alt">
+<script name="alt"><text>Alt</text></script>
+</module>"#,
         )]);
         let error = compile_artifact_from_xml_map(&no_main, None)
             .expect_err("missing default main should fail");
@@ -159,7 +169,7 @@ mod artifact_tests {
 
     #[test]
     fn compile_artifact_from_xml_map_propagates_compile_errors() {
-        let files = compiler_test_support::map(&[("main.script.xml", "<script>")]);
+        let files = compiler_test_support::map(&[("main.xml", "<script>")]);
         let error = compile_artifact_from_xml_map(&files, None)
             .expect_err("invalid xml should fail compile");
         assert_eq!(error.code, "XML_PARSE_ERROR");
@@ -168,8 +178,10 @@ mod artifact_tests {
     #[test]
     fn write_and_read_artifact_json_roundtrip() {
         let files = compiler_test_support::map(&[(
-            "main.script.xml",
-            r#"<script name="main"><text>Hello</text></script>"#,
+            "main.xml",
+            r#"<module name="main">
+<script name="main"><text>Hello</text></script>
+</module>"#,
         )]);
         let artifact = compile_artifact_from_xml_map(&files, None).expect("compile artifact");
 
@@ -184,8 +196,10 @@ mod artifact_tests {
     #[test]
     fn write_and_read_artifact_json_reports_io_and_schema_errors() {
         let files = compiler_test_support::map(&[(
-            "main.script.xml",
-            r#"<script name="main"><text>Hello</text></script>"#,
+            "main.xml",
+            r#"<module name="main">
+<script name="main"><text>Hello</text></script>
+</module>"#,
         )]);
         let artifact = compile_artifact_from_xml_map(&files, None).expect("compile artifact");
 

@@ -902,7 +902,7 @@ mod script_compile_tests {
 
     #[test]
     fn compile_group_recurses_for_if_while_and_choice_children() {
-        let mut builder = GroupBuilder::new("recursive.script.xml");
+        let mut builder = GroupBuilder::new("recursive.xml");
         let root_group = builder.next_group_id();
         let container = xml_element(
             "script",
@@ -985,7 +985,7 @@ mod script_compile_tests {
 
     #[test]
     fn compile_group_supports_debug_and_rejects_debug_attributes() {
-        let mut builder = GroupBuilder::new("debug.script.xml");
+        let mut builder = GroupBuilder::new("debug.xml");
         let root_group = builder.next_group_id();
         let container = xml_element(
             "script",
@@ -1010,7 +1010,7 @@ mod script_compile_tests {
         assert_eq!(group.nodes.len(), 1);
 
         for attrs in [[("text", "x")], [("once", "true")], [("tag", "x")]] {
-            let mut bad_builder = GroupBuilder::new("debug-attr.script.xml");
+            let mut bad_builder = GroupBuilder::new("debug-attr.xml");
             let bad_root = bad_builder.next_group_id();
             let bad_container = xml_element(
                 "script",
@@ -1034,7 +1034,7 @@ mod script_compile_tests {
             assert_eq!(error.code, "XML_ATTR_NOT_ALLOWED");
         }
 
-        let mut empty_builder = GroupBuilder::new("debug-empty.script.xml");
+        let mut empty_builder = GroupBuilder::new("debug-empty.xml");
         let empty_root = empty_builder.next_group_id();
         let empty_container = xml_element(
             "script",
@@ -1056,7 +1056,7 @@ mod script_compile_tests {
 
     #[test]
     fn compile_group_creates_scoped_child_group_node() {
-        let mut builder = GroupBuilder::new("group.script.xml");
+        let mut builder = GroupBuilder::new("group.xml");
         let root_group = builder.next_group_id();
         let container = xml_element(
             "script",
@@ -1129,7 +1129,7 @@ mod script_compile_tests {
                 vec![xml_text("x = 1;")],
             ))],
         );
-        let mut builder = GroupBuilder::new("main.script.xml");
+        let mut builder = GroupBuilder::new("main.xml");
         let group_id = builder.next_group_id();
         let error = compile_group(
             &group_id,
@@ -1148,7 +1148,7 @@ mod script_compile_tests {
             &[("name", "main")],
             vec![XmlNode::Element(xml_element("break", &[], Vec::new()))],
         );
-        let mut builder = GroupBuilder::new("main.script.xml");
+        let mut builder = GroupBuilder::new("main.xml");
         let group_id = builder.next_group_id();
         let error = compile_group(
             &group_id,
@@ -1167,7 +1167,7 @@ mod script_compile_tests {
             &[("name", "main")],
             vec![XmlNode::Element(xml_element("continue", &[], Vec::new()))],
         );
-        let mut builder = GroupBuilder::new("main.script.xml");
+        let mut builder = GroupBuilder::new("main.xml");
         let group_id = builder.next_group_id();
         let error = compile_group(
             &group_id,
@@ -1190,7 +1190,7 @@ mod script_compile_tests {
                 Vec::new(),
             ))],
         );
-        let mut builder = GroupBuilder::new("main.script.xml");
+        let mut builder = GroupBuilder::new("main.xml");
         let group_id = builder.next_group_id();
         let error = compile_group(
             &group_id,
@@ -1213,7 +1213,7 @@ mod script_compile_tests {
                 vec![XmlNode::Element(xml_element("unknown", &[], Vec::new()))],
             ))],
         );
-        let mut builder = GroupBuilder::new("main.script.xml");
+        let mut builder = GroupBuilder::new("main.xml");
         let group_id = builder.next_group_id();
         let error = compile_group(
             &group_id,
@@ -1232,7 +1232,7 @@ mod script_compile_tests {
             &[("name", "main")],
             vec![XmlNode::Element(xml_element("text", &[], Vec::new()))],
         );
-        let mut builder = GroupBuilder::new("main.script.xml");
+        let mut builder = GroupBuilder::new("main.xml");
         let group_id = builder.next_group_id();
         let error = compile_group(
             &group_id,
@@ -1251,7 +1251,7 @@ mod script_compile_tests {
             &[("name", "main")],
             vec![XmlNode::Element(xml_element("code", &[], Vec::new()))],
         );
-        let mut builder = GroupBuilder::new("main.script.xml");
+        let mut builder = GroupBuilder::new("main.xml");
         let group_id = builder.next_group_id();
         let error = compile_group(
             &group_id,
@@ -1274,7 +1274,7 @@ mod script_compile_tests {
                 vec![XmlNode::Element(xml_element("loop", &[], Vec::new()))],
             ))],
         );
-        let mut builder = GroupBuilder::new("main.script.xml");
+        let mut builder = GroupBuilder::new("main.xml");
         let group_id = builder.next_group_id();
         let error = compile_group(
             &group_id,
@@ -1301,7 +1301,7 @@ mod script_compile_tests {
                 ))],
             ))],
         );
-        let mut builder = GroupBuilder::new("main.script.xml");
+        let mut builder = GroupBuilder::new("main.xml");
         let group_id = builder.next_group_id();
         let error = compile_group(
             &group_id,
@@ -1324,7 +1324,7 @@ mod script_compile_tests {
                 vec![XmlNode::Element(xml_element("loop", &[], Vec::new()))],
             ))],
         );
-        let mut builder = GroupBuilder::new("main.script.xml");
+        let mut builder = GroupBuilder::new("main.xml");
         let group_id = builder.next_group_id();
         let error = compile_group(
             &group_id,
@@ -1351,7 +1351,7 @@ mod script_compile_tests {
                 ))],
             ))],
         );
-        let mut builder = GroupBuilder::new("main.script.xml");
+        let mut builder = GroupBuilder::new("main.xml");
         let group_id = builder.next_group_id();
         let error = compile_group(
             &group_id,
@@ -1378,7 +1378,7 @@ mod script_compile_tests {
                 ))],
             ))],
         );
-        let mut builder = GroupBuilder::new("main.script.xml");
+        let mut builder = GroupBuilder::new("main.xml");
         let group_id = builder.next_group_id();
         let error = compile_group(
             &group_id,
@@ -1409,7 +1409,7 @@ mod script_compile_tests {
                 ))],
             ))],
         );
-        let mut builder = GroupBuilder::new("main.script.xml");
+        let mut builder = GroupBuilder::new("main.xml");
         let group_id = builder.next_group_id();
         let error = compile_group(
             &group_id,
@@ -1436,7 +1436,7 @@ mod script_compile_tests {
                 ))],
             ))],
         );
-        let mut builder = GroupBuilder::new("main.script.xml");
+        let mut builder = GroupBuilder::new("main.xml");
         let group_id = builder.next_group_id();
         let error = compile_group(
             &group_id,
@@ -1467,7 +1467,7 @@ mod script_compile_tests {
                 ))],
             ))],
         );
-        let mut builder = GroupBuilder::new("main.script.xml");
+        let mut builder = GroupBuilder::new("main.xml");
         let group_id = builder.next_group_id();
         let error = compile_group(
             &group_id,
@@ -1498,7 +1498,7 @@ mod script_compile_tests {
                 ))],
             ))],
         );
-        let mut builder = GroupBuilder::new("main.script.xml");
+        let mut builder = GroupBuilder::new("main.xml");
         let group_id = builder.next_group_id();
         let error = compile_group(
             &group_id,
@@ -1520,7 +1520,7 @@ mod script_compile_tests {
                     "json parse error",
                     map(&[
                         ("bad.json", "{"),
-                        ("main.script.xml", "<script name=\"main\"><text>x</text></script>"),
+                        ("main.xml", "<script name=\"main\"><text>x</text></script>"),
                     ]),
                     "JSON_PARSE_ERROR",
                 ),
@@ -1528,31 +1528,35 @@ mod script_compile_tests {
                     "defs child invalid",
                     map(&[
                         (
-                            "x.defs.xml",
+                            "x.xml",
                             "<defs name=\"x\"><unknown/></defs>",
                         ),
                         (
-                            "main.script.xml",
+                            "main.xml",
                             r#"
-    <!-- include: x.defs.xml -->
-    <script name="main"><text>x</text></script>
+    <!-- include: x.xml -->
+    <module name="main">
+<script name="main"><text>x</text></script>
+</module>
     "#,
                         ),
                     ]),
-                    "XML_DEFS_CHILD_INVALID",
+                    "XML_MODULE_CHILD_INVALID",
                 ),
                 (
                     "type field child invalid",
                     map(&[
                         (
-                            "x.defs.xml",
+                            "x.xml",
                             "<defs name=\"x\"><type name=\"A\"><bad/></type></defs>",
                         ),
                         (
-                            "main.script.xml",
+                            "main.xml",
                             r#"
-    <!-- include: x.defs.xml -->
-    <script name="main"><text>x</text></script>
+    <!-- include: x.xml -->
+    <module name="main">
+<script name="main"><text>x</text></script>
+</module>
     "#,
                         ),
                     ]),
@@ -1562,14 +1566,16 @@ mod script_compile_tests {
                     "type field duplicate",
                     map(&[
                         (
-                            "x.defs.xml",
+                            "x.xml",
                             "<defs name=\"x\"><type name=\"A\"><field name=\"v\" type=\"int\"/><field name=\"v\" type=\"int\"/></type></defs>",
                         ),
                         (
-                            "main.script.xml",
+                            "main.xml",
                             r#"
-    <!-- include: x.defs.xml -->
-    <script name="main"><text>x</text></script>
+    <!-- include: x.xml -->
+    <module name="main">
+<script name="main"><text>x</text></script>
+</module>
     "#,
                         ),
                     ]),
@@ -1579,14 +1585,16 @@ mod script_compile_tests {
                     "function duplicate",
                     map(&[
                         (
-                            "x.defs.xml",
+                            "x.xml",
                             "<defs name=\"x\"><function name=\"f\" return=\"int:r\">r=1;</function><function name=\"f\" return=\"int:r\">r=2;</function></defs>",
                         ),
                         (
-                            "main.script.xml",
+                            "main.xml",
                             r#"
-    <!-- include: x.defs.xml -->
-    <script name="main"><text>x</text></script>
+    <!-- include: x.xml -->
+    <module name="main">
+<script name="main"><text>x</text></script>
+</module>
     "#,
                         ),
                     ]),
@@ -1595,7 +1603,7 @@ mod script_compile_tests {
                 (
                     "unknown custom type in var",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><var name=\"x\" type=\"Unknown\"/></script>",
                     )]),
                     "TYPE_UNKNOWN",
@@ -1603,7 +1611,7 @@ mod script_compile_tests {
                 (
                     "choice child invalid",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><choice text=\"c\"><bad/></choice></script>",
                     )]),
                     "XML_CHOICE_CHILD_INVALID",
@@ -1611,7 +1619,7 @@ mod script_compile_tests {
                 (
                     "choice fall_over with when forbidden",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><choice text=\"c\"><option text=\"a\" fall_over=\"true\" when=\"true\"/></choice></script>",
                     )]),
                     "XML_OPTION_FALL_OVER_WHEN_FORBIDDEN",
@@ -1619,7 +1627,7 @@ mod script_compile_tests {
                 (
                     "choice fall_over duplicate",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><choice text=\"c\"><option text=\"a\" fall_over=\"true\"/><option text=\"b\" fall_over=\"true\"/></choice></script>",
                     )]),
                     "XML_OPTION_FALL_OVER_DUPLICATE",
@@ -1627,7 +1635,7 @@ mod script_compile_tests {
                 (
                     "choice fall_over not last",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><choice text=\"c\"><option text=\"a\" fall_over=\"true\"/><option text=\"b\"/></choice></script>",
                     )]),
                     "XML_OPTION_FALL_OVER_NOT_LAST",
@@ -1635,7 +1643,7 @@ mod script_compile_tests {
                 (
                     "dynamic options template required",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><choice text=\"c\"><dynamic-options array=\"arr\" item=\"it\"/></choice></script>",
                     )]),
                     "XML_DYNAMIC_OPTIONS_TEMPLATE_REQUIRED",
@@ -1643,7 +1651,7 @@ mod script_compile_tests {
                 (
                     "dynamic options child invalid",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><choice text=\"c\"><dynamic-options array=\"arr\" item=\"it\"><option text=\"a\"/><option text=\"b\"/></dynamic-options></choice></script>",
                     )]),
                     "XML_DYNAMIC_OPTIONS_CHILD_INVALID",
@@ -1651,7 +1659,7 @@ mod script_compile_tests {
                 (
                     "dynamic option once unsupported",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><choice text=\"c\"><dynamic-options array=\"arr\" item=\"it\"><option text=\"a\" once=\"true\"/></dynamic-options></choice></script>",
                     )]),
                     "XML_DYNAMIC_OPTION_ONCE_UNSUPPORTED",
@@ -1659,7 +1667,7 @@ mod script_compile_tests {
                 (
                     "dynamic option fall_over unsupported",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><choice text=\"c\"><dynamic-options array=\"arr\" item=\"it\"><option text=\"a\" fall_over=\"true\"/></dynamic-options></choice></script>",
                     )]),
                     "XML_DYNAMIC_OPTION_FALL_OVER_UNSUPPORTED",
@@ -1667,7 +1675,7 @@ mod script_compile_tests {
                 (
                     "dynamic options reserved item",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><choice text=\"c\"><dynamic-options array=\"arr\" item=\"__sl_it\"><option text=\"a\"/></dynamic-options></choice></script>",
                     )]),
                     "NAME_RESERVED_PREFIX",
@@ -1675,7 +1683,7 @@ mod script_compile_tests {
                 (
                     "dynamic options reserved index",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><choice text=\"c\"><dynamic-options array=\"arr\" item=\"it\" index=\"__sl_i\"><option text=\"a\"/></dynamic-options></choice></script>",
                     )]),
                     "NAME_RESERVED_PREFIX",
@@ -1683,7 +1691,7 @@ mod script_compile_tests {
                 (
                     "input default unsupported",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><input var=\"x\" text=\"p\" default=\"d\"/></script>",
                     )]),
                     "XML_INPUT_DEFAULT_UNSUPPORTED",
@@ -1691,7 +1699,7 @@ mod script_compile_tests {
                 (
                     "input content forbidden",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><input var=\"x\" text=\"p\">x</input></script>",
                     )]),
                     "XML_INPUT_CONTENT_FORBIDDEN",
@@ -1699,7 +1707,7 @@ mod script_compile_tests {
                 (
                     "return ref unsupported",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><return script=\"next\" args=\"ref:x\"/></script>",
                     )]),
                     "XML_RETURN_REF_UNSUPPORTED",
@@ -1707,7 +1715,7 @@ mod script_compile_tests {
                 (
                     "removed node",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><set/></script>",
                     )]),
                     "XML_REMOVED_NODE",
@@ -1715,7 +1723,7 @@ mod script_compile_tests {
                 (
                     "else at top level",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><else/></script>",
                     )]),
                     "XML_ELSE_POSITION",
@@ -1723,7 +1731,7 @@ mod script_compile_tests {
                 (
                     "break outside while",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><break/></script>",
                     )]),
                     "XML_BREAK_OUTSIDE_WHILE",
@@ -1731,7 +1739,7 @@ mod script_compile_tests {
                 (
                     "continue outside while or option",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><continue/></script>",
                     )]),
                     "XML_CONTINUE_OUTSIDE_WHILE_OR_OPTION",
@@ -1739,7 +1747,7 @@ mod script_compile_tests {
                 (
                     "call args parse error",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><call script=\"s\" args=\"ref:\"/></script>",
                     )]),
                     "CALL_ARGS_PARSE_ERROR",
@@ -1747,7 +1755,7 @@ mod script_compile_tests {
                 (
                     "script args reserved prefix",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\" args=\"int:__sl_x\"><text>x</text></script>",
                     )]),
                     "NAME_RESERVED_PREFIX",
@@ -1755,7 +1763,7 @@ mod script_compile_tests {
                 (
                     "loop times template unsupported",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><loop times=\"${n}\"><text>x</text></loop></script>",
                     )]),
                     "XML_LOOP_TIMES_TEMPLATE_UNSUPPORTED",
@@ -1763,7 +1771,7 @@ mod script_compile_tests {
                 (
                     "text inline required",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><text/></script>",
                     )]),
                     "XML_EMPTY_NODE_CONTENT",
@@ -1771,7 +1779,7 @@ mod script_compile_tests {
                 (
                     "text once bool invalid",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><text once=\"bad\">x</text></script>",
                     )]),
                     "XML_ATTR_BOOL_INVALID",
@@ -1779,7 +1787,7 @@ mod script_compile_tests {
                 (
                     "if missing when",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><if><text>x</text></if></script>",
                     )]),
                     "XML_MISSING_ATTR",
@@ -1787,7 +1795,7 @@ mod script_compile_tests {
                 (
                     "while missing when",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><while><text>x</text></while></script>",
                     )]),
                     "XML_MISSING_ATTR",
@@ -1795,7 +1803,7 @@ mod script_compile_tests {
                 (
                     "choice option text required",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><choice text=\"c\"><option><text>x</text></option></choice></script>",
                     )]),
                     "XML_MISSING_ATTR",
@@ -1803,7 +1811,7 @@ mod script_compile_tests {
                 (
                     "choice option once bool invalid",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><choice text=\"c\"><option text=\"a\" once=\"bad\"/></choice></script>",
                     )]),
                     "XML_ATTR_BOOL_INVALID",
@@ -1811,7 +1819,7 @@ mod script_compile_tests {
                 (
                     "dynamic options array required",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><choice text=\"c\"><dynamic-options item=\"it\"><option text=\"a\"/></dynamic-options></choice></script>",
                     )]),
                     "XML_MISSING_ATTR",
@@ -1819,7 +1827,7 @@ mod script_compile_tests {
                 (
                     "dynamic options item required",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><choice text=\"c\"><dynamic-options array=\"arr\"><option text=\"a\"/></dynamic-options></choice></script>",
                     )]),
                     "XML_MISSING_ATTR",
@@ -1827,7 +1835,7 @@ mod script_compile_tests {
                 (
                     "dynamic option text required",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><choice text=\"c\"><dynamic-options array=\"arr\" item=\"it\"><option/></dynamic-options></choice></script>",
                     )]),
                     "XML_MISSING_ATTR",
@@ -1835,7 +1843,7 @@ mod script_compile_tests {
                 (
                     "input var missing",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><input text=\"p\"/></script>",
                     )]),
                     "XML_MISSING_ATTR",
@@ -1843,7 +1851,7 @@ mod script_compile_tests {
                 (
                     "input text missing",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><var name=\"n\" type=\"string\">\"\"</var><input var=\"n\"/></script>",
                     )]),
                     "XML_MISSING_ATTR",
@@ -1851,7 +1859,7 @@ mod script_compile_tests {
                 (
                     "call script missing",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><call/></script>",
                     )]),
                     "XML_MISSING_ATTR",
@@ -1859,7 +1867,7 @@ mod script_compile_tests {
                 (
                     "return args parse error",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><return script=\"s\" args=\"ref:\"/></script>",
                     )]),
                     "CALL_ARGS_PARSE_ERROR",
@@ -1867,7 +1875,7 @@ mod script_compile_tests {
                 (
                     "var missing name",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><var type=\"int\">1</var></script>",
                     )]),
                     "XML_MISSING_ATTR",
@@ -1875,7 +1883,7 @@ mod script_compile_tests {
                 (
                     "var missing type",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><var name=\"x\">1</var></script>",
                     )]),
                     "XML_MISSING_ATTR",
@@ -1883,7 +1891,7 @@ mod script_compile_tests {
                 (
                     "var type parse error",
                     map(&[(
-                        "main.script.xml",
+                        "main.xml",
                         "<script name=\"main\"><var name=\"x\" type=\"#{ }\">1</var></script>",
                     )]),
                     "TYPE_PARSE_ERROR",
@@ -1915,11 +1923,11 @@ mod script_compile_tests {
         );
 
         assert_eq!(
-            resolve_include_path("scripts/main.script.xml", "/shared.defs.xml"),
-            "shared.defs.xml"
+            resolve_include_path("scripts/main.xml", "/shared.xml"),
+            "shared.xml"
         );
-        let reachable = collect_reachable_files("missing.script.xml", &BTreeMap::new());
-        assert!(reachable.contains("missing.script.xml"));
+        let reachable = collect_reachable_files("missing.xml", &BTreeMap::new());
+        assert!(reachable.contains("missing.xml"));
 
         let visible_empty = collect_visible_json_symbols(
             &BTreeSet::from(["missing.json".to_string()]),
@@ -2039,7 +2047,7 @@ mod script_compile_tests {
 
         let non_script_root = xml_element("defs", &[("name", "x")], Vec::new());
         let compile_root_error = compile_script(CompileScriptOptions {
-            script_path: "x.script.xml",
+            script_path: "x.xml",
             root: &non_script_root,
             qualified_script_name: None,
             module_name: None,
@@ -2053,8 +2061,9 @@ mod script_compile_tests {
         assert_eq!(compile_root_error.code, "XML_ROOT_INVALID");
 
         let rich_script = map(&[(
-            "main.script.xml",
+            "main.xml",
             r#"
+    <module name="main">
     <script name="main">
       <if when="true">
         <text>A</text>
@@ -2067,11 +2076,12 @@ mod script_compile_tests {
         <option text="O"><text>X</text></option>
       </choice>
     </script>
+    </module>
     "#,
         )]);
         let compiled =
             compile_project_bundle_from_xml_map(&rich_script).expect("compile should pass");
-        let main = compiled.scripts.get("main").expect("main script");
+        let main = compiled.scripts.get("main.main").expect("main script");
         let root_group = main.groups.get(&main.root_group_id).expect("root group");
         assert!(root_group
             .nodes
@@ -2084,32 +2094,34 @@ mod script_compile_tests {
 
         let defs_resolution = map(&[
             (
-                "shared.defs.xml",
+                "shared.xml",
                 r##"
-    <defs name="shared">
+    <module name="shared">
       <type name="Obj">
         <field name="values" type="#{int[]}"/>
       </type>
       <function name="build" return="Obj:r">
         r = #{values: #{a: [1]}};
       </function>
-    </defs>
+    </module>
     "##,
             ),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
-    <!-- include: shared.defs.xml -->
-    <script name="main">
+    <!-- include: shared.xml -->
+    <module name="main">
+<script name="main">
       <var name="x" type="Obj"/>
     </script>
+</module>
     "#,
             ),
         ]);
         let _ = compile_project_bundle_from_xml_map(&defs_resolution)
             .expect("defs return/field type resolution should pass");
 
-        let mut builder_ok = GroupBuilder::new("manual.script.xml");
+        let mut builder_ok = GroupBuilder::new("manual.xml");
         let root_ok = builder_ok.next_group_id();
         let complex_container = xml_element(
             "script",
@@ -2166,7 +2178,7 @@ mod script_compile_tests {
         )
         .expect("manual complex compile_group should pass");
 
-        let mut loop_builder = GroupBuilder::new("loop.script.xml");
+        let mut loop_builder = GroupBuilder::new("loop.xml");
         let loop_group = loop_builder.next_group_id();
         let loop_error = compile_group(
             &loop_group,
@@ -2238,7 +2250,7 @@ mod script_compile_tests {
         let continue_id = node_id(&continue_node);
         assert_eq!(continue_id, "k1");
 
-        let mut choice_builder = GroupBuilder::new("choice.script.xml");
+        let mut choice_builder = GroupBuilder::new("choice.xml");
         let choice_group = choice_builder.next_group_id();
         compile_group(
             &choice_group,
@@ -2271,7 +2283,7 @@ mod script_compile_tests {
         .expect("option continue and last fall_over should compile");
 
         let dynamic_choice = map(&[(
-            "main.script.xml",
+            "main.xml",
             r#"
     <script name="main">
       <var name="arr" type="int[]">[1,2]</var>
@@ -2284,11 +2296,15 @@ mod script_compile_tests {
         </dynamic-options>
       </choice>
     </script>
+</module>
     "#,
         )]);
         let dynamic_compiled =
             compile_project_bundle_from_xml_map(&dynamic_choice).expect("dynamic choice compile");
-        let dynamic_main = dynamic_compiled.scripts.get("main").expect("main script");
+        let dynamic_main = dynamic_compiled
+            .scripts
+            .get("main.main")
+            .expect("main script");
         let dynamic_root = dynamic_main
             .groups
             .get(&dynamic_main.root_group_id)

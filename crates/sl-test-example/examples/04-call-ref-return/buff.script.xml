@@ -1,4 +1,0 @@
-<script name="buff" args="int:amount,ref:int:target">
-  <code>target = target + amount;</code>
-  <return/>
-</script>

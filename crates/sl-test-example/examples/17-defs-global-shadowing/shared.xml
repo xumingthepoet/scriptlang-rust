@@ -1,0 +1,3 @@
+<module name="shared">
+  <var name="hp" type="int">100</var>
+</module>

@@ -182,7 +182,7 @@ mod runner_tests {
     fn simple_case(expected_events: Vec<ExpectedEvent>) -> TestCase {
         TestCase {
             schema_version: crate::TESTCASE_SCHEMA.to_string(),
-            entry_script: "main".to_string(),
+            entry_script: "main.main".to_string(),
             actions: Vec::new(),
             expected_events,
         }
@@ -192,8 +192,8 @@ mod runner_tests {
     fn run_case_executes_text_only_script() {
         let root = temp_dir("text-only");
         write_file(
-            &root.join("main.script.xml"),
-            r#"<script name="main"><text>Hello</text></script>"#,
+            &root.join("main.xml"),
+            r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#,
         );
 
         let case = simple_case(vec![
@@ -213,22 +213,22 @@ mod runner_tests {
     fn run_case_consumes_choose_and_input_actions() {
         let root = temp_dir("boundaries");
         write_file(
-            &root.join("main.script.xml"),
+            &root.join("main.xml"),
             r#"
-<script name="main">
+<module name="main"><script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
   </choice>
   <var name="name" type="string">"Traveler"</var>
   <input var="name" text="Name"/>
   <text>${name}</text>
-</script>
+</script></module>
 "#,
         );
 
         let case = TestCase {
             schema_version: crate::TESTCASE_SCHEMA.to_string(),
-            entry_script: "main".to_string(),
+            entry_script: "main.main".to_string(),
             actions: vec![
                 TestAction::Choose { index: 0 },
                 TestAction::Input {
@@ -265,19 +265,19 @@ mod runner_tests {
     fn run_case_reports_missing_or_wrong_action_kinds() {
         let root = temp_dir("missing-action");
         write_file(
-            &root.join("main.script.xml"),
+            &root.join("main.xml"),
             r#"
-<script name="main">
+<module name="main"><script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
   </choice>
-</script>
+</script></module>
 "#,
         );
 
         let missing = TestCase {
             schema_version: crate::TESTCASE_SCHEMA.to_string(),
-            entry_script: "main".to_string(),
+            entry_script: "main.main".to_string(),
             actions: vec![],
             expected_events: vec![],
         };
@@ -289,7 +289,7 @@ mod runner_tests {
 
         let wrong_kind = TestCase {
             schema_version: crate::TESTCASE_SCHEMA.to_string(),
-            entry_script: "main".to_string(),
+            entry_script: "main.main".to_string(),
             actions: vec![TestAction::Input {
                 text: "x".to_string(),
             }],
@@ -303,18 +303,18 @@ mod runner_tests {
 
         let input_root = temp_dir("missing-input-action");
         write_file(
-            &input_root.join("main.script.xml"),
+            &input_root.join("main.xml"),
             r#"
-<script name="main">
+<module name="main"><script name="main">
   <var name="name" type="string">"Traveler"</var>
   <input var="name" text="Name"/>
-</script>
+</script></module>
 "#,
         );
 
         let missing_input = TestCase {
             schema_version: crate::TESTCASE_SCHEMA.to_string(),
-            entry_script: "main".to_string(),
+            entry_script: "main.main".to_string(),
             actions: vec![],
             expected_events: vec![],
         };
@@ -327,7 +327,7 @@ mod runner_tests {
 
         let wrong_input_kind = TestCase {
             schema_version: crate::TESTCASE_SCHEMA.to_string(),
-            entry_script: "main".to_string(),
+            entry_script: "main.main".to_string(),
             actions: vec![TestAction::Choose { index: 0 }],
             expected_events: vec![],
         };
@@ -343,12 +343,12 @@ mod runner_tests {
     fn run_case_reports_unused_actions_and_engine_errors() {
         let unused_root = temp_dir("unused-action");
         write_file(
-            &unused_root.join("main.script.xml"),
-            r#"<script name="main"><text>x</text></script>"#,
+            &unused_root.join("main.xml"),
+            r#"<module name="main"><script name="main"><text>x</text></script></module>"#,
         );
         let unused_case = TestCase {
             schema_version: crate::TESTCASE_SCHEMA.to_string(),
-            entry_script: "main".to_string(),
+            entry_script: "main.main".to_string(),
             actions: vec![TestAction::Input {
                 text: "x".to_string(),
             }],
@@ -363,18 +363,18 @@ mod runner_tests {
 
         let bad_choose_root = temp_dir("bad-choose");
         write_file(
-            &bad_choose_root.join("main.script.xml"),
+            &bad_choose_root.join("main.xml"),
             r#"
-<script name="main">
+<module name="main"><script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
   </choice>
-</script>
+</script></module>
 "#,
         );
         let bad_choose_case = TestCase {
             schema_version: crate::TESTCASE_SCHEMA.to_string(),
-            entry_script: "main".to_string(),
+            entry_script: "main.main".to_string(),
             actions: vec![TestAction::Choose { index: 99 }],
             expected_events: vec![],
         };
@@ -387,15 +387,15 @@ mod runner_tests {
     fn run_case_reports_guard_exceeded() {
         let root = temp_dir("guard");
         write_file(
-            &root.join("main.script.xml"),
+            &root.join("main.xml"),
             r#"
-<script name="main">
+<module name="main"><script name="main">
   <var name="i" type="int">0</var>
   <while when="i &lt; 6000">
     <code>i = i + 1;</code>
     <text>tick</text>
   </while>
-</script>
+</script></module>
 "#,
         );
 
@@ -409,8 +409,8 @@ mod runner_tests {
         let root = temp_dir("assert");
         fs::create_dir_all(&root).expect("root should exist");
         write_file(
-            &root.join("main.script.xml"),
-            r#"<script name="main"><text>Hello</text></script>"#,
+            &root.join("main.xml"),
+            r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#,
         );
 
         let count_case = root.join("count.json");
@@ -449,8 +449,8 @@ mod runner_tests {
         let root = temp_dir("assert-pass");
         fs::create_dir_all(&root).expect("root should exist");
         write_file(
-            &root.join("main.script.xml"),
-            r#"<script name="main"><text>Hello</text></script>"#,
+            &root.join("main.xml"),
+            r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#,
         );
 
         let case_path = root.join("testcase.json");

@@ -40,7 +40,7 @@ pub(crate) fn load_source_by_ref(scenario_ref: &str) -> Result<LoadedScenario, S
     }
 
     let raw = scenario_ref.trim_start_matches(prefix);
-    load_source_by_scripts_dir(raw, "main")
+    load_source_by_scripts_dir(raw, "main.main")
 }
 
 pub(crate) fn resolve_scripts_dir(scripts_dir: &str) -> Result<PathBuf, ScriptLangError> {
@@ -87,10 +87,7 @@ pub(crate) fn read_scripts_xml_from_dir(
         let path = entry.path();
         let path_str = path.to_string_lossy();
 
-        if !(path_str.ends_with(".script.xml")
-            || path_str.ends_with(".defs.xml")
-            || path_str.ends_with(".json"))
-        {
+        if !(path_str.ends_with(".xml") || path_str.ends_with(".json")) {
             continue;
         }
 
@@ -107,10 +104,7 @@ pub(crate) fn read_scripts_xml_from_dir(
     if scripts.is_empty() {
         return Err(ScriptLangError::new(
             "CLI_SOURCE_EMPTY",
-            format!(
-                "No .script.xml/.defs.xml/.json files under {}",
-                scripts_dir.display()
-            ),
+            format!("No .xml/.json files under {}", scripts_dir.display()),
         ));
     }
 
@@ -151,8 +145,8 @@ mod source_loader_tests {
         let relative_child = relative_root.join("child");
         fs::create_dir_all(&relative_child).expect("child");
         write_file(
-            &relative_child.join("main.script.xml"),
-            "<script name=\"main\"></script>",
+            &relative_child.join("main.xml"),
+            "<module name=\"main\"><script name=\"main\"></script></module>",
         );
 
         std::env::set_current_dir(&relative_root).expect("switch cwd");
@@ -166,17 +160,17 @@ mod source_loader_tests {
         let root = temp_path("scripts-dir");
         fs::create_dir_all(&root).expect("root should be created");
         write_file(
-            &root.join("main.script.xml"),
-            "<script name=\"main\"></script>",
+            &root.join("main.xml"),
+            "<module name=\"main\"><script name=\"main\"></script></module>",
         );
-        write_file(&root.join("defs.defs.xml"), "<defs name=\"d\"></defs>");
+        write_file(&root.join("defs.xml"), "<module name=\"defs\"></module>");
         write_file(&root.join("data.json"), "{\"ok\":true}");
         write_file(&root.join("skip.txt"), "ignored");
 
         let scripts = read_scripts_xml_from_dir(&root).expect("scan should pass");
         assert_eq!(scripts.len(), 3);
-        assert!(scripts.contains_key("main.script.xml"));
-        assert!(scripts.contains_key("defs.defs.xml"));
+        assert!(scripts.contains_key("main.xml"));
+        assert!(scripts.contains_key("defs.xml"));
         assert!(scripts.contains_key("data.json"));
     }
 
@@ -196,15 +190,15 @@ mod source_loader_tests {
         let root = temp_path("scripts-dir-test");
         fs::create_dir_all(&root).expect("root");
         write_file(
-            &root.join("main.script.xml"),
-            r#"<script name="main"><text>Hello</text></script>"#,
+            &root.join("main.xml"),
+            r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#,
         );
 
-        let loaded =
-            load_source_by_scripts_dir(&root.to_string_lossy(), "main").expect("load should pass");
+        let loaded = load_source_by_scripts_dir(&root.to_string_lossy(), "main.main")
+            .expect("load should pass");
         assert!(loaded.id.starts_with("scripts-dir:"));
-        assert_eq!(loaded.entry_script, "main");
-        assert!(loaded.scripts_xml.contains_key("main.script.xml"));
+        assert_eq!(loaded.entry_script, "main.main");
+        assert!(loaded.scripts_xml.contains_key("main.xml"));
     }
 
     #[test]
@@ -212,13 +206,13 @@ mod source_loader_tests {
         let root = temp_path("scripts-dir-nested");
         fs::create_dir_all(&root).expect("root");
         write_file(
-            &root.join("game.script.xml"),
-            r#"<script name="game"><text>Game</text></script>"#,
+            &root.join("game.xml"),
+            r#"<module name="game"><script name="game"><text>Game</text></script></module>"#,
         );
 
-        let loaded =
-            load_source_by_scripts_dir(&root.to_string_lossy(), "game").expect("load should pass");
-        assert_eq!(loaded.entry_script, "game");
+        let loaded = load_source_by_scripts_dir(&root.to_string_lossy(), "game.game")
+            .expect("load should pass");
+        assert_eq!(loaded.entry_script, "game.game");
     }
 
     #[test]

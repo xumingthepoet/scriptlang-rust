@@ -156,14 +156,14 @@ mod control_flow_tests {
         let mut return_arg_unknown = engine_from_sources(map(&[
             (
                 "main.script.xml",
-                r#"<script name="main"><return script="next" args="1,2"/></script>"#,
+                r#"<script name="main"><return script="next.next" args="1,2"/></script>"#,
             ),
             (
                 "next.script.xml",
                 r#"<script name="next" args="int:x"><text>${x}</text></script>"#,
             ),
         ]));
-        return_arg_unknown.start("main", None).expect("start");
+        return_arg_unknown.start("main.main", None).expect("start");
         let error = return_arg_unknown
             .next_output()
             .expect_err("extra return arg should fail");

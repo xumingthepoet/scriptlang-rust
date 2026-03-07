@@ -12,8 +12,9 @@ pub fn compile_project_bundle_from_xml_map(
     let sources = parse_sources(xml_by_path)?;
     validate_include_graph(&sources)?;
 
-    let defs_by_path = parse_defs_files(&sources)?;
     let module_scripts_by_path = parse_module_scripts(&sources)?;
+    let defs_by_path = parse_defs_files(&sources)
+        .expect("defs parsing should match previously validated module parsing");
     let global_json = collect_global_json(&sources)?;
     let all_json_symbols = global_json.keys().cloned().collect::<BTreeSet<_>>();
     let (defs_global_declarations, defs_global_init_order) =
@@ -23,7 +24,7 @@ pub fn compile_project_bundle_from_xml_map(
     let mut reachable_cache = HashMap::new();
 
     for (file_path, source) in &sources {
-        if !matches!(source.kind, SourceKind::ScriptXml | SourceKind::ModuleXml) {
+        if !matches!(source.kind, SourceKind::ModuleXml) {
             continue;
         }
 
@@ -35,7 +36,7 @@ pub fn compile_project_bundle_from_xml_map(
                 .map_err(|error| with_file_context(error, file_path))?;
         let visible_json_symbols = collect_visible_json_symbols(reachable, &sources)
             .expect("collect_visible_json_symbols should be infallible after collect_global_json");
-        let script_roots = collect_source_scripts(source, file_path, &module_scripts_by_path)?;
+        let script_roots = collect_source_scripts(source, file_path, &module_scripts_by_path);
         for script_decl in script_roots {
             let ir = compile_script(CompileScriptOptions {
                 script_path: file_path,
@@ -80,32 +81,9 @@ fn collect_source_scripts(
     source: &SourceFile,
     file_path: &str,
     module_scripts_by_path: &BTreeMap<String, Vec<ParsedModuleScript>>,
-) -> Result<Vec<SourceScriptToCompile>, ScriptLangError> {
+) -> Vec<SourceScriptToCompile> {
     match source.kind {
-        SourceKind::ScriptXml => {
-            let script_root = source
-                .xml_root
-                .as_ref()
-                .expect("script sources should always carry parsed xml root");
-
-            if script_root.name != "script" {
-                return Err(ScriptLangError::with_span(
-                    "XML_ROOT_INVALID",
-                    format!(
-                        "Expected <script> root in file \"{}\", got <{}>.",
-                        file_path, script_root.name
-                    ),
-                    script_root.location.clone(),
-                ));
-            }
-
-            Ok(vec![SourceScriptToCompile {
-                root: script_root.clone(),
-                qualified_script_name: None,
-                module_name: None,
-            }])
-        }
-        SourceKind::ModuleXml => Ok(module_scripts_by_path
+        SourceKind::ModuleXml => module_scripts_by_path
             .get(file_path)
             .cloned()
             .unwrap_or_default()
@@ -123,8 +101,8 @@ fn collect_source_scripts(
                     module_name: Some(module_name),
                 }
             })
-            .collect()),
-        _ => Ok(Vec::new()),
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -144,20 +122,22 @@ mod pipeline_tests {
     #[test]
     fn compile_basic_script_project() {
         let files = map(&[(
-            "main.script.xml",
+            "main.xml",
             r#"
+    <module name="main">
     <script name="main">
       <text>Hello</text>
       <choice text="Pick">
         <option text="A"><text>A1</text></option>
       </choice>
     </script>
+    </module>
     "#,
         )]);
 
         let result = compile_project_bundle_from_xml_map(&files).expect("project should compile");
-        assert!(result.scripts.contains_key("main"));
-        let main = result.scripts.get("main").expect("main script");
+        assert!(result.scripts.contains_key("main.main"));
+        let main = result.scripts.get("main.main").expect("main script");
         assert!(!main.groups.is_empty());
     }
 
@@ -165,47 +145,51 @@ mod pipeline_tests {
     fn compile_bundle_supports_mixed_sources_without_filesystem_examples() {
         let files = map(&[
             (
-                "shared.defs.xml",
+                "shared.xml",
                 r#"
-<defs name="shared">
+<module name="shared">
   <var name="hp" type="int">100</var>
-</defs>
+</module>
 "#,
             ),
             ("config.json", r#"{"base": 3}"#),
             (
-                "battle.script.xml",
+                "battle.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- include: shared.xml -->
+<module name="battle">
 <script name="battle">
   <text>battle.hp=${shared.hp}</text>
 </script>
+</module>
 "#,
             ),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
-<!-- include: shared.defs.xml -->
-<!-- include: battle.script.xml -->
+<!-- include: shared.xml -->
+<!-- include: battle.xml -->
 <!-- include: config.json -->
+<module name="main">
 <script name="main">
   <text>main.base=${config.base}</text>
   <call script="battle"/>
 </script>
+</module>
 "#,
             ),
         ]);
 
         let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
-        assert!(bundle.scripts.contains_key("main"));
-        assert!(bundle.scripts.contains_key("battle"));
+        assert!(bundle.scripts.contains_key("main.main"));
+        assert!(bundle.scripts.contains_key("battle.battle"));
         assert!(bundle.global_json.contains_key("config"));
     }
 
     #[test]
     fn compile_bundle_supports_module_files_and_qualified_script_names() {
         let files = map(&[(
-            "battle.module.xml",
+            "battle.xml",
             r#"
 <module name="battle">
   <type name="Combatant">
@@ -250,11 +234,11 @@ mod pipeline_tests {
     fn compile_bundle_allows_same_local_script_name_across_modules() {
         let files = map(&[
             (
-                "a.module.xml",
+                "a.xml",
                 r#"<module name="a"><script name="main"><text>A</text></script></module>"#,
             ),
             (
-                "b.module.xml",
+                "b.xml",
                 r#"<module name="b"><script name="main"><text>B</text></script></module>"#,
             ),
         ]);
@@ -268,23 +252,20 @@ mod pipeline_tests {
     #[test]
     fn compile_bundle_rejects_invalid_module_shapes() {
         let missing_name = map(&[(
-            "bad.module.xml",
+            "bad.xml",
             r#"<module><script name="main"><text>x</text></script></module>"#,
         )]);
         let missing_name_error =
             compile_project_bundle_from_xml_map(&missing_name).expect_err("module name required");
         assert_eq!(missing_name_error.code, "XML_MISSING_ATTR");
 
-        let invalid_child = map(&[(
-            "bad.module.xml",
-            r#"<module name="bad"><unknown/></module>"#,
-        )]);
+        let invalid_child = map(&[("bad.xml", r#"<module name="bad"><unknown/></module>"#)]);
         let invalid_child_error =
             compile_project_bundle_from_xml_map(&invalid_child).expect_err("invalid child");
         assert_eq!(invalid_child_error.code, "XML_MODULE_CHILD_INVALID");
 
         let duplicate = map(&[(
-            "bad.module.xml",
+            "bad.xml",
             r#"<module name="bad"><script name="main"/><script name="main"/></module>"#,
         )]);
         let duplicate_error =
@@ -296,40 +277,44 @@ mod pipeline_tests {
     fn compile_bundle_supports_directory_includes() {
         let files = map(&[
             (
-                "shared/support/types.defs.xml",
+                "shared/support/types.xml",
                 r#"
-<defs name="shared">
+<module name="shared">
   <function name="boost" args="int:x" return="int:out">
     out = x + 1;
   </function>
-</defs>
+</module>
 "#,
             ),
             ("shared/support/config.json", r#"{"base": 3}"#),
             (
-                "shared/nested/battle.script.xml",
+                "shared/nested/battle.xml",
                 r#"
 <!-- include: ../support/ -->
+<module name="battle">
 <script name="battle">
   <text>battle=${shared.boost(config.base)}</text>
 </script>
+</module>
 "#,
             ),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
 <!-- include: shared/ -->
+<module name="main">
 <script name="main">
   <text>main=${shared.boost(config.base)}</text>
   <call script="battle"/>
 </script>
+</module>
 "#,
             ),
         ]);
 
         let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
-        assert!(bundle.scripts.contains_key("main"));
-        assert!(bundle.scripts.contains_key("battle"));
+        assert!(bundle.scripts.contains_key("main.main"));
+        assert!(bundle.scripts.contains_key("battle.battle"));
         assert!(bundle.global_json.contains_key("config"));
     }
 
@@ -337,22 +322,26 @@ mod pipeline_tests {
     fn compile_scripts_from_xml_map_returns_script_only_bundle() {
         let files = map(&[
             (
-                "main.script.xml",
-                r#"<script name="main"><text>Main</text></script>"#,
+                "main.xml",
+                r#"<module name="main">
+<script name="main"><text>Main</text></script>
+</module>"#,
             ),
             (
-                "alt.script.xml",
-                r#"<script name="alt"><text>Alt</text></script>"#,
+                "alt.xml",
+                r#"<module name="alt">
+<script name="alt"><text>Alt</text></script>
+</module>"#,
             ),
         ]);
         let scripts = compile_project_scripts_from_xml_map(&files).expect("compile should pass");
-        assert!(scripts.contains_key("main"));
-        assert!(scripts.contains_key("alt"));
+        assert!(scripts.contains_key("main.main"));
+        assert!(scripts.contains_key("alt.alt"));
     }
 
     #[test]
     fn compile_scripts_from_xml_map_propagates_errors() {
-        let files = map(&[("bad.script.xml", "<script>")]);
+        let files = map(&[("bad.xml", "<script>")]);
         let error =
             compile_project_scripts_from_xml_map(&files).expect_err("invalid xml should fail");
         assert_eq!(error.code, "XML_PARSE_ERROR");
@@ -369,10 +358,12 @@ mod pipeline_tests {
     #[test]
     fn compile_bundle_rejects_missing_include_and_cycle() {
         let missing_include = map(&[(
-            "main.script.xml",
+            "main.xml",
             r#"
-    <!-- include: missing.script.xml -->
-    <script name="main"></script>
+    <!-- include: missing.xml -->
+    <module name="main">
+<script name="main"></script>
+</module>
     "#,
         )]);
         let missing = compile_project_bundle_from_xml_map(&missing_include)
@@ -380,30 +371,36 @@ mod pipeline_tests {
         assert_eq!(missing.code, "INCLUDE_NOT_FOUND");
 
         let empty_directory_include = map(&[(
-            "main.script.xml",
+            "main.xml",
             r#"
     <!-- include: missing/ -->
-    <script name="main"></script>
+    <module name="main">
+<script name="main"></script>
+</module>
     "#,
         )]);
         let empty_directory = compile_project_bundle_from_xml_map(&empty_directory_include)
             .expect_err("empty directory include should fail");
         assert_eq!(empty_directory.code, "INCLUDE_DIR_EMPTY");
-        assert!(empty_directory.message.contains("main.script.xml"));
+        assert!(empty_directory.message.contains("main.xml"));
 
         let cycle = map(&[
             (
-                "a.script.xml",
+                "a.xml",
                 r#"
-    <!-- include: b.script.xml -->
-    <script name="a"></script>
+    <!-- include: b.xml -->
+    <module name="a">
+<script name="a"></script>
+</module>
     "#,
             ),
             (
-                "b.script.xml",
+                "b.xml",
                 r#"
-    <!-- include: a.script.xml -->
-    <script name="b"></script>
+    <!-- include: a.xml -->
+    <module name="b">
+<script name="b"></script>
+</module>
     "#,
             ),
         ]);
@@ -413,17 +410,21 @@ mod pipeline_tests {
 
         let directory_cycle = map(&[
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
     <!-- include: shared/ -->
-    <script name="main"></script>
+    <module name="main">
+<script name="main"></script>
+</module>
     "#,
             ),
             (
-                "shared/loop.script.xml",
+                "shared/loop.xml",
                 r#"
-    <!-- include: ../main.script.xml -->
-    <script name="loop"></script>
+    <!-- include: ../main.xml -->
+    <module name="loop">
+<script name="loop"></script>
+</module>
     "#,
             ),
         ]);
@@ -434,14 +435,17 @@ mod pipeline_tests {
 
     #[test]
     fn compile_bundle_rejects_invalid_root_and_duplicate_script_names() {
-        let invalid_root = map(&[("main.script.xml", "<defs name=\"x\"></defs>")]);
+        let invalid_root = BTreeMap::from([(
+            "main.xml".to_string(),
+            "<defs name=\"x\"></defs>".to_string(),
+        )]);
         let root_error =
             compile_project_bundle_from_xml_map(&invalid_root).expect_err("invalid root");
         assert_eq!(root_error.code, "XML_ROOT_INVALID");
 
         let duplicate_script_name = map(&[
-            ("a.script.xml", "<script name=\"main\"></script>"),
-            ("b.script.xml", "<script name=\"main\"></script>"),
+            ("a.xml", "<script name=\"main\"></script>"),
+            ("b.xml", "<script name=\"main\"></script>"),
         ]);
         let duplicate_error = compile_project_bundle_from_xml_map(&duplicate_script_name)
             .expect_err("duplicate script names should fail");
@@ -450,27 +454,17 @@ mod pipeline_tests {
 
     #[test]
     fn collect_source_scripts_and_module_parse_helpers_cover_non_happy_paths() {
-        let defs_source = SourceFile {
-            kind: SourceKind::DefsXml,
+        let json_source = SourceFile {
+            kind: SourceKind::Json,
             includes: Vec::new(),
-            xml_root: Some(xml_element("defs", &[("name", "shared")], Vec::new())),
-            json_value: None,
+            xml_root: None,
+            json_value: Some(SlValue::Bool(true)),
         };
-        let collected = collect_source_scripts(&defs_source, "shared.defs.xml", &BTreeMap::new())
-            .expect("defs sources should return no scripts");
+        let collected = collect_source_scripts(&json_source, "shared.json", &BTreeMap::new());
         assert!(collected.is_empty());
 
-        let only_scripts = parse_sources(&map(&[(
-            "main.script.xml",
-            r#"<script name="main"><text>x</text></script>"#,
-        )]))
-        .expect("sources parse");
-        let parsed =
-            parse_module_scripts(&only_scripts).expect("non-module sources should be ignored");
-        assert!(parsed.is_empty());
-
         let bad_module = map(&[(
-            "bad.module.xml",
+            "bad.xml",
             r#"<module name="bad"><script><text>x</text></script></module>"#,
         )]);
         let error = compile_project_bundle_from_xml_map(&bad_module)
@@ -480,60 +474,66 @@ mod pipeline_tests {
 
     #[test]
     fn compile_bundle_errors_include_file_context() {
-        let xml_parse = map(&[("bad.script.xml", "<script>")]);
+        let xml_parse = map(&[("bad.xml", "<script>")]);
         let parse_error =
             compile_project_bundle_from_xml_map(&xml_parse).expect_err("xml parse should fail");
-        assert!(parse_error.message.contains("bad.script.xml"));
+        assert!(parse_error.message.contains("bad.xml"));
 
         let compile_error_case = map(&[(
-            "broken.script.xml",
-            r#"<script name="main"><break/></script>"#,
+            "broken.xml",
+            r#"<module name="main">
+<script name="main"><break/></script>
+</module>"#,
         )]);
         let compile_error = compile_project_bundle_from_xml_map(&compile_error_case)
             .expect_err("break outside while should fail");
-        assert!(compile_error.message.contains("broken.script.xml"));
+        assert!(compile_error.message.contains("broken.xml"));
     }
 
     #[test]
     fn compile_bundle_exposes_defs_globals_with_short_alias_rules() {
         let unique = map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int">1</var></defs>"#,
+                "shared.xml",
+                r#"<module name="shared"><var name="hp" type="int">1</var></module>"#,
             ),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- include: shared.xml -->
+<module name="main">
 <script name="main"><text>${hp + shared.hp}</text></script>
+</module>
 "#,
             ),
         ]);
         let unique_bundle = compile_project_bundle_from_xml_map(&unique).expect("compile");
-        let unique_main = unique_bundle.scripts.get("main").expect("main");
+        let unique_main = unique_bundle.scripts.get("main.main").expect("main");
         assert!(unique_main.visible_defs_globals.contains_key("shared.hp"));
         assert!(unique_main.visible_defs_globals.contains_key("hp"));
 
         let conflict = map(&[
             (
-                "a.defs.xml",
-                r#"<defs name="a"><var name="hp" type="int">1</var></defs>"#,
+                "a.xml",
+                r#"<module name="a"><var name="hp" type="int">1</var></module>"#,
             ),
             (
-                "b.defs.xml",
-                r#"<defs name="b"><var name="hp" type="int">2</var></defs>"#,
+                "b.xml",
+                r#"<module name="b"><var name="hp" type="int">2</var></module>"#,
             ),
             (
-                "main.script.xml",
+                "main.xml",
                 r#"
-<!-- include: a.defs.xml -->
-<!-- include: b.defs.xml -->
+<!-- include: a.xml -->
+<!-- include: b.xml -->
+<module name="main">
 <script name="main"><text>${a.hp + b.hp}</text></script>
+</module>
 "#,
             ),
         ]);
         let conflict_bundle = compile_project_bundle_from_xml_map(&conflict).expect("compile");
-        let conflict_main = conflict_bundle.scripts.get("main").expect("main");
+        let conflict_main = conflict_bundle.scripts.get("main.main").expect("main");
         assert!(conflict_main.visible_defs_globals.contains_key("a.hp"));
         assert!(conflict_main.visible_defs_globals.contains_key("b.hp"));
         assert!(!conflict_main.visible_defs_globals.contains_key("hp"));
@@ -549,10 +549,10 @@ mod pipeline_tests {
                 end: SourceLocation { line: 7, column: 9 },
             },
         );
-        let wrapped_with_span = with_file_context(with_span, "main.script.xml");
+        let wrapped_with_span = with_file_context(with_span, "main.xml");
         assert!(wrapped_with_span
             .message
-            .contains("In file \"main.script.xml\": boom"));
+            .contains("In file \"main.xml\": boom"));
         let span = wrapped_with_span.span.expect("span should be preserved");
         assert_eq!(span.start.line, 7);
         assert_eq!(span.start.column, 9);
@@ -560,10 +560,10 @@ mod pipeline_tests {
         assert_eq!(span.end.column, 9);
 
         let without_span = ScriptLangError::new("SOME_CODE", "no-span");
-        let wrapped_without_span = with_file_context(without_span, "other.script.xml");
+        let wrapped_without_span = with_file_context(without_span, "other.xml");
         assert!(wrapped_without_span
             .message
-            .contains("In file \"other.script.xml\": no-span"));
+            .contains("In file \"other.xml\": no-span"));
         let synthetic = wrapped_without_span
             .span
             .expect("missing span should become synthetic");
@@ -571,5 +571,39 @@ mod pipeline_tests {
         assert_eq!(synthetic.start.column, 1);
         assert_eq!(synthetic.end.line, 1);
         assert_eq!(synthetic.end.column, 1);
+    }
+
+    #[test]
+    fn pipeline_helpers_propagate_module_parse_and_lookup_errors() {
+        let bad_sources = BTreeMap::from([(
+            "bad.xml".to_string(),
+            SourceFile {
+                kind: SourceKind::ModuleXml,
+                xml_root: Some(
+                    parse_xml_document("<module><script name=\"main\"/></module>")
+                        .expect("xml")
+                        .root,
+                ),
+                json_value: None,
+                includes: Vec::new(),
+            },
+        )]);
+        let error = parse_module_scripts(&bad_sources).expect_err("module parse should fail");
+        assert_eq!(error.code, "XML_MISSING_ATTR");
+
+        let json_sources = BTreeMap::from([(
+            "game.json".to_string(),
+            SourceFile {
+                kind: SourceKind::Json,
+                includes: Vec::new(),
+                xml_root: None,
+                json_value: Some(SlValue::Bool(true)),
+            },
+        )]);
+        let parsed = parse_module_scripts(&json_sources).expect("json-only sources should parse");
+        assert!(parsed.is_empty());
+        let source = json_sources.get("game.json").expect("json source");
+        let scripts = collect_source_scripts(source, "game.json", &BTreeMap::new());
+        assert!(scripts.is_empty());
     }
 }

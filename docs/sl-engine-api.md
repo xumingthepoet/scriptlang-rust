@@ -16,7 +16,7 @@
 ### 2.1 输入源
 
 - 所有 API 都以 `BTreeMap<String, String>` 输入脚本源：
-  - `key`: 虚拟路径（如 `main.script.xml`、`shared.defs.xml`、`game.json`）
+  - `key`: 虚拟路径（如 `main.xml`、`shared.xml`、`game.json`）
   - `value`: 文件文本内容
 
 ### 2.2 运行输出
@@ -53,7 +53,7 @@
 
 推荐把宿主流程固定为两步：
 
-1. `XML/JSON/DEFS -> CompiledProjectArtifact`
+1. `XML/JSON -> CompiledProjectArtifact`
 2. `CompiledProjectArtifact -> Engine start/resume`
 
 这样可以在“运行前”尽早暴露编译错误，并支持产物缓存、分发和复用。
@@ -67,10 +67,10 @@ use std::collections::BTreeMap;
 use sl_api::compile_scripts_from_xml_map;
 
 let mut files = BTreeMap::new();
-files.insert("main.script.xml".to_string(), r#"<script name="main"><text>Hello</text></script>"#.to_string());
+files.insert("main.xml".to_string(), r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#.to_string());
 
 let scripts = compile_scripts_from_xml_map(&files)?;
-assert!(scripts.contains_key("main"));
+assert!(scripts.contains_key("main.main"));
 # Ok::<(), sl_core::ScriptLangError>(())
 ```
 
@@ -78,7 +78,7 @@ assert!(scripts.contains_key("main"));
 
 编译完整工程，返回：
 - `scripts`
-- `entry_script`（显式指定或默认 `main`）
+- `entry_script`（显式指定或默认 `main.main`）
 - `global_json`
 
 ```rust
@@ -86,11 +86,11 @@ use std::collections::BTreeMap;
 use sl_api::compile_project_from_xml_map;
 
 let files = BTreeMap::from([
-    ("main.script.xml".to_string(), r#"<script name="main"><text>Hello</text></script>"#.to_string())
+    ("main.xml".to_string(), r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#.to_string())
 ]);
 
 let project = compile_project_from_xml_map(&files, None)?;
-assert_eq!(project.entry_script, "main");
+assert_eq!(project.entry_script, "main.main");
 # Ok::<(), sl_core::ScriptLangError>(())
 ```
 
@@ -115,7 +115,7 @@ use sl_api::{create_engine_from_xml, CreateEngineFromXmlOptions};
 use sl_core::EngineOutput;
 
 let files = BTreeMap::from([
-    ("main.script.xml".to_string(), r#"<script name="main"><text>Hello</text></script>"#.to_string())
+    ("main.xml".to_string(), r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#.to_string())
 ]);
 
 let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
@@ -154,12 +154,14 @@ use sl_api::{
 use sl_core::EngineOutput;
 
 let files = BTreeMap::from([
-    ("main.script.xml".to_string(), r#"
-<script name="main">
-  <choice text="Pick">
-    <option text="A"><text>A</text></option>
-  </choice>
-</script>
+    ("main.xml".to_string(), r#"
+<module name="main">
+  <script name="main">
+    <choice text="Pick">
+      <option text="A"><text>A</text></option>
+    </choice>
+  </script>
+</module>
 "#.to_string())
 ]);
 
@@ -198,7 +200,7 @@ use sl_api::compile_artifact_from_xml_map;
 use sl_core::COMPILED_PROJECT_SCHEMA;
 
 let files = BTreeMap::from([
-    ("main.script.xml".to_string(), r#"<script name="main"><text>Hello</text></script>"#.to_string())
+    ("main.xml".to_string(), r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#.to_string())
 ]);
 
 let artifact = compile_artifact_from_xml_map(&files, None)?;
@@ -218,7 +220,7 @@ use sl_api::{
 use sl_core::EngineOutput;
 
 let files = BTreeMap::from([
-    ("main.script.xml".to_string(), r#"<script name="main"><text>Hello</text></script>"#.to_string())
+    ("main.xml".to_string(), r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#.to_string())
 ]);
 let artifact = compile_artifact_from_xml_map(&files, None)?;
 
@@ -248,12 +250,14 @@ use sl_api::{
 use sl_core::EngineOutput;
 
 let files = BTreeMap::from([
-    ("main.script.xml".to_string(), r#"
-<script name="main">
-  <choice text="Pick">
-    <option text="A"><text>A</text></option>
-  </choice>
-</script>
+    ("main.xml".to_string(), r#"
+<module name="main">
+  <script name="main">
+    <choice text="Pick">
+      <option text="A"><text>A</text></option>
+    </choice>
+  </script>
+</module>
 "#.to_string())
 ]);
 
@@ -297,7 +301,7 @@ use sl_api::compile_artifact_from_xml_map;
 use sl_compiler::{write_artifact_json, read_artifact_json};
 
 let files = BTreeMap::from([
-    ("main.script.xml".to_string(), r#"<script name="main"><text>Hello</text></script>"#.to_string())
+    ("main.xml".to_string(), r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#.to_string())
 ]);
 
 let artifact = compile_artifact_from_xml_map(&files, None)?;
@@ -396,7 +400,7 @@ match engine.next_output() {
 
 ## 8. 实战检查清单
 
-- 入口脚本是否存在（默认 `main`）。
+- 入口脚本是否存在（默认 `main.main`）。
 - 所有 include 路径是否可解析且无循环。
 - 每次收到 `Choices/Input` 是否及时存档。
 - `compiler_version` 是否在新旧进程间一致。

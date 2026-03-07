@@ -118,9 +118,9 @@ mod boundary_runner_tests {
     fn run_to_boundary_and_load_source_helpers_work_with_examples() {
         let scripts_dir = example_scripts_dir("06-snapshot-flow");
         let loaded =
-            load_source_by_scripts_dir(&scripts_dir, "main").expect("source should be loaded");
+            load_source_by_scripts_dir(&scripts_dir, "main.main").expect("source should be loaded");
         assert!(loaded.id.starts_with("scripts-dir:"));
-        assert_eq!(loaded.entry_script, "main");
+        assert_eq!(loaded.entry_script, "main.main");
 
         let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
             scripts_xml: loaded.scripts_xml.clone(),
@@ -139,7 +139,7 @@ mod boundary_runner_tests {
         assert!(!boundary.choices.is_empty());
 
         let loaded_by_ref = load_source_by_ref(&loaded.id).expect("load by ref should pass");
-        assert_eq!(loaded_by_ref.entry_script, "main");
+        assert_eq!(loaded_by_ref.entry_script, "main.main");
     }
 
     #[test]
@@ -173,10 +173,13 @@ mod boundary_runner_tests {
     fn run_to_boundary_hides_or_shows_debug_events_by_flag() {
         let mut hidden = create_engine_from_xml(CreateEngineFromXmlOptions {
             scripts_xml: std::collections::BTreeMap::from([(
-                "main.script.xml".to_string(),
-                r#"<script name="main"><debug>dbg</debug><text>ok</text></script>"#.to_string(),
+                "main.xml".to_string(),
+                r#"<module name="main">
+<script name="main"><debug>dbg</debug><text>ok</text></script>
+</module>"#
+                    .to_string(),
             )]),
-            entry_script: Some("main".to_string()),
+            entry_script: Some("main.main".to_string()),
             entry_args: None,
             host_functions: None,
             random_seed: Some(1),
@@ -191,10 +194,13 @@ mod boundary_runner_tests {
 
         let mut shown = create_engine_from_xml(CreateEngineFromXmlOptions {
             scripts_xml: std::collections::BTreeMap::from([(
-                "main.script.xml".to_string(),
-                r#"<script name="main"><debug>dbg</debug><text>ok</text></script>"#.to_string(),
+                "main.xml".to_string(),
+                r#"<module name="main">
+<script name="main"><debug>dbg</debug><text>ok</text></script>
+</module>"#
+                    .to_string(),
             )]),
-            entry_script: Some("main".to_string()),
+            entry_script: Some("main.main".to_string()),
             entry_args: None,
             host_functions: None,
             random_seed: Some(1),

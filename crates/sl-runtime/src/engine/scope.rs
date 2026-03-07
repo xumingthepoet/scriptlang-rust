@@ -273,7 +273,7 @@ mod scope_tests {
             .insert("g".to_string(), SlValue::Number(1.0));
         engine
             .visible_json_by_script
-            .entry("main".to_string())
+            .entry("main.main".to_string())
             .or_default()
             .insert("g".to_string());
 
@@ -385,7 +385,7 @@ mod scope_tests {
                 r#"
     <!-- include: callee.script.xml -->
     <script name="main">
-      <call script="callee" args="1"/>
+      <call script="callee.callee" args="1"/>
     </script>
     "#,
             ),
@@ -394,7 +394,7 @@ mod scope_tests {
                 r#"<script name="callee"><return/></script>"#,
             ),
         ]));
-        engine.start("main", None).expect("start");
+        engine.start("main.main", None).expect("start");
         let error = engine.next_output().expect_err("arg unknown should fail");
         assert_eq!(error.code, "ENGINE_CALL_ARG_UNKNOWN");
 
@@ -405,7 +405,7 @@ mod scope_tests {
                 r#"
     <!-- include: callee.script.xml -->
     <script name="main">
-      <call script="callee" args="&quot;str&quot;"/>
+      <call script="callee.callee" args="&quot;str&quot;"/>
     </script>
     "#,
             ),
@@ -414,7 +414,7 @@ mod scope_tests {
                 r#"<script name="callee" args="int:x"><return/></script>"#,
             ),
         ]));
-        engine.start("main", None).expect("start");
+        engine.start("main.main", None).expect("start");
         let error = engine
             .next_output()
             .expect_err("arg type mismatch should fail");

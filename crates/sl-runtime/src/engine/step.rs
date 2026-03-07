@@ -649,7 +649,7 @@ mod step_tests {
     <option text="A"><text>A</text></option>
   </choice>
   <input var="name" text="Name"/>
-  <call script="next"/>
+  <call script="next.next"/>
   <text>done ${name}</text>
 </script>
 "#,
@@ -665,7 +665,7 @@ mod step_tests {
         ]);
 
         let mut engine = engine_from_sources(files);
-        engine.start("main", None).expect("start main");
+        engine.start("main.main", None).expect("start main");
         drive_engine_to_end(&mut engine);
     }
 
@@ -702,7 +702,7 @@ mod step_tests {
   <var name="hp" type="int">10</var>
   <text>main.local.before=${hp}</text>
   <text>main.global.before=${shared.hp}</text>
-  <call script="battle"/>
+  <call script="battle.battle"/>
   <text>main.local.after=${hp}</text>
   <text>main.global.after=${shared.hp}</text>
 </script>
@@ -710,7 +710,7 @@ mod step_tests {
             ),
         ]);
         let mut engine = engine_from_sources(files);
-        engine.start("main", None).expect("start main");
+        engine.start("main.main", None).expect("start main");
 
         let mut texts = Vec::new();
         for _ in 0..64usize {
@@ -900,7 +900,7 @@ mod step_tests {
         )]));
         engine.start("main", None).expect("start");
 
-        let script = engine.scripts.get("main").expect("main script");
+        let script = engine.scripts.get("main.main").expect("main script");
         let root = script
             .groups
             .get(&script.root_group_id)
@@ -924,7 +924,7 @@ mod step_tests {
                 _ => None,
             })
             .expect("fall_over option");
-        engine.mark_once_state("main", &format!("option:{}", option_id));
+        engine.mark_once_state("main.main", &format!("option:{}", option_id));
 
         let output = engine.next_output().expect("choice should be skipped");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "after"));

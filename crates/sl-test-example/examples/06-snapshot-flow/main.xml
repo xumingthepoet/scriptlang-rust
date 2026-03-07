@@ -1,0 +1,15 @@
+<module name="main">
+<script name="main">
+  <var name="hp" type="int">10</var>
+  <text>before ${hp}</text>
+  <choice text="Choose">
+    <option text="Heal">
+      <code>hp = hp + 5;</code>
+    </option>
+    <option text="Hit">
+      <code>hp = hp - 2;</code>
+    </option>
+  </choice>
+  <text>after ${hp}</text>
+</script>
+</module>

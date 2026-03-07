@@ -1,0 +1,12 @@
+<module name="main">
+<script name="main">
+  <var name="arr" type="int[]">[2, 3]</var>
+  <choice text="Pick">
+    <option text="Static"><text>S</text></option>
+    <dynamic-options array="arr" item="it" index="i">
+      <option text="D-${it}-${i}" when="it > 2"><text>D ${it}/${i}</text></option>
+    </dynamic-options>
+    <option text="Tail"><text>T</text></option>
+  </choice>
+</script>
+</module>

@@ -1,0 +1,9 @@
+<!-- include: buff.xml -->
+<module name="main">
+<script name="main">
+  <var name="hp" type="int">1</var>
+  <text>before hp=${hp}</text>
+  <call script="buff.buff" args="3,ref:hp"/>
+  <text>after hp=${hp}</text>
+</script>
+</module>

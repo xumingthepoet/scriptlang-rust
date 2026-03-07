@@ -1,0 +1,6 @@
+<!-- include: ../support/ -->
+<module name="battle">
+<script name="battle">
+  <text>battle=${shared.boost(config.base)}</text>
+</script>
+</module>

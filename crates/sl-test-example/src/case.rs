@@ -15,7 +15,7 @@ pub struct TestCase {
 }
 
 fn default_entry_script() -> String {
-    "main".to_string()
+    "main.main".to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,8 +61,8 @@ mod case_tests {
     use super::*;
 
     #[test]
-    fn default_entry_script_returns_main() {
-        assert_eq!(default_entry_script(), "main");
+    fn default_entry_script_returns_main_main() {
+        assert_eq!(default_entry_script(), "main.main");
     }
 
     #[test]
@@ -89,7 +89,7 @@ mod case_tests {
         .expect("testcase should deserialize");
 
         assert_eq!(parsed.schema_version, TESTCASE_SCHEMA);
-        assert_eq!(parsed.entry_script, "main");
+        assert_eq!(parsed.entry_script, "main.main");
         assert!(parsed.actions.is_empty());
         assert!(parsed.expected_events.is_empty());
     }
