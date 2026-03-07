@@ -51,6 +51,7 @@ All code must be written with testability in mind:
 - **100% coverage required**: All code paths must be covered by tests; `make gate` enforces this.
 - **Write tests first**: When fixing bugs or adding features, write the failing test first (TDD approach).
 - **Test support helpers**: Use the `*_test_support` modules provided by each crate for common test utilities.
+- **Host-facing paths should fail gracefully**: For CLI/artifact/state IO paths, prefer returning typed errors instead of panicking assertions.
 
 ## Runtime/Compiler Performance Notes
 - `sl-runtime` reuses a single internal `rhai::Engine` instance and keeps `random` builtin state in shared runtime storage, avoiding per-eval engine re-construction.

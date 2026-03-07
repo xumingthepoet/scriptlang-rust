@@ -32,7 +32,10 @@ pub fn read_scripts_xml_from_dir(
 
         let relative = path
             .strip_prefix(example_dir)
-            .expect("walkdir path should start with example dir")
+            .map_err(|source| SlTestExampleError::PathStrip {
+                path: path.to_path_buf(),
+                source,
+            })?
             .to_string_lossy()
             .replace('\\', "/");
 

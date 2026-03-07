@@ -2,6 +2,10 @@ use sl_api::{EngineOutput, ScriptLangError};
 
 use crate::{BoundaryEvent, BoundaryResult, DebugEvent, OutputEvent, TextEvent};
 
+fn json_string(value: &str) -> String {
+    serde_json::Value::String(value.to_string()).to_string()
+}
+
 pub(crate) fn run_to_boundary(
     engine: &mut sl_api::ScriptLangEngine,
     show_debug: bool,
@@ -69,53 +73,31 @@ pub(crate) fn emit_boundary(boundary: BoundaryResult, state_out: Option<String>)
     for output in boundary.outputs {
         match output {
             OutputEvent::Text(text_event) => {
-                println!(
-                    "TEXT_JSON:{}",
-                    serde_json::to_string(&text_event.text).expect("string json")
-                );
+                println!("TEXT_JSON:{}", json_string(&text_event.text));
                 if let Some(tag) = text_event.tag {
-                    println!(
-                        "TEXT_TAG_JSON:{}",
-                        serde_json::to_string(&tag).expect("string json")
-                    );
+                    println!("TEXT_TAG_JSON:{}", json_string(&tag));
                 }
             }
             OutputEvent::Debug(debug_event) => {
-                println!(
-                    "DEBUG_JSON:{}",
-                    serde_json::to_string(&debug_event.text).expect("string json")
-                );
+                println!("DEBUG_JSON:{}", json_string(&debug_event.text));
             }
         }
     }
 
     if let Some(prompt) = boundary.choice_prompt_text {
-        println!(
-            "PROMPT_JSON:{}",
-            serde_json::to_string(&prompt).expect("string json")
-        );
+        println!("PROMPT_JSON:{}", json_string(&prompt));
     }
 
     if let Some(prompt) = boundary.input_prompt_text {
-        println!(
-            "PROMPT_JSON:{}",
-            serde_json::to_string(&prompt).expect("string json")
-        );
+        println!("PROMPT_JSON:{}", json_string(&prompt));
     }
 
     for (index, text) in boundary.choices {
-        println!(
-            "CHOICE:{}|{}",
-            index,
-            serde_json::to_string(&text).expect("string json")
-        );
+        println!("CHOICE:{}|{}", index, json_string(&text));
     }
 
     if let Some(default_text) = boundary.input_default_text {
-        println!(
-            "INPUT_DEFAULT_JSON:{}",
-            serde_json::to_string(&default_text).expect("string json")
-        );
+        println!("INPUT_DEFAULT_JSON:{}", json_string(&default_text));
     }
 
     println!(

@@ -104,10 +104,9 @@ impl TuiUiState {
             return true;
         }
 
-        let line = self
-            .typing_line
-            .as_ref()
-            .expect("typing line should exist when typing");
+        let Some(line) = self.typing_line.as_ref() else {
+            return false;
+        };
         let total_chars = line.chars().count();
         if self.typing_chars >= total_chars {
             self.rendered_lines.push(line.clone());

@@ -15,7 +15,7 @@ pub(crate) fn save_player_state(path: &Path, state: &PlayerState) -> Result<(), 
     };
     fs::create_dir_all(parent).map_err(map_cli_state_write)?;
 
-    let payload = serde_json::to_string(state).expect("player state should serialize");
+    let payload = serde_json::to_string(state).map_err(map_cli_state_invalid)?;
     fs::write(path, payload).map_err(map_cli_state_write)
 }
 

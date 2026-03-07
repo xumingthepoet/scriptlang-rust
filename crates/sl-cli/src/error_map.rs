@@ -42,7 +42,7 @@ pub(crate) fn emit_error(error: ScriptLangError) -> i32 {
     println!("ERROR_CODE:{}", error.code);
     println!(
         "ERROR_MSG_JSON:{}",
-        serde_json::to_string(&error.message).expect("string json")
+        serde_json::Value::String(error.message)
     );
     1
 }

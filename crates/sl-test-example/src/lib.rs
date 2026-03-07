@@ -25,6 +25,11 @@ pub enum SlTestExampleError {
     InvalidSchemaVersion { expected: String, found: String },
     #[error("No .script.xml/.defs.xml/.module.xml/.json files under {path}.")]
     SourceEmpty { path: PathBuf },
+    #[error("Failed to relativize path {path}: {source}")]
+    PathStrip {
+        path: PathBuf,
+        source: std::path::StripPrefixError,
+    },
     #[error("Engine error: {0}")]
     Engine(#[from] sl_core::ScriptLangError),
     #[error("Action missing at event index {event_index}: expected {expected_action_kind}.")]
