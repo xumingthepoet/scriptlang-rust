@@ -381,7 +381,7 @@ mod snapshot_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="heroName" type="string">&quot;Traveler&quot;</var>
+      <var name="heroName" type="string">"Traveler"</var>
       <input var="heroName" text="Name your hero"/>
       <text>Hello ${heroName}</text>
     </script>
@@ -531,7 +531,7 @@ mod snapshot_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="name" type="string">&quot;X&quot;</var>
+      <var name="name" type="string">"X"</var>
       <input var="name" text="name?"/>
     </script>
     "#,
@@ -554,7 +554,7 @@ mod snapshot_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="name" type="string">&quot;X&quot;</var>
+      <var name="name" type="string">"X"</var>
       <input var="name" text="name?"/>
     </script>
     "#,
@@ -614,7 +614,7 @@ mod snapshot_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="name" type="string">&quot;X&quot;</var>
+      <var name="name" type="string">"X"</var>
       <input var="name" text="name?"/>
     </script>
     "#,

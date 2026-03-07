@@ -256,15 +256,19 @@ cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/06-snap
 
 1. `XML_PARSE_ERROR ... invalid name token`
 - 常见原因：属性值里直接写了 `<` 或 `&&`
-- 修复：把 `<` 写成 `&lt;`，把 `&&` 写成 `&amp;&amp;`
+- 修复：改用 ScriptLang 保留字，写成 `LT` / `LTE` / `AND`
 
 2. `TYPE_UNKNOWN: Unknown custom type "game.WorldState"`
 - 常见原因：脚本所在模块没有 include 对应的 `*.xml` 定义文件
 - 修复：在每个使用该类型的模块文件里显式 `<!-- include: ... -->`，或 include 一个覆盖所需定义的目录（如 `<!-- include: shared/ -->`）
 
 3. `when` 字符串比较表达式异常
-- 常见原因：`when="..."` 中使用单引号字符串导致执行路径兼容性问题
-- 修复：统一写 `&quot;xxx&quot;`，例如 `name == &quot;Rin&quot;`
+- 常见原因：属性表达式里继续使用 XML 转义或双引号字符串
+- 修复：属性里写单引号字符串，例如 `name == 'Rin'`
+
+4. `<code>` / `<function>` 里的字符串异常
+- 常见原因：代码块里写了单引号字符串，触发 ScriptLang 的 char/单引号禁用规则
+- 修复：代码块里改成双引号，例如 `<code>name = "Rin";</code>`
 
 4. `Data type incorrect: f64 (expecting i64)`
 - 归类：运行时类型稳定性 bug（不是脚本作者的预期行为）

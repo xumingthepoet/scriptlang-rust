@@ -209,7 +209,7 @@ mod scope_tests {
 
         let mut bad_type = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><var name="x" type="int">&quot;str&quot;</var></script>"#,
+            r#"<script name="main"><var name="x" type="int">"str"</var></script>"#,
         )]));
         bad_type.start("main", None).expect("start");
         let error = bad_type
@@ -405,7 +405,7 @@ mod scope_tests {
                 r#"
     <!-- include: callee.script.xml -->
     <script name="main">
-      <call script="callee.callee" args="&quot;str&quot;"/>
+      <call script="callee.callee" args="'str'"/>
     </script>
     "#,
             ),

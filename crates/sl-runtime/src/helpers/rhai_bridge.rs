@@ -102,6 +102,214 @@ pub(crate) fn replace_defs_global_symbol(source: &str, symbol: &str, replacement
     out
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RhaiInputMode {
+    AttributeExpr,
+    CodeBlock,
+}
+
+pub(crate) fn preprocess_scriptlang_rhai_input(
+    source: &str,
+    context: &str,
+    mode: RhaiInputMode,
+) -> Result<String, ScriptLangError> {
+    let chars = source.chars().collect::<Vec<_>>();
+    let mut out = String::with_capacity(source.len());
+    let mut index = 0usize;
+
+    while index < chars.len() {
+        match chars[index] {
+            '\'' => match mode {
+                RhaiInputMode::AttributeExpr => {
+                    let (encoded, next_index) = parse_single_quoted_string(&chars, index, context)?;
+                    out.push_str(&encoded);
+                    index = next_index;
+                }
+                RhaiInputMode::CodeBlock => {
+                    return Err(preprocess_error(
+                        "RHAI_PREPROCESS_FORBIDDEN_SINGLE_QUOTE",
+                        context,
+                        "single-quoted strings are forbidden in code-style expressions",
+                        "Use double-quoted strings like \"text\" in <code>, <function>, and <var> initializer bodies.",
+                    ));
+                }
+            },
+            '"' => match mode {
+                RhaiInputMode::AttributeExpr => {
+                    return Err(preprocess_error(
+                        "RHAI_PREPROCESS_FORBIDDEN_DOUBLE_QUOTE",
+                        context,
+                        "double-quoted strings are forbidden in attribute expressions",
+                        "Use single-quoted strings like 'text' in XML attributes.",
+                    ));
+                }
+                RhaiInputMode::CodeBlock => {
+                    out.push('"');
+                    index += 1;
+                    let mut closed = false;
+                    while index < chars.len() {
+                        match chars[index] {
+                            '"' => {
+                                out.push('"');
+                                index += 1;
+                                closed = true;
+                                break;
+                            }
+                            '\\' => {
+                                out.push('\\');
+                                let Some(next) = chars.get(index + 1).copied() else {
+                                    return Err(preprocess_error(
+                                            "RHAI_PREPROCESS_STRING_UNTERMINATED",
+                                            context,
+                                            "unterminated escape in double-quoted string",
+                                            "Close the string with \" and keep escapes inside the string body.",
+                                        ));
+                                };
+                                out.push(next);
+                                index += 2;
+                            }
+                            ch => {
+                                out.push(ch);
+                                index += 1;
+                            }
+                        }
+                    }
+                    if !closed {
+                        return Err(preprocess_error(
+                            "RHAI_PREPROCESS_STRING_UNTERMINATED",
+                            context,
+                            "unterminated double-quoted string",
+                            "Close the string with \".",
+                        ));
+                    }
+                }
+            },
+            '<' => {
+                let code = if chars.get(index + 1) == Some(&'=') {
+                    "RHAI_PREPROCESS_FORBIDDEN_LTE"
+                } else {
+                    "RHAI_PREPROCESS_FORBIDDEN_LT"
+                };
+                let replacement = if code.ends_with("LTE") {
+                    "Use LTE instead of <=."
+                } else {
+                    "Use LT instead of <."
+                };
+                return Err(preprocess_error(
+                    code,
+                    context,
+                    "raw comparison operator is forbidden",
+                    replacement,
+                ));
+            }
+            '&' if chars.get(index + 1) == Some(&'&') => {
+                return Err(preprocess_error(
+                    "RHAI_PREPROCESS_FORBIDDEN_AND",
+                    context,
+                    "raw logical operator && is forbidden",
+                    "Use AND instead of &&.",
+                ));
+            }
+            ch if is_scriptlang_token_char(ch) => {
+                let start = index;
+                index += 1;
+                while index < chars.len() && is_scriptlang_token_char(chars[index]) {
+                    index += 1;
+                }
+                let token = chars[start..index].iter().collect::<String>();
+                match token.as_str() {
+                    "LTE" => out.push_str("<="),
+                    "LT" => out.push('<'),
+                    "AND" => out.push_str("&&"),
+                    _ => out.push_str(&token),
+                }
+            }
+            ch => {
+                out.push(ch);
+                index += 1;
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+fn parse_single_quoted_string(
+    chars: &[char],
+    start: usize,
+    context: &str,
+) -> Result<(String, usize), ScriptLangError> {
+    let mut out = String::from("\"");
+    let mut index = start + 1;
+
+    while index < chars.len() {
+        match chars[index] {
+            '\'' => {
+                out.push('"');
+                return Ok((out, index + 1));
+            }
+            '\\' => {
+                let Some(next) = chars.get(index + 1).copied() else {
+                    return Err(preprocess_error(
+                        "RHAI_PREPROCESS_STRING_UNTERMINATED",
+                        context,
+                        "unterminated escape in single-quoted string",
+                        "Close the string and escape inner apostrophes as \\'",
+                    ));
+                };
+                match next {
+                    '\'' => out.push('\''),
+                    '"' => out.push_str("\\\""),
+                    '\\' => out.push_str("\\\\"),
+                    'n' => out.push_str("\\n"),
+                    'r' => out.push_str("\\r"),
+                    't' => out.push_str("\\t"),
+                    '0' => out.push_str("\\0"),
+                    _ => {
+                        out.push('\\');
+                        out.push(next);
+                    }
+                }
+                index += 2;
+            }
+            '"' => {
+                out.push_str("\\\"");
+                index += 1;
+            }
+            ch => {
+                out.push(ch);
+                index += 1;
+            }
+        }
+    }
+
+    Err(preprocess_error(
+        "RHAI_PREPROCESS_STRING_UNTERMINATED",
+        context,
+        "unterminated single-quoted string",
+        "Close the string with ' and escape inner apostrophes as \\'",
+    ))
+}
+
+fn preprocess_error(
+    code: &'static str,
+    context: &str,
+    detail: &str,
+    recommendation: &str,
+) -> ScriptLangError {
+    ScriptLangError::new(
+        code,
+        format!(
+            "ScriptLang Rhai preprocessing failed in {}: {}. {}",
+            context, detail, recommendation
+        ),
+    )
+}
+
+fn is_scriptlang_token_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_' || ch == '$'
+}
+
 pub(crate) fn is_defs_identifier_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '$' || ch == '_'
 }
@@ -280,6 +488,9 @@ mod rhai_bridge_tests {
     fn bridge_helper_functions_cover_remaining_paths() {
         assert_eq!(rhai_function_symbol("a.b-c"), "a_b_c");
         assert_eq!(defs_namespace_symbol("shared.ns"), "__sl_defs_ns_shared_ns");
+        assert!(is_scriptlang_token_char('a'));
+        assert!(is_scriptlang_token_char('_'));
+        assert!(!is_scriptlang_token_char('.'));
         assert!(is_defs_identifier_char('a'));
         assert!(is_defs_identifier_char('$'));
         assert!(!is_defs_identifier_char('.'));
@@ -352,6 +563,128 @@ mod rhai_bridge_tests {
                 SlValue::Number(1.0),
             )]))),
             "#{k: 1}"
+        );
+    }
+
+    #[test]
+    fn preprocess_scriptlang_rhai_input_rewrites_keywords_and_single_quotes() {
+        let rewritten = preprocess_scriptlang_rhai_input(
+            "hp LTE 10 AND name == 'Rin' AND slot == SLOT",
+            "expression",
+            RhaiInputMode::AttributeExpr,
+        )
+        .expect("preprocess");
+        assert_eq!(rewritten, "hp <= 10 && name == \"Rin\" && slot == SLOT");
+
+        let escaped = preprocess_scriptlang_rhai_input(
+            "'I\\'m \"ok\"'",
+            "expression",
+            RhaiInputMode::AttributeExpr,
+        )
+        .expect("escaped string");
+        assert_eq!(escaped, "\"I'm \\\"ok\\\"\"");
+    }
+
+    #[test]
+    fn preprocess_attribute_expr_rejects_legacy_and_invalid_syntax() {
+        let raw_lt =
+            preprocess_scriptlang_rhai_input("hp < 10", "expression", RhaiInputMode::AttributeExpr)
+                .expect_err("raw lt should fail");
+        assert_eq!(raw_lt.code, "RHAI_PREPROCESS_FORBIDDEN_LT");
+        assert!(raw_lt.message.contains("Use LT instead of <"));
+
+        let raw_lte = preprocess_scriptlang_rhai_input(
+            "hp <= 10",
+            "expression",
+            RhaiInputMode::AttributeExpr,
+        )
+        .expect_err("raw lte should fail");
+        assert_eq!(raw_lte.code, "RHAI_PREPROCESS_FORBIDDEN_LTE");
+
+        let raw_and =
+            preprocess_scriptlang_rhai_input("a && b", "expression", RhaiInputMode::AttributeExpr)
+                .expect_err("raw and should fail");
+        assert_eq!(raw_and.code, "RHAI_PREPROCESS_FORBIDDEN_AND");
+
+        let double_quote = preprocess_scriptlang_rhai_input(
+            "name == \"Rin\"",
+            "expression",
+            RhaiInputMode::AttributeExpr,
+        )
+        .expect_err("double quote should fail");
+        assert_eq!(double_quote.code, "RHAI_PREPROCESS_FORBIDDEN_DOUBLE_QUOTE");
+
+        let unterminated =
+            preprocess_scriptlang_rhai_input("'Rin", "expression", RhaiInputMode::AttributeExpr)
+                .expect_err("unterminated string should fail");
+        assert_eq!(unterminated.code, "RHAI_PREPROCESS_STRING_UNTERMINATED");
+    }
+
+    #[test]
+    fn preprocess_attribute_expr_covers_single_quote_escape_variants() {
+        let rewritten = preprocess_scriptlang_rhai_input(
+            "'a\\\"b\\\\c\\nd\\re\\tf\\0g\\xy'",
+            "expression",
+            RhaiInputMode::AttributeExpr,
+        )
+        .expect("preprocess");
+        assert_eq!(rewritten, "\"a\\\"b\\\\c\\nd\\re\\tf\\0g\\xy\"");
+
+        let bad_escape =
+            preprocess_scriptlang_rhai_input("'oops\\", "expression", RhaiInputMode::AttributeExpr)
+                .expect_err("unterminated escape should fail");
+        assert_eq!(bad_escape.code, "RHAI_PREPROCESS_STRING_UNTERMINATED");
+        assert!(bad_escape.message.contains("escape inner apostrophes"));
+    }
+
+    #[test]
+    fn preprocess_code_block_supports_double_quotes_and_keywords() {
+        let rewritten = preprocess_scriptlang_rhai_input(
+            r#"name = "Rin"; hp = hp LTE 1 AND ready"#,
+            "code",
+            RhaiInputMode::CodeBlock,
+        )
+        .expect("preprocess");
+        assert_eq!(rewritten, r#"name = "Rin"; hp = hp <= 1 && ready"#);
+
+        let escaped = preprocess_scriptlang_rhai_input(
+            "name = \"R\\\"in\";",
+            "code",
+            RhaiInputMode::CodeBlock,
+        )
+        .expect("escaped code string");
+        assert_eq!(escaped, "name = \"R\\\"in\";");
+    }
+
+    #[test]
+    fn preprocess_code_block_rejects_single_quotes_and_legacy_operators() {
+        let single_quote =
+            preprocess_scriptlang_rhai_input("name = 'Rin';", "code", RhaiInputMode::CodeBlock)
+                .expect_err("single quote should fail");
+        assert_eq!(single_quote.code, "RHAI_PREPROCESS_FORBIDDEN_SINGLE_QUOTE");
+
+        let raw_lt = preprocess_scriptlang_rhai_input("hp < 10", "code", RhaiInputMode::CodeBlock)
+            .expect_err("raw lt should fail");
+        assert_eq!(raw_lt.code, "RHAI_PREPROCESS_FORBIDDEN_LT");
+
+        let raw_and = preprocess_scriptlang_rhai_input("a && b", "code", RhaiInputMode::CodeBlock)
+            .expect_err("raw and should fail");
+        assert_eq!(raw_and.code, "RHAI_PREPROCESS_FORBIDDEN_AND");
+
+        let unterminated_escape =
+            preprocess_scriptlang_rhai_input("name = \"Rin\\", "code", RhaiInputMode::CodeBlock)
+                .expect_err("unterminated escape should fail");
+        assert_eq!(
+            unterminated_escape.code,
+            "RHAI_PREPROCESS_STRING_UNTERMINATED"
+        );
+
+        let unterminated_string =
+            preprocess_scriptlang_rhai_input("name = \"Rin", "code", RhaiInputMode::CodeBlock)
+                .expect_err("unterminated string should fail");
+        assert_eq!(
+            unterminated_string.code,
+            "RHAI_PREPROCESS_STRING_UNTERMINATED"
         );
     }
 

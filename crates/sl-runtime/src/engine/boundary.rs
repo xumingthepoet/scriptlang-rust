@@ -388,7 +388,7 @@ mod boundary_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="heroName" type="string">&quot;Traveler&quot;</var>
+      <var name="heroName" type="string">"Traveler"</var>
       <input var="heroName" text="Name your hero"/>
       <text>Hello ${heroName}</text>
     </script>
@@ -412,7 +412,7 @@ mod boundary_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="heroName" type="string">&quot;Traveler&quot;</var>
+      <var name="heroName" type="string">"Traveler"</var>
       <input var="heroName" text="Name your hero"/>
       <text>Hello ${heroName}</text>
     </script>
@@ -611,7 +611,7 @@ mod boundary_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="heroName" type="string">&quot;Traveler&quot;</var>
+      <var name="heroName" type="string">"Traveler"</var>
       <input var="heroName" text="Name your hero"/>
     </script>
     "#,

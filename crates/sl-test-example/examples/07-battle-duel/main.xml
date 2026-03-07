@@ -4,8 +4,8 @@
 <!-- include: defeat.xml -->
 <module name="main">
 <script name="main">
-  <var name="player" type="actors.Combatant">#{name: &quot;Hero&quot;, hp: 12}</var>
-  <var name="enemy" type="actors.Combatant">#{name: &quot;Bandit&quot;, hp: 12}</var>
+  <var name="player" type="actors.Combatant">#{name: "Hero", hp: 12}</var>
+  <var name="enemy" type="actors.Combatant">#{name: "Bandit", hp: 12}</var>
 
   <text>Battle start: ${player.name}(${player.hp}) vs ${enemy.name}(${enemy.hp})</text>
   <text>Tip: if you keep using weak attacks, you will lose.</text>
@@ -15,7 +15,7 @@
     args="ref:player,ref:enemy"
   />
 
-  <if when="player.hp > 0 &amp;&amp; enemy.hp &lt;= 0">
+  <if when="player.hp > 0  AND  enemy.hp  LTE  0">
     <text>Result: ${player.name} wins. hp=${player.hp}</text>
     <return script="victory.victory"/>
     <else>

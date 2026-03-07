@@ -86,11 +86,19 @@ impl ScriptLangEngine {
     }
 
     pub(super) fn run_code(&mut self, code: &str) -> Result<(), ScriptLangError> {
-        self.execute_rhai(code, false).map(|_| ())
+        self.execute_rhai(code, false, "code").map(|_| ())
     }
 
     pub(super) fn eval_expression(&mut self, expr: &str) -> Result<SlValue, ScriptLangError> {
-        self.execute_rhai(expr, true)
+        self.execute_rhai(expr, true, "expression")
+    }
+
+    pub(super) fn eval_initializer_expression(
+        &mut self,
+        expr: &str,
+        context: &str,
+    ) -> Result<SlValue, ScriptLangError> {
+        self.execute_rhai_with_mode(expr, true, context, RhaiInputMode::CodeBlock)
     }
 
     pub(super) fn eval_defs_global_initializer(
@@ -140,7 +148,9 @@ impl ScriptLangEngine {
             scope.push_dynamic(name.clone(), slvalue_to_dynamic(value));
         }
 
-        let rewritten = rewrite_defs_global_qualified_access(expr, &qualified_rewrite_map);
+        let preprocessed =
+            preprocess_scriptlang_rhai_input(expr, "initializer", RhaiInputMode::CodeBlock)?;
+        let rewritten = rewrite_defs_global_qualified_access(&preprocessed, &qualified_rewrite_map);
         let result = self
             .rhai_engine
             .eval_with_scope::<Dynamic>(&mut scope, &format!("({})", rewritten))
@@ -174,6 +184,22 @@ impl ScriptLangEngine {
         &mut self,
         script: &str,
         is_expression: bool,
+        context: &str,
+    ) -> Result<SlValue, ScriptLangError> {
+        let mode = if is_expression {
+            RhaiInputMode::AttributeExpr
+        } else {
+            RhaiInputMode::CodeBlock
+        };
+        self.execute_rhai_with_mode(script, is_expression, context, mode)
+    }
+
+    pub(super) fn execute_rhai_with_mode(
+        &mut self,
+        script: &str,
+        is_expression: bool,
+        context: &str,
+        mode: RhaiInputMode,
     ) -> Result<SlValue, ScriptLangError> {
         let script_name = self.resolve_current_script_name().unwrap_or_default();
         let function_symbol_map = self
@@ -288,7 +314,8 @@ impl ScriptLangEngine {
 
         let source = {
             let prelude = self.get_or_build_defs_prelude(&script_name, &function_symbol_map)?;
-            let rewritten_script = rewrite_function_calls(script, &function_symbol_map);
+            let preprocessed = preprocess_scriptlang_rhai_input(script, context, mode)?;
+            let rewritten_script = rewrite_function_calls(&preprocessed, &function_symbol_map);
             let rewritten_script =
                 rewrite_defs_global_qualified_access(&rewritten_script, &qualified_rewrite_map);
             if is_expression {
@@ -493,7 +520,12 @@ impl ScriptLangEngine {
                 decl.return_binding.name,
                 slvalue_to_rhai_literal(&default_value)
             ));
-            let rewritten = rewrite_function_calls(&decl.code, function_symbol_map);
+            let preprocessed = preprocess_scriptlang_rhai_input(
+                &decl.code,
+                "function body",
+                RhaiInputMode::CodeBlock,
+            )?;
+            let rewritten = rewrite_function_calls(&preprocessed, function_symbol_map);
             let rewritten =
                 rewrite_defs_global_qualified_access(&rewritten, &qualified_rewrite_map);
             out.push_str(&rewritten);
@@ -750,6 +782,110 @@ mod eval_tests {
             .next_output()
             .expect_err("host functions unsupported");
         assert_eq!(error.code, "ENGINE_HOST_FUNCTION_UNSUPPORTED");
+    }
+
+    #[test]
+    pub(super) fn scriptlang_expr_preprocessing_supports_new_keywords_and_rejects_legacy_syntax() {
+        let mut supported = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+<script name="main">
+  <var name="hp" type="int">1</var>
+  <var name="name" type="string">"Rin"</var>
+  <if when="hp LTE 1 AND name == 'Rin'">
+    <code>name = "Win";</code>
+  </if>
+  <text>${name}</text>
+</script>
+"#,
+        )]));
+        supported.start("main", None).expect("start");
+        let output = supported.next_output().expect("text");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "Win"));
+
+        let mut legacy_compare = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><if when="hp &lt; 10"><text>x</text></if></script>"#,
+        )]));
+        legacy_compare.start("main", None).expect("start");
+        let error = legacy_compare
+            .next_output()
+            .expect_err("legacy lt should fail");
+        assert_eq!(error.code, "RHAI_PREPROCESS_FORBIDDEN_LT");
+
+        let mut legacy_logic = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><var name="hp" type="int">1</var><if when="hp > 0 &amp;&amp; true"><text>x</text></if></script>"#,
+        )]));
+        legacy_logic.start("main", None).expect("start");
+        let error = legacy_logic
+            .next_output()
+            .expect_err("legacy and should fail");
+        assert_eq!(error.code, "RHAI_PREPROCESS_FORBIDDEN_AND");
+
+        let mut legacy_quote = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><var name="name" type="string">"Rin"</var><if when="name == &quot;Rin&quot;"><text>x</text></if></script>"#,
+        )]));
+        legacy_quote.start("main", None).expect("start");
+        let error = legacy_quote
+            .next_output()
+            .expect_err("attribute double quote string should fail");
+        assert_eq!(error.code, "RHAI_PREPROCESS_FORBIDDEN_DOUBLE_QUOTE");
+    }
+
+    #[test]
+    pub(super) fn scriptlang_expr_preprocessing_rejects_initializer_and_function_body_legacy_syntax(
+    ) {
+        let bad_initializer = map(&[
+            (
+                "shared.defs.xml",
+                r#"<defs name="shared"><var name="hp" type="int">base &lt;= 1</var></defs>"#,
+            ),
+            ("base.json", r#"{ "base": 1 }"#),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<!-- include: base.json -->
+<script name="main"><text>ok</text></script>
+"#,
+            ),
+        ]);
+        let mut bad_initializer_engine = engine_from_sources(bad_initializer);
+        let error = bad_initializer_engine
+            .start("main.main", None)
+            .expect_err("legacy initializer syntax should fail");
+        assert_eq!(error.code, "RHAI_PREPROCESS_FORBIDDEN_LTE");
+        assert!(error.message.contains("initializer"));
+
+        let bad_function = map(&[
+            (
+                "shared.defs.xml",
+                r#"<defs name="shared"><function name="bad" return="string:out">out = 'bad';</function></defs>"#,
+            ),
+            (
+                "main.script.xml",
+                r#"
+<!-- include: shared.defs.xml -->
+<script name="main">
+  <code>let value = shared.bad();</code>
+  <text>ok</text>
+</script>
+"#,
+            ),
+        ]);
+        let bad_function_engine = engine_from_sources(bad_function);
+        let function_symbol_map = bad_function_engine
+            .visible_function_symbols_by_script
+            .get("main.main")
+            .cloned()
+            .expect("function symbols");
+        let error = bad_function_engine
+            .build_defs_prelude("main.main", &function_symbol_map)
+            .expect_err("legacy function body syntax should fail");
+        assert_eq!(error.code, "RHAI_PREPROCESS_FORBIDDEN_SINGLE_QUOTE");
+        assert!(error.message.contains("function body"));
     }
 
     #[test]
@@ -1132,7 +1268,7 @@ mod eval_tests {
             ]),
         );
         let _ = alias_visibility_engine
-            .execute_rhai("hp + 1", true)
+            .execute_rhai("hp + 1", true, "expression")
             .expect("eval should pass");
 
         let mut short_decl_missing_engine = engine_from_sources(map(&[(
@@ -1155,7 +1291,7 @@ mod eval_tests {
             .defs_globals_value
             .insert("bad".to_string(), SlValue::Number(1.0));
         let error = short_decl_missing_engine
-            .execute_rhai("hp = hp + 1;", false)
+            .execute_rhai("hp = hp + 1;", false, "code")
             .expect_err("short alias missing decl should fail");
         assert_eq!(error.code, "ENGINE_DEFS_GLOBAL_DECL_MISSING");
     }
@@ -1362,7 +1498,7 @@ mod eval_tests {
 
         let mut mutable_type = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><var name="x" type="int">1</var><code>x = &quot;bad&quot;;</code></script>"#,
+            r#"<script name="main"><var name="x" type="int">1</var><code>x = "bad";</code></script>"#,
         )]));
         mutable_type.start("main", None).expect("start");
         let error = mutable_type

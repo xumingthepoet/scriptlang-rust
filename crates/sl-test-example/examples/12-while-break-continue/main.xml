@@ -1,7 +1,7 @@
 <module name="main">
 <script name="main">
   <var name="i" type="int">0</var>
-  <while when="i &lt; 6">
+  <while when="i  LT  6">
     <code>i = i + 1;</code>
     <if when="i == 2">
       <continue/>

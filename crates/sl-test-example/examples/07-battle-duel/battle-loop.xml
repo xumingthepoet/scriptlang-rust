@@ -7,7 +7,7 @@
   <var name="potions" type="int">1</var>
   <var name="rounds" type="int">0</var>
 
-  <while when="player.hp > 0 &amp;&amp; enemy.hp > 0">
+  <while when="player.hp > 0  AND  enemy.hp > 0">
     <code>rounds = rounds + 1;</code>
     <var name="roundBanner" type="string"/>
     <code>roundBanner = "Round " + rounds;</code>
@@ -32,7 +32,7 @@
       </option>
     </choice>
 
-    <if when="enemy.hp &lt;= 0">
+    <if when="enemy.hp  LTE  0">
       <text>${enemy.name} is down.</text>
       <else>
         <var name="enemyRoll" type="int">(rounds + player.hp + enemy.hp) % 3</var>

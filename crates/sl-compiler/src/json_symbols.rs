@@ -958,7 +958,7 @@ mod json_symbols_tests {
     <module name="main">
 <script name="main">
       <var name="hp" type="int">1</var>
-      <var name="name" type="string">&quot;A&quot;</var>
+      <var name="name" type="string">"A"</var>
       <if when="hp > 0">
         <text>ok</text>
       </if>

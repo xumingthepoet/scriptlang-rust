@@ -1,7 +1,7 @@
 <module name="main">
 <script name="main">
   <var name="round" type="int">0</var>
-  <while when="round &lt; 2">
+  <while when="round  LT  2">
     <choice text="Choose">
       <option text="Pick">
         <code>round = round + 1;</code>

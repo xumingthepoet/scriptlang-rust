@@ -592,32 +592,41 @@ JSON 全局符号必须在 include 闭包内可见，否则编译失败。
 
 ## 10.3 XML 转义
 
-为避免“写完后编译才发现 XML 解析错误”，建议按下面规则检查：
+ScriptLang 表达式层不再推荐 XML 转义写法，而是使用自己的保留字：
 
-- 在属性值里（统一使用双引号）：
-- `<` 必须写 `&lt;`
-- `&` 必须写 `&amp;`（如 `a && b` 要写成 `a &amp;&amp; b`）
-- `>` 不需要转义（保持原样即可）
+- `<` 写成 `LT`
+- `<=` 写成 `LTE`
+- `&&` 写成 `AND`
+- XML 属性表达式里的字符串写单引号：`'Rin'`
+- `<code>` / `<function>` / `<var>...</var>` initializer 里的字符串写双引号：`"Rin"`
 
-文本节点中同样要注意：
-- 出现 `<` 必须写 `&lt;`
-- 出现 `&` 必须写 `&amp;`
-- 需要保留原始文本时可用 `<![CDATA[...]]>`
+旧写法会在送入 Rhai 前报错：
 
-`when="..."` 中如果需要字符串字面量，建议统一写成 `&quot;...&quot;`，避免单引号在不同执行路径下出现兼容性问题。
+- `&lt;`
+- `&lt;=`
+- `&amp;&amp;`
+- 属性表达式里的 `&quot;...&quot;`
+
+普通文本节点里如果只是展示 XML 字符，仍然按 XML 规则写 `&lt;` / `&amp;`。
 
 示例 1：`<if when="...">` 中的比较和逻辑表达式
 
 ```xml
-<if when="hp &lt; 10">
+<if when="hp LT 10">
   <text>danger</text>
 </if>
 ```
 
 ```xml
-<if when="hp &lt;= 10 &amp;&amp; name == &quot;Rin&quot;">
+<if when="hp LTE 10 AND name == 'Rin'">
   <text>danger</text>
 </if>
+```
+
+示例 1b：`<code>` / `<function>` 中的字符串
+
+```xml
+<code>name = "Rin";</code>
 ```
 
 示例 2：文本节点里显示尖括号/`&`

@@ -1496,7 +1496,7 @@ mod step_tests {
             r#"
     <script name="main">
       <var name="i" type="int">0</var>
-      <while when="i &lt; 5">
+      <while when="i  LT  5">
         <code>i = i + 1;</code>
         <if when="i == 2">
           <continue/>
@@ -1541,7 +1541,7 @@ mod step_tests {
             r#"
     <script name="main">
       <var name="i" type="int">0</var>
-      <while when="i &lt; 2">
+      <while when="i  LT  2">
         <code>i = i + 1;</code>
         <text once="true">only once</text>
         <text>every time</text>
@@ -1611,7 +1611,7 @@ mod step_tests {
             r#"
     <script name="main">
       <var name="count" type="int">0</var>
-      <while when="count &lt; 3">
+      <while when="count  LT  3">
         <code>count = count + 1;</code>
         <choice text="Pick">
           <option text="A" once="true"><text>A</text></option>
@@ -1873,7 +1873,7 @@ mod step_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="heroName" type="string">&quot;Traveler&quot;</var>
+      <var name="heroName" type="string">"Traveler"</var>
       <input var="heroName" text="Name"/>
     </script>
     "#,

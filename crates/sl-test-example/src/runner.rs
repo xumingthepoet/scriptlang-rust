@@ -391,7 +391,7 @@ mod runner_tests {
             r#"
 <module name="main"><script name="main">
   <var name="i" type="int">0</var>
-  <while when="i &lt; 6000">
+  <while when="i LT 6000">
     <code>i = i + 1;</code>
     <text>tick</text>
   </while>

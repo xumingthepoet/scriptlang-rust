@@ -52,7 +52,7 @@ impl ScriptLangEngine {
 
         let mut value = default_value_from_type(&decl.r#type);
         if let Some(expr) = &decl.initial_value_expr {
-            value = self.eval_expression(expr)?;
+            value = self.eval_initializer_expression(expr, "initializer")?;
         }
 
         if !is_type_compatible(&value, &decl.r#type) {
@@ -308,7 +308,7 @@ mod callstack_tests {
                 r#"
     <!-- include: greeting.script.xml -->
     <script name="main">
-      <var name="nextScene" type="string">&quot;greeting.greeting&quot;</var>
+      <var name="nextScene" type="string">"greeting.greeting"</var>
       <call script="${nextScene}"/>
     </script>
     "#,
@@ -340,7 +340,7 @@ mod callstack_tests {
 
         let mut call_empty_target = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><var name="dst" type="string">&quot;&quot;</var><call script="${dst}"/></script>"#,
+            r#"<script name="main"><var name="dst" type="string">""</var><call script="${dst}"/></script>"#,
         )]));
         call_empty_target.start("main", None).expect("start");
         let error = call_empty_target
@@ -392,7 +392,7 @@ mod callstack_tests {
 
         let mut return_empty_target = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><var name="dst" type="string">&quot;&quot;</var><return script="${dst}"/></script>"#,
+            r#"<script name="main"><var name="dst" type="string">""</var><return script="${dst}"/></script>"#,
         )]));
         return_empty_target.start("main", None).expect("start");
         let error = return_empty_target
@@ -767,7 +767,7 @@ mod callstack_tests {
                 r#"
     <!-- include: next.script.xml -->
     <script name="main">
-      <var name="nextScene" type="string">&quot;next.next&quot;</var>
+      <var name="nextScene" type="string">"next.next"</var>
       <return script="${nextScene}"/>
     </script>
     "#,
@@ -1306,7 +1306,7 @@ mod callstack_tests {
         let mut return_target_type_error = engine_from_sources(map(&[
             (
                 "main.script.xml",
-                r#"<script name="main"><return script="next.next" args="&quot;bad&quot;"/></script>"#,
+                r#"<script name="main"><return script="next.next" args="'bad'"/></script>"#,
             ),
             (
                 "next.script.xml",

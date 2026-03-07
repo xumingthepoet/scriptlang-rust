@@ -2,6 +2,6 @@
 <!-- include: nested/config.json -->
 <module name="main">
 <script name="main">
-  <text>Main entry ${greet("main")}</text>
+  <text>Main entry ${greet('main')}</text>
 </script>
 </module>

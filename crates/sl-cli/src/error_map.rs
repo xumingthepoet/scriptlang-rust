@@ -8,7 +8,15 @@ fn map_error(code: &'static str, error: impl Display) -> ScriptLangError {
 fn hint_for_error(code: &str, message: &str) -> Option<&'static str> {
     if code == "XML_PARSE_ERROR" && message.contains("invalid name token") {
         return Some(
-            "Hint: XML attributes require escaping. Use '&lt;' for '<', '&amp;&amp;' for '&&', and prefer '&quot;...&quot;' for string literals in when=\"...\".",
+            "Hint: ScriptLang expressions no longer use XML escape operators. Write LT/LTE/AND instead of <, <=, &&. In XML attributes use 'text'; in <code>/<function>/<var> bodies use \"text\".",
+        );
+    }
+
+    if code.starts_with("RHAI_PREPROCESS_FORBIDDEN_")
+        || code == "RHAI_PREPROCESS_STRING_UNTERMINATED"
+    {
+        return Some(
+            "Hint: use ScriptLang expr keywords LT/LTE/AND. In XML attributes, write strings with single quotes like 'text'; in <code>/<function>/<var> bodies, use double quotes like \"text\". Raw <, <=, && are forbidden.",
         );
     }
 
@@ -121,8 +129,8 @@ mod error_map_tests {
             "XML_PARSE_ERROR",
             "invalid name token at 1:23",
         ));
-        assert!(enriched.message.contains("Use '&lt;' for '<'"));
-        assert!(enriched.message.contains("'&amp;&amp;' for '&&'"));
+        assert!(enriched.message.contains("Write LT/LTE/AND"));
+        assert!(enriched.message.contains("XML attributes use 'text'"));
     }
 
     #[test]
@@ -149,5 +157,13 @@ mod error_map_tests {
     fn with_hint_keeps_message_when_no_rule_matches() {
         let enriched = with_hint(ScriptLangError::new("ANY", "plain"));
         assert_eq!(enriched.message, "plain");
+    }
+
+    #[test]
+    fn with_hint_adds_preprocess_suggestion() {
+        let enriched = with_hint(ScriptLangError::new("RHAI_PREPROCESS_FORBIDDEN_AND", "bad"));
+        assert!(enriched.message.contains("LT/LTE/AND"));
+        assert!(enriched.message.contains("XML attributes"));
+        assert!(enriched.message.contains("<code>/<function>/<var>"));
     }
 }
