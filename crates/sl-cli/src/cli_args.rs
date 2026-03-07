@@ -1,7 +1,7 @@
 use clap::{Args, Parser, Subcommand};
 
 #[derive(Debug, Parser)]
-#[command(name = "scriptlang-player")]
+#[command(name = "sl-cli")]
 #[command(about = "ScriptLang CLI for scripted runs and interactive debugging")]
 #[command(
     long_about = "ScriptLang CLI for scripted runs and interactive debugging.\n\nUse `agent` for automation-friendly workflows (`start/choose/input/replay`), and `tui` for manual interactive playtesting."

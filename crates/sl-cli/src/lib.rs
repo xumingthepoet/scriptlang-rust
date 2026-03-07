@@ -359,7 +359,7 @@ mod lib_tests {
 
     #[test]
     fn parse_error_and_error_mapper_helpers_are_covered() {
-        let parse_code = run_cli_from_args(["scriptlang-player", "agent", "unknown"]);
+        let parse_code = run_cli_from_args(["sl-cli", "agent", "unknown"]);
         assert_ne!(parse_code, 0);
 
         let io_error = std::io::Error::other("io");
