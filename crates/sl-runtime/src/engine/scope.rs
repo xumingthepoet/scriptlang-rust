@@ -30,6 +30,18 @@ impl ScriptLangEngine {
             .cloned()
     }
 
+    pub(super) fn resolve_defs_const_alias(
+        &self,
+        script_name: Option<&str>,
+        alias: &str,
+    ) -> Option<String> {
+        let script_name = script_name?;
+        self.defs_const_alias_by_script
+            .get(script_name)
+            .and_then(|aliases| aliases.get(alias))
+            .cloned()
+    }
+
     pub(super) fn read_variable(&self, name: &str) -> Result<SlValue, ScriptLangError> {
         for frame in self.frames.iter().rev() {
             if let Some(value) = frame.scope.get(name) {
@@ -47,6 +59,18 @@ impl ScriptLangEngine {
                     ScriptLangError::new(
                         "ENGINE_DEFS_GLOBAL_MISSING",
                         format!("Defs global \"{}\" is not initialized.", qualified_name),
+                    )
+                });
+        }
+        if let Some(qualified_name) = self.resolve_defs_const_alias(script_name.as_deref(), name) {
+            return self
+                .defs_consts_value
+                .get(&qualified_name)
+                .cloned()
+                .ok_or_else(|| {
+                    ScriptLangError::new(
+                        "ENGINE_DEFS_CONST_MISSING",
+                        format!("Defs const \"{}\" is not initialized.", qualified_name),
                     )
                 });
         }
@@ -98,6 +122,15 @@ impl ScriptLangEngine {
             }
             self.defs_globals_value.insert(qualified_name, value);
             return Ok(());
+        }
+        if let Some(qualified_name) = self.resolve_defs_const_alias(script_name.as_deref(), name) {
+            return Err(ScriptLangError::new(
+                "ENGINE_CONST_READONLY",
+                format!(
+                    "Defs const \"{}\" is readonly and cannot be mutated.",
+                    qualified_name
+                ),
+            ));
         }
         if self.is_visible_json_global(script_name.as_deref(), name) {
             return Err(ScriptLangError::new(
@@ -176,6 +209,12 @@ impl ScriptLangEngine {
             let qualified = format!("{}.{}", parts[0], parts[1]);
             if self
                 .resolve_defs_global_alias(script_name.as_deref(), &qualified)
+                .is_some()
+            {
+                return (qualified, 2);
+            }
+            if self
+                .resolve_defs_const_alias(script_name.as_deref(), &qualified)
                 .is_some()
             {
                 return (qualified, 2);
@@ -326,6 +365,34 @@ mod scope_tests {
 
         let (root, index) = engine.resolve_path_root_alias(&["plain".to_string()]);
         assert_eq!((root, index), ("plain".to_string(), 1));
+    }
+
+    #[test]
+    pub(super) fn defs_const_is_readonly_for_direct_and_path_writes() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public">
+  <const name="base" type="int">7</const>
+  <script name="main"><text>${base}</text></script>
+</module>"#,
+        )]));
+        engine.start("main.main", None).expect("start");
+
+        let write_error = engine
+            .write_variable("base", SlValue::Number(9.0))
+            .expect_err("const write should fail");
+        assert_eq!(write_error.code, "ENGINE_CONST_READONLY");
+
+        let path_error = engine
+            .write_path("main.base", SlValue::Number(9.0))
+            .expect_err("const path write should fail");
+        assert_eq!(path_error.code, "ENGINE_CONST_READONLY");
+
+        engine.defs_consts_value.clear();
+        let read_error = engine
+            .read_variable("base")
+            .expect_err("missing const value should fail");
+        assert_eq!(read_error.code, "ENGINE_DEFS_CONST_MISSING");
     }
 
     #[test]

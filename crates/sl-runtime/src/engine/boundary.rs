@@ -431,6 +431,26 @@ mod boundary_tests {
     }
 
     #[test]
+    pub(super) fn submit_input_rejects_defs_const_target() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public">
+  <const name="heroName" type="string">"Traveler"</const>
+  <script name="main">
+    <input var="heroName" text="Name your hero"/>
+  </script>
+</module>"#,
+        )]));
+        engine.start("main.main", None).expect("start");
+        let first = engine.next_output().expect("next");
+        assert_eq!(output_kind(&first), "input");
+        let error = engine
+            .submit_input("Guild")
+            .expect_err("input into const should fail");
+        assert_eq!(error.code, "ENGINE_CONST_READONLY");
+    }
+
+    #[test]
     pub(super) fn choose_restores_pending_boundary_on_internal_failures() {
         let mut wrong_kind = engine_from_sources(map(&[(
             "main.script.xml",

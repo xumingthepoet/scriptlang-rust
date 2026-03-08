@@ -67,21 +67,27 @@ All code must be written with testability in mind:
 
 ## Module Sources
 - XML source files now use plain `*.xml` names and must have a `<module name="...">` root.
-- `<module>` may contain `<type>`, `<function>`, `<var>`, and multiple `<script>` nodes.
+- `<module>` may contain `<type>`, `<function>`, `<var>`, `<const>`, and multiple `<script>` nodes.
 - `<module default_access="public|private">` controls default visibility for module children; default is `private`.
-- `<type>/<function>/<var>/<script>` support `access="public|private"`; default follows `default_access`.
+- `<type>/<function>/<var>/<const>/<script>` support `access="public|private"`; default follows `default_access`.
 - Legacy `*.script.xml`, `*.defs.xml`, and `*.module.xml` inputs are rejected; migrate them to `<module>` in `name.xml`.
 - Module scripts compile to qualified names like `battle.main`; host entry/call/return targets should use that qualified form.
 - Host entry script must be `public`; private scripts cannot be used as host entry.
 - Inside the same module, scripts may reference sibling scripts with short names (`<call script="next"/>`), which resolves to the qualified module target.
 - Script-local variables now use `<temp ...>...</temp>` (legacy `<script><var>` is removed).
 - Import visibility is public-only across modules; private members remain accessible inside their own module.
-- Module `<var>` is the only global-variable source in XML and remains writable, snapshotted, and visible through import-closure rules.
+- Module `<var>` defines writable globals (snapshotted), while `<const>` defines readonly globals (not snapshotted).
 
 ## Module Globals (`<module><var>`)
 - `<module><var name="..." type="...">expr</var>` defines writable module globals.
 - globals initialize on `engine.start`, support short name and `ns.var` access, and follow import-closure visibility.
 - when short names conflict across namespaces, only fully-qualified `ns.var` remains available.
+
+## Module Constants (`<module><const>`)
+- `<module><const name="..." type="...">expr</const>` defines readonly module globals.
+- consts follow the same import-closure visibility and short-name rules as `<var>`.
+- const writes fail at runtime with readonly errors, and const values are not persisted in snapshot/save.
+- const initializers may reference consts, but not mutable module `<var>` globals.
 
 ## Choice Dynamic Options
 - `<choice>` supports mixed static `<option>` and `<dynamic-options>` blocks.

@@ -128,6 +128,19 @@ impl ScriptLangEngine {
                 format!("{}.{}", defs_namespace_symbol(namespace), name),
             );
         }
+        for (qualified_name, value) in &self.defs_consts_value {
+            let Some((namespace, name)) = qualified_name.split_once('.') else {
+                continue;
+            };
+            namespace_values
+                .entry(namespace.to_string())
+                .or_default()
+                .insert(name.to_string(), value.clone());
+            qualified_rewrite_map.insert(
+                qualified_name.clone(),
+                format!("{}.{}", defs_namespace_symbol(namespace), name),
+            );
+        }
 
         let mut scope = Scope::new();
         for (namespace, values) in &namespace_values {
@@ -139,6 +152,11 @@ impl ScriptLangEngine {
 
         for (alias, qualified_name) in self.collect_bundle_defs_short_aliases(module_name) {
             if let Some(value) = self.defs_globals_value.get(&qualified_name) {
+                scope.push_dynamic(alias, slvalue_to_dynamic(value));
+            }
+        }
+        for (alias, qualified_name) in self.collect_bundle_defs_const_short_aliases(module_name) {
+            if let Some(value) = self.defs_consts_value.get(&qualified_name) {
                 scope.push_dynamic(alias, slvalue_to_dynamic(value));
             }
         }
@@ -162,6 +180,87 @@ impl ScriptLangEngine {
                 )
             })
             .and_then(dynamic_to_slvalue);
+        for (name, before) in global_snapshot {
+            let after_dynamic = scope
+                .get_value::<Dynamic>(&name)
+                .expect("scope should still contain global snapshot bindings");
+            let after = dynamic_to_slvalue(after_dynamic)?;
+            if after != before {
+                return Err(ScriptLangError::new(
+                    "ENGINE_GLOBAL_READONLY",
+                    format!(
+                        "Global JSON \"{}\" is readonly and cannot be mutated.",
+                        name
+                    ),
+                ));
+            }
+        }
+
+        result
+    }
+
+    pub(super) fn eval_defs_const_initializer(
+        &mut self,
+        expr: &str,
+        module_name: &str,
+    ) -> Result<SlValue, ScriptLangError> {
+        if !self.host_functions.names().is_empty() {
+            return Err(ScriptLangError::new(
+                "ENGINE_HOST_FUNCTION_UNSUPPORTED",
+                "Host function invocation is not yet supported in this runtime build.",
+            ));
+        }
+
+        let mut namespace_values: BTreeMap<String, BTreeMap<String, SlValue>> = BTreeMap::new();
+        let mut qualified_rewrite_map = BTreeMap::new();
+        for (qualified_name, value) in &self.defs_consts_value {
+            let Some((namespace, name)) = qualified_name.split_once('.') else {
+                continue;
+            };
+            namespace_values
+                .entry(namespace.to_string())
+                .or_default()
+                .insert(name.to_string(), value.clone());
+            qualified_rewrite_map.insert(
+                qualified_name.clone(),
+                format!("{}.{}", defs_namespace_symbol(namespace), name),
+            );
+        }
+
+        let mut scope = Scope::new();
+        for (namespace, values) in &namespace_values {
+            scope.push_dynamic(
+                defs_namespace_symbol(namespace),
+                slvalue_to_dynamic(&SlValue::Map(values.clone())),
+            );
+        }
+
+        for (alias, qualified_name) in self.collect_bundle_defs_const_short_aliases(module_name) {
+            if let Some(value) = self.defs_consts_value.get(&qualified_name) {
+                scope.push_dynamic(alias, slvalue_to_dynamic(value));
+            }
+        }
+
+        let mut global_snapshot = BTreeMap::new();
+        for (name, value) in &self.global_json {
+            global_snapshot.insert(name.clone(), value.clone());
+            scope.push_dynamic(name.clone(), slvalue_to_dynamic(value));
+        }
+
+        let preprocessed =
+            preprocess_scriptlang_rhai_input(expr, "initializer", RhaiInputMode::CodeBlock)?;
+        let rewritten = rewrite_defs_global_qualified_access(&preprocessed, &qualified_rewrite_map);
+        let result = self
+            .rhai_engine
+            .eval_with_scope::<Dynamic>(&mut scope, &format!("({})", rewritten))
+            .map_err(|error| {
+                ScriptLangError::new(
+                    "ENGINE_EVAL_ERROR",
+                    format!("Defs const initializer eval failed: {}", error),
+                )
+            })
+            .and_then(dynamic_to_slvalue);
+
         for (name, before) in global_snapshot {
             let after_dynamic = scope
                 .get_value::<Dynamic>(&name)
@@ -213,8 +312,18 @@ impl ScriptLangEngine {
             .get(&script_name)
             .cloned()
             .unwrap_or_default();
+        let visible_consts = self
+            .visible_consts_by_script
+            .get(&script_name)
+            .cloned()
+            .unwrap_or_default();
         let defs_alias_map = self
             .defs_global_alias_by_script
+            .get(&script_name)
+            .cloned()
+            .unwrap_or_default();
+        let const_alias_map = self
+            .defs_const_alias_by_script
             .get(&script_name)
             .cloned()
             .unwrap_or_default();
@@ -265,6 +374,25 @@ impl ScriptLangEngine {
                 .or_insert_with(BTreeMap::new)
                 .insert(name.to_string(), value);
         }
+        for qualified_name in &visible_consts {
+            let Some((namespace, name)) = qualified_name.split_once('.') else {
+                continue;
+            };
+            let value = self
+                .defs_consts_value
+                .get(qualified_name)
+                .cloned()
+                .ok_or_else(|| {
+                    ScriptLangError::new(
+                        "ENGINE_DEFS_CONST_MISSING",
+                        format!("Defs const \"{}\" is not initialized.", qualified_name),
+                    )
+                })?;
+            defs_namespace_snapshot
+                .entry(namespace.to_string())
+                .or_insert_with(BTreeMap::new)
+                .insert(name.to_string(), value);
+        }
 
         let mut defs_namespace_symbols = BTreeMap::new();
         for (namespace, values) in &defs_namespace_snapshot {
@@ -300,9 +428,42 @@ impl ScriptLangEngine {
             short_defs_aliases.insert(alias, (qualified_name, value));
         }
 
+        let mut short_const_aliases = BTreeMap::new();
+        for (alias, qualified_name) in const_alias_map {
+            if alias.contains('.')
+                || mutable_bindings.contains_key(&alias)
+                || short_defs_aliases.contains_key(&alias)
+            {
+                continue;
+            }
+            if !visible_consts.contains(&qualified_name) {
+                continue;
+            }
+
+            let value = self
+                .defs_consts_value
+                .get(&qualified_name)
+                .cloned()
+                .ok_or_else(|| {
+                    ScriptLangError::new(
+                        "ENGINE_DEFS_CONST_MISSING",
+                        format!("Defs const \"{}\" is not initialized.", qualified_name),
+                    )
+                })?;
+            let declared_type = self.defs_consts_type.get(&qualified_name);
+            scope.push_dynamic(
+                alias.clone(),
+                slvalue_to_dynamic_with_type(&value, declared_type),
+            );
+            short_const_aliases.insert(alias, (qualified_name, value));
+        }
+
         let mut global_snapshot = BTreeMap::new();
         for name in visible_globals {
-            if mutable_bindings.contains_key(&name) || short_defs_aliases.contains_key(&name) {
+            if mutable_bindings.contains_key(&name)
+                || short_defs_aliases.contains_key(&name)
+                || short_const_aliases.contains_key(&name)
+            {
                 continue;
             }
             let value = self
@@ -396,6 +557,30 @@ impl ScriptLangEngine {
             for (name, value) in entries {
                 let qualified_name = format!("{}.{}", namespace, name);
                 if !visible_defs.contains(&qualified_name) {
+                    if visible_consts.contains(&qualified_name) {
+                        let before = self
+                            .defs_consts_value
+                            .get(&qualified_name)
+                            .cloned()
+                            .ok_or_else(|| {
+                                ScriptLangError::new(
+                                    "ENGINE_DEFS_CONST_DECL_MISSING",
+                                    format!(
+                                        "Defs const \"{}\" is visible but declaration is missing.",
+                                        qualified_name
+                                    ),
+                                )
+                            })?;
+                        if value != before {
+                            return Err(ScriptLangError::new(
+                                "ENGINE_CONST_READONLY",
+                                format!(
+                                    "Defs const \"{}\" is readonly and cannot be mutated.",
+                                    qualified_name
+                                ),
+                            ));
+                        }
+                    }
                     continue;
                 }
                 let declared_type =
@@ -448,6 +633,22 @@ impl ScriptLangEngine {
                 ));
             }
             self.defs_globals_value.insert(qualified_name, after);
+        }
+
+        for (alias, (qualified_name, before_value)) in short_const_aliases {
+            let after_dynamic = scope
+                .get_value::<Dynamic>(&alias)
+                .expect("scope should still contain short defs const alias");
+            let after = dynamic_to_slvalue(after_dynamic)?;
+            if after != before_value {
+                return Err(ScriptLangError::new(
+                    "ENGINE_CONST_READONLY",
+                    format!(
+                        "Defs const \"{}\" is readonly and cannot be mutated.",
+                        qualified_name
+                    ),
+                ));
+            }
         }
 
         run_result
@@ -543,11 +744,17 @@ impl ScriptLangEngine {
         script_name: &str,
     ) -> BTreeMap<String, String> {
         let mut out = BTreeMap::new();
-        let Some(visible_defs) = self.visible_defs_by_script.get(script_name) else {
-            return out;
-        };
-
-        for qualified_name in visible_defs {
+        let visible_defs = self
+            .visible_defs_by_script
+            .get(script_name)
+            .cloned()
+            .unwrap_or_default();
+        let visible_consts = self
+            .visible_consts_by_script
+            .get(script_name)
+            .cloned()
+            .unwrap_or_default();
+        for qualified_name in visible_defs.iter().chain(visible_consts.iter()) {
             let Some((namespace, name)) = qualified_name.split_once('.') else {
                 continue;
             };
@@ -566,6 +773,27 @@ impl ScriptLangEngine {
     ) -> BTreeMap<String, String> {
         let mut candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for decl in self.defs_global_declarations.values() {
+            if decl.namespace != module_name {
+                continue;
+            }
+            candidates
+                .entry(decl.name.clone())
+                .or_default()
+                .push(decl.qualified_name.clone());
+        }
+
+        candidates
+            .into_iter()
+            .map(|(short_name, qualified_names)| (short_name, qualified_names[0].clone()))
+            .collect()
+    }
+
+    pub(super) fn collect_bundle_defs_const_short_aliases(
+        &self,
+        module_name: &str,
+    ) -> BTreeMap<String, String> {
+        let mut candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for decl in self.defs_const_declarations.values() {
             if decl.namespace != module_name {
                 continue;
             }
@@ -632,6 +860,61 @@ mod eval_tests {
         let error = engine
             .next_output()
             .expect_err("global mutation should fail");
+        assert_eq!(error.code, "ENGINE_GLOBAL_READONLY");
+    }
+
+    #[test]
+    pub(super) fn defs_const_is_readonly_during_code_execution() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public">
+  <const name="base" type="int">7</const>
+  <script name="main">
+    <code>base = 9;</code>
+  </script>
+</module>"#,
+        )]));
+        engine.start("main.main", None).expect("start");
+        let error = engine
+            .next_output()
+            .expect_err("const mutation should fail");
+        assert_eq!(error.code, "ENGINE_CONST_READONLY");
+    }
+
+    #[test]
+    pub(super) fn defs_global_initializer_can_read_defs_consts() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public">
+  <const name="base" type="int">7</const>
+  <var name="hp" type="int">1</var>
+  <script name="main"><text>ok</text></script>
+</module>"#,
+        )]));
+        engine.start("main.main", None).expect("start");
+        let value = engine
+            .eval_defs_global_initializer("base + main.base + hp", "main")
+            .expect("initializer should evaluate");
+        assert_eq!(value, SlValue::Number(15.0));
+    }
+
+    #[test]
+    pub(super) fn defs_const_initializer_rejects_global_json_mutation() {
+        let mut engine = engine_from_sources_with_global_json(
+            map(&[(
+                "main.xml",
+                r#"<module name="main" default_access="public">
+  <const name="base" type="int">7</const>
+  <script name="main"><text>ok</text></script>
+</module>"#,
+            )]),
+            BTreeMap::from([("game".to_string(), SlValue::Number(1.0))]),
+            &["game"],
+        );
+        engine.start("main.main", None).expect("start");
+        let error = engine
+            .eval_defs_const_initializer("{ game = 2; base }", "main")
+            .expect_err("global json mutation should fail");
         assert_eq!(error.code, "ENGINE_GLOBAL_READONLY");
     }
 
@@ -775,6 +1058,8 @@ mod eval_tests {
             global_json: compiled.global_json,
             defs_global_declarations: compiled.defs_global_declarations,
             defs_global_init_order: compiled.defs_global_init_order,
+            defs_global_const_declarations: compiled.defs_global_const_declarations,
+            defs_global_const_init_order: compiled.defs_global_const_init_order,
             host_functions: Some(Arc::new(TestRegistry {
                 names: vec!["ext_fn".to_string()],
             })),
@@ -911,6 +1196,8 @@ mod eval_tests {
             global_json: host_blocked_compiled.global_json,
             defs_global_declarations: host_blocked_compiled.defs_global_declarations,
             defs_global_init_order: host_blocked_compiled.defs_global_init_order,
+            defs_global_const_declarations: host_blocked_compiled.defs_global_const_declarations,
+            defs_global_const_init_order: host_blocked_compiled.defs_global_const_init_order,
             host_functions: Some(Arc::new(TestRegistry {
                 names: vec!["ext_fn".to_string()],
             })),

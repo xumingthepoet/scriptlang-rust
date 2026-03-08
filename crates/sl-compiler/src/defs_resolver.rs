@@ -9,6 +9,7 @@ enum ParsedModuleChild {
     Type(ParsedTypeDecl),
     Function(ParsedFunctionDecl),
     DefsGlobalVar(ParsedDefsGlobalVarDecl),
+    DefsGlobalConst(ParsedDefsGlobalConstDecl),
     Script(ParsedModuleScript),
 }
 
@@ -84,6 +85,7 @@ fn parse_module_source(
     let mut type_decls = Vec::new();
     let mut function_decls = Vec::new();
     let mut defs_global_var_decls = Vec::new();
+    let mut defs_global_const_decls = Vec::new();
     let mut scripts = Vec::new();
 
     for child in element_children(root) {
@@ -91,6 +93,7 @@ fn parse_module_source(
             ParsedModuleChild::Type(decl) => type_decls.push(decl),
             ParsedModuleChild::Function(decl) => function_decls.push(decl),
             ParsedModuleChild::DefsGlobalVar(decl) => defs_global_var_decls.push(decl),
+            ParsedModuleChild::DefsGlobalConst(decl) => defs_global_const_decls.push(decl),
             ParsedModuleChild::Script(script) => scripts.push(script),
         }
     }
@@ -100,6 +103,7 @@ fn parse_module_source(
             type_decls,
             function_decls,
             defs_global_var_decls,
+            defs_global_const_decls,
         },
         scripts,
     })
@@ -150,6 +154,9 @@ fn parse_module_child(
         "var" => parse_defs_global_var_declaration(child, namespace, default_access)
             .map(ParsedModuleChild::DefsGlobalVar)
             .map_err(|error| with_file_context(error, file_path)),
+        "const" => parse_defs_global_const_declaration(child, namespace, default_access)
+            .map(ParsedModuleChild::DefsGlobalConst)
+            .map_err(|error| with_file_context(error, file_path)),
         "script" => {
             let script_name = get_required_non_empty_attr(child, "name")
                 .map_err(|error| with_file_context(error, file_path))?;
@@ -183,8 +190,43 @@ pub(crate) fn parse_defs_global_var_declaration(
     namespace: &str,
     default_access: AccessLevel,
 ) -> Result<ParsedDefsGlobalVarDecl, ScriptLangError> {
+    let parsed = parse_defs_global_binding_declaration(node, namespace, default_access, "var")?;
+    Ok(ParsedDefsGlobalVarDecl {
+        namespace: parsed.namespace,
+        name: parsed.name,
+        qualified_name: parsed.qualified_name,
+        access: parsed.access,
+        type_expr: parsed.type_expr,
+        initial_value_expr: parsed.initial_value_expr,
+        location: parsed.location,
+    })
+}
+
+pub(crate) fn parse_defs_global_const_declaration(
+    node: &XmlElementNode,
+    namespace: &str,
+    default_access: AccessLevel,
+) -> Result<ParsedDefsGlobalConstDecl, ScriptLangError> {
+    let parsed = parse_defs_global_binding_declaration(node, namespace, default_access, "const")?;
+    Ok(ParsedDefsGlobalConstDecl {
+        namespace: parsed.namespace,
+        name: parsed.name,
+        qualified_name: parsed.qualified_name,
+        access: parsed.access,
+        type_expr: parsed.type_expr,
+        initial_value_expr: parsed.initial_value_expr,
+        location: parsed.location,
+    })
+}
+
+fn parse_defs_global_binding_declaration(
+    node: &XmlElementNode,
+    namespace: &str,
+    default_access: AccessLevel,
+    tag_name: &str,
+) -> Result<ParsedDefsGlobalVarDecl, ScriptLangError> {
     let name = get_required_non_empty_attr(node, "name")?;
-    assert_name_not_reserved(&name, "defs var", node.location.clone())?;
+    assert_name_not_reserved(&name, "defs global", node.location.clone())?;
     let access = parse_access_attr(node, "access", default_access)?;
 
     let type_raw = get_required_non_empty_attr(node, "type")?;
@@ -193,7 +235,10 @@ pub(crate) fn parse_defs_global_var_declaration(
     if has_attr(node, "value") {
         return Err(ScriptLangError::with_span(
             "XML_ATTR_NOT_ALLOWED",
-            "Attribute \"value\" is not allowed on <var>. Use inline content instead.",
+            format!(
+                "Attribute \"value\" is not allowed on <{}>. Use inline content instead.",
+                tag_name
+            ),
             node.location.clone(),
         ));
     }
@@ -202,8 +247,8 @@ pub(crate) fn parse_defs_global_var_declaration(
         return Err(ScriptLangError::with_span(
             "XML_VAR_CHILD_INVALID",
             format!(
-                "<var> cannot contain child element <{}>. Use inline expression text only.",
-                child.name
+                "<{}> cannot contain child element <{}>. Use inline expression text only.",
+                tag_name, child.name
             ),
             child.location.clone(),
         ));
@@ -317,14 +362,7 @@ pub(crate) fn resolve_visible_defs(
     reachable: &BTreeSet<String>,
     defs_by_path: &BTreeMap<String, DefsDeclarations>,
     local_module_name: Option<&str>,
-) -> Result<
-    (
-        VisibleTypeMap,
-        VisibleFunctionMap,
-        BTreeMap<String, DefsGlobalVarDecl>,
-    ),
-    ScriptLangError,
-> {
+) -> Result<VisibleDefsResolution, ScriptLangError> {
     let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
     let mut local_type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut namespace_type_aliases: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
@@ -549,7 +587,65 @@ pub(crate) fn resolve_visible_defs(
         defs_globals.entry(alias).or_insert(decl);
     }
 
-    Ok((visible_types, functions, defs_globals))
+    let mut defs_consts_qualified = BTreeMap::new();
+    let mut defs_const_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for path in reachable {
+        let Some(defs) = defs_by_path.get(path) else {
+            continue;
+        };
+
+        for decl in &defs.defs_global_const_decls {
+            let is_local = local_module_name == Some(decl.namespace.as_str());
+            if !is_local && decl.access != AccessLevel::Public {
+                continue;
+            }
+            if defs_consts_qualified.contains_key(&decl.qualified_name) {
+                return Err(ScriptLangError::with_span(
+                    "DEFS_GLOBAL_CONST_DUPLICATE",
+                    format!(
+                        "Duplicate defs global const declaration \"{}\".",
+                        decl.qualified_name
+                    ),
+                    decl.location.clone(),
+                ));
+            }
+            defs_consts_qualified.insert(
+                decl.qualified_name.clone(),
+                DefsGlobalConstDecl {
+                    namespace: decl.namespace.clone(),
+                    name: decl.name.clone(),
+                    qualified_name: decl.qualified_name.clone(),
+                    access: decl.access,
+                    r#type: resolve_type_expr_in_namespace(
+                        &decl.type_expr,
+                        &visible_types,
+                        &decl.namespace,
+                        &decl.location,
+                    )?,
+                    initial_value_expr: decl.initial_value_expr.clone(),
+                    location: decl.location.clone(),
+                },
+            );
+            if is_local {
+                defs_const_short_candidates
+                    .entry(decl.name.clone())
+                    .or_default()
+                    .push(decl.qualified_name.clone());
+            }
+        }
+    }
+
+    let mut defs_consts = defs_consts_qualified.clone();
+    for (alias, qualified_names) in defs_const_short_candidates {
+        let qualified_name = &qualified_names[0];
+        let decl = defs_consts_qualified
+            .get(qualified_name)
+            .cloned()
+            .expect("defs const alias target should exist");
+        defs_consts.entry(alias).or_insert(decl);
+    }
+
+    Ok((visible_types, functions, defs_globals, defs_consts))
 }
 
 pub(crate) fn collect_defs_globals_for_bundle(
@@ -641,6 +737,96 @@ pub(crate) fn collect_defs_globals_for_bundle(
     Ok((defs_globals, init_order))
 }
 
+pub(crate) fn collect_defs_consts_for_bundle(
+    defs_by_path: &BTreeMap<String, DefsDeclarations>,
+    defs_globals: &BTreeMap<String, DefsGlobalVarDecl>,
+) -> Result<(BTreeMap<String, DefsGlobalConstDecl>, Vec<String>), ScriptLangError> {
+    let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
+    let mut type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
+    for defs in defs_by_path.values() {
+        for decl in &defs.type_decls {
+            if type_decls_map.contains_key(&decl.qualified_name) {
+                return Err(ScriptLangError::with_span(
+                    "TYPE_DECL_DUPLICATE",
+                    format!("Duplicate type declaration \"{}\".", decl.qualified_name),
+                    decl.location.clone(),
+                ));
+            }
+            type_decls_map.insert(decl.qualified_name.clone(), decl.clone());
+            type_short_candidates
+                .entry(decl.name.clone())
+                .or_default()
+                .push(decl.qualified_name.clone());
+        }
+    }
+
+    let type_aliases = type_short_candidates
+        .into_iter()
+        .filter_map(|(short, qualified)| {
+            if qualified.len() == 1 {
+                Some((short, qualified[0].clone()))
+            } else {
+                None
+            }
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let mut resolved_types: BTreeMap<String, ScriptType> = BTreeMap::new();
+    let mut visiting = HashSet::new();
+    for type_name in type_decls_map.keys() {
+        resolve_named_type_with_aliases(
+            type_name,
+            &type_decls_map,
+            &type_aliases,
+            &mut resolved_types,
+            &mut visiting,
+        )?;
+    }
+
+    let mut visible_types = resolved_types.clone();
+    for (alias, qualified_name) in &type_aliases {
+        let ty = resolved_types
+            .get(qualified_name)
+            .cloned()
+            .expect("resolved type aliases must point to resolved types");
+        visible_types.insert(alias.clone(), ty);
+    }
+
+    let mut defs_consts = BTreeMap::new();
+    let mut init_order = Vec::new();
+    for defs in defs_by_path.values() {
+        for decl in &defs.defs_global_const_decls {
+            if defs_consts.contains_key(&decl.qualified_name) {
+                return Err(ScriptLangError::with_span(
+                    "DEFS_GLOBAL_CONST_DUPLICATE",
+                    format!(
+                        "Duplicate defs global const declaration \"{}\".",
+                        decl.qualified_name
+                    ),
+                    decl.location.clone(),
+                ));
+            }
+            defs_consts.insert(
+                decl.qualified_name.clone(),
+                DefsGlobalConstDecl {
+                    namespace: decl.namespace.clone(),
+                    name: decl.name.clone(),
+                    qualified_name: decl.qualified_name.clone(),
+                    access: decl.access,
+                    r#type: resolve_type_expr(&decl.type_expr, &visible_types, &decl.location)?,
+                    initial_value_expr: decl.initial_value_expr.clone(),
+                    location: decl.location.clone(),
+                },
+            );
+            init_order.push(decl.qualified_name.clone());
+        }
+    }
+
+    validate_defs_const_init_rules(&defs_consts, &init_order, defs_globals)?;
+    Ok((defs_consts, init_order))
+}
+
 pub(crate) fn validate_defs_global_init_order(
     defs_globals: &BTreeMap<String, DefsGlobalVarDecl>,
     init_order: &[String],
@@ -695,6 +881,106 @@ pub(crate) fn validate_defs_global_init_order(
     Ok(())
 }
 
+pub(crate) fn validate_defs_const_init_rules(
+    defs_consts: &BTreeMap<String, DefsGlobalConstDecl>,
+    init_order: &[String],
+    defs_globals: &BTreeMap<String, DefsGlobalVarDecl>,
+) -> Result<(), ScriptLangError> {
+    let mut const_name_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (qualified, decl) in defs_consts {
+        const_name_candidates
+            .entry(qualified.clone())
+            .or_default()
+            .push(qualified.clone());
+        const_name_candidates
+            .entry(decl.name.clone())
+            .or_default()
+            .push(qualified.clone());
+    }
+    let const_name_to_qualified = const_name_candidates
+        .into_iter()
+        .filter_map(|(name, candidates)| {
+            if candidates.len() == 1 {
+                Some((name, candidates[0].clone()))
+            } else {
+                None
+            }
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let mut var_name_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (qualified, decl) in defs_globals {
+        var_name_candidates
+            .entry(qualified.clone())
+            .or_default()
+            .push(qualified.clone());
+        var_name_candidates
+            .entry(decl.name.clone())
+            .or_default()
+            .push(qualified.clone());
+    }
+    let var_name_to_qualified = var_name_candidates
+        .into_iter()
+        .filter_map(|(name, candidates)| {
+            if candidates.len() == 1 {
+                Some((name, candidates[0].clone()))
+            } else {
+                None
+            }
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let mut initialized = BTreeSet::new();
+    for qualified in init_order {
+        let decl = defs_consts
+            .get(qualified)
+            .expect("init order should only contain declared defs consts");
+        if let Some(expr) = &decl.initial_value_expr {
+            let sanitized = sanitize_rhai_source(expr);
+            for (name, target_qualified) in &var_name_to_qualified {
+                if contains_root_identifier(&sanitized, name) {
+                    return Err(ScriptLangError::with_span(
+                        "DEFS_CONST_INIT_REF_NON_CONST",
+                        format!(
+                            "Defs const \"{}\" initializer references mutable defs global \"{}\".",
+                            qualified, name
+                        ),
+                        decl.location.clone(),
+                    ));
+                }
+                if contains_root_identifier(&sanitized, target_qualified) {
+                    return Err(ScriptLangError::with_span(
+                        "DEFS_CONST_INIT_REF_NON_CONST",
+                        format!(
+                            "Defs const \"{}\" initializer references mutable defs global \"{}\".",
+                            qualified, target_qualified
+                        ),
+                        decl.location.clone(),
+                    ));
+                }
+            }
+            for (name, target_qualified) in &const_name_to_qualified {
+                if !contains_root_identifier(&sanitized, name) {
+                    continue;
+                }
+                if !initialized.contains(target_qualified) {
+                    return Err(ScriptLangError::with_span(
+                        "DEFS_CONST_INIT_ORDER",
+                        format!(
+                            "Defs const \"{}\" initializer references \"{}\" before initialization.",
+                            qualified, name
+                        ),
+                        decl.location.clone(),
+                    ));
+                }
+            }
+        }
+        initialized.insert(qualified.clone());
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod defs_resolver_tests {
     use super::*;
@@ -742,12 +1028,13 @@ mod defs_resolver_tests {
                 location: span.clone(),
             }],
             defs_global_var_decls: Vec::new(),
+            defs_global_const_decls: Vec::new(),
         };
 
         let reachable = BTreeSet::from(["shared.xml".to_string()]);
         let defs_by_path = BTreeMap::from([("shared.xml".to_string(), defs)]);
 
-        let (types, functions, defs_globals) =
+        let (types, functions, defs_globals, _defs_consts) =
             resolve_visible_defs(&reachable, &defs_by_path, Some("shared"))
                 .expect("defs should resolve");
         assert!(types.contains_key("Obj"));
@@ -775,6 +1062,7 @@ mod defs_resolver_tests {
             }],
             function_decls: Vec::new(),
             defs_global_var_decls: Vec::new(),
+            defs_global_const_decls: Vec::new(),
         };
         let duplicate_defs_by_path = BTreeMap::from([
             ("a.xml".to_string(), duplicate_qualified.clone()),
@@ -808,6 +1096,7 @@ mod defs_resolver_tests {
                         location: span.clone(),
                     }],
                     defs_global_var_decls: Vec::new(),
+                    defs_global_const_decls: Vec::new(),
                 },
             ),
             (
@@ -828,11 +1117,12 @@ mod defs_resolver_tests {
                         location: span.clone(),
                     }],
                     defs_global_var_decls: Vec::new(),
+                    defs_global_const_decls: Vec::new(),
                 },
             ),
         ]);
         let reachable = BTreeSet::from(["a.xml".to_string(), "b.xml".to_string()]);
-        let (_types, functions, defs_globals) =
+        let (_types, functions, defs_globals, _defs_consts) =
             resolve_visible_defs(&reachable, &defs_by_path, Some("a"))
                 .expect("defs should resolve");
         assert!(functions.contains_key("a.doit"));
@@ -864,10 +1154,11 @@ mod defs_resolver_tests {
                 type_decls: Vec::new(),
                 function_decls: Vec::new(),
                 defs_global_var_decls: vec![make_decl("a", "hp")],
+                defs_global_const_decls: Vec::new(),
             },
         )]);
         let unique_reachable = BTreeSet::from(["a.xml".to_string()]);
-        let (_types, _functions, unique_globals) =
+        let (_types, _functions, unique_globals, _defs_consts) =
             resolve_visible_defs(&unique_reachable, &unique_defs, Some("a"))
                 .expect("defs should resolve");
         assert!(unique_globals.contains_key("a.hp"));
@@ -887,6 +1178,7 @@ mod defs_resolver_tests {
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
                     defs_global_var_decls: vec![make_decl("a", "hp")],
+                    defs_global_const_decls: Vec::new(),
                 },
             ),
             (
@@ -895,11 +1187,12 @@ mod defs_resolver_tests {
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
                     defs_global_var_decls: vec![make_decl("b", "hp")],
+                    defs_global_const_decls: Vec::new(),
                 },
             ),
         ]);
         let collision_reachable = BTreeSet::from(["a.xml".to_string(), "b.xml".to_string()]);
-        let (_types, _functions, collision_globals) =
+        let (_types, _functions, collision_globals, _defs_consts) =
             resolve_visible_defs(&collision_reachable, &collision_defs, Some("a"))
                 .expect("defs should resolve");
         assert!(collision_globals.contains_key("a.hp"));
@@ -1085,6 +1378,7 @@ mod defs_resolver_tests {
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
                     defs_global_var_decls: vec![duplicate.clone()],
+                    defs_global_const_decls: Vec::new(),
                 },
             ),
             (
@@ -1093,6 +1387,7 @@ mod defs_resolver_tests {
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
                     defs_global_var_decls: vec![duplicate],
+                    defs_global_const_decls: Vec::new(),
                 },
             ),
         ]);
@@ -1211,7 +1506,7 @@ mod defs_resolver_tests {
         let sources = parse_sources(&files).expect("parse sources");
         let defs_by_path = parse_defs_files(&sources).expect("parse defs");
         let reachable = BTreeSet::from(["shared.xml".to_string()]);
-        let (types, functions, _) =
+        let (types, functions, _, _defs_consts) =
             resolve_visible_defs(&reachable, &defs_by_path, Some("shared")).expect("resolve defs");
         assert!(types.contains_key("shared.Obj"));
         assert!(functions.contains_key("shared.make"));
@@ -1420,10 +1715,11 @@ mod defs_resolver_tests {
                     initial_value_expr: None,
                     location: span.clone(),
                 }],
+                defs_global_const_decls: Vec::new(),
             },
         )]);
         let reachable = BTreeSet::from(["one.xml".to_string()]);
-        let (types, functions, defs_globals) =
+        let (types, functions, defs_globals, _defs_consts) =
             resolve_visible_defs(&reachable, &defs_with_alias, Some("one"))
                 .expect("resolve aliases");
         assert!(types.contains_key("Obj"));
@@ -1462,6 +1758,7 @@ mod defs_resolver_tests {
                     initial_value_expr: None,
                     location: span.clone(),
                 }],
+                defs_global_const_decls: Vec::new(),
             },
         )]);
         let (bundle_globals, init_order) =
@@ -1485,6 +1782,7 @@ mod defs_resolver_tests {
                 }],
                 function_decls: Vec::new(),
                 defs_global_var_decls: Vec::new(),
+                defs_global_const_decls: Vec::new(),
             },
         )]);
         let reachable = BTreeSet::from(["bad_type.xml".to_string()]);
@@ -1510,10 +1808,11 @@ mod defs_resolver_tests {
                     location: span.clone(),
                 }],
                 defs_global_var_decls: Vec::new(),
+                defs_global_const_decls: Vec::new(),
             },
         )]);
         let reachable = BTreeSet::from(["alias.xml".to_string()]);
-        let (_types, alias_functions, _defs_globals) =
+        let (_types, alias_functions, _defs_globals, _defs_consts) =
             resolve_visible_defs(&reachable, &alias_already_exists, None)
                 .expect("existing alias key should skip insertion branch");
         assert!(alias_functions.contains_key("make"));
@@ -1561,10 +1860,11 @@ mod defs_resolver_tests {
                     },
                 ],
                 defs_global_var_decls: Vec::new(),
+                defs_global_const_decls: Vec::new(),
             },
         )]);
         let reachable = BTreeSet::from(["odd.xml".to_string()]);
-        let (malformed_types, malformed_functions, _defs_globals) =
+        let (malformed_types, malformed_functions, _defs_globals, _defs_consts) =
             resolve_visible_defs(&reachable, &malformed_local_names, Some("odd"))
                 .expect("malformed aliases should still resolve without duplicate insert");
         assert!(malformed_types.contains_key("Obj"));
@@ -1598,6 +1898,7 @@ mod defs_resolver_tests {
                     location: span.clone(),
                 }],
                 defs_global_var_decls: Vec::new(),
+                defs_global_const_decls: Vec::new(),
             },
         )]);
         let reachable = BTreeSet::from(["bad.xml".to_string()]);
@@ -1623,6 +1924,7 @@ mod defs_resolver_tests {
                     location: span.clone(),
                 }],
                 defs_global_var_decls: Vec::new(),
+                defs_global_const_decls: Vec::new(),
             },
         )]);
         let reachable = BTreeSet::from(["bad.xml".to_string()]);
@@ -1644,6 +1946,7 @@ mod defs_resolver_tests {
                     initial_value_expr: None,
                     location: span.clone(),
                 }],
+                defs_global_const_decls: Vec::new(),
             },
         )]);
         let reachable = BTreeSet::from(["bad.xml".to_string()]);
@@ -1894,10 +2197,11 @@ mod defs_resolver_tests {
                     initial_value_expr: None,
                     location: span,
                 }],
+                defs_global_const_decls: Vec::new(),
             },
         )]);
         let reachable = BTreeSet::from(["main.xml".to_string(), "missing.xml".to_string()]);
-        let (types, functions, defs_globals) =
+        let (types, functions, defs_globals, _defs_consts) =
             resolve_visible_defs(&reachable, &defs_by_path, Some("main"))
                 .expect("missing paths in reachable closure should be skipped");
         assert!(types.contains_key("Player"));
@@ -1928,6 +2232,52 @@ mod defs_resolver_tests {
     }
 
     #[test]
+    fn compile_bundle_supports_module_const_declarations() {
+        let files = map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public">
+  <const name="base" type="int">7</const>
+  <script name="main"><text>${base}</text></script>
+</module>"#,
+        )]);
+        let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        assert!(bundle
+            .defs_global_const_declarations
+            .contains_key("main.base"));
+        assert_eq!(
+            bundle.defs_global_const_init_order,
+            vec!["main.base".to_string()]
+        );
+    }
+
+    #[test]
+    fn compile_bundle_rejects_const_initializer_referencing_var() {
+        let files = map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public">
+  <var name="hp" type="int">10</var>
+  <const name="bad" type="int">hp + 1</const>
+  <script name="main"><text>${bad}</text></script>
+</module>"#,
+        )]);
+        let error = compile_project_bundle_from_xml_map(&files)
+            .expect_err("const initializer referencing var should fail");
+        assert_eq!(error.code, "DEFS_CONST_INIT_REF_NON_CONST");
+
+        let files_qualified = map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public">
+  <var name="hp" type="int">10</var>
+  <const name="bad" type="int">main.hp + 1</const>
+  <script name="main"><text>${bad}</text></script>
+</module>"#,
+        )]);
+        let qualified_error = compile_project_bundle_from_xml_map(&files_qualified)
+            .expect_err("const initializer referencing qualified var should fail");
+        assert_eq!(qualified_error.code, "DEFS_CONST_INIT_REF_NON_CONST");
+    }
+
+    #[test]
     fn resolve_visible_defs_skips_private_types_from_non_local_module() {
         let span = SourceSpan::synthetic();
         let defs = DefsDeclarations {
@@ -1944,13 +2294,14 @@ mod defs_resolver_tests {
             }],
             function_decls: Vec::new(),
             defs_global_var_decls: Vec::new(),
+            defs_global_const_decls: Vec::new(),
         };
 
         let reachable = BTreeSet::from(["other.xml".to_string()]);
         let defs_by_path = BTreeMap::from([("other.xml".to_string(), defs)]);
 
         // Query from module "main" should NOT see "other.Secret" because it's private
-        let (types, functions, defs_globals) =
+        let (types, functions, defs_globals, _defs_consts) =
             resolve_visible_defs(&reachable, &defs_by_path, Some("main")).expect("should resolve");
         assert!(
             !types.contains_key("Secret"),
@@ -1979,13 +2330,14 @@ mod defs_resolver_tests {
                 location: span.clone(),
             }],
             defs_global_var_decls: Vec::new(),
+            defs_global_const_decls: Vec::new(),
         };
 
         let reachable = BTreeSet::from(["other.xml".to_string()]);
         let defs_by_path = BTreeMap::from([("other.xml".to_string(), defs)]);
 
         // Query from module "main" should NOT see "other.hidden" because it's private
-        let (types, functions, defs_globals) =
+        let (types, functions, defs_globals, _defs_consts) =
             resolve_visible_defs(&reachable, &defs_by_path, Some("main")).expect("should resolve");
         assert!(types.is_empty());
         assert!(
@@ -1993,5 +2345,189 @@ mod defs_resolver_tests {
             "private function from non-local should be hidden"
         );
         assert!(defs_globals.is_empty());
+    }
+
+    #[test]
+    fn parse_defs_global_const_declaration_validates_shape() {
+        let node = xml_element(
+            "const",
+            &[("name", "base"), ("type", "int")],
+            vec![xml_text("7")],
+        );
+        let parsed = parse_defs_global_const_declaration(&node, "main", AccessLevel::Private)
+            .expect("const should parse");
+        assert_eq!(parsed.qualified_name, "main.base");
+
+        let with_value = xml_element(
+            "const",
+            &[("name", "base"), ("type", "int"), ("value", "1")],
+            vec![],
+        );
+        let value_error =
+            parse_defs_global_const_declaration(&with_value, "main", AccessLevel::Private)
+                .expect_err("value attr should fail");
+        assert_eq!(value_error.code, "XML_ATTR_NOT_ALLOWED");
+
+        let with_child = xml_element(
+            "const",
+            &[("name", "base"), ("type", "int")],
+            vec![XmlNode::Element(xml_element(
+                "text",
+                &[],
+                vec![xml_text("x")],
+            ))],
+        );
+        let child_error =
+            parse_defs_global_const_declaration(&with_child, "main", AccessLevel::Private)
+                .expect_err("child should fail");
+        assert_eq!(child_error.code, "XML_VAR_CHILD_INVALID");
+    }
+
+    #[test]
+    fn resolve_visible_defs_includes_public_consts_and_local_private_consts() {
+        let span = SourceSpan::synthetic();
+        let defs_by_path = BTreeMap::from([
+            (
+                "main.xml".to_string(),
+                DefsDeclarations {
+                    type_decls: Vec::new(),
+                    function_decls: Vec::new(),
+                    defs_global_var_decls: Vec::new(),
+                    defs_global_const_decls: vec![
+                        ParsedDefsGlobalConstDecl {
+                            namespace: "main".to_string(),
+                            name: "localConst".to_string(),
+                            qualified_name: "main.localConst".to_string(),
+                            access: AccessLevel::Private,
+                            type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                            initial_value_expr: Some("1".to_string()),
+                            location: span.clone(),
+                        },
+                        ParsedDefsGlobalConstDecl {
+                            namespace: "main".to_string(),
+                            name: "sharedConst".to_string(),
+                            qualified_name: "main.sharedConst".to_string(),
+                            access: AccessLevel::Public,
+                            type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                            initial_value_expr: Some("2".to_string()),
+                            location: span,
+                        },
+                    ],
+                },
+            ),
+            (
+                "other.xml".to_string(),
+                DefsDeclarations {
+                    type_decls: Vec::new(),
+                    function_decls: Vec::new(),
+                    defs_global_var_decls: Vec::new(),
+                    defs_global_const_decls: vec![ParsedDefsGlobalConstDecl {
+                        namespace: "other".to_string(),
+                        name: "hidden".to_string(),
+                        qualified_name: "other.hidden".to_string(),
+                        access: AccessLevel::Private,
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        initial_value_expr: Some("3".to_string()),
+                        location: SourceSpan::synthetic(),
+                    }],
+                },
+            ),
+        ]);
+        let reachable = BTreeSet::from(["main.xml".to_string(), "other.xml".to_string()]);
+        let (_types, _functions, _defs_globals, defs_consts) =
+            resolve_visible_defs(&reachable, &defs_by_path, Some("main")).expect("resolve");
+        assert!(defs_consts.contains_key("main.localConst"));
+        assert!(defs_consts.contains_key("sharedConst"));
+        assert!(!defs_consts.contains_key("other.hidden"));
+    }
+
+    #[test]
+    fn collect_defs_consts_for_bundle_rejects_duplicate_and_forward_reference() {
+        let span = SourceSpan::synthetic();
+        let defs_globals = BTreeMap::from([(
+            "main.hp".to_string(),
+            DefsGlobalVarDecl {
+                namespace: "main".to_string(),
+                name: "hp".to_string(),
+                qualified_name: "main.hp".to_string(),
+                access: AccessLevel::Public,
+                r#type: ScriptType::Primitive {
+                    name: "int".to_string(),
+                },
+                initial_value_expr: Some("1".to_string()),
+                location: span.clone(),
+            },
+        )]);
+        let duplicate = BTreeMap::from([
+            (
+                "a.xml".to_string(),
+                DefsDeclarations {
+                    type_decls: Vec::new(),
+                    function_decls: Vec::new(),
+                    defs_global_var_decls: Vec::new(),
+                    defs_global_const_decls: vec![ParsedDefsGlobalConstDecl {
+                        namespace: "main".to_string(),
+                        name: "base".to_string(),
+                        qualified_name: "main.base".to_string(),
+                        access: AccessLevel::Public,
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        initial_value_expr: Some("1".to_string()),
+                        location: span.clone(),
+                    }],
+                },
+            ),
+            (
+                "b.xml".to_string(),
+                DefsDeclarations {
+                    type_decls: Vec::new(),
+                    function_decls: Vec::new(),
+                    defs_global_var_decls: Vec::new(),
+                    defs_global_const_decls: vec![ParsedDefsGlobalConstDecl {
+                        namespace: "main".to_string(),
+                        name: "base".to_string(),
+                        qualified_name: "main.base".to_string(),
+                        access: AccessLevel::Public,
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        initial_value_expr: Some("2".to_string()),
+                        location: span.clone(),
+                    }],
+                },
+            ),
+        ]);
+        let duplicate_error = collect_defs_consts_for_bundle(&duplicate, &defs_globals)
+            .expect_err("duplicate const should fail");
+        assert_eq!(duplicate_error.code, "DEFS_GLOBAL_CONST_DUPLICATE");
+
+        let bad_order = BTreeMap::from([(
+            "main.xml".to_string(),
+            DefsDeclarations {
+                type_decls: Vec::new(),
+                function_decls: Vec::new(),
+                defs_global_var_decls: Vec::new(),
+                defs_global_const_decls: vec![
+                    ParsedDefsGlobalConstDecl {
+                        namespace: "main".to_string(),
+                        name: "a".to_string(),
+                        qualified_name: "main.a".to_string(),
+                        access: AccessLevel::Public,
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        initial_value_expr: Some("b + 1".to_string()),
+                        location: SourceSpan::synthetic(),
+                    },
+                    ParsedDefsGlobalConstDecl {
+                        namespace: "main".to_string(),
+                        name: "b".to_string(),
+                        qualified_name: "main.b".to_string(),
+                        access: AccessLevel::Public,
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        initial_value_expr: Some("1".to_string()),
+                        location: SourceSpan::synthetic(),
+                    },
+                ],
+            },
+        )]);
+        let order_error = collect_defs_consts_for_bundle(&bad_order, &defs_globals)
+            .expect_err("forward const reference should fail");
+        assert_eq!(order_error.code, "DEFS_CONST_INIT_ORDER");
     }
 }

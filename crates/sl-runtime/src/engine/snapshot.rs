@@ -110,6 +110,7 @@ impl ScriptLangEngine {
         }
 
         self.reset();
+        self.initialize_defs_consts()?;
         self.seeded_rng_state = snapshot.rng_state;
         if self.initial_random_sequence.is_none() {
             *self.shared_rng_state.borrow_mut() = RuntimeRandomState::Seeded(snapshot.rng_state);
@@ -698,6 +699,60 @@ mod snapshot_tests {
     }
 
     #[test]
+    pub(super) fn snapshot_does_not_store_defs_consts_and_resume_rebuilds_them() {
+        let files = map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public">
+  <const name="base" type="int">7</const>
+  <script name="main">
+    <choice text="Pick">
+      <option text="A"><text>${base}</text></option>
+    </choice>
+  </script>
+</module>"#,
+        )]);
+
+        let mut engine = engine_from_sources(files.clone());
+        engine.start("main.main", None).expect("start");
+        let first = engine.next_output().expect("choice");
+        assert_eq!(output_kind(&first), "choices");
+        let snapshot = engine.snapshot().expect("snapshot");
+        assert!(!snapshot.defs_globals.contains_key("main.base"));
+
+        let mut resumed = engine_from_sources(files);
+        resumed.resume(snapshot).expect("resume");
+        resumed.choose(0).expect("choose");
+        let text = resumed.next_output().expect("text");
+        assert!(matches!(text, EngineOutput::Text { text, .. } if text == "7"));
+    }
+
+    #[test]
+    pub(super) fn resume_fails_when_defs_const_declaration_missing() {
+        let files = map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public">
+  <const name="base" type="int">7</const>
+  <script name="main">
+    <choice text="Pick"><option text="A"><text>x</text></option></choice>
+  </script>
+</module>"#,
+        )]);
+
+        let mut engine = engine_from_sources(files.clone());
+        engine.start("main.main", None).expect("start");
+        let _ = engine.next_output().expect("choice");
+        let snapshot = engine.snapshot().expect("snapshot");
+
+        let mut resumed = engine_from_sources(files);
+        resumed.defs_const_declarations.clear();
+        resumed.defs_const_init_order = vec!["main.base".to_string()];
+        let error = resumed
+            .resume(snapshot)
+            .expect_err("missing const declaration should fail");
+        assert_eq!(error.code, "ENGINE_DEFS_CONST_DECL_MISSING");
+    }
+
+    #[test]
     pub(super) fn resume_validates_defs_globals_shape_and_types() {
         let files = map(&[
             (
@@ -869,6 +924,8 @@ mod snapshot_tests {
             global_json: compiled.global_json.clone(),
             defs_global_declarations: compiled.defs_global_declarations.clone(),
             defs_global_init_order: compiled.defs_global_init_order.clone(),
+            defs_global_const_declarations: compiled.defs_global_const_declarations.clone(),
+            defs_global_const_init_order: compiled.defs_global_const_init_order.clone(),
             host_functions: None,
             random_seed: Some(1),
             random_sequence: Some(vec![7, 9]),
@@ -888,6 +945,8 @@ mod snapshot_tests {
             global_json: compiled.global_json,
             defs_global_declarations: compiled.defs_global_declarations,
             defs_global_init_order: compiled.defs_global_init_order,
+            defs_global_const_declarations: compiled.defs_global_const_declarations,
+            defs_global_const_init_order: compiled.defs_global_const_init_order,
             host_functions: None,
             random_seed: Some(1),
             random_sequence: Some(vec![7, 9]),

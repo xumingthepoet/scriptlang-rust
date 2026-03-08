@@ -1680,6 +1680,7 @@ mod callstack_tests {
             groups: Default::default(),
             visible_functions: Default::default(),
             visible_defs_globals: Default::default(),
+            visible_defs_consts: Default::default(),
             visible_json_globals: vec![],
         };
 
@@ -1740,6 +1741,7 @@ mod callstack_tests {
             groups: Default::default(),
             visible_functions: Default::default(),
             visible_defs_globals: Default::default(),
+            visible_defs_consts: Default::default(),
             visible_json_globals: vec![],
         };
 

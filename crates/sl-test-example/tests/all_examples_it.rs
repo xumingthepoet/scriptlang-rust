@@ -118,3 +118,8 @@ fn example_21_dynamic_transfer_target_matches_testcase() {
 fn example_22_access_control_matches_testcase() {
     assert_example("22-access-control");
 }
+
+#[test]
+fn example_23_const_basics_matches_testcase() {
+    assert_example("23-const-basics");
+}

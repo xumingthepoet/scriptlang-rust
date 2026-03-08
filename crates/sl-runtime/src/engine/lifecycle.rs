@@ -44,6 +44,8 @@ pub struct ScriptLangEngineOptions {
     pub global_json: BTreeMap<String, SlValue>,
     pub defs_global_declarations: BTreeMap<String, DefsGlobalVarDecl>,
     pub defs_global_init_order: Vec<String>,
+    pub defs_global_const_declarations: BTreeMap<String, DefsGlobalConstDecl>,
+    pub defs_global_const_init_order: Vec<String>,
     pub host_functions: Option<Arc<dyn HostFunctionRegistry>>,
     pub random_seed: Option<u32>,
     pub random_sequence: Option<Vec<u32>>,
@@ -109,11 +111,17 @@ pub struct ScriptLangEngine {
     pub(super) global_json: BTreeMap<String, SlValue>,
     pub(super) defs_global_declarations: BTreeMap<String, DefsGlobalVarDecl>,
     pub(super) defs_global_init_order: Vec<String>,
+    pub(super) defs_const_declarations: BTreeMap<String, DefsGlobalConstDecl>,
+    pub(super) defs_const_init_order: Vec<String>,
     pub(super) defs_globals_value: BTreeMap<String, SlValue>,
     pub(super) defs_globals_type: BTreeMap<String, ScriptType>,
+    pub(super) defs_consts_value: BTreeMap<String, SlValue>,
+    pub(super) defs_consts_type: BTreeMap<String, ScriptType>,
     pub(super) visible_json_by_script: HashMap<String, BTreeSet<String>>,
     pub(super) visible_defs_by_script: HashMap<String, BTreeSet<String>>,
     pub(super) defs_global_alias_by_script: HashMap<String, BTreeMap<String, String>>,
+    pub(super) visible_consts_by_script: HashMap<String, BTreeSet<String>>,
+    pub(super) defs_const_alias_by_script: HashMap<String, BTreeMap<String, String>>,
     pub(super) visible_function_symbols_by_script: HashMap<String, BTreeMap<String, String>>,
     pub(super) defs_prelude_by_script: HashMap<String, String>,
     pub(super) initial_random_seed: u32,
@@ -147,6 +155,8 @@ impl ScriptLangEngine {
         let mut visible_json_by_script = HashMap::new();
         let mut visible_defs_by_script = HashMap::new();
         let mut defs_global_alias_by_script = HashMap::new();
+        let mut visible_consts_by_script = HashMap::new();
+        let mut defs_const_alias_by_script = HashMap::new();
         let mut visible_function_symbols_by_script = HashMap::new();
 
         for (script_name, script) in &options.scripts {
@@ -182,6 +192,15 @@ impl ScriptLangEngine {
             }
             visible_defs_by_script.insert(script_name.clone(), visible_defs);
             defs_global_alias_by_script.insert(script_name.clone(), defs_aliases);
+
+            let mut const_aliases = BTreeMap::new();
+            let mut visible_consts = BTreeSet::new();
+            for (public_name, decl) in &script.visible_defs_consts {
+                const_aliases.insert(public_name.clone(), decl.qualified_name.clone());
+                visible_consts.insert(decl.qualified_name.clone());
+            }
+            visible_consts_by_script.insert(script_name.clone(), visible_consts);
+            defs_const_alias_by_script.insert(script_name.clone(), const_aliases);
 
             for function_name in script.visible_functions.keys() {
                 if host_functions
@@ -263,6 +282,11 @@ impl ScriptLangEngine {
             .iter()
             .map(|(qualified_name, decl)| (qualified_name.clone(), decl.r#type.clone()))
             .collect();
+        let defs_consts_type = options
+            .defs_global_const_declarations
+            .iter()
+            .map(|(qualified_name, decl)| (qualified_name.clone(), decl.r#type.clone()))
+            .collect();
         Ok(Self {
             scripts: options.scripts,
             host_functions,
@@ -273,11 +297,17 @@ impl ScriptLangEngine {
             global_json: options.global_json,
             defs_global_declarations: options.defs_global_declarations,
             defs_global_init_order: options.defs_global_init_order,
+            defs_const_declarations: options.defs_global_const_declarations,
+            defs_const_init_order: options.defs_global_const_init_order,
             defs_globals_value: BTreeMap::new(),
             defs_globals_type,
+            defs_consts_value: BTreeMap::new(),
+            defs_consts_type,
             visible_json_by_script,
             visible_defs_by_script,
             defs_global_alias_by_script,
+            visible_consts_by_script,
+            defs_const_alias_by_script,
             visible_function_symbols_by_script,
             defs_prelude_by_script: HashMap::new(),
             initial_random_seed,
@@ -325,6 +355,7 @@ impl ScriptLangEngine {
         entry_args: Option<BTreeMap<String, SlValue>>,
     ) -> Result<(), ScriptLangError> {
         self.reset();
+        self.initialize_defs_consts()?;
         self.initialize_defs_globals()?;
         let Some(script) = self.scripts.get(entry_script_name) else {
             return Err(ScriptLangError::new(
@@ -388,6 +419,49 @@ impl ScriptLangEngine {
         }
         Ok(())
     }
+
+    pub(super) fn initialize_defs_consts(&mut self) -> Result<(), ScriptLangError> {
+        self.defs_consts_value.clear();
+        for qualified_name in self.defs_const_init_order.clone() {
+            let decl = self
+                .defs_const_declarations
+                .get(&qualified_name)
+                .cloned()
+                .ok_or_else(|| {
+                    ScriptLangError::new(
+                        "ENGINE_DEFS_CONST_DECL_MISSING",
+                        format!(
+                            "Defs const \"{}\" is present in init order but missing from declarations.",
+                            qualified_name
+                        ),
+                    )
+                })?;
+            let mut value = default_value_from_type(&decl.r#type);
+            if let Some(expr) = &decl.initial_value_expr {
+                value = self.eval_defs_const_initializer(expr, &decl.namespace)?;
+            }
+            if !is_type_compatible(&value, &decl.r#type) {
+                return Err(ScriptLangError::new(
+                    "ENGINE_TYPE_MISMATCH",
+                    format!(
+                        "Defs const \"{}\" does not match declared type.",
+                        qualified_name
+                    ),
+                ));
+            }
+            self.defs_consts_value.insert(qualified_name, value);
+        }
+        for (qualified_name, decl) in &self.defs_const_declarations {
+            if self.defs_consts_value.contains_key(qualified_name) {
+                continue;
+            }
+            self.defs_consts_value.insert(
+                qualified_name.clone(),
+                default_value_from_type(&decl.r#type),
+            );
+        }
+        Ok(())
+    }
 }
 #[cfg(test)]
 mod lifecycle_tests {
@@ -431,6 +505,8 @@ mod lifecycle_tests {
             global_json: compiled.global_json,
             defs_global_declarations: compiled.defs_global_declarations,
             defs_global_init_order: compiled.defs_global_init_order,
+            defs_global_const_declarations: compiled.defs_global_const_declarations,
+            defs_global_const_init_order: compiled.defs_global_const_init_order,
             host_functions: Some(Arc::new(TestRegistry {
                 names: vec!["random".to_string()],
             })),
@@ -471,6 +547,8 @@ mod lifecycle_tests {
             global_json: compiled.global_json,
             defs_global_declarations: compiled.defs_global_declarations,
             defs_global_init_order: compiled.defs_global_init_order,
+            defs_global_const_declarations: compiled.defs_global_const_declarations,
+            defs_global_const_init_order: compiled.defs_global_const_init_order,
             host_functions: Some(Arc::new(TestRegistry {
                 names: vec!["shared.addWithGameBonus".to_string()],
             })),
@@ -512,6 +590,8 @@ mod lifecycle_tests {
             global_json: compiled.global_json,
             defs_global_declarations: compiled.defs_global_declarations,
             defs_global_init_order: compiled.defs_global_init_order,
+            defs_global_const_declarations: compiled.defs_global_const_declarations,
+            defs_global_const_init_order: compiled.defs_global_const_init_order,
             host_functions: None,
             random_seed: Some(1),
             random_sequence: None,
@@ -568,6 +648,8 @@ mod lifecycle_tests {
             global_json: compiled.global_json,
             defs_global_declarations: compiled.defs_global_declarations,
             defs_global_init_order: compiled.defs_global_init_order,
+            defs_global_const_declarations: compiled.defs_global_const_declarations,
+            defs_global_const_init_order: compiled.defs_global_const_init_order,
             host_functions: None,
             random_seed: Some(1),
             random_sequence: Some(vec![12, 3, 1]),
@@ -623,6 +705,8 @@ mod lifecycle_tests {
             global_json: compiled.global_json,
             defs_global_declarations: compiled.defs_global_declarations,
             defs_global_init_order: compiled.defs_global_init_order,
+            defs_global_const_declarations: compiled.defs_global_const_declarations,
+            defs_global_const_init_order: compiled.defs_global_const_init_order,
             host_functions: None,
             random_seed: Some(1),
             random_sequence: Some(vec![5]),
@@ -683,6 +767,8 @@ mod lifecycle_tests {
             global_json: compiled.global_json,
             defs_global_declarations: compiled.defs_global_declarations,
             defs_global_init_order: compiled.defs_global_init_order,
+            defs_global_const_declarations: compiled.defs_global_const_declarations,
+            defs_global_const_init_order: compiled.defs_global_const_init_order,
             host_functions: None,
             random_seed: Some(9),
             random_sequence: Some(vec![12, 3]),
@@ -731,6 +817,8 @@ mod lifecycle_tests {
             global_json: compiled.global_json,
             defs_global_declarations: compiled.defs_global_declarations,
             defs_global_init_order: compiled.defs_global_init_order,
+            defs_global_const_declarations: compiled.defs_global_const_declarations,
+            defs_global_const_init_order: compiled.defs_global_const_init_order,
             host_functions: None,
             random_seed: Some(7),
             random_sequence: None,
@@ -810,6 +898,34 @@ mod lifecycle_tests {
             .start("main", None)
             .expect_err("type mismatch should fail");
         assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
+    }
+
+    #[test]
+    pub(super) fn start_rejects_defs_const_initializer_type_mismatch() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public">
+  <const name="base" type="int">"bad"</const>
+  <script name="main"><text>ok</text></script>
+</module>"#,
+        )]));
+        let error = engine
+            .start("main.main", None)
+            .expect_err("const type mismatch should fail");
+        assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
+    }
+
+    #[test]
+    pub(super) fn initialize_defs_consts_reports_missing_decl() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public"><script name="main"><text>ok</text></script></module>"#,
+        )]));
+        engine.defs_const_init_order = vec!["main.base".to_string()];
+        let error = engine
+            .initialize_defs_consts()
+            .expect_err("missing decl should fail");
+        assert_eq!(error.code, "ENGINE_DEFS_CONST_DECL_MISSING");
     }
 
     #[test]

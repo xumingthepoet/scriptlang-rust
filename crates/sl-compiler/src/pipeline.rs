@@ -18,6 +18,8 @@ pub fn compile_project_bundle_from_xml_map(
     let global_json = BTreeMap::new();
     let (defs_global_declarations, defs_global_init_order) =
         collect_defs_globals_for_bundle(&defs_by_path)?;
+    let (defs_global_const_declarations, defs_global_const_init_order) =
+        collect_defs_consts_for_bundle(&defs_by_path, &defs_global_declarations)?;
 
     let mut scripts = BTreeMap::new();
     let mut reachable_cache = HashMap::new();
@@ -28,7 +30,7 @@ pub fn compile_project_bundle_from_xml_map(
             .or_insert_with(|| collect_reachable_imports(file_path, &sources));
         let script_roots = collect_source_scripts(source, file_path, &module_scripts_by_path);
         for script_decl in script_roots {
-            let (visible_types, visible_functions, visible_defs_globals) =
+            let (visible_types, visible_functions, visible_defs_globals, visible_defs_consts) =
                 resolve_visible_defs(reachable, &defs_by_path, script_decl.module_name.as_deref())
                     .map_err(|error| with_file_context(error, file_path))?;
             let ir = compile_script(CompileScriptOptions {
@@ -40,6 +42,7 @@ pub fn compile_project_bundle_from_xml_map(
                 visible_types: &visible_types,
                 visible_functions: &visible_functions,
                 visible_defs_globals: &visible_defs_globals,
+                visible_defs_consts: &visible_defs_consts,
             })
             .map_err(|error| with_file_context(error, file_path))?;
             if scripts.contains_key(&ir.script_name) {
@@ -59,6 +62,8 @@ pub fn compile_project_bundle_from_xml_map(
         global_json,
         defs_global_declarations,
         defs_global_init_order,
+        defs_global_const_declarations,
+        defs_global_const_init_order,
     })
 }
 

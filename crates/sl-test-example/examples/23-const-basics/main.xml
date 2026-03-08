@@ -1,0 +1,6 @@
+<module name="main" default_access="public">
+  <const name="baseHp" type="int">40</const>
+  <script name="main">
+    <text>base=${baseHp}</text>
+  </script>
+</module>

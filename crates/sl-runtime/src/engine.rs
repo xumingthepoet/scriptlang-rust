@@ -26,9 +26,9 @@ use rng::next_random_bounded;
 use rng::{next_random_bounded_with, next_random_u32};
 use sl_core::{
     default_value_from_type, is_type_compatible, AccessLevel, ChoiceEntry, ChoiceItem,
-    ContinuationFrame, ContinueTarget, DefsGlobalVarDecl, EngineOutput, PendingBoundary,
-    PendingDynamicChoiceBinding, ScriptIr, ScriptLangError, ScriptNode, ScriptType, SlValue,
-    Snapshot, SnapshotCompletion, SnapshotFrame,
+    ContinuationFrame, ContinueTarget, DefsGlobalConstDecl, DefsGlobalVarDecl, EngineOutput,
+    PendingBoundary, PendingDynamicChoiceBinding, ScriptIr, ScriptLangError, ScriptNode,
+    ScriptType, SlValue, Snapshot, SnapshotCompletion, SnapshotFrame,
 };
 
 mod boundary;
@@ -175,6 +175,8 @@ pub(super) mod runtime_test_support {
             global_json: compiled.global_json,
             defs_global_declarations: compiled.defs_global_declarations,
             defs_global_init_order: compiled.defs_global_init_order,
+            defs_global_const_declarations: compiled.defs_global_const_declarations,
+            defs_global_const_init_order: compiled.defs_global_const_init_order,
             host_functions: None,
             random_seed: Some(1),
             random_sequence: None,
@@ -202,6 +204,8 @@ pub(super) mod runtime_test_support {
             global_json,
             defs_global_declarations: compiled.defs_global_declarations,
             defs_global_init_order: compiled.defs_global_init_order,
+            defs_global_const_declarations: compiled.defs_global_const_declarations,
+            defs_global_const_init_order: compiled.defs_global_const_init_order,
             host_functions: None,
             random_seed: Some(1),
             random_sequence: None,
@@ -244,6 +248,8 @@ pub(super) mod runtime_test_support {
             global_json: bundle.global_json,
             defs_global_declarations: bundle.defs_global_declarations,
             defs_global_init_order: bundle.defs_global_init_order,
+            defs_global_const_declarations: bundle.defs_global_const_declarations,
+            defs_global_const_init_order: bundle.defs_global_const_init_order,
         }
     }
 

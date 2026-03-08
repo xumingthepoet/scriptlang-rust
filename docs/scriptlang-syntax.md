@@ -29,14 +29,14 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 
 规则：
 - 一个 `*.xml` 模块文件内可以有多个 `<script>`。
-- `<module>` 下允许的直接子节点只有：`<type>`、`<function>`、`<var>`、`<script>`。
+- `<module>` 下允许的直接子节点只有：`<type>`、`<function>`、`<var>`、`<const>`、`<script>`。
 - module 名只取自 `<module name="...">`，不从文件名推导。
 - `<module default_access="public|private">` 可设置 module 内默认可见性，默认是 `private`。
-- `<type>/<function>/<var>/<script>` 可单独声明 `access="public|private"`；未声明时继承 `default_access`。
+- `<type>/<function>/<var>/<const>/<script>` 可单独声明 `access="public|private"`；未声明时继承 `default_access`。
 - 不再支持顶层 `<script>` 或 `<defs>` 根；旧的 `*.script.xml`、`*.defs.xml`、`*.module.xml` 输入会直接报错。
 - module 内脚本对外注册名是 `moduleName.scriptName`，例如 `battle.main`。
-- module 内 `type/function/var` 仍属于同一命名空间，例如 `battle.Combatant`、`battle.boost`、`battle.baseHp`。
-- 同一个 module 内部，脚本可以直接用短名访问本 module 的 `type/function/var`，也可以用短名调用 sibling script。
+- module 内 `type/function/var/const` 仍属于同一命名空间，例如 `battle.Combatant`、`battle.boost`、`battle.baseHp`。
+- 同一个 module 内部，脚本可以直接用短名访问本 module 的 `type/function/var/const`，也可以用短名调用 sibling script。
 - 跨 module 访问任何元素时，都必须使用限定名，例如 `shared.boost`、`shared.hp`、`shared.Hero`、`battle.main`。
 - 跨 module import 只能访问对方 `public` 元素；`private` 仅在本 module 内可见。
 - 宿主入口脚本必须是 `public`；`private` 脚本不能作为 entry。
@@ -156,6 +156,22 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 - `<module><var>` 与 `<defs><var>` 使用同一套运行时模型。
 - 它们都会参与 snapshot / resume。
 - module 内脚本天然可以看到本 module 的这些全局变量。
+
+## 4.3 `<module><const>`（全局只读常量）
+
+`<module>` 下可声明只读常量：
+
+```xml
+<module name="shared" default_access="public">
+  <const name="baseHp" type="int">40</const>
+</module>
+```
+
+语义规则：
+- 可见性/短名/限定名规则与 `<module><var>` 相同。
+- 常量在 `engine.start(...)` 时初始化，运行时禁止写入（包括代码赋值、`input`、路径写入）。
+- `<const>` 不参与 snapshot/save；`resume` 时会按声明重新构建。
+- `<const>` 初始化表达式可引用已初始化的 const；若引用 `<var>` 会编译失败。
 
 ## 5. 类型语法
 

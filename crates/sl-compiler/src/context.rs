@@ -9,6 +9,8 @@ pub struct CompileProjectBundleResult {
     pub global_json: BTreeMap<String, SlValue>,
     pub defs_global_declarations: BTreeMap<String, DefsGlobalVarDecl>,
     pub defs_global_init_order: Vec<String>,
+    pub defs_global_const_declarations: BTreeMap<String, DefsGlobalConstDecl>,
+    pub defs_global_const_init_order: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -66,6 +68,17 @@ pub(crate) struct ParsedDefsGlobalVarDecl {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct ParsedDefsGlobalConstDecl {
+    pub(crate) namespace: String,
+    pub(crate) name: String,
+    pub(crate) qualified_name: String,
+    pub(crate) access: AccessLevel,
+    pub(crate) type_expr: ParsedTypeExpr,
+    pub(crate) initial_value_expr: Option<String>,
+    pub(crate) location: SourceSpan,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct ParsedFunctionParamDecl {
     pub(crate) name: String,
     pub(crate) type_expr: ParsedTypeExpr,
@@ -85,6 +98,7 @@ pub(crate) struct DefsDeclarations {
     pub(crate) type_decls: Vec<ParsedTypeDecl>,
     pub(crate) function_decls: Vec<ParsedFunctionDecl>,
     pub(crate) defs_global_var_decls: Vec<ParsedDefsGlobalVarDecl>,
+    pub(crate) defs_global_const_decls: Vec<ParsedDefsGlobalConstDecl>,
 }
 
 #[derive(Debug, Clone)]
@@ -109,10 +123,17 @@ pub(crate) struct CompileScriptOptions<'a> {
     pub(crate) visible_types: &'a BTreeMap<String, ScriptType>,
     pub(crate) visible_functions: &'a BTreeMap<String, FunctionDecl>,
     pub(crate) visible_defs_globals: &'a BTreeMap<String, DefsGlobalVarDecl>,
+    pub(crate) visible_defs_consts: &'a BTreeMap<String, DefsGlobalConstDecl>,
 }
 
 pub(crate) type VisibleTypeMap = BTreeMap<String, ScriptType>;
 pub(crate) type VisibleFunctionMap = BTreeMap<String, FunctionDecl>;
+pub(crate) type VisibleDefsResolution = (
+    VisibleTypeMap,
+    VisibleFunctionMap,
+    BTreeMap<String, DefsGlobalVarDecl>,
+    BTreeMap<String, DefsGlobalConstDecl>,
+);
 
 #[derive(Debug, Clone)]
 pub(crate) struct MacroExpansionContext {

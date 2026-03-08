@@ -6,10 +6,10 @@ pub(crate) use regex::Regex;
 pub(crate) use serde_json::Value as JsonValue;
 pub(crate) use sl_core::{
     default_value_from_type, AccessLevel, CallArgument, ChoiceEntry, ChoiceOption,
-    CompiledProjectArtifact, ContinueTarget, DefsGlobalVarDecl, DynamicChoiceBlock,
-    DynamicChoiceTemplate, FunctionDecl, FunctionParam, FunctionReturn, ImplicitGroup, ScriptIr,
-    ScriptLangError, ScriptNode, ScriptParam, ScriptType, SlValue, SourceSpan, VarDeclaration,
-    COMPILED_PROJECT_SCHEMA,
+    CompiledProjectArtifact, ContinueTarget, DefsGlobalConstDecl, DefsGlobalVarDecl,
+    DynamicChoiceBlock, DynamicChoiceTemplate, FunctionDecl, FunctionParam, FunctionReturn,
+    ImplicitGroup, ScriptIr, ScriptLangError, ScriptNode, ScriptParam, ScriptType, SlValue,
+    SourceSpan, VarDeclaration, COMPILED_PROJECT_SCHEMA,
 };
 pub(crate) use sl_parser::{
     parse_import_directives, parse_xml_document, reject_non_import_dependency_directives,

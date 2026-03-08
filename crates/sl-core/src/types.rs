@@ -75,6 +75,18 @@ pub struct DefsGlobalVarDecl {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DefsGlobalConstDecl {
+    pub namespace: String,
+    pub name: String,
+    pub qualified_name: String,
+    #[serde(default)]
+    pub access: AccessLevel,
+    pub r#type: ScriptType,
+    pub initial_value_expr: Option<String>,
+    pub location: SourceSpan,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ScriptParam {
     pub name: String,
     pub r#type: ScriptType,
@@ -252,6 +264,8 @@ pub struct ScriptIr {
     pub visible_json_globals: Vec<String>,
     pub visible_functions: BTreeMap<String, FunctionDecl>,
     pub visible_defs_globals: BTreeMap<String, DefsGlobalVarDecl>,
+    #[serde(default)]
+    pub visible_defs_consts: BTreeMap<String, DefsGlobalConstDecl>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -365,6 +379,10 @@ pub struct CompileProjectResult {
     pub global_json: BTreeMap<String, SlValue>,
     pub defs_global_declarations: BTreeMap<String, DefsGlobalVarDecl>,
     pub defs_global_init_order: Vec<String>,
+    #[serde(default)]
+    pub defs_global_const_declarations: BTreeMap<String, DefsGlobalConstDecl>,
+    #[serde(default)]
+    pub defs_global_const_init_order: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -377,6 +395,10 @@ pub struct CompiledProjectArtifact {
     pub global_json: BTreeMap<String, SlValue>,
     pub defs_global_declarations: BTreeMap<String, DefsGlobalVarDecl>,
     pub defs_global_init_order: Vec<String>,
+    #[serde(default)]
+    pub defs_global_const_declarations: BTreeMap<String, DefsGlobalConstDecl>,
+    #[serde(default)]
+    pub defs_global_const_init_order: Vec<String>,
 }
 
 #[cfg(test)]
@@ -407,6 +429,8 @@ mod tests {
             global_json: BTreeMap::new(),
             defs_global_declarations: BTreeMap::new(),
             defs_global_init_order: Vec::new(),
+            defs_global_const_declarations: BTreeMap::new(),
+            defs_global_const_init_order: Vec::new(),
         };
 
         let encoded = serde_json::to_string(&artifact).expect("artifact serialize");

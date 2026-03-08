@@ -72,6 +72,8 @@ pub fn compile_project_from_xml_map(
         global_json,
         defs_global_declarations,
         defs_global_init_order,
+        defs_global_const_declarations,
+        defs_global_const_init_order,
     } = compile_project_bundle_from_xml_map(xml_by_path)?;
 
     let entry_script = resolve_entry_script(&scripts, entry_script)?;
@@ -82,6 +84,8 @@ pub fn compile_project_from_xml_map(
         global_json,
         defs_global_declarations,
         defs_global_init_order,
+        defs_global_const_declarations,
+        defs_global_const_init_order,
     })
 }
 
@@ -119,6 +123,8 @@ pub fn create_engine_from_artifact(
         global_json: options.artifact.global_json,
         defs_global_declarations: options.artifact.defs_global_declarations,
         defs_global_init_order: options.artifact.defs_global_init_order,
+        defs_global_const_declarations: options.artifact.defs_global_const_declarations,
+        defs_global_const_init_order: options.artifact.defs_global_const_init_order,
         host_functions: options.host_functions,
         random_seed: options.random_seed,
         random_sequence: options.random_sequence,
@@ -142,6 +148,8 @@ pub fn resume_engine_from_artifact(
         global_json: options.artifact.global_json,
         defs_global_declarations: options.artifact.defs_global_declarations,
         defs_global_init_order: options.artifact.defs_global_init_order,
+        defs_global_const_declarations: options.artifact.defs_global_const_declarations,
+        defs_global_const_init_order: options.artifact.defs_global_const_init_order,
         host_functions: options.host_functions,
         random_seed: None,
         random_sequence: options.random_sequence,
@@ -181,6 +189,8 @@ pub fn resume_engine_from_xml(
             global_json: compiled.global_json,
             defs_global_declarations: compiled.defs_global_declarations,
             defs_global_init_order: compiled.defs_global_init_order,
+            defs_global_const_declarations: compiled.defs_global_const_declarations,
+            defs_global_const_init_order: compiled.defs_global_const_init_order,
         },
         snapshot: options.snapshot,
         host_functions: options.host_functions,
@@ -461,6 +471,8 @@ mod tests {
             global_json: BTreeMap::new(),
             defs_global_declarations: BTreeMap::new(),
             defs_global_init_order: Vec::new(),
+            defs_global_const_declarations: BTreeMap::new(),
+            defs_global_const_init_order: Vec::new(),
         };
         let error = create_engine_from_artifact(CreateEngineFromArtifactOptions {
             artifact: bad_artifact,
@@ -492,6 +504,8 @@ mod tests {
                 global_json: bundle.global_json,
                 defs_global_declarations: bundle.defs_global_declarations,
                 defs_global_init_order: bundle.defs_global_init_order,
+                defs_global_const_declarations: bundle.defs_global_const_declarations,
+                defs_global_const_init_order: bundle.defs_global_const_init_order,
             },
             entry_args: None,
             host_functions: None,

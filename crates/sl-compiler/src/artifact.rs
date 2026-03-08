@@ -14,6 +14,8 @@ pub fn compile_artifact_from_xml_map(
         global_json,
         defs_global_declarations,
         defs_global_init_order,
+        defs_global_const_declarations,
+        defs_global_const_init_order,
     } = compile_project_bundle_from_xml_map(xml_by_path)?;
 
     let entry_script = resolve_entry_script(&scripts, entry_script)?;
@@ -26,6 +28,8 @@ pub fn compile_artifact_from_xml_map(
         global_json,
         defs_global_declarations,
         defs_global_init_order,
+        defs_global_const_declarations,
+        defs_global_const_init_order,
     })
 }
 

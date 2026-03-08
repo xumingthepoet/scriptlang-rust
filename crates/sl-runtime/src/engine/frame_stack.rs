@@ -17,6 +17,7 @@ impl ScriptLangEngine {
             None => RuntimeRandomState::Seeded(self.initial_random_seed),
         };
         self.defs_globals_value.clear();
+        self.defs_consts_value.clear();
     }
 
     pub(super) fn boundary_output(&self, boundary: &PendingBoundary) -> EngineOutput {
