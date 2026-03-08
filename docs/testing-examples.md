@@ -5,7 +5,7 @@ This workspace uses `sl-test-example` to validate all examples under `crates/sl-
 ## Layout
 - Case file path: `crates/sl-test-example/examples/<example>/testcase.json`
 - Runner API: `sl_test_example::run_case(...)` and `sl_test_example::assert_case(...)`
-- Integration tests: `crates/sl-test-example/tests/*_it.rs`
+- Integration tests: `crates/sl-test-example/tests/all_examples_it.rs` (single test binary to reduce per-process startup overhead)
 
 ## Case Schema (`sl-tool-case`)
 

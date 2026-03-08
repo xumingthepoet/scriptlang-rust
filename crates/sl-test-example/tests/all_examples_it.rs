@@ -1,0 +1,120 @@
+fn assert_example(name: &str) {
+    let example_dir = sl_test_example::example_dir(name);
+    let case_path = sl_test_example::testcase_path(name);
+    sl_test_example::assert_case(&example_dir, &case_path).expect("example testcase should pass");
+}
+
+#[test]
+fn example_01_text_code_matches_testcase() {
+    assert_example("01-text-code");
+}
+
+#[test]
+fn example_02_if_while_matches_testcase() {
+    assert_example("02-if-while");
+}
+
+#[test]
+fn example_03_choice_once_matches_testcase() {
+    assert_example("03-choice-once");
+}
+
+#[test]
+fn example_04_call_ref_return_matches_testcase() {
+    assert_example("04-call-ref-return");
+}
+
+#[test]
+fn example_05_return_transfer_matches_testcase() {
+    assert_example("05-return-transfer");
+}
+
+#[test]
+fn example_06_snapshot_flow_matches_testcase() {
+    assert_example("06-snapshot-flow");
+}
+
+#[test]
+fn example_07_battle_duel_matches_testcase() {
+    assert_example("07-battle-duel");
+}
+
+#[test]
+fn example_08_json_globals_matches_testcase() {
+    assert_example("08-json-globals");
+}
+
+#[test]
+fn example_09_random_matches_testcase() {
+    assert_example("09-random");
+}
+
+#[test]
+fn example_10_once_static_matches_testcase() {
+    assert_example("10-once-static");
+}
+
+#[test]
+fn example_11_choice_fallover_continue_matches_testcase() {
+    assert_example("11-choice-fallover-continue");
+}
+
+#[test]
+fn example_12_while_break_continue_matches_testcase() {
+    assert_example("12-while-break-continue");
+}
+
+#[test]
+fn example_13_loop_times_matches_testcase() {
+    assert_example("13-loop-times");
+}
+
+#[test]
+fn example_14_defs_functions_matches_testcase() {
+    assert_example("14-defs-functions");
+}
+
+#[test]
+fn example_15_entry_override_recursive_matches_testcase() {
+    assert_example("15-entry-override-recursive");
+}
+
+#[test]
+fn example_16_input_name_matches_testcase() {
+    assert_example("16-input-name");
+}
+
+#[test]
+fn example_17_defs_global_shadowing_matches_testcase() {
+    assert_example("17-defs-global-shadowing");
+}
+
+#[test]
+fn example_18_group_container_matches_testcase() {
+    assert_example("18-group-container");
+}
+
+#[test]
+fn example_19_dynamic_choice_mixed_matches_testcase() {
+    assert_example("19-dynamic-choice-mixed");
+}
+
+#[test]
+fn example_20_dynamic_choice_nested_matches_testcase() {
+    assert_example("20-dynamic-choice-nested");
+}
+
+#[test]
+fn example_21_directory_include_matches_testcase() {
+    assert_example("21-directory-include");
+}
+
+#[test]
+fn example_21_dynamic_transfer_target_matches_testcase() {
+    assert_example("21-dynamic-transfer-target");
+}
+
+#[test]
+fn example_22_access_control_matches_testcase() {
+    assert_example("22-access-control");
+}
