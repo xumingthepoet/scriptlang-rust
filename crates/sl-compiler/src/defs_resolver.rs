@@ -3060,4 +3060,148 @@ mod defs_resolver_tests {
             .expect_err("duplicate field should fail");
         assert_eq!(error.code, "TYPE_FIELD_DUPLICATE");
     }
+
+    #[test]
+    fn collect_functions_for_bundle_rejects_unknown_param_type() {
+        let span = SourceSpan::synthetic();
+        // Function with param type that doesn't exist
+        let defs = DefsDeclarations {
+            type_decls: Vec::new(),
+            function_decls: vec![ParsedFunctionDecl {
+                name: "foo".to_string(),
+                qualified_name: "shared.foo".to_string(),
+                access: AccessLevel::Public,
+                params: vec![ParsedFunctionParamDecl {
+                    name: "x".to_string(),
+                    type_expr: ParsedTypeExpr::Custom("UnknownType".to_string()),
+                    location: span.clone(),
+                }],
+                return_binding: ParsedFunctionParamDecl {
+                    name: "out".to_string(),
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    location: span.clone(),
+                },
+                code: "out = 1;".to_string(),
+                location: span.clone(),
+            }],
+            defs_global_var_decls: Vec::new(),
+            defs_global_const_decls: Vec::new(),
+        };
+        let defs_by_path = BTreeMap::from([("a.xml".to_string(), defs)]);
+        let error = collect_functions_for_bundle(&defs_by_path)
+            .expect_err("unknown param type should fail");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
+
+    #[test]
+    fn collect_functions_for_bundle_rejects_unknown_return_type() {
+        let span = SourceSpan::synthetic();
+        // Function with return type that doesn't exist
+        let defs = DefsDeclarations {
+            type_decls: Vec::new(),
+            function_decls: vec![ParsedFunctionDecl {
+                name: "foo".to_string(),
+                qualified_name: "shared.foo".to_string(),
+                access: AccessLevel::Public,
+                params: vec![],
+                return_binding: ParsedFunctionParamDecl {
+                    name: "out".to_string(),
+                    type_expr: ParsedTypeExpr::Custom("NonExistentType".to_string()),
+                    location: span.clone(),
+                },
+                code: "out = 1;".to_string(),
+                location: span.clone(),
+            }],
+            defs_global_var_decls: Vec::new(),
+            defs_global_const_decls: Vec::new(),
+        };
+        let defs_by_path = BTreeMap::from([("a.xml".to_string(), defs)]);
+        let error = collect_functions_for_bundle(&defs_by_path)
+            .expect_err("unknown return type should fail");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
+
+    #[test]
+    fn collect_defs_globals_for_bundle_rejects_duplicate_type() {
+        let span = SourceSpan::synthetic();
+        // Two defs files with the same type
+        let type_decl = ParsedTypeDecl {
+            name: "Obj".to_string(),
+            qualified_name: "shared.Obj".to_string(),
+            access: AccessLevel::Public,
+            fields: vec![],
+            location: span.clone(),
+        };
+        let defs1 = DefsDeclarations {
+            type_decls: vec![type_decl.clone()],
+            function_decls: Vec::new(),
+            defs_global_var_decls: Vec::new(),
+            defs_global_const_decls: Vec::new(),
+        };
+        let defs2 = DefsDeclarations {
+            type_decls: vec![type_decl],
+            function_decls: Vec::new(),
+            defs_global_var_decls: Vec::new(),
+            defs_global_const_decls: Vec::new(),
+        };
+        let defs_by_path =
+            BTreeMap::from([("a.xml".to_string(), defs1), ("b.xml".to_string(), defs2)]);
+        let error =
+            collect_defs_globals_for_bundle(&defs_by_path).expect_err("duplicate type should fail");
+        assert_eq!(error.code, "TYPE_DECL_DUPLICATE");
+    }
+
+    #[test]
+    fn collect_defs_globals_for_bundle_rejects_recursive_type() {
+        let span = SourceSpan::synthetic();
+        // Type that references a non-existent type
+        let invalid_type = ParsedTypeDecl {
+            name: "Node".to_string(),
+            qualified_name: "shared.Node".to_string(),
+            access: AccessLevel::Public,
+            fields: vec![ParsedTypeFieldDecl {
+                name: "value".to_string(),
+                type_expr: ParsedTypeExpr::Custom("NonExistent".to_string()), // doesn't exist
+                location: span.clone(),
+            }],
+            location: span.clone(),
+        };
+        let defs = DefsDeclarations {
+            type_decls: vec![invalid_type],
+            function_decls: Vec::new(),
+            defs_global_var_decls: Vec::new(),
+            defs_global_const_decls: Vec::new(),
+        };
+        let defs_by_path = BTreeMap::from([("a.xml".to_string(), defs)]);
+        let error =
+            collect_defs_globals_for_bundle(&defs_by_path).expect_err("invalid type should fail");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
+
+    #[test]
+    fn collect_defs_consts_for_bundle_rejects_recursive_type() {
+        let span = SourceSpan::synthetic();
+        // Type that references a non-existent type
+        let invalid_type = ParsedTypeDecl {
+            name: "Tree".to_string(),
+            qualified_name: "shared.Tree".to_string(),
+            access: AccessLevel::Public,
+            fields: vec![ParsedTypeFieldDecl {
+                name: "value".to_string(),
+                type_expr: ParsedTypeExpr::Custom("DoesNotExist".to_string()), // doesn't exist
+                location: span.clone(),
+            }],
+            location: span.clone(),
+        };
+        let defs = DefsDeclarations {
+            type_decls: vec![invalid_type],
+            function_decls: Vec::new(),
+            defs_global_var_decls: Vec::new(),
+            defs_global_const_decls: Vec::new(),
+        };
+        let defs_by_path = BTreeMap::from([("a.xml".to_string(), defs)]);
+        let error = collect_defs_consts_for_bundle(&defs_by_path, &BTreeMap::new())
+            .expect_err("invalid type should fail");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
 }
