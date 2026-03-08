@@ -114,18 +114,18 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 </module>
 ```
 
-## 4. `<defs>` / `<module>` 顶层属性
+## 4. `<module>` 顶层属性
 
 ## 4.1 `name`（必填）
 
 作为命名空间前缀（如 `shared.boost`）。
 
 ```xml
-<defs name="shared">
+<module name="shared" default_access="public">
   <function name="boost" args="int:x" return="int:out">
     out = x + 1;
   </function>
-</defs>
+</module>
 ```
 
 对于 `<module name="battle" default_access="public">`，这个名字同时决定：
@@ -134,14 +134,14 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 - `battle.var`
 - `battle.script`
 
-## 4.2 `<defs><var>` / `<module><var>`（全局可写变量）
+## 4.2 `<module><var>`（全局可写变量）
 
-`<defs>` 或 `<module>` 下都可以声明全局变量：
+`<module>` 下可以声明全局变量：
 
 ```xml
-<defs name="shared">
+<module name="shared" default_access="public">
   <var name="hp" type="int">100</var>
-</defs>
+</module>
 ```
 
 语义规则：
@@ -150,10 +150,10 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 - 读取/写入优先级：局部（含参数） > module 全局。
 - 本 module 内声明的全局变量可直接用短名（如 `hp`）。
 - 来自其他 module 的全局变量必须使用全名（如 `shared.hp`）。
-- defs 全局初始化表达式可以引用“前面已声明并已初始化”的 defs 全局；前向引用会编译失败。
+- module 全局初始化表达式可以引用“前面已声明并已初始化”的 module `<var>`；前向引用会编译失败。
 
 补充：
-- `<module><var>` 与 `<defs><var>` 使用同一套运行时模型。
+- `<module><var>` 使用统一的全局可写变量运行时模型。
 - 它们都会参与 snapshot / resume。
 - module 内脚本天然可以看到本 module 的这些全局变量。
 
@@ -197,7 +197,7 @@ key 固定是 string。
 <var name="dict" type="#{int}">#{a: 1, b: 2}</var>
 ```
 
-## 5.4 自定义类型（来自 defs/module）
+## 5.4 自定义类型（来自 module）
 
 本 module 内可直接写短名；跨 module 必须写全名 `ns.Type`。
 
@@ -471,22 +471,22 @@ module 相关规则与 `<call>` 相同：
 </group>
 ```
 
-## 7. `<defs>` / `<module>` 声明语法点
+## 7. `<module>` 声明语法点
 
 ## 7.1 `<type>`
 
 用途：声明对象类型。  
 属性：`name`（必填）。  
 子节点：`<field>`。  
-可出现位置：`<defs>` 或 `<module>` 直接子节点。  
+可出现位置：`<module>` 直接子节点。  
 
 ```xml
-<defs name="shared">
+<module name="shared" default_access="public">
   <type name="Hero">
     <field name="hp" type="int"/>
     <field name="name" type="string"/>
   </type>
-</defs>
+</module>
 ```
 
 ## 7.2 `<field>`
@@ -507,16 +507,16 @@ module 相关规则与 `<call>` 相同：
 - `return`（必填，`type:name`）
 
 限制：
-- defs 函数 `args` 不支持 `ref:`
-- defs 函数 `return` 不支持 `ref:`
+- module 函数 `args` 不支持 `ref:`
+- module 函数 `return` 不支持 `ref:`
 - 函数体只能是内联代码文本，不允许子元素
 
 ```xml
-<defs name="shared">
+<module name="shared" default_access="public">
   <function name="add" args="int:a,int:b" return="int:out">
     out = a + b;
   </function>
-</defs>
+</module>
 ```
 
 ## 7.4 `<module><script>`

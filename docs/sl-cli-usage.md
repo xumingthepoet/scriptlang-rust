@@ -27,11 +27,12 @@ cargo run -p sl-cli -- tui --help
 
 ## 2. Agent 模式
 
-`agent` 提供四个子命令：
+`agent` 提供五个子命令：
 - `start`
 - `choose`
 - `input`
 - `replay`
+- `compile`
 
 ### 2.1 `agent start`
 
@@ -100,7 +101,7 @@ cargo run -p sl-cli -- agent replay \
 ```bash
 cargo run -p sl-cli -- agent replay \
   --scripts-dir crates/sl-test-example/examples/06-snapshot-flow \
-  --entry-script main \
+  --entry-script main.main \
   --step choose:0
 ```
 

@@ -12,7 +12,7 @@ This workspace uses `sl-test-example` to validate all examples under `crates/sl-
 ```json
 {
   "schemaVersion": "sl-tool-case",
-  "entryScript": "main",
+  "entryScript": "main.main",
   "actions": [
     { "kind": "choose", "index": 0 },
     { "kind": "input", "text": "Guild" }
@@ -41,7 +41,7 @@ This workspace uses `sl-test-example` to validate all examples under `crates/sl-
 - `end`: terminal event.
 
 ## Runtime Defaults
-- `entryScript`: defaults to `main` if omitted.
+- `entryScript`: defaults to `main.main` if omitted.
 - 运行链路：`xml -> compile artifact -> create engine from artifact`
 - Random seed: fixed to `1` inside `sl-test-example` runner for deterministic outputs.
 - Guard: max `5000` engine steps per case.

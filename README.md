@@ -7,7 +7,7 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 - [SL CLI usage](docs/sl-cli-usage.md)
 - [ScriptLang syntax rules](docs/scriptlang-syntax.md)
 - [Example testing with sl-test-example runner](docs/testing-examples.md)
-- [Rust testability playbook for 100% coverage](docs/rust-testability-playbook.md)
+- [Rust testability playbook for high coverage](docs/rust-testability-playbook.md)
 
 ## Doc Boundary
 - `README.md` and `docs/`: user-facing behavior, integration usage, commands, and examples.
@@ -43,7 +43,7 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
   helpers are in `helpers/value_path.rs` and `helpers/rhai_bridge.rs`.
 - `crates/sl-compiler/src`:
   compile pipeline is split into `artifact.rs`, `context.rs`, `pipeline.rs`, `source_parse.rs`,
-  `import_graph.rs`, `defs_resolver.rs`, `error_context.rs`, `type_expr.rs`, `json_symbols.rs`,
+  `import_graph.rs`, `defs_resolver.rs`, `error_context.rs`, `type_expr.rs`,
   `sanitize.rs`, `script_compile.rs`, `xml_utils.rs`, `macro_expand.rs`, `defaults.rs`.
 
 This split keeps crate boundaries unchanged and enforces one-way internal dependencies.

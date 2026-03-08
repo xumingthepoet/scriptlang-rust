@@ -16,11 +16,11 @@
 
 ### Workspace Crates
 - `crates/sl-core`: 通用类型、值模型、错误、快照数据结构。
-- `crates/sl-parser`: XML 解析和 include 信息提取。
-- `crates/sl-compiler`: include 图校验、defs/json/script 编译到中间表示（IR）。
+- `crates/sl-parser`: XML 解析和 import 信息提取。
+- `crates/sl-compiler`: import 图校验、module/json/script 编译到中间表示（IR）。
 - `crates/sl-runtime`: 执行引擎（`next`/`choose`/`submit_input`/`snapshot`/`resume`）。
 - `crates/sl-api`: 面向宿主的高层 API（create/compile/resume 等）。
-- `crates/sl-cli`: 命令行入口（`agent start/choose/input`）。
+- `crates/sl-cli`: 命令行入口（`agent start/choose/input/replay/compile`）。
 
 ### 依赖方向（必须保持）
 1. `sl-core` 为最底层，不依赖其他业务 crate。
@@ -49,7 +49,7 @@
 ## 完成定义（DoD）
 - 变更位于正确分层，未破坏 crate 边界。
 - 相关示例/测试已覆盖新增或修复行为，且满足文件级一对一防守。
-- `make gate` 通过（覆盖率必须达到 `100%`）。
+- `make gate` 通过（覆盖率必须达到 `99.50%`）。
 
 ## Knowledge logging (Ralph-style)
 

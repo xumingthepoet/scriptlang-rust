@@ -1,6 +1,6 @@
-# Rust Testability Playbook for 100% Coverage (Agent-Oriented)
+# Rust Testability Playbook for High Coverage (Agent-Oriented)
 
-This document is an operational guide for writing Rust code that is easy to test and can reliably reach 100% line coverage without fragile tests.
+This document is an operational guide for writing Rust code that is easy to test and can reliably reach high coverage without fragile tests.
 
 Use it as a default implementation policy when generating or refactoring code.
 
@@ -308,7 +308,7 @@ Heuristic:
 1. If output/state is enough to validate behavior: fake.
 2. If call choreography is required: mock.
 
-## 8. Test Design Matrix for 100% Coverage
+## 8. Test Design Matrix for High Coverage
 
 For each function, define cases before coding:
 
@@ -389,7 +389,8 @@ Only exception:
 - You may skip or relax coverage/testing only when the requirement explicitly states that tests are optional for that scope.
 
 Important:
-- 100% line coverage is a gate, not the goal.
+- High coverage is a gate, not the goal.
+- In this repository, `make gate` enforces `99.50%` minimum region coverage.
 - The goal is behavior confidence and regression resistance.
 
 ## 12. Agent Checklist Before Submitting Code

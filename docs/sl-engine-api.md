@@ -32,6 +32,8 @@
 
 - `Snapshot`（来自 `sl-core`）：
   - 包含运行帧、随机数状态、待处理边界（choice/input）和 once 状态。
+  - 包含可写全局变量（`<var>`）当前值。
+  - 不包含只读常量（`<const>`）；恢复时会按编译声明重新初始化 const。
   - `snapshot()` 仅允许在等待 choice/input 边界时调用。
 
 ### 2.4 错误
@@ -45,6 +47,9 @@
 - `CompiledProjectArtifact`（来自 `sl-core`）：
   - `schemaVersion` 固定为 `compiled-project`
   - 包含 `entryScript / scripts / globalJson / defsGlobalDeclarations / defsGlobalInitOrder`
+  - 也包含 const 声明与初始化顺序：
+    - `defsGlobalConstDeclarations`
+    - `defsGlobalConstInitOrder`
   - 可作为“离线编译后运行”的稳定输入
 
 ## 3. `sl-api` 高层 API
@@ -328,7 +333,7 @@ assert_eq!(artifact.schema_version, loaded.schema_version);
 ```rust
 loop {
     match engine.next_output()? {
-        sl_core::EngineOutput::Text { text } => {
+        sl_core::EngineOutput::Text { text, .. } => {
             println!("{}", text);
         }
         sl_core::EngineOutput::Debug { text } => {
@@ -354,6 +359,8 @@ loop {
   - `snapshot.schema_version`
   - `snapshot.compiler_version`
   - pending boundary 与当前脚本节点是否一致
+- `<var>` 值会随 snapshot 持久化并恢复。
+- `<const>` 不写入 snapshot；`resume` 后按声明重建，仍保持只读。
 
 建议流程：
 1. `next_output()` 得到 `Choices/Input`
