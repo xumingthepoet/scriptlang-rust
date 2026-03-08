@@ -299,7 +299,7 @@ impl ScriptLangEngine {
             None => RuntimeRandomState::Seeded(initial_random_seed),
         }));
         let mut rhai_engine = Engine::new();
-        rhai_engine.set_strict_variables(true);
+        rhai_engine.set_strict_variables(false);
         let rng_for_builtin = Rc::clone(&shared_rng_state);
         rhai_engine.register_fn(
             "random",

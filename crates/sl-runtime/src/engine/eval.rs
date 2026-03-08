@@ -334,16 +334,65 @@ impl ScriptLangEngine {
             .get(&script_name)
             .cloned()
             .unwrap_or_default();
-        let visible_defs = self
+        let mut visible_defs = self
             .visible_defs_by_script
             .get(&script_name)
             .cloned()
             .unwrap_or_default();
-        let visible_consts = self
+        let mut visible_consts = self
             .visible_consts_by_script
             .get(&script_name)
             .cloned()
             .unwrap_or_default();
+        let mut required_function_namespaces = BTreeSet::new();
+        if let Some(module_name) = self
+            .scripts
+            .get(&script_name)
+            .and_then(|script| script.module_name.as_ref())
+        {
+            required_function_namespaces.insert(module_name.clone());
+        }
+        for qualified_name in function_symbol_map.keys() {
+            let Some((namespace, _)) = qualified_name.split_once('.') else {
+                continue;
+            };
+            required_function_namespaces.insert(namespace.to_string());
+        }
+        for symbol in function_symbol_map.values() {
+            for qualified_name in self
+                .invoke_function_symbols
+                .iter()
+                .filter(|(_, invoke_symbol)| *invoke_symbol == symbol)
+                .map(|(qualified_name, _)| qualified_name)
+            {
+                let Some((namespace, _)) = qualified_name.split_once('.') else {
+                    continue;
+                };
+                required_function_namespaces.insert(namespace.to_string());
+            }
+        }
+        for qualified_name in self.invoke_all_functions.keys() {
+            let Some((namespace, _)) = qualified_name.split_once('.') else {
+                continue;
+            };
+            required_function_namespaces.insert(namespace.to_string());
+        }
+        for decl in self.defs_global_declarations.values() {
+            required_function_namespaces.insert(decl.namespace.clone());
+        }
+        for decl in self.defs_const_declarations.values() {
+            required_function_namespaces.insert(decl.namespace.clone());
+        }
+        for decl in self.defs_global_declarations.values() {
+            if required_function_namespaces.contains(&decl.namespace) {
+                visible_defs.insert(decl.qualified_name.clone());
+            }
+        }
+        for decl in self.defs_const_declarations.values() {
+            if required_function_namespaces.contains(&decl.namespace) {
+                visible_consts.insert(decl.qualified_name.clone());
+            }
+        }
         let defs_alias_map = self
             .defs_global_alias_by_script
             .get(&script_name)
@@ -504,7 +553,9 @@ impl ScriptLangEngine {
         let source = {
             let prelude = self.get_or_build_defs_prelude(&script_name, &function_symbol_map)?;
             let preprocessed = preprocess_scriptlang_rhai_input(script, context, mode)?;
-            let rewritten_script = rewrite_function_calls(&preprocessed, &function_symbol_map);
+            let mut call_rewrite_map = function_symbol_map.clone();
+            call_rewrite_map.insert("invoke".to_string(), "invoke".to_string());
+            let rewritten_script = rewrite_function_calls(&preprocessed, &call_rewrite_map);
             let rewritten_script =
                 rewrite_defs_global_qualified_access(&rewritten_script, &qualified_rewrite_map);
             if is_expression {
@@ -712,7 +763,6 @@ impl ScriptLangEngine {
             .visible_json_by_script
             .get(script_name)
             .expect("script visibility should exist for registered script");
-        let qualified_rewrite_map = self.build_defs_global_qualified_rewrite_map(script_name);
         let current_module = script.module_name.as_deref();
 
         let mut out = String::new();
@@ -730,19 +780,46 @@ impl ScriptLangEngine {
                         ),
                     )
                 })?;
-            let body_symbol_map = self.invoke_body_symbol_map(qualified_name);
-            out.push_str("fn ");
+            let params = decl
+                .params
+                .iter()
+                .map(|param| param.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let default_value = default_value_from_type(&decl.return_binding.r#type);
+            out.push_str("let ");
             out.push_str(&rhai_name);
-            out.push('(');
-            out.push_str(
-                &decl
-                    .params
-                    .iter()
-                    .map(|param| param.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            );
-            out.push_str(") {\n");
+            out.push_str(" = |");
+            out.push_str(&params);
+            out.push_str("| {\n");
+            out.push_str(&slvalue_to_rhai_literal(&default_value));
+            out.push_str("\n};\n");
+        }
+        for (qualified_name, decl) in &self.invoke_all_functions {
+            let rhai_name = self
+                .invoke_function_symbols
+                .get(qualified_name)
+                .cloned()
+                .ok_or_else(|| {
+                    ScriptLangError::new(
+                        "ENGINE_DEFS_FUNCTION_SYMBOL_MISSING",
+                        format!(
+                            "Missing Rhai function symbol mapping for \"{}\".",
+                            qualified_name
+                        ),
+                    )
+                })?;
+            let body_symbol_map = self.invoke_body_symbol_map(qualified_name);
+            let params = decl
+                .params
+                .iter()
+                .map(|param| param.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push_str(&rhai_name);
+            out.push_str(" = |");
+            out.push_str(&params);
+            out.push_str("| {\n");
 
             for json_symbol in visible_json {
                 if let Some(value) = self.global_json.get(json_symbol) {
@@ -765,13 +842,44 @@ impl ScriptLangEngine {
                 "function body",
                 RhaiInputMode::CodeBlock,
             )?;
-            let rewritten = rewrite_function_calls(&preprocessed, &body_symbol_map);
-            let rewritten =
-                rewrite_defs_global_qualified_access(&rewritten, &qualified_rewrite_map);
+            let mut call_rewrite_map = body_symbol_map;
+            call_rewrite_map.insert("invoke".to_string(), "invoke".to_string());
+            let rewritten = rewrite_function_calls(&preprocessed, &call_rewrite_map);
+            let mut function_rewrite_map = self.build_defs_global_rewrite_map_all();
+            if let Some((function_namespace, _)) = qualified_name.split_once('.') {
+                for (alias, local_qualified) in self.collect_bundle_defs_short_aliases(function_namespace)
+                {
+                    if decl.params.iter().any(|param| param.name == alias)
+                        || alias == decl.return_binding.name
+                    {
+                        continue;
+                    }
+                    let Some((namespace, field)) = local_qualified.split_once('.') else {
+                        continue;
+                    };
+                    function_rewrite_map
+                        .insert(alias, format!("{}.{}", defs_namespace_symbol(namespace), field));
+                }
+                for (alias, local_qualified) in
+                    self.collect_bundle_defs_const_short_aliases(function_namespace)
+                {
+                    if decl.params.iter().any(|param| param.name == alias)
+                        || alias == decl.return_binding.name
+                    {
+                        continue;
+                    }
+                    let Some((namespace, field)) = local_qualified.split_once('.') else {
+                        continue;
+                    };
+                    function_rewrite_map
+                        .insert(alias, format!("{}.{}", defs_namespace_symbol(namespace), field));
+                }
+            }
+            let rewritten = rewrite_defs_global_qualified_access(&rewritten, &function_rewrite_map);
             out.push_str(&rewritten);
             out.push('\n');
             out.push_str(&decl.return_binding.name);
-            out.push_str("\n}\n");
+            out.push_str("\n};\n");
         }
 
         if let Some(module_name) = current_module {
@@ -783,47 +891,36 @@ impl ScriptLangEngine {
                 let rhai_name = function_symbol_map
                     .get(&local_name)
                     .cloned()
-                    .ok_or_else(|| {
-                        ScriptLangError::new(
-                            "ENGINE_DEFS_FUNCTION_SYMBOL_MISSING",
-                            format!(
-                                "Missing Rhai function symbol mapping for \"{}\".",
-                                local_name
-                            ),
-                        )
-                    })?;
+                    .expect("visible function symbol map should contain local alias");
                 let target_symbol = self
                     .invoke_function_symbols
                     .get(&qualified_name)
                     .cloned()
-                    .ok_or_else(|| {
-                        ScriptLangError::new(
-                            "ENGINE_DEFS_FUNCTION_SYMBOL_MISSING",
-                            format!(
-                                "Missing Rhai function symbol mapping for \"{}\".",
-                                qualified_name
-                            ),
-                        )
-                    })?;
+                    .expect("invoke symbol map should contain local target symbol");
                 let params = decl
                     .params
                     .iter()
                     .map(|param| param.name.as_str())
                     .collect::<Vec<_>>()
                     .join(", ");
-                out.push_str("fn ");
+                out.push_str("let ");
                 out.push_str(&rhai_name);
-                out.push('(');
+                out.push_str(" = |");
                 out.push_str(&params);
-                out.push_str(") {\n");
+                out.push_str("| {\n");
+                out.push_str("call(");
                 out.push_str(&target_symbol);
-                out.push('(');
-                out.push_str(&params);
-                out.push_str(")\n}\n");
+                if params.is_empty() {
+                    out.push_str(")\n};\n");
+                } else {
+                    out.push_str(", ");
+                    out.push_str(&params);
+                    out.push_str(")\n};\n");
+                }
             }
         }
 
-        out.push_str("fn invoke(name, args) {\n");
+        out.push_str("let invoke = |name, args| {\n");
         out.push_str("if type_of(name) != \"string\" || !name.contains(\".\") {\n");
         out.push_str("throw \"__sl_err:ENGINE_INVOKE_NAME_INVALID:invoke(name, [args]) requires name in module.func format.\";\n");
         out.push_str("}\n");
@@ -848,15 +945,20 @@ impl ScriptLangEngine {
             out.push_str(" received unexpected arg count.\";\n");
             out.push_str("}\n");
             out.push_str("return ");
+            out.push_str("call(");
             out.push_str(target_symbol);
-            out.push('(');
-            out.push_str(
-                &(0..decl.params.len())
-                    .map(|index| format!("args[{index}]"))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            );
-            out.push_str(")\n}\n");
+            if decl.params.is_empty() {
+                out.push_str(")\n}\n");
+            } else {
+                out.push_str(", ");
+                out.push_str(
+                    &(0..decl.params.len())
+                        .map(|index| format!("args[{index}]"))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                );
+                out.push_str(")\n}\n");
+            }
         }
         for qualified_name in self.invoke_all_functions.keys() {
             if self.invoke_public_functions.contains(qualified_name) {
@@ -871,7 +973,7 @@ impl ScriptLangEngine {
         out.push_str(
             "throw \"__sl_err:ENGINE_INVOKE_TARGET_NOT_FOUND:Invoke target not found.\" + name;\n",
         );
-        out.push_str("}\n");
+        out.push_str("};\n");
 
         Ok(out)
     }
@@ -900,6 +1002,25 @@ impl ScriptLangEngine {
             }
         }
         map
+    }
+
+    fn build_defs_global_rewrite_map_all(&self) -> BTreeMap<String, String> {
+        let mut out = BTreeMap::new();
+        for qualified_name in self
+            .defs_global_declarations
+            .keys()
+            .cloned()
+            .chain(self.defs_const_declarations.keys().cloned())
+        {
+            let Some((namespace, name)) = qualified_name.split_once('.') else {
+                continue;
+            };
+            out.insert(
+                qualified_name.clone(),
+                format!("{}.{}", defs_namespace_symbol(namespace), name),
+            );
+        }
+        out
     }
 
     pub(super) fn build_defs_global_qualified_rewrite_map(
@@ -999,6 +1120,16 @@ mod eval_tests {
     use super::runtime_test_support::*;
     use super::*;
     use sl_core::SourceSpan;
+
+    #[test]
+    pub(super) fn invoke_runtime_error_parser_handles_non_matching_payloads() {
+        assert!(parse_invoke_runtime_error("plain error").is_none());
+        assert!(parse_invoke_runtime_error("__sl_err:ONLY_CODE").is_none());
+        let parsed = parse_invoke_runtime_error("__sl_err:ENGINE_X:boom (line 1, position 1)")
+            .expect("should parse tagged invoke error");
+        assert_eq!(parsed.code, "ENGINE_X");
+        assert_eq!(parsed.message, "boom");
+    }
 
     #[test]
     pub(super) fn global_json_is_readonly_during_code_execution() {
@@ -2147,7 +2278,7 @@ mod eval_tests {
                     .expect("symbol map"),
             )
             .expect("prelude build should ignore missing global binding");
-        assert!(prelude.contains("fn shared_add("));
+        assert!(prelude.contains("let shared_add = |"));
     }
 
     #[test]
@@ -2388,6 +2519,41 @@ mod eval_tests {
         engine.start("main.main", None).expect("start");
         let output = engine.next_output().expect("text");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "8"));
+    }
+
+    #[test]
+    pub(super) fn function_can_access_module_globals_when_called_from_other_module() {
+        let files = map(&[
+            (
+                "event_system.xml",
+                r#"
+<module name="event_system" default_access="public">
+  <var name="listeners" type="int">0</var>
+  <function name="add" return="int:out">
+    event_system.listeners += 1;
+    out = event_system.listeners;
+  </function>
+</module>
+"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<!-- import event_system from event_system.xml -->
+<module name="main" default_access="public">
+  <script name="main">
+    <temp name="v" type="int">0</temp>
+    <code>v = event_system.add();</code>
+    <text>${v}</text>
+  </script>
+</module>
+"#,
+            ),
+        ]);
+        let mut engine = engine_from_sources(files);
+        engine.start("main.main", None).expect("start");
+        let output = engine.next_output().expect("text");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "1"));
     }
 
     #[test]

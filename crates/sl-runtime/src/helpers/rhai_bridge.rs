@@ -34,9 +34,6 @@ pub(crate) fn rewrite_function_calls(
 
     let mut rewritten = source.to_string();
     for (public_name, symbol_name) in names {
-        if public_name == symbol_name {
-            continue;
-        }
         let pattern = Regex::new(&format!(
             r"(^|[^A-Za-z0-9_]){}\s*\(",
             regex::escape(public_name)
@@ -45,7 +42,31 @@ pub(crate) fn rewrite_function_calls(
 
         rewritten = pattern
             .replace_all(&rewritten, |captures: &regex::Captures<'_>| {
-                format!("{}{}(", &captures[1], symbol_name)
+                let full = captures
+                    .get(0)
+                    .expect("full regex capture should exist for function replacement");
+                let mut out = format!("{}call({}", &captures[1], symbol_name);
+                let mut cursor = full.end();
+                while cursor < rewritten.len()
+                    && rewritten[cursor..]
+                        .chars()
+                        .next()
+                        .is_some_and(char::is_whitespace)
+                {
+                    cursor += rewritten[cursor..]
+                        .chars()
+                        .next()
+                        .expect("cursor should point to valid char")
+                        .len_utf8();
+                }
+                if rewritten[cursor..]
+                    .chars()
+                    .next()
+                    .is_some_and(|ch| ch != ')')
+                {
+                    out.push_str(", ");
+                }
+                out
             })
             .to_string();
     }
@@ -508,8 +529,14 @@ mod rhai_bridge_tests {
                 ("add".to_string(), "__fn_add".to_string()),
             ]),
         );
-        assert!(rewritten.contains("__fn_shared_add("));
-        assert!(rewritten.contains("__fn_add("));
+        assert!(rewritten.contains("call(__fn_shared_add, 1)"));
+        assert!(rewritten.contains("call(__fn_add, 2)"));
+        let rewritten_same = rewrite_function_calls(
+            "x = invoke();",
+            &BTreeMap::from([("invoke".to_string(), "invoke".to_string())]),
+        );
+        assert!(rewritten_same.contains("call(invoke)"));
+        assert_eq!(rewrite_function_calls("x = 1;", &BTreeMap::new()), "x = 1;");
 
         let rewritten_defs = rewrite_defs_global_qualified_access(
             "x = shared.hp + other.hp;",

@@ -1,0 +1,4 @@
+<module name="lib" default_access="public">
+  <var name="a" type="int">1</var>
+  <const name="b" type="int">2</const>
+</module>

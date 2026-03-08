@@ -82,6 +82,7 @@ All code must be written with testability in mind:
 - `<module><var name="..." type="...">expr</var>` defines writable module globals.
 - globals initialize on `engine.start`, support short name and `ns.var` access, and follow import-closure visibility.
 - when short names conflict across namespaces, only fully-qualified `ns.var` remains available.
+- `<function>` bodies can read/write module `<var>` through qualified names (for example `event_system.listeners`), including cross-module calls.
 
 ## Module Constants (`<module><const>`)
 - `<module><const name="..." type="...">expr</const>` defines readonly module globals.
