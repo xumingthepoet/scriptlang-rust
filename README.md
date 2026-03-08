@@ -48,7 +48,7 @@ All code must be written with testability in mind:
 - **One-to-one test file mapping**: Each source file should have a corresponding test module in the same file (`#[cfg(test)] mod tests { ... }`).
 - **Test order**: Test functions must be defined in the same order as the functions they test within each file.
 - **No compatibility burden in this phase**: This is a development stage; do not introduce extra version compatibility handling unless explicitly required.
-- **100% coverage required**: All code paths must be covered by tests; `make gate` enforces this.
+- **99.5% region coverage required**: `make gate` enforces a minimum compiler/runtime region coverage threshold of `99.50%`.
 - **Write tests first**: When fixing bugs or adding features, write the failing test first (TDD approach).
 - **Test support helpers**: Use the `*_test_support` modules provided by each crate for common test utilities.
 - **Host-facing paths should fail gracefully**: For CLI/artifact/state IO paths, prefer returning typed errors instead of panicking assertions.

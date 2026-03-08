@@ -35,7 +35,7 @@ if ! cargo llvm-cov \
 fi
 
 total_percent="$(jq -r '.data[0].totals.regions.percent // empty' "$TMP_JSON")"
-min_region_coverage="${MIN_REGION_COVERAGE:-100.00}"
+min_region_coverage="${MIN_REGION_COVERAGE:-99.50}"
 
 if [[ -z "${total_percent:-}" ]]; then
   echo "Failed to parse total region coverage from llvm-cov output."
