@@ -10,20 +10,17 @@ impl ScriptLangEngine {
     ) -> Result<String, ScriptLangError> {
         let rendered_target = self.render_text(template)?;
         let mut target_script = rendered_target.trim().to_string();
+        if target_script.is_empty() {
+            return Err(ScriptLangError::new(missing_code, missing_message));
+        }
         if !target_script.contains('.') {
             if let Some(module_name) = self
                 .resolve_current_script_name()
                 .and_then(|current_script_name| self.scripts.get(&current_script_name).cloned())
                 .and_then(|script| script.module_name)
             {
-                let module_qualified = format!("{}.{}", module_name, target_script);
-                if self.scripts.contains_key(&module_qualified) {
-                    target_script = module_qualified;
-                }
+                target_script = format!("{}.{}", module_name, target_script);
             }
-        }
-        if target_script.trim().is_empty() {
-            return Err(ScriptLangError::new(missing_code, missing_message));
         }
         Ok(target_script)
     }
@@ -534,7 +531,7 @@ mod callstack_tests {
             },
         ];
         engine
-            .execute_return(Some("next".to_string()), &[])
+            .execute_return(Some("next.next".to_string()), &[])
             .expect("return to next should pass");
         assert_eq!(engine.frames.len(), 2);
         assert_eq!(
@@ -668,7 +665,7 @@ mod callstack_tests {
         ];
 
         engine
-            .execute_return(Some("next".to_string()), &[])
+            .execute_return(Some("next.next".to_string()), &[])
             .expect("return to target script should pass");
 
         let continuation = engine
@@ -718,7 +715,7 @@ mod callstack_tests {
             var_types: BTreeMap::new(),
         }];
         no_inherited
-            .execute_return(Some("next".to_string()), &[])
+            .execute_return(Some("next.next".to_string()), &[])
             .expect("return target should work without inherited continuation");
         assert_eq!(no_inherited.frames.len(), 1);
         assert_eq!(no_inherited.frames[0].group_id, next_root);
@@ -855,7 +852,7 @@ mod callstack_tests {
         }];
         let error = tail
             .execute_call(
-                "callee",
+                "callee.callee",
                 &[sl_core::CallArgument {
                     value_expr: "x".to_string(),
                     is_ref: true,
@@ -895,7 +892,7 @@ mod callstack_tests {
         }];
         tail_ok
             .execute_call(
-                "callee",
+                "callee.callee",
                 &[sl_core::CallArgument {
                     value_expr: "x".to_string(),
                     is_ref: false,
@@ -1152,7 +1149,7 @@ mod callstack_tests {
         }];
         let error = tail_scope_error
             .execute_call(
-                "callee",
+                "callee.callee",
                 &[sl_core::CallArgument {
                     value_expr: "x".to_string(),
                     is_ref: false,
@@ -1299,7 +1296,7 @@ mod callstack_tests {
             },
         ];
         let error = target_return_write_error
-            .execute_return(Some("next".to_string()), &[])
+            .execute_return(Some("next.next".to_string()), &[])
             .expect_err("target return ref write path should fail");
         assert_eq!(error.code, "ENGINE_REF_PATH_WRITE");
 
@@ -1378,8 +1375,8 @@ mod callstack_tests {
 
         let missing_local = engine
             .resolve_target_script("other", "ERR", "err")
-            .expect("unknown local name should remain short");
-        assert_eq!(missing_local, "other");
+            .expect("unknown local name should qualify to current module");
+        assert_eq!(missing_local, "battle.other");
 
         let mut plain_engine = engine_from_sources(map(&[(
             "main.script.xml",
@@ -1388,8 +1385,8 @@ mod callstack_tests {
         plain_engine.start("main.main", None).expect("start");
         let plain = plain_engine
             .resolve_target_script("next", "ERR", "err")
-            .expect("non-module scripts should keep short names");
-        assert_eq!(plain, "next");
+            .expect("module-local script names should qualify");
+        assert_eq!(plain, "main.next");
 
         let mut idle_engine = engine_from_sources(map(&[(
             "main.script.xml",
@@ -1423,8 +1420,8 @@ mod callstack_tests {
         missing_script_engine.scripts.remove("main");
         let missing_script_result = missing_script_engine
             .resolve_target_script("next", "ERR", "err")
-            .expect("missing current script metadata should fall back to short name");
-        assert_eq!(missing_script_result, "next");
+            .expect("group metadata should still qualify to current module");
+        assert_eq!(missing_script_result, "main.next");
     }
 
     #[test]

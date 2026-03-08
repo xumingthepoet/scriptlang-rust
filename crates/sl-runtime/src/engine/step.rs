@@ -1127,7 +1127,7 @@ mod step_tests {
             },
         ];
         return_engine
-            .execute_return(Some("next".to_string()), &[])
+            .execute_return(Some("next.next".to_string()), &[])
             .expect("return should pass even when value missing");
         return_engine.frames = vec![
             RuntimeFrame {
@@ -1412,7 +1412,7 @@ mod step_tests {
             },
         ];
         return_skip
-            .execute_return(Some("next".to_string()), &[])
+            .execute_return(Some("next.next".to_string()), &[])
             .expect("return should pass when source value is missing");
         return_skip.frames = vec![RuntimeFrame {
             frame_id: 12,
@@ -1434,7 +1434,7 @@ mod step_tests {
             var_types: BTreeMap::new(),
         }];
         return_skip
-            .execute_return(Some("next".to_string()), &[])
+            .execute_return(Some("next.next".to_string()), &[])
             .expect("return should pass when resume frame is missing");
 
         let mut find_ctx = engine_from_sources(map(&[(

@@ -104,6 +104,7 @@ impl ScriptLangEngine {
     pub(super) fn eval_defs_global_initializer(
         &mut self,
         expr: &str,
+        module_name: &str,
     ) -> Result<SlValue, ScriptLangError> {
         if !self.host_functions.names().is_empty() {
             return Err(ScriptLangError::new(
@@ -136,7 +137,7 @@ impl ScriptLangEngine {
             );
         }
 
-        for (alias, qualified_name) in self.collect_bundle_defs_short_aliases() {
+        for (alias, qualified_name) in self.collect_bundle_defs_short_aliases(module_name) {
             if let Some(value) = self.defs_globals_value.get(&qualified_name) {
                 scope.push_dynamic(alias, slvalue_to_dynamic(value));
             }
@@ -559,9 +560,15 @@ impl ScriptLangEngine {
         out
     }
 
-    pub(super) fn collect_bundle_defs_short_aliases(&self) -> BTreeMap<String, String> {
+    pub(super) fn collect_bundle_defs_short_aliases(
+        &self,
+        module_name: &str,
+    ) -> BTreeMap<String, String> {
         let mut candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for decl in self.defs_global_declarations.values() {
+            if decl.namespace != module_name {
+                continue;
+            }
             candidates
                 .entry(decl.name.clone())
                 .or_default()
@@ -570,13 +577,7 @@ impl ScriptLangEngine {
 
         candidates
             .into_iter()
-            .filter_map(|(short_name, qualified_names)| {
-                if qualified_names.len() == 1 {
-                    Some((short_name, qualified_names[0].clone()))
-                } else {
-                    None
-                }
-            })
+            .map(|(short_name, qualified_names)| (short_name, qualified_names[0].clone()))
             .collect()
     }
 
@@ -1165,7 +1166,7 @@ mod eval_tests {
                 r#"
 <!-- include: shared.defs.xml -->
 <script name="main">
-  <code>hp = "bad";</code>
+  <code>shared.hp = "bad";</code>
 </script>
 "#,
             ),
@@ -1203,8 +1204,8 @@ mod eval_tests {
                 location: sl_core::SourceSpan::synthetic(),
             },
         );
-        let aliases = map_helpers_engine.collect_bundle_defs_short_aliases();
-        assert!(!aliases.contains_key("hp"));
+        let aliases = map_helpers_engine.collect_bundle_defs_short_aliases("shared");
+        assert_eq!(aliases.get("hp").map(String::as_str), Some("shared.hp"));
 
         let mut invalid_initializer_engine = engine_from_sources(map(&[(
             "main.script.xml",
@@ -1294,6 +1295,66 @@ mod eval_tests {
             .execute_rhai("hp = hp + 1;", false, "code")
             .expect_err("short alias missing decl should fail");
         assert_eq!(error.code, "ENGINE_DEFS_GLOBAL_DECL_MISSING");
+    }
+
+    #[test]
+    pub(super) fn module_local_defs_short_aliases_write_back_and_type_check() {
+        let files = map(&[(
+            "main.xml",
+            r#"
+<module name="main">
+  <var name="hp" type="int">7</var>
+  <script name="main">
+    <code>hp = hp + 1;</code>
+    <text>${main.hp}</text>
+  </script>
+</module>
+"#,
+        )]);
+        let mut engine = engine_from_sources(files.clone());
+        engine.start("main.main", None).expect("start");
+        let output = engine.next_output().expect("text");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "8"));
+        assert_eq!(
+            engine.defs_globals_value.get("main.hp"),
+            Some(&SlValue::Number(8.0))
+        );
+
+        let mismatch_files = map(&[(
+            "main.xml",
+            r#"
+<module name="main">
+  <var name="hp" type="int">7</var>
+  <script name="main">
+    <code>hp = "bad";</code>
+  </script>
+</module>
+"#,
+        )]);
+        let mut mismatch_engine = engine_from_sources(mismatch_files);
+        mismatch_engine.start("main.main", None).expect("start");
+        let error = mismatch_engine
+            .next_output()
+            .expect_err("module-local short alias type mismatch should fail");
+        assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
+
+        let unsupported_files = map(&[(
+            "main.xml",
+            r#"
+<module name="main">
+  <var name="hp" type="int">7</var>
+  <script name="main">
+    <code>hp = ();</code>
+  </script>
+</module>
+"#,
+        )]);
+        let mut unsupported_engine = engine_from_sources(unsupported_files);
+        unsupported_engine.start("main.main", None).expect("start");
+        let error = unsupported_engine
+            .next_output()
+            .expect_err("module-local short alias unsupported conversion should fail");
+        assert_eq!(error.code, "ENGINE_VALUE_UNSUPPORTED");
     }
 
     #[test]
@@ -1466,7 +1527,7 @@ mod eval_tests {
         ]));
         initializer_unit.start("main", None).expect("start");
         let error = initializer_unit
-            .eval_defs_global_initializer("{ game = (); 1 }")
+            .eval_defs_global_initializer("{ game = (); 1 }", "shared")
             .expect_err("initializer should reject unsupported global value type");
         assert_eq!(error.code, "ENGINE_VALUE_UNSUPPORTED");
 
@@ -1533,9 +1594,9 @@ mod eval_tests {
             (
                 "main.script.xml",
                 r#"
-    <!-- include: shared.defs.xml -->
-    <script name="main"><code>hp = ();</code></script>
-    "#,
+	    <!-- include: shared.defs.xml -->
+	    <script name="main"><code>shared.hp = ();</code></script>
+	    "#,
             ),
         ]));
         alias_unit.start("main", None).expect("start");
@@ -1597,6 +1658,6 @@ mod eval_tests {
                     .expect("symbol map"),
             )
             .expect("prelude build should ignore missing global binding");
-        assert!(prelude.contains("fn add("));
+        assert!(prelude.contains("fn shared_add("));
     }
 }

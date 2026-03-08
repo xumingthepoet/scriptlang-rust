@@ -31,13 +31,13 @@ pub fn compile_project_bundle_from_xml_map(
         let reachable = reachable_cache
             .entry(file_path.clone())
             .or_insert_with(|| collect_reachable_files(file_path, &sources));
-        let (visible_types, visible_functions, visible_defs_globals) =
-            resolve_visible_defs(reachable, &defs_by_path)
-                .map_err(|error| with_file_context(error, file_path))?;
         let visible_json_symbols = collect_visible_json_symbols(reachable, &sources)
             .expect("collect_visible_json_symbols should be infallible after collect_global_json");
         let script_roots = collect_source_scripts(source, file_path, &module_scripts_by_path);
         for script_decl in script_roots {
+            let (visible_types, visible_functions, visible_defs_globals) =
+                resolve_visible_defs(reachable, &defs_by_path, script_decl.module_name.as_deref())
+                    .map_err(|error| with_file_context(error, file_path))?;
             let ir = compile_script(CompileScriptOptions {
                 script_path: file_path,
                 root: &script_decl.root,
@@ -510,7 +510,7 @@ mod pipeline_tests {
         let unique_bundle = compile_project_bundle_from_xml_map(&unique).expect("compile");
         let unique_main = unique_bundle.scripts.get("main.main").expect("main");
         assert!(unique_main.visible_defs_globals.contains_key("shared.hp"));
-        assert!(unique_main.visible_defs_globals.contains_key("hp"));
+        assert!(!unique_main.visible_defs_globals.contains_key("hp"));
 
         let conflict = map(&[
             (

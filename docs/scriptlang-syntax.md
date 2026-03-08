@@ -35,7 +35,7 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 - module 内脚本对外注册名是 `moduleName.scriptName`，例如 `battle.main`。
 - module 内 `type/function/var` 仍属于同一命名空间，例如 `battle.Combatant`、`battle.boost`、`battle.baseHp`。
 - 同一个 module 内部，脚本可以直接用短名访问本 module 的 `type/function/var`，也可以用短名调用 sibling script。
-- 跨 module 调用脚本时，应使用限定名，例如 `<call script="battle.main"/>`。
+- 跨 module 访问任何元素时，都必须使用限定名，例如 `shared.boost`、`shared.hp`、`shared.Hero`、`battle.main`。
 
 ## 1.2 `*.json`（全局只读数据）
 
@@ -156,8 +156,8 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 - 变量在 `engine.start(...)` 时按声明顺序初始化。
 - 可见性遵循 include 闭包：脚本可见才可读写。
 - 读取/写入优先级：局部（含参数） > defs 全局 > JSON 全局（JSON 仍只读）。
-- 访问方式：短名（如 `hp`）和全名（如 `shared.hp`）。
-- 若短名冲突（多个 namespace 同名），短名不可用，只能用全名。
+- 本 module 内声明的全局变量可直接用短名（如 `hp`）。
+- 来自其他 module 的全局变量必须使用全名（如 `shared.hp`）。
 - defs 全局初始化表达式可以引用“前面已声明并已初始化”的 defs 全局；前向引用会编译失败。
 
 补充：
@@ -191,7 +191,7 @@ key 固定是 string。
 
 ## 5.4 自定义类型（来自 defs/module）
 
-可用全名 `ns.Type`，或在无歧义场景下用短名。
+本 module 内可直接写短名；跨 module 必须写全名 `ns.Type`。
 
 ```xml
 <var name="hero" type="shared.Hero">#{hp: 10}</var>
@@ -415,7 +415,7 @@ key 固定是 string。
 module 相关规则：
 - 对外调用 module 脚本时，推荐直接写限定名，例如 `<call script="battle.main"/>`
 - 在同 module 内调用 sibling script 时，可写短名，例如 `<call script="next"/>`
-- 若 `script` 使用 `${expr}` 动态插值，则按运行时结果查找，不自动补 module 前缀
+- 若 `script` 使用 `${expr}` 动态插值且结果是短名，则只会解析到当前 module 的 sibling script
 
 ## 6.15 `<return>`
 
@@ -443,7 +443,7 @@ module 相关规则：
 module 相关规则与 `<call>` 相同：
 - 对外跳转到 module 脚本时使用 `battle.next`
 - 同 module 内可写短名 `next`
-- 动态目标 `${expr}` 不做静态补前缀
+- 动态目标 `${expr}` 若产出短名，也只会解析到当前 module 的 sibling script
 
 ## 6.16 `<group>`
 

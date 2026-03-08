@@ -538,6 +538,31 @@ mod json_symbols_tests {
     }
 
     #[test]
+    fn compile_bundle_accepts_module_local_short_aliases_only_inside_same_module() {
+        let files = map(&[(
+            "main.xml",
+            r#"
+<module name="main">
+  <function name="boost" return="int:out">
+    out = hp + 1;
+  </function>
+  <var name="hp" type="int">1</var>
+  <script name="main">
+    <code>hp = boost();</code>
+    <text>${main.hp}</text>
+  </script>
+</module>
+"#,
+        )]);
+
+        let compiled =
+            compile_project_bundle_from_xml_map(&files).expect("module-local short aliases");
+        let script = compiled.scripts.get("main.main").expect("script");
+        validate_json_symbol_visibility(script, &BTreeSet::new())
+            .expect("local short aliases should remain visible");
+    }
+
+    #[test]
     fn compile_bundle_rejects_hidden_json_usage_without_include_in_defs() {
         let files = map(&[
             ("game.json", r#"{ "hp": 5 }"#),
@@ -787,6 +812,67 @@ mod json_symbols_tests {
 
         validate_json_symbol_visibility(&script_ir, &BTreeSet::from(["secret".to_string()]))
             .expect("return without target should skip target template checks");
+    }
+
+    #[test]
+    fn validate_json_visibility_skips_local_function_aliases_and_duplicate_defs_globals() {
+        let span = SourceSpan::synthetic();
+        let function_decl = FunctionDecl {
+            name: "boost".to_string(),
+            params: Vec::new(),
+            return_binding: FunctionReturn {
+                name: "out".to_string(),
+                r#type: ScriptType::Primitive {
+                    name: "int".to_string(),
+                },
+                location: span.clone(),
+            },
+            code: "out = hp + 1;".to_string(),
+            location: span.clone(),
+        };
+        let defs_decl = DefsGlobalVarDecl {
+            namespace: "main".to_string(),
+            name: "hp".to_string(),
+            qualified_name: "main.hp".to_string(),
+            r#type: ScriptType::Primitive {
+                name: "int".to_string(),
+            },
+            initial_value_expr: Some("1".to_string()),
+            location: span.clone(),
+        };
+        let script_ir = ScriptIr {
+            script_path: "main.xml".to_string(),
+            script_name: "main.main".to_string(),
+            module_name: Some("main".to_string()),
+            local_script_name: Some("main".to_string()),
+            params: Vec::new(),
+            root_group_id: "g0".to_string(),
+            groups: BTreeMap::from([(
+                "g0".to_string(),
+                ImplicitGroup {
+                    group_id: "g0".to_string(),
+                    parent_group_id: None,
+                    entry_node_id: None,
+                    nodes: vec![ScriptNode::Code {
+                        id: "code".to_string(),
+                        code: "hp = boost();".to_string(),
+                        location: span.clone(),
+                    }],
+                },
+            )]),
+            visible_json_globals: Vec::new(),
+            visible_functions: BTreeMap::from([
+                ("boost".to_string(), function_decl.clone()),
+                ("main.boost".to_string(), function_decl),
+            ]),
+            visible_defs_globals: BTreeMap::from([
+                ("hp".to_string(), defs_decl.clone()),
+                ("main.hp".to_string(), defs_decl),
+            ]),
+        };
+
+        validate_json_symbol_visibility(&script_ir, &BTreeSet::from(["secret".to_string()]))
+            .expect("local aliases and duplicate defs globals should be ignored");
     }
 
     #[test]

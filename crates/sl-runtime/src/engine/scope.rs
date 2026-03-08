@@ -483,7 +483,7 @@ mod scope_tests {
                 r#"
 <!-- include: shared.defs.xml -->
 <script name="main">
-  <code>hp = hp + 3;</code>
+  <code>shared.hp = shared.hp + 3;</code>
   <text>${shared.hp}</text>
 </script>
 "#,
@@ -494,7 +494,7 @@ mod scope_tests {
         let first = engine.next_output().expect("text");
         assert!(matches!(first, EngineOutput::Text { text, .. } if text == "10"));
         assert_eq!(
-            engine.read_variable("hp").expect("short alias read"),
+            engine.read_path("shared.hp").expect("qualified read"),
             SlValue::Number(10.0)
         );
     }

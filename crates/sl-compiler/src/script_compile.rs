@@ -2109,13 +2109,13 @@ mod script_compile_tests {
             (
                 "main.xml",
                 r#"
-    <!-- include: shared.xml -->
-    <module name="main">
-<script name="main">
-      <var name="x" type="Obj"/>
-    </script>
-</module>
-    "#,
+	    <!-- include: shared.xml -->
+	    <module name="main">
+	<script name="main">
+	      <var name="x" type="shared.Obj"/>
+	    </script>
+	</module>
+	    "#,
             ),
         ]);
         let _ = compile_project_bundle_from_xml_map(&defs_resolution)

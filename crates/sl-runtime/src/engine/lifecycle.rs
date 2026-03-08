@@ -355,7 +355,7 @@ impl ScriptLangEngine {
                     ))?;
             let mut value = default_value_from_type(&decl.r#type);
             if let Some(expr) = &decl.initial_value_expr {
-                value = self.eval_defs_global_initializer(expr)?;
+                value = self.eval_defs_global_initializer(expr, &decl.namespace)?;
             }
             if !is_type_compatible(&value, &decl.r#type) {
                 return Err(ScriptLangError::new(
@@ -463,7 +463,7 @@ mod lifecycle_tests {
             defs_global_declarations: compiled.defs_global_declarations,
             defs_global_init_order: compiled.defs_global_init_order,
             host_functions: Some(Arc::new(TestRegistry {
-                names: vec!["addWithGameBonus".to_string()],
+                names: vec!["shared.addWithGameBonus".to_string()],
             })),
             random_seed: Some(1),
             random_sequence: None,
@@ -479,27 +479,21 @@ mod lifecycle_tests {
     pub(super) fn new_rejects_defs_function_symbol_conflict_after_normalization() {
         let files = map(&[
             (
-                "main.script.xml",
+                "a.xml",
                 r#"
-    <!-- include: a.defs.xml -->
-    <!-- include: x.defs.xml -->
-    <script name="main"><text>Hello</text></script>
-    "#,
-            ),
-            (
-                "a.defs.xml",
-                r#"
-    <defs name="a">
+    <module name="a">
       <function name="b" return="int:out">out = 1;</function>
-    </defs>
+    </module>
     "#,
             ),
             (
-                "x.defs.xml",
+                "main.xml",
                 r#"
-    <defs name="x">
+    <!-- include: a.xml -->
+    <module name="main">
       <function name="a_b" return="int:out">out = 2;</function>
-    </defs>
+      <script name="main"><text>Hello</text></script>
+    </module>
     "#,
             ),
         ]);
@@ -747,9 +741,9 @@ mod lifecycle_tests {
             engine
                 .visible_function_symbols_by_script
                 .get("main")
-                .and_then(|m| m.get("addWithGameBonus"))
+                .and_then(|m| m.get("shared.addWithGameBonus"))
                 .map(String::as_str),
-            Some("addWithGameBonus")
+            Some("shared_addWithGameBonus")
         );
 
         engine.start("main", None).expect("start");

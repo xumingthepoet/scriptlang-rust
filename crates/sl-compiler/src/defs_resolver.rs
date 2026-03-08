@@ -263,6 +263,7 @@ pub(crate) fn json_symbol_regex() -> &'static Regex {
 pub(crate) fn resolve_visible_defs(
     reachable: &BTreeSet<String>,
     defs_by_path: &BTreeMap<String, DefsDeclarations>,
+    local_module_name: Option<&str>,
 ) -> Result<
     (
         VisibleTypeMap,
@@ -272,7 +273,8 @@ pub(crate) fn resolve_visible_defs(
     ScriptLangError,
 > {
     let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
-    let mut type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut local_type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut namespace_type_aliases: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
 
     for path in reachable {
         let Some(defs) = defs_by_path.get(path) else {
@@ -287,38 +289,47 @@ pub(crate) fn resolve_visible_defs(
                 ));
             }
             type_decls_map.insert(decl.qualified_name.clone(), decl.clone());
-            type_short_candidates
-                .entry(decl.name.clone())
-                .or_default()
-                .push(decl.qualified_name.clone());
+            if let Some((namespace, _)) = decl.qualified_name.split_once('.') {
+                namespace_type_aliases
+                    .entry(namespace.to_string())
+                    .or_default()
+                    .insert(decl.name.clone(), decl.qualified_name.clone());
+            }
+            if local_module_name.is_some_and(|module_name| {
+                decl.qualified_name.starts_with(&format!("{module_name}."))
+            }) {
+                local_type_short_candidates
+                    .entry(decl.name.clone())
+                    .or_default()
+                    .push(decl.qualified_name.clone());
+            }
         }
     }
 
-    let type_aliases = type_short_candidates
+    let type_aliases = local_type_short_candidates
         .into_iter()
-        .filter_map(|(short, qualified)| {
-            if qualified.len() == 1 {
-                Some((short, qualified[0].clone()))
-            } else {
-                None
-            }
-        })
+        .map(|(short, qualified)| (short, qualified[0].clone()))
         .collect::<BTreeMap<_, _>>();
 
     let mut resolved_types: BTreeMap<String, ScriptType> = BTreeMap::new();
     let mut visiting = HashSet::new();
 
-    let mut resolve_visible_type = |type_name: &String| {
+    for type_name in type_decls_map.keys() {
+        let namespace = type_name
+            .split_once('.')
+            .map(|(namespace, _)| namespace)
+            .unwrap_or_default();
+        let aliases = namespace_type_aliases
+            .get(namespace)
+            .cloned()
+            .unwrap_or_default();
         resolve_named_type_with_aliases(
             type_name,
             &type_decls_map,
-            &type_aliases,
+            &aliases,
             &mut resolved_types,
             &mut visiting,
-        )
-    };
-    for type_name in type_decls_map.keys() {
-        resolve_visible_type(type_name)?;
+        )?;
     }
 
     let mut visible_types = resolved_types.clone();
@@ -349,18 +360,33 @@ pub(crate) fn resolve_visible_defs(
                     decl.location.clone(),
                 ));
             }
+            let function_namespace = decl
+                .qualified_name
+                .split_once('.')
+                .map(|(namespace, _)| namespace)
+                .unwrap_or_default();
 
             let mut params = Vec::new();
             for param in &decl.params {
                 params.push(FunctionParam {
                     name: param.name.clone(),
-                    r#type: resolve_type_expr(&param.type_expr, &visible_types, &param.location)?,
+                    r#type: resolve_type_expr_in_namespace(
+                        &param.type_expr,
+                        &visible_types,
+                        function_namespace,
+                        &param.location,
+                    )?,
                     location: param.location.clone(),
                 });
             }
 
             let rb = &decl.return_binding;
-            let return_type = resolve_type_expr(&rb.type_expr, &visible_types, &rb.location)?;
+            let return_type = resolve_type_expr_in_namespace(
+                &rb.type_expr,
+                &visible_types,
+                function_namespace,
+                &rb.location,
+            )?;
 
             functions.insert(
                 decl.qualified_name.clone(),
@@ -376,17 +402,18 @@ pub(crate) fn resolve_visible_defs(
                     location: decl.location.clone(),
                 },
             );
-            function_short_candidates
-                .entry(decl.name.clone())
-                .or_default()
-                .push(decl.qualified_name.clone());
+            if local_module_name.is_some_and(|module_name| {
+                decl.qualified_name.starts_with(&format!("{module_name}."))
+            }) {
+                function_short_candidates
+                    .entry(decl.name.clone())
+                    .or_default()
+                    .push(decl.qualified_name.clone());
+            }
         }
     }
 
     for (alias, qualified_names) in function_short_candidates {
-        if qualified_names.len() != 1 {
-            continue;
-        }
         let qualified = &qualified_names[0];
         let decl = functions
             .get(qualified)
@@ -427,23 +454,27 @@ pub(crate) fn resolve_visible_defs(
                     namespace: decl.namespace.clone(),
                     name: decl.name.clone(),
                     qualified_name: decl.qualified_name.clone(),
-                    r#type: resolve_type_expr(&decl.type_expr, &visible_types, &decl.location)?,
+                    r#type: resolve_type_expr_in_namespace(
+                        &decl.type_expr,
+                        &visible_types,
+                        &decl.namespace,
+                        &decl.location,
+                    )?,
                     initial_value_expr: decl.initial_value_expr.clone(),
                     location: decl.location.clone(),
                 },
             );
-            defs_global_short_candidates
-                .entry(decl.name.clone())
-                .or_default()
-                .push(decl.qualified_name.clone());
+            if local_module_name == Some(decl.namespace.as_str()) {
+                defs_global_short_candidates
+                    .entry(decl.name.clone())
+                    .or_default()
+                    .push(decl.qualified_name.clone());
+            }
         }
     }
 
     let mut defs_globals = defs_globals_qualified.clone();
     for (alias, qualified_names) in defs_global_short_candidates {
-        if qualified_names.len() != 1 {
-            continue;
-        }
         let qualified_name = &qualified_names[0];
         let decl = defs_globals_qualified
             .get(qualified_name)
@@ -648,7 +679,8 @@ mod defs_resolver_tests {
         let defs_by_path = BTreeMap::from([("shared.xml".to_string(), defs)]);
 
         let (types, functions, defs_globals) =
-            resolve_visible_defs(&reachable, &defs_by_path).expect("defs should resolve");
+            resolve_visible_defs(&reachable, &defs_by_path, Some("shared"))
+                .expect("defs should resolve");
         assert!(types.contains_key("Obj"));
         let function = functions.get("make").expect("function should exist");
         assert_eq!(function.params.len(), 1);
@@ -679,8 +711,12 @@ mod defs_resolver_tests {
             ("b.xml".to_string(), duplicate_qualified),
         ]);
         let duplicate_reachable = BTreeSet::from(["a.xml".to_string(), "b.xml".to_string()]);
-        let duplicate_error = resolve_visible_defs(&duplicate_reachable, &duplicate_defs_by_path)
-            .expect_err("duplicate qualified type should fail");
+        let duplicate_error = resolve_visible_defs(
+            &duplicate_reachable,
+            &duplicate_defs_by_path,
+            Some("shared"),
+        )
+        .expect_err("duplicate qualified type should fail");
         assert_eq!(duplicate_error.code, "TYPE_DECL_DUPLICATE");
 
         let defs_by_path = BTreeMap::from([
@@ -725,10 +761,15 @@ mod defs_resolver_tests {
         ]);
         let reachable = BTreeSet::from(["a.xml".to_string(), "b.xml".to_string()]);
         let (_types, functions, defs_globals) =
-            resolve_visible_defs(&reachable, &defs_by_path).expect("defs should resolve");
+            resolve_visible_defs(&reachable, &defs_by_path, Some("a"))
+                .expect("defs should resolve");
         assert!(functions.contains_key("a.doit"));
         assert!(functions.contains_key("b.doit"));
-        assert!(!functions.contains_key("doit"));
+        assert!(functions.contains_key("doit"));
+        assert_eq!(
+            functions.get("doit").expect("local short alias").name,
+            "doit"
+        );
         assert!(defs_globals.is_empty());
     }
 
@@ -754,7 +795,8 @@ mod defs_resolver_tests {
         )]);
         let unique_reachable = BTreeSet::from(["a.xml".to_string()]);
         let (_types, _functions, unique_globals) =
-            resolve_visible_defs(&unique_reachable, &unique_defs).expect("defs should resolve");
+            resolve_visible_defs(&unique_reachable, &unique_defs, Some("a"))
+                .expect("defs should resolve");
         assert!(unique_globals.contains_key("a.hp"));
         assert!(unique_globals.contains_key("hp"));
         assert_eq!(
@@ -785,11 +827,18 @@ mod defs_resolver_tests {
         ]);
         let collision_reachable = BTreeSet::from(["a.xml".to_string(), "b.xml".to_string()]);
         let (_types, _functions, collision_globals) =
-            resolve_visible_defs(&collision_reachable, &collision_defs)
+            resolve_visible_defs(&collision_reachable, &collision_defs, Some("a"))
                 .expect("defs should resolve");
         assert!(collision_globals.contains_key("a.hp"));
         assert!(collision_globals.contains_key("b.hp"));
-        assert!(!collision_globals.contains_key("hp"));
+        assert!(collision_globals.contains_key("hp"));
+        assert_eq!(
+            collision_globals
+                .get("hp")
+                .expect("local short alias should exist")
+                .qualified_name,
+            "a.hp"
+        );
     }
 
     #[test]
@@ -974,7 +1023,7 @@ mod defs_resolver_tests {
             ),
         ]);
         let reachable = BTreeSet::from(["a.xml".to_string(), "b.xml".to_string()]);
-        let error = resolve_visible_defs(&reachable, &defs_by_path)
+        let error = resolve_visible_defs(&reachable, &defs_by_path, Some("a"))
             .expect_err("duplicate defs global should fail");
         assert_eq!(error.code, "DEFS_GLOBAL_VAR_DUPLICATE");
     }
@@ -1089,7 +1138,7 @@ mod defs_resolver_tests {
         let defs_by_path = parse_defs_files(&sources).expect("parse defs");
         let reachable = BTreeSet::from(["shared.xml".to_string()]);
         let (types, functions, _) =
-            resolve_visible_defs(&reachable, &defs_by_path).expect("resolve defs");
+            resolve_visible_defs(&reachable, &defs_by_path, Some("shared")).expect("resolve defs");
         assert!(types.contains_key("shared.Obj"));
         assert!(functions.contains_key("shared.make"));
     }
@@ -1260,7 +1309,8 @@ mod defs_resolver_tests {
         )]);
         let reachable = BTreeSet::from(["one.xml".to_string()]);
         let (types, functions, defs_globals) =
-            resolve_visible_defs(&reachable, &defs_with_alias).expect("resolve aliases");
+            resolve_visible_defs(&reachable, &defs_with_alias, Some("one"))
+                .expect("resolve aliases");
         assert!(types.contains_key("Obj"));
         assert!(functions.contains_key("make"));
         assert!(defs_globals.contains_key("hp"));
@@ -1320,7 +1370,7 @@ mod defs_resolver_tests {
             },
         )]);
         let reachable = BTreeSet::from(["bad_type.xml".to_string()]);
-        let error = resolve_visible_defs(&reachable, &bad_type_decl)
+        let error = resolve_visible_defs(&reachable, &bad_type_decl, Some("bad_type"))
             .expect_err("type resolution in visible loop should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
 
@@ -1345,9 +1395,64 @@ mod defs_resolver_tests {
         )]);
         let reachable = BTreeSet::from(["alias.xml".to_string()]);
         let (_types, alias_functions, _defs_globals) =
-            resolve_visible_defs(&reachable, &alias_already_exists)
+            resolve_visible_defs(&reachable, &alias_already_exists, None)
                 .expect("existing alias key should skip insertion branch");
         assert!(alias_functions.contains_key("make"));
+
+        let malformed_local_names = BTreeMap::from([(
+            "odd.xml".to_string(),
+            DefsDeclarations {
+                type_decls: vec![ParsedTypeDecl {
+                    name: "Obj".to_string(),
+                    qualified_name: "Obj".to_string(),
+                    fields: vec![ParsedTypeFieldDecl {
+                        name: "v".to_string(),
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        location: span.clone(),
+                    }],
+                    location: span.clone(),
+                }],
+                function_decls: vec![
+                    ParsedFunctionDecl {
+                        name: "make".to_string(),
+                        qualified_name: "odd.make".to_string(),
+                        params: Vec::new(),
+                        return_binding: ParsedFunctionParamDecl {
+                            name: "ret".to_string(),
+                            type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                            location: span.clone(),
+                        },
+                        code: "ret = 1;".to_string(),
+                        location: span.clone(),
+                    },
+                    ParsedFunctionDecl {
+                        name: "make".to_string(),
+                        qualified_name: "make".to_string(),
+                        params: Vec::new(),
+                        return_binding: ParsedFunctionParamDecl {
+                            name: "ret".to_string(),
+                            type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                            location: span.clone(),
+                        },
+                        code: "ret = 2;".to_string(),
+                        location: span.clone(),
+                    },
+                ],
+                defs_global_var_decls: Vec::new(),
+            },
+        )]);
+        let reachable = BTreeSet::from(["odd.xml".to_string()]);
+        let (malformed_types, malformed_functions, _defs_globals) =
+            resolve_visible_defs(&reachable, &malformed_local_names, Some("odd"))
+                .expect("malformed aliases should still resolve without duplicate insert");
+        assert!(malformed_types.contains_key("Obj"));
+        assert_eq!(
+            malformed_functions
+                .get("make")
+                .expect("existing function alias should be preserved")
+                .code,
+            "ret = 2;"
+        );
 
         let bad_param = BTreeMap::from([(
             "bad.xml".to_string(),
@@ -1373,7 +1478,7 @@ mod defs_resolver_tests {
             },
         )]);
         let reachable = BTreeSet::from(["bad.xml".to_string()]);
-        let error = resolve_visible_defs(&reachable, &bad_param)
+        let error = resolve_visible_defs(&reachable, &bad_param, Some("bad"))
             .expect_err("function param type should resolve");
         assert_eq!(error.code, "TYPE_UNKNOWN");
 
@@ -1397,7 +1502,7 @@ mod defs_resolver_tests {
             },
         )]);
         let reachable = BTreeSet::from(["bad.xml".to_string()]);
-        let error = resolve_visible_defs(&reachable, &bad_return)
+        let error = resolve_visible_defs(&reachable, &bad_return, Some("bad"))
             .expect_err("function return type should resolve");
         assert_eq!(error.code, "TYPE_UNKNOWN");
 
@@ -1417,7 +1522,7 @@ mod defs_resolver_tests {
             },
         )]);
         let reachable = BTreeSet::from(["bad.xml".to_string()]);
-        let error = resolve_visible_defs(&reachable, &bad_global_type)
+        let error = resolve_visible_defs(&reachable, &bad_global_type, Some("bad"))
             .expect_err("defs global type should resolve");
         assert_eq!(error.code, "TYPE_UNKNOWN");
 

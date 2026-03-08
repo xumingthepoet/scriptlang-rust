@@ -179,6 +179,25 @@ pub(crate) fn resolve_type_expr(
     }
 }
 
+pub(crate) fn resolve_type_expr_in_namespace(
+    expr: &ParsedTypeExpr,
+    resolved_types: &BTreeMap<String, ScriptType>,
+    namespace: &str,
+    span: &SourceSpan,
+) -> Result<ScriptType, ScriptLangError> {
+    match expr {
+        ParsedTypeExpr::Custom(name) if !name.contains('.') => {
+            let qualified = format!("{}.{}", namespace, name);
+            if let Some(value) = resolved_types.get(&qualified).cloned() {
+                Ok(value)
+            } else {
+                resolve_type_expr(expr, resolved_types, span)
+            }
+        }
+        _ => resolve_type_expr(expr, resolved_types, span),
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn parse_type_declaration_node(
     node: &XmlElementNode,
