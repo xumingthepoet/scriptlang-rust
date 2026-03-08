@@ -3,7 +3,7 @@
   "entryScript": "main.main",
   "actions": [],
   "expectedEvents": [
-    { "kind": "text", "text": "8" },
+    { "kind": "text", "text": "13" },
     { "kind": "end" }
   ]
 }

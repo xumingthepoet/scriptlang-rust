@@ -5,8 +5,13 @@
     let v = invoke(step, [x]);
     out = invoke("lib.times2", [v]);
   </function>
+  <function name="from_code" access="public" args="int:x" return="int:out">
+    out = main.run(x) + invoke("lib.add1", [x]);
+  </function>
   <script name="main">
-    <temp name="value" type="int">main.run(3)</temp>
+    <temp name="value" type="int">0</temp>
+    <code>value = main.from_code(3);</code>
+    <code>value = invoke("lib.add1", [value]);</code>
     <text>${value}</text>
   </script>
 </module>
