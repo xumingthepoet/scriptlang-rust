@@ -20,6 +20,7 @@ mod artifact;
 mod context;
 mod defaults;
 mod defs_resolver;
+mod error_context;
 mod include_graph;
 mod macro_expand;
 mod pipeline;
@@ -38,6 +39,7 @@ pub use pipeline::{compile_project_bundle_from_xml_map, compile_project_scripts_
 
 pub(crate) use context::*;
 pub(crate) use defs_resolver::*;
+pub(crate) use error_context::with_file_context_shared;
 pub(crate) use include_graph::*;
 pub(crate) use macro_expand::*;
 pub(crate) use sanitize::*;

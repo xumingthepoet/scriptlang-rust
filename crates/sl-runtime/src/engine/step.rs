@@ -1,10 +1,167 @@
 use super::lifecycle::{CompletionKind, PendingBoundary, PendingChoiceOption, RuntimeFrame};
 use super::*;
 
+enum PlannedNode {
+    FinishFrame {
+        frame_id: u64,
+    },
+    Text {
+        script_name: String,
+        value: String,
+        tag: Option<String>,
+        once: bool,
+        id: String,
+    },
+    Debug {
+        value: String,
+    },
+    Code {
+        code: String,
+    },
+    Var {
+        declaration: sl_core::VarDeclaration,
+    },
+    If {
+        when_expr: String,
+        then_group_id: String,
+        else_group_id: Option<String>,
+    },
+    While {
+        when_expr: String,
+        body_group_id: String,
+    },
+    Choice {
+        script_name: String,
+        id: String,
+        entries: Vec<ChoiceEntry>,
+        prompt_text: String,
+    },
+    Input {
+        id: String,
+        target_var: String,
+        prompt_text: String,
+    },
+    Call {
+        target_script: String,
+        args: Vec<sl_core::CallArgument>,
+    },
+    Return {
+        target_script: Option<String>,
+        args: Vec<sl_core::CallArgument>,
+    },
+    Break,
+    Continue {
+        target: ContinueTarget,
+    },
+}
+
 impl ScriptLangEngine {
     fn bump_top_node_index_infallible(&mut self, amount: usize) {
         self.bump_top_node_index(amount)
             .expect("top frame should exist while stepping");
+    }
+
+    fn top_frame_state(&self) -> Option<(u64, String, usize)> {
+        self.frames
+            .last()
+            .map(|frame| (frame.frame_id, frame.group_id.clone(), frame.node_index))
+    }
+
+    fn plan_node(
+        &self,
+        top_frame_id: u64,
+        top_group_id: &str,
+        top_node_index: usize,
+    ) -> Result<PlannedNode, ScriptLangError> {
+        let (script_name, group) = self.lookup_group(top_group_id)?;
+        if top_node_index >= group.nodes.len() {
+            return Ok(PlannedNode::FinishFrame {
+                frame_id: top_frame_id,
+            });
+        }
+
+        let planned = match &group.nodes[top_node_index] {
+            ScriptNode::Text {
+                value,
+                tag,
+                once,
+                id,
+                ..
+            } => PlannedNode::Text {
+                script_name: script_name.to_string(),
+                value: value.clone(),
+                tag: tag.clone(),
+                once: *once,
+                id: id.clone(),
+            },
+            ScriptNode::Debug { value, .. } => PlannedNode::Debug {
+                value: value.clone(),
+            },
+            ScriptNode::Code { code, .. } => PlannedNode::Code { code: code.clone() },
+            ScriptNode::Var { declaration, .. } => PlannedNode::Var {
+                declaration: declaration.clone(),
+            },
+            ScriptNode::If {
+                when_expr,
+                then_group_id,
+                else_group_id,
+                ..
+            } => PlannedNode::If {
+                when_expr: when_expr.clone(),
+                then_group_id: then_group_id.clone(),
+                else_group_id: else_group_id.clone(),
+            },
+            ScriptNode::While {
+                when_expr,
+                body_group_id,
+                ..
+            } => PlannedNode::While {
+                when_expr: when_expr.clone(),
+                body_group_id: body_group_id.clone(),
+            },
+            ScriptNode::Choice {
+                id,
+                entries,
+                prompt_text,
+                ..
+            } => PlannedNode::Choice {
+                script_name: script_name.to_string(),
+                id: id.clone(),
+                entries: entries.clone(),
+                prompt_text: prompt_text.clone(),
+            },
+            ScriptNode::Input {
+                id,
+                target_var,
+                prompt_text,
+                ..
+            } => PlannedNode::Input {
+                id: id.clone(),
+                target_var: target_var.clone(),
+                prompt_text: prompt_text.clone(),
+            },
+            ScriptNode::Call {
+                target_script,
+                args,
+                ..
+            } => PlannedNode::Call {
+                target_script: target_script.clone(),
+                args: args.clone(),
+            },
+            ScriptNode::Return {
+                target_script,
+                args,
+                ..
+            } => PlannedNode::Return {
+                target_script: target_script.clone(),
+                args: args.clone(),
+            },
+            ScriptNode::Break { .. } => PlannedNode::Break,
+            ScriptNode::Continue { target, .. } => PlannedNode::Continue {
+                target: target.clone(),
+            },
+        };
+        Ok(planned)
     }
 
     pub fn next_output(&mut self) -> Result<EngineOutput, ScriptLangError> {
@@ -20,401 +177,14 @@ impl ScriptLangEngine {
         while guard < 10_000 {
             guard += 1;
 
-            let Some((top_frame_id, top_group_id, top_node_index)) = self
-                .frames
-                .last()
-                .map(|frame| (frame.frame_id, frame.group_id.clone(), frame.node_index))
-            else {
+            let Some((top_frame_id, top_group_id, top_node_index)) = self.top_frame_state() else {
                 self.ended = true;
                 return Ok(EngineOutput::End);
             };
 
-            enum PlannedNode {
-                FinishFrame {
-                    frame_id: u64,
-                },
-                Text {
-                    script_name: String,
-                    value: String,
-                    tag: Option<String>,
-                    once: bool,
-                    id: String,
-                },
-                Debug {
-                    value: String,
-                },
-                Code {
-                    code: String,
-                },
-                Var {
-                    declaration: sl_core::VarDeclaration,
-                },
-                If {
-                    when_expr: String,
-                    then_group_id: String,
-                    else_group_id: Option<String>,
-                },
-                While {
-                    when_expr: String,
-                    body_group_id: String,
-                },
-                Choice {
-                    script_name: String,
-                    id: String,
-                    entries: Vec<ChoiceEntry>,
-                    prompt_text: String,
-                },
-                Input {
-                    id: String,
-                    target_var: String,
-                    prompt_text: String,
-                },
-                Call {
-                    target_script: String,
-                    args: Vec<sl_core::CallArgument>,
-                },
-                Return {
-                    target_script: Option<String>,
-                    args: Vec<sl_core::CallArgument>,
-                },
-                Break,
-                Continue {
-                    target: ContinueTarget,
-                },
-            }
-
-            let planned_node = {
-                let (script_name, group) = self.lookup_group(&top_group_id)?;
-                if top_node_index >= group.nodes.len() {
-                    PlannedNode::FinishFrame {
-                        frame_id: top_frame_id,
-                    }
-                } else {
-                    match &group.nodes[top_node_index] {
-                        ScriptNode::Text {
-                            value,
-                            tag,
-                            once,
-                            id,
-                            ..
-                        } => PlannedNode::Text {
-                            script_name: script_name.to_string(),
-                            value: value.clone(),
-                            tag: tag.clone(),
-                            once: *once,
-                            id: id.clone(),
-                        },
-                        ScriptNode::Debug { value, .. } => PlannedNode::Debug {
-                            value: value.clone(),
-                        },
-                        ScriptNode::Code { code, .. } => PlannedNode::Code { code: code.clone() },
-                        ScriptNode::Var { declaration, .. } => PlannedNode::Var {
-                            declaration: declaration.clone(),
-                        },
-                        ScriptNode::If {
-                            when_expr,
-                            then_group_id,
-                            else_group_id,
-                            ..
-                        } => PlannedNode::If {
-                            when_expr: when_expr.clone(),
-                            then_group_id: then_group_id.clone(),
-                            else_group_id: else_group_id.clone(),
-                        },
-                        ScriptNode::While {
-                            when_expr,
-                            body_group_id,
-                            ..
-                        } => PlannedNode::While {
-                            when_expr: when_expr.clone(),
-                            body_group_id: body_group_id.clone(),
-                        },
-                        ScriptNode::Choice {
-                            id,
-                            entries,
-                            prompt_text,
-                            ..
-                        } => PlannedNode::Choice {
-                            script_name: script_name.to_string(),
-                            id: id.clone(),
-                            entries: entries.clone(),
-                            prompt_text: prompt_text.clone(),
-                        },
-                        ScriptNode::Input {
-                            id,
-                            target_var,
-                            prompt_text,
-                            ..
-                        } => PlannedNode::Input {
-                            id: id.clone(),
-                            target_var: target_var.clone(),
-                            prompt_text: prompt_text.clone(),
-                        },
-                        ScriptNode::Call {
-                            target_script,
-                            args,
-                            ..
-                        } => PlannedNode::Call {
-                            target_script: target_script.clone(),
-                            args: args.clone(),
-                        },
-                        ScriptNode::Return {
-                            target_script,
-                            args,
-                            ..
-                        } => PlannedNode::Return {
-                            target_script: target_script.clone(),
-                            args: args.clone(),
-                        },
-                        ScriptNode::Break { .. } => PlannedNode::Break,
-                        ScriptNode::Continue { target, .. } => PlannedNode::Continue {
-                            target: target.clone(),
-                        },
-                    }
-                }
-            };
-
-            match planned_node {
-                PlannedNode::FinishFrame { frame_id } => {
-                    self.finish_frame(frame_id)?;
-                    continue;
-                }
-                PlannedNode::Text {
-                    script_name,
-                    value,
-                    tag,
-                    once,
-                    id,
-                } => {
-                    if once && self.has_once_state(&script_name, &format!("text:{}", id)) {
-                        self.bump_top_node_index_infallible(1);
-                        continue;
-                    }
-
-                    let rendered = self.render_text(&value)?;
-                    self.bump_top_node_index_infallible(1);
-
-                    if once {
-                        self.mark_once_state(&script_name, &format!("text:{}", id));
-                    }
-
-                    return Ok(EngineOutput::Text {
-                        text: rendered,
-                        tag,
-                    });
-                }
-                PlannedNode::Debug { value } => {
-                    let rendered = self.render_text(&value)?;
-                    self.bump_top_node_index_infallible(1);
-                    return Ok(EngineOutput::Debug { text: rendered });
-                }
-                PlannedNode::Code { code } => {
-                    self.run_code(&code)?;
-                    self.bump_top_node_index_infallible(1);
-                }
-                PlannedNode::Var { declaration } => {
-                    self.execute_var_declaration(&declaration)?;
-                    self.bump_top_node_index_infallible(1);
-                }
-                PlannedNode::If {
-                    when_expr,
-                    then_group_id,
-                    else_group_id,
-                } => {
-                    let condition = self.eval_boolean(&when_expr)?;
-                    self.bump_top_node_index_infallible(1);
-                    if condition {
-                        self.push_group_frame(&then_group_id, CompletionKind::ResumeAfterChild)
-                            .expect("compiler should emit existing then group");
-                    } else {
-                        let else_group_id = else_group_id
-                            .expect("compiler should always synthesize an else group id");
-                        self.push_group_frame(&else_group_id, CompletionKind::ResumeAfterChild)
-                            .expect("compiler should emit existing else group");
-                    }
-                }
-                PlannedNode::While {
-                    when_expr,
-                    body_group_id,
-                } => {
-                    let condition = self.eval_boolean(&when_expr)?;
-                    if condition {
-                        self.push_group_frame(&body_group_id, CompletionKind::WhileBody)
-                            .expect("compiler should emit existing while body group");
-                    } else {
-                        self.bump_top_node_index_infallible(1);
-                    }
-                }
-                PlannedNode::Choice {
-                    script_name,
-                    id,
-                    entries,
-                    prompt_text,
-                } => {
-                    let mut visible_regular = Vec::<PendingChoiceOption>::new();
-                    let mut visible_fall_over = None;
-                    let mut dynamic_block_ordinal = 0usize;
-
-                    for entry in &entries {
-                        match entry {
-                            ChoiceEntry::Static { option } => {
-                                if option.fall_over {
-                                    let visible = !option.once
-                                        || !self.has_once_state(
-                                            &script_name,
-                                            &format!("option:{}", option.id),
-                                        );
-                                    if visible {
-                                        visible_fall_over = Some(PendingChoiceOption {
-                                            item: ChoiceItem {
-                                                index: 0,
-                                                id: option.id.clone(),
-                                                text: self.render_text(&option.text)?,
-                                            },
-                                            dynamic_binding: None,
-                                        });
-                                    }
-                                    continue;
-                                }
-
-                                if self.is_choice_option_visible(&script_name, option)? {
-                                    visible_regular.push(PendingChoiceOption {
-                                        item: ChoiceItem {
-                                            index: 0,
-                                            id: option.id.clone(),
-                                            text: self.render_text(&option.text)?,
-                                        },
-                                        dynamic_binding: None,
-                                    });
-                                }
-                            }
-                            ChoiceEntry::Dynamic { block } => {
-                                let array_value = self.eval_expression(&block.array_expr)?;
-                                let SlValue::Array(items) = array_value else {
-                                    return Err(ScriptLangError::new(
-                                        "ENGINE_CHOICE_ARRAY_NOT_ARRAY",
-                                        format!(
-                                            "dynamic-options array expression \"{}\" must evaluate to array.",
-                                            block.array_expr
-                                        ),
-                                    ));
-                                };
-
-                                for (element_index, element_value) in items.into_iter().enumerate()
-                                {
-                                    let binding = (&element_value, element_index);
-                                    let visible = self.dynamic_choice_when(block, binding)?;
-
-                                    if !visible {
-                                        continue;
-                                    }
-
-                                    let rendered_text = self.dynamic_choice_text(block, binding)?;
-
-                                    visible_regular.push(PendingChoiceOption {
-                                        item: ChoiceItem {
-                                            index: 0,
-                                            id: format!(
-                                                "dyn:{}:{}:{}",
-                                                id, dynamic_block_ordinal, element_index
-                                            ),
-                                            text: rendered_text,
-                                        },
-                                        dynamic_binding: Some(PendingDynamicChoiceBinding {
-                                            group_id: block.template.group_id.clone(),
-                                            item_name: block.item_name.clone(),
-                                            item_value: element_value,
-                                            index_name: block.index_name.clone(),
-                                            index_value: block
-                                                .index_name
-                                                .as_ref()
-                                                .map(|_| element_index),
-                                        }),
-                                    });
-                                }
-
-                                dynamic_block_ordinal += 1;
-                            }
-                        }
-                    }
-
-                    let visible_options = if visible_regular.is_empty() {
-                        visible_fall_over.into_iter().collect::<Vec<_>>()
-                    } else {
-                        visible_regular
-                    };
-
-                    if visible_options.is_empty() {
-                        self.bump_top_node_index_infallible(1);
-                        continue;
-                    }
-
-                    let mut pending_options = visible_options;
-                    for (index, option) in pending_options.iter_mut().enumerate() {
-                        option.item.index = index;
-                    }
-                    let items = pending_options
-                        .iter()
-                        .map(|option| option.item.clone())
-                        .collect::<Vec<_>>();
-
-                    let prompt_text = Some(self.render_text(&prompt_text)?);
-                    let frame_id = top_frame_id;
-                    self.pending_boundary = Some(PendingBoundary::Choice {
-                        frame_id,
-                        node_id: id,
-                        options: pending_options,
-                        prompt_text: prompt_text.clone(),
-                    });
-                    self.waiting_choice = true;
-                    return Ok(EngineOutput::Choices { items, prompt_text });
-                }
-                PlannedNode::Input {
-                    id,
-                    target_var,
-                    prompt_text,
-                } => {
-                    let current = self.read_path(&target_var)?;
-                    let SlValue::String(default_text) = current else {
-                        return Err(ScriptLangError::new(
-                            "ENGINE_INPUT_VAR_TYPE",
-                            format!("Input target var \"{}\" must be string.", target_var),
-                        ));
-                    };
-
-                    let frame_id = top_frame_id;
-                    self.pending_boundary = Some(PendingBoundary::Input {
-                        frame_id,
-                        node_id: id,
-                        target_var,
-                        prompt_text: prompt_text.clone(),
-                        default_text: default_text.clone(),
-                    });
-                    self.waiting_choice = false;
-                    return Ok(EngineOutput::Input {
-                        prompt_text,
-                        default_text,
-                    });
-                }
-                PlannedNode::Call {
-                    target_script,
-                    args,
-                } => {
-                    self.execute_call(&target_script, &args)?;
-                }
-                PlannedNode::Return {
-                    target_script,
-                    args,
-                } => {
-                    self.execute_return(target_script, &args)?;
-                }
-                PlannedNode::Break => {
-                    self.execute_break()?;
-                }
-                PlannedNode::Continue { target } => match target {
-                    ContinueTarget::While => self.execute_continue_while()?,
-                    ContinueTarget::Choice => self.execute_continue_choice()?,
-                },
+            let planned_node = self.plan_node(top_frame_id, &top_group_id, top_node_index)?;
+            if let Some(output) = self.execute_planned_node(top_frame_id, planned_node)? {
+                return Ok(output);
             }
         }
 
@@ -422,6 +192,274 @@ impl ScriptLangEngine {
             "ENGINE_GUARD_EXCEEDED",
             "Execution guard exceeded 10000 iterations.",
         ))
+    }
+
+    fn execute_planned_node(
+        &mut self,
+        top_frame_id: u64,
+        planned_node: PlannedNode,
+    ) -> Result<Option<EngineOutput>, ScriptLangError> {
+        match planned_node {
+            PlannedNode::FinishFrame { frame_id } => {
+                self.finish_frame(frame_id)?;
+                Ok(None)
+            }
+            PlannedNode::Text {
+                script_name,
+                value,
+                tag,
+                once,
+                id,
+            } => {
+                if once && self.has_once_state(&script_name, &format!("text:{}", id)) {
+                    self.bump_top_node_index_infallible(1);
+                    return Ok(None);
+                }
+
+                let rendered = self.render_text(&value)?;
+                self.bump_top_node_index_infallible(1);
+
+                if once {
+                    self.mark_once_state(&script_name, &format!("text:{}", id));
+                }
+
+                Ok(Some(EngineOutput::Text {
+                    text: rendered,
+                    tag,
+                }))
+            }
+            PlannedNode::Debug { value } => {
+                let rendered = self.render_text(&value)?;
+                self.bump_top_node_index_infallible(1);
+                Ok(Some(EngineOutput::Debug { text: rendered }))
+            }
+            PlannedNode::Code { code } => {
+                self.run_code(&code)?;
+                self.bump_top_node_index_infallible(1);
+                Ok(None)
+            }
+            PlannedNode::Var { declaration } => {
+                self.execute_var_declaration(&declaration)?;
+                self.bump_top_node_index_infallible(1);
+                Ok(None)
+            }
+            PlannedNode::If {
+                when_expr,
+                then_group_id,
+                else_group_id,
+            } => {
+                let condition = self.eval_boolean(&when_expr)?;
+                self.bump_top_node_index_infallible(1);
+                if condition {
+                    self.push_group_frame(&then_group_id, CompletionKind::ResumeAfterChild)
+                        .expect("compiler should emit existing then group");
+                } else {
+                    let else_group_id =
+                        else_group_id.expect("compiler should always synthesize an else group id");
+                    self.push_group_frame(&else_group_id, CompletionKind::ResumeAfterChild)
+                        .expect("compiler should emit existing else group");
+                }
+                Ok(None)
+            }
+            PlannedNode::While {
+                when_expr,
+                body_group_id,
+            } => {
+                let condition = self.eval_boolean(&when_expr)?;
+                if condition {
+                    self.push_group_frame(&body_group_id, CompletionKind::WhileBody)
+                        .expect("compiler should emit existing while body group");
+                } else {
+                    self.bump_top_node_index_infallible(1);
+                }
+                Ok(None)
+            }
+            PlannedNode::Choice {
+                script_name,
+                id,
+                entries,
+                prompt_text,
+            } => self.execute_choice_node(top_frame_id, &script_name, &id, &entries, &prompt_text),
+            PlannedNode::Input {
+                id,
+                target_var,
+                prompt_text,
+            } => self.execute_input_node(top_frame_id, &id, &target_var, &prompt_text),
+            PlannedNode::Call {
+                target_script,
+                args,
+            } => {
+                self.execute_call(&target_script, &args)?;
+                Ok(None)
+            }
+            PlannedNode::Return {
+                target_script,
+                args,
+            } => {
+                self.execute_return(target_script, &args)?;
+                Ok(None)
+            }
+            PlannedNode::Break => {
+                self.execute_break()?;
+                Ok(None)
+            }
+            PlannedNode::Continue { target } => {
+                match target {
+                    ContinueTarget::While => self.execute_continue_while()?,
+                    ContinueTarget::Choice => self.execute_continue_choice()?,
+                }
+                Ok(None)
+            }
+        }
+    }
+
+    fn execute_choice_node(
+        &mut self,
+        top_frame_id: u64,
+        script_name: &str,
+        node_id: &str,
+        entries: &[ChoiceEntry],
+        prompt_text: &str,
+    ) -> Result<Option<EngineOutput>, ScriptLangError> {
+        let mut visible_regular = Vec::<PendingChoiceOption>::new();
+        let mut visible_fall_over = None;
+        let mut dynamic_block_ordinal = 0usize;
+
+        for entry in entries {
+            match entry {
+                ChoiceEntry::Static { option } => {
+                    if option.fall_over {
+                        let visible = !option.once
+                            || !self.has_once_state(script_name, &format!("option:{}", option.id));
+                        if visible {
+                            visible_fall_over = Some(PendingChoiceOption {
+                                item: ChoiceItem {
+                                    index: 0,
+                                    id: option.id.clone(),
+                                    text: self.render_text(&option.text)?,
+                                },
+                                dynamic_binding: None,
+                            });
+                        }
+                        continue;
+                    }
+
+                    if self.is_choice_option_visible(script_name, option)? {
+                        visible_regular.push(PendingChoiceOption {
+                            item: ChoiceItem {
+                                index: 0,
+                                id: option.id.clone(),
+                                text: self.render_text(&option.text)?,
+                            },
+                            dynamic_binding: None,
+                        });
+                    }
+                }
+                ChoiceEntry::Dynamic { block } => {
+                    let array_value = self.eval_expression(&block.array_expr)?;
+                    let SlValue::Array(items) = array_value else {
+                        return Err(ScriptLangError::new(
+                            "ENGINE_CHOICE_ARRAY_NOT_ARRAY",
+                            format!(
+                                "dynamic-options array expression \"{}\" must evaluate to array.",
+                                block.array_expr
+                            ),
+                        ));
+                    };
+
+                    for (element_index, element_value) in items.into_iter().enumerate() {
+                        let binding = (&element_value, element_index);
+                        let visible = self.dynamic_choice_when(block, binding)?;
+                        if !visible {
+                            continue;
+                        }
+
+                        let rendered_text = self.dynamic_choice_text(block, binding)?;
+                        visible_regular.push(PendingChoiceOption {
+                            item: ChoiceItem {
+                                index: 0,
+                                id: format!(
+                                    "dyn:{}:{}:{}",
+                                    node_id, dynamic_block_ordinal, element_index
+                                ),
+                                text: rendered_text,
+                            },
+                            dynamic_binding: Some(PendingDynamicChoiceBinding {
+                                group_id: block.template.group_id.clone(),
+                                item_name: block.item_name.clone(),
+                                item_value: element_value,
+                                index_name: block.index_name.clone(),
+                                index_value: block.index_name.as_ref().map(|_| element_index),
+                            }),
+                        });
+                    }
+
+                    dynamic_block_ordinal += 1;
+                }
+            }
+        }
+
+        let visible_options = if visible_regular.is_empty() {
+            visible_fall_over.into_iter().collect::<Vec<_>>()
+        } else {
+            visible_regular
+        };
+
+        if visible_options.is_empty() {
+            self.bump_top_node_index_infallible(1);
+            return Ok(None);
+        }
+
+        let mut pending_options = visible_options;
+        for (index, option) in pending_options.iter_mut().enumerate() {
+            option.item.index = index;
+        }
+        let items = pending_options
+            .iter()
+            .map(|option| option.item.clone())
+            .collect::<Vec<_>>();
+
+        let rendered_prompt = Some(self.render_text(prompt_text)?);
+        self.pending_boundary = Some(PendingBoundary::Choice {
+            frame_id: top_frame_id,
+            node_id: node_id.to_string(),
+            options: pending_options,
+            prompt_text: rendered_prompt.clone(),
+        });
+        self.waiting_choice = true;
+        Ok(Some(EngineOutput::Choices {
+            items,
+            prompt_text: rendered_prompt,
+        }))
+    }
+
+    fn execute_input_node(
+        &mut self,
+        top_frame_id: u64,
+        node_id: &str,
+        target_var: &str,
+        prompt_text: &str,
+    ) -> Result<Option<EngineOutput>, ScriptLangError> {
+        let current = self.read_path(target_var)?;
+        let SlValue::String(default_text) = current else {
+            return Err(ScriptLangError::new(
+                "ENGINE_INPUT_VAR_TYPE",
+                format!("Input target var \"{}\" must be string.", target_var),
+            ));
+        };
+
+        self.pending_boundary = Some(PendingBoundary::Input {
+            frame_id: top_frame_id,
+            node_id: node_id.to_string(),
+            target_var: target_var.to_string(),
+            prompt_text: prompt_text.to_string(),
+            default_text: default_text.clone(),
+        });
+        self.waiting_choice = false;
+        Ok(Some(EngineOutput::Input {
+            prompt_text: prompt_text.to_string(),
+            default_text,
+        }))
     }
 
     fn dynamic_choice_when(

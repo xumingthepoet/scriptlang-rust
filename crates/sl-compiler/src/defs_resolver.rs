@@ -1,5 +1,17 @@
 use crate::*;
 
+struct ParsedModuleHeader {
+    namespace: String,
+    default_access: AccessLevel,
+}
+
+enum ParsedModuleChild {
+    Type(ParsedTypeDecl),
+    Function(ParsedFunctionDecl),
+    DefsGlobalVar(ParsedDefsGlobalVarDecl),
+    Script(ParsedModuleScript),
+}
+
 pub(crate) fn parse_defs_files(
     sources: &BTreeMap<String, SourceFile>,
 ) -> Result<BTreeMap<String, DefsDeclarations>, ScriptLangError> {
@@ -64,6 +76,39 @@ fn parse_module_source(
         ));
     }
 
+    let ParsedModuleHeader {
+        namespace,
+        default_access,
+    } = parse_module_header(root, file_path)?;
+
+    let mut type_decls = Vec::new();
+    let mut function_decls = Vec::new();
+    let mut defs_global_var_decls = Vec::new();
+    let mut scripts = Vec::new();
+
+    for child in element_children(root) {
+        match parse_module_child(child, root, file_path, &namespace, default_access)? {
+            ParsedModuleChild::Type(decl) => type_decls.push(decl),
+            ParsedModuleChild::Function(decl) => function_decls.push(decl),
+            ParsedModuleChild::DefsGlobalVar(decl) => defs_global_var_decls.push(decl),
+            ParsedModuleChild::Script(script) => scripts.push(script),
+        }
+    }
+
+    Ok(ModuleDeclarations {
+        defs: DefsDeclarations {
+            type_decls,
+            function_decls,
+            defs_global_var_decls,
+        },
+        scripts,
+    })
+}
+
+fn parse_module_header(
+    root: &XmlElementNode,
+    file_path: &str,
+) -> Result<ParsedModuleHeader, ScriptLangError> {
     let namespace = get_required_non_empty_attr(root, "name")
         .map_err(|error| with_file_context(error, file_path))?;
     assert_name_not_reserved(&namespace, "module", root.location.clone())
@@ -80,74 +125,57 @@ fn parse_module_source(
     }
     let default_access = parse_access_attr(root, "default_access", AccessLevel::Private)
         .map_err(|error| with_file_context(error, file_path))?;
-
-    let mut type_decls = Vec::new();
-    let mut function_decls = Vec::new();
-    let mut defs_global_var_decls = Vec::new();
-    let mut scripts = Vec::new();
-
-    for child in element_children(root) {
-        match child.name.as_str() {
-            "type" => type_decls.push(
-                parse_type_declaration_node_with_namespace(child, &namespace, default_access)
-                    .map_err(|error| with_file_context(error, file_path))?,
-            ),
-            "function" => {
-                let function_decl = parse_function_declaration_node_with_namespace(
-                    child,
-                    &namespace,
-                    default_access,
-                )
-                .map_err(|error| with_file_context(error, file_path))?;
-                function_decls.push(function_decl);
-            }
-            "var" => defs_global_var_decls.push(
-                parse_defs_global_var_declaration(child, &namespace, default_access)
-                    .map_err(|error| with_file_context(error, file_path))?,
-            ),
-            "script" => {
-                let script_name = get_required_non_empty_attr(child, "name")
-                    .map_err(|error| with_file_context(error, file_path))?;
-                assert_name_not_reserved(&script_name, "script", child.location.clone())
-                    .map_err(|error| with_file_context(error, file_path))?;
-                let access = parse_access_attr(child, "access", default_access)
-                    .map_err(|error| with_file_context(error, file_path))?;
-                scripts.push(ParsedModuleScript {
-                    qualified_script_name: format!("{}.{}", namespace, script_name),
-                    access,
-                    root: child.clone(),
-                });
-            }
-            _ => {
-                return Err(with_file_context(
-                    ScriptLangError::with_span(
-                        "XML_MODULE_CHILD_INVALID",
-                        format!("Unsupported child <{}> under <{}>.", child.name, root.name),
-                        child.location.clone(),
-                    ),
-                    file_path,
-                ))
-            }
-        }
-    }
-
-    Ok(ModuleDeclarations {
-        defs: DefsDeclarations {
-            type_decls,
-            function_decls,
-            defs_global_var_decls,
-        },
-        scripts,
+    Ok(ParsedModuleHeader {
+        namespace,
+        default_access,
     })
 }
 
+fn parse_module_child(
+    child: &XmlElementNode,
+    root: &XmlElementNode,
+    file_path: &str,
+    namespace: &str,
+    default_access: AccessLevel,
+) -> Result<ParsedModuleChild, ScriptLangError> {
+    match child.name.as_str() {
+        "type" => parse_type_declaration_node_with_namespace(child, namespace, default_access)
+            .map(ParsedModuleChild::Type)
+            .map_err(|error| with_file_context(error, file_path)),
+        "function" => {
+            parse_function_declaration_node_with_namespace(child, namespace, default_access)
+                .map(ParsedModuleChild::Function)
+                .map_err(|error| with_file_context(error, file_path))
+        }
+        "var" => parse_defs_global_var_declaration(child, namespace, default_access)
+            .map(ParsedModuleChild::DefsGlobalVar)
+            .map_err(|error| with_file_context(error, file_path)),
+        "script" => {
+            let script_name = get_required_non_empty_attr(child, "name")
+                .map_err(|error| with_file_context(error, file_path))?;
+            assert_name_not_reserved(&script_name, "script", child.location.clone())
+                .map_err(|error| with_file_context(error, file_path))?;
+            let access = parse_access_attr(child, "access", default_access)
+                .map_err(|error| with_file_context(error, file_path))?;
+            Ok(ParsedModuleChild::Script(ParsedModuleScript {
+                qualified_script_name: format!("{}.{}", namespace, script_name),
+                access,
+                root: child.clone(),
+            }))
+        }
+        _ => Err(with_file_context(
+            ScriptLangError::with_span(
+                "XML_MODULE_CHILD_INVALID",
+                format!("Unsupported child <{}> under <{}>.", child.name, root.name),
+                child.location.clone(),
+            ),
+            file_path,
+        )),
+    }
+}
+
 fn with_file_context(error: ScriptLangError, file_path: &str) -> ScriptLangError {
-    let message = format!("In file \"{}\": {}", file_path, error.message);
-    ScriptLangError::with_span(
-        error.code,
-        message,
-        error.span.unwrap_or(SourceSpan::synthetic()),
-    )
+    with_file_context_shared(error, file_path)
 }
 
 pub(crate) fn parse_defs_global_var_declaration(
@@ -1298,6 +1326,17 @@ mod defs_resolver_tests {
             parse_defs_global_var_declaration(&missing_type, "shared", AccessLevel::Private)
                 .expect_err("type should be required");
         assert_eq!(error.code, "XML_MISSING_ATTR");
+
+        // Test with explicit access attribute (covers line 160)
+        let with_access = xml_element(
+            "var",
+            &[("name", "gold"), ("type", "int"), ("access", "public")],
+            vec![xml_text("100")],
+        );
+        let parsed =
+            parse_defs_global_var_declaration(&with_access, "shared", AccessLevel::Private)
+                .expect("var with access should parse");
+        assert_eq!(parsed.access, AccessLevel::Public);
 
         let mut invalid_sources = BTreeMap::new();
         invalid_sources.insert(

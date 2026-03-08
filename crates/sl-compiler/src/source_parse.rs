@@ -1,68 +1,41 @@
 use crate::*;
 
+struct ParsedSourceEntry {
+    file_path: String,
+    root: XmlElementNode,
+    module_name: String,
+    imports: Vec<ImportDirective>,
+}
+
 pub(crate) fn parse_sources(
     xml_by_path: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<String, SourceFile>, ScriptLangError> {
-    let normalized_paths = xml_by_path
-        .keys()
-        .map(|raw_path| normalize_virtual_path(raw_path))
-        .collect::<BTreeSet<_>>();
-    let mut parsed_roots = BTreeMap::new();
-    let mut raw_imports = BTreeMap::new();
+    let normalized_paths = collect_normalized_paths(xml_by_path);
+    let mut parsed_entries = Vec::with_capacity(xml_by_path.len());
     let mut module_names_by_path = BTreeMap::new();
 
     for (raw_path, source_text) in xml_by_path {
-        let file_path = normalize_virtual_path(raw_path);
-        detect_source_kind(&file_path)?;
-
-        let legacy_includes = parse_legacy_include_directives(source_text);
-        if !legacy_includes.is_empty() {
-            return Err(with_file_context(
-                ScriptLangError::new(
-                    "IMPORT_LEGACY_INCLUDE_UNSUPPORTED",
-                    format!(
-                        "Legacy include directives are no longer supported. Replace `<!-- include: ... -->` with `<!-- import ... from ... -->` in \"{}\".",
-                        file_path
-                    ),
-                ),
-                &file_path,
-            ));
-        }
-
-        let document = parse_xml_document(source_text)
-            .map_err(|error| with_file_context(error, &file_path))?;
-        let module_name = extract_module_name(&document.root).map_err(|error| {
-            with_file_context(
-                ScriptLangError::with_span(error.code, error.message, error.span.unwrap()),
-                &file_path,
-            )
-        })?;
-        let imports = parse_import_directives(source_text);
-
-        module_names_by_path.insert(file_path.clone(), module_name);
-        parsed_roots.insert(file_path.clone(), document.root);
-        raw_imports.insert(file_path, imports);
+        let parsed = parse_source_entry(raw_path, source_text)?;
+        module_names_by_path.insert(parsed.file_path.clone(), parsed.module_name.clone());
+        parsed_entries.push(parsed);
     }
 
     let mut sources = BTreeMap::new();
-    for (file_path, root) in parsed_roots {
-        let imports = raw_imports
-            .get(&file_path)
-            .expect("raw imports should exist for parsed source");
+    for parsed in parsed_entries {
         let includes = resolve_import_directives(
-            &file_path,
-            imports,
+            &parsed.file_path,
+            &parsed.imports,
             &normalized_paths,
             &module_names_by_path,
         )
-        .map_err(|error| with_file_context(error, &file_path))?;
+        .map_err(|error| with_file_context(error, &parsed.file_path))?;
 
         sources.insert(
-            file_path,
+            parsed.file_path,
             SourceFile {
                 kind: SourceKind::ModuleXml,
                 includes,
-                xml_root: Some(root),
+                xml_root: Some(parsed.root),
                 json_value: None,
             },
         );
@@ -71,13 +44,62 @@ pub(crate) fn parse_sources(
     Ok(sources)
 }
 
+fn collect_normalized_paths(xml_by_path: &BTreeMap<String, String>) -> BTreeSet<String> {
+    xml_by_path
+        .keys()
+        .map(|raw_path| normalize_virtual_path(raw_path))
+        .collect::<BTreeSet<_>>()
+}
+
+fn parse_source_entry(
+    raw_path: &str,
+    source_text: &str,
+) -> Result<ParsedSourceEntry, ScriptLangError> {
+    let file_path = normalize_virtual_path(raw_path);
+    detect_source_kind(&file_path)?;
+    reject_legacy_include_directives(source_text, &file_path)?;
+
+    let document =
+        parse_xml_document(source_text).map_err(|error| with_file_context(error, &file_path))?;
+    let module_name = extract_module_name(&document.root).map_err(|error| {
+        let span = error.span.unwrap_or(SourceSpan::synthetic());
+        with_file_context(
+            ScriptLangError::with_span(error.code, error.message, span),
+            &file_path,
+        )
+    })?;
+
+    Ok(ParsedSourceEntry {
+        file_path,
+        root: document.root,
+        module_name,
+        imports: parse_import_directives(source_text),
+    })
+}
+
+fn reject_legacy_include_directives(
+    source_text: &str,
+    file_path: &str,
+) -> Result<(), ScriptLangError> {
+    let legacy_includes = parse_legacy_include_directives(source_text);
+    if legacy_includes.is_empty() {
+        return Ok(());
+    }
+
+    Err(with_file_context(
+        ScriptLangError::new(
+            "IMPORT_LEGACY_INCLUDE_UNSUPPORTED",
+            format!(
+                "Legacy include directives are no longer supported. Replace `<!-- include: ... -->` with `<!-- import ... from ... -->` in \"{}\".",
+                file_path
+            ),
+        ),
+        file_path,
+    ))
+}
+
 fn with_file_context(error: ScriptLangError, file_path: &str) -> ScriptLangError {
-    let message = format!("In file \"{}\": {}", file_path, error.message);
-    ScriptLangError::with_span(
-        error.code,
-        message,
-        error.span.unwrap_or(SourceSpan::synthetic()),
-    )
+    with_file_context_shared(error, file_path)
 }
 
 pub(crate) fn detect_source_kind(path: &str) -> Result<SourceKind, ScriptLangError> {

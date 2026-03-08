@@ -101,10 +101,7 @@ fn collect_source_scripts(
 }
 
 pub(crate) fn with_file_context(error: ScriptLangError, file_path: &str) -> ScriptLangError {
-    let code = error.code;
-    let message = format!("In file \"{}\": {}", file_path, error.message);
-    let span = error.span.unwrap_or(SourceSpan::synthetic());
-    ScriptLangError::with_span(code, message, span)
+    crate::with_file_context_shared(error, file_path)
 }
 
 #[cfg(test)]
