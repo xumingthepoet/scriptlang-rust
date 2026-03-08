@@ -109,15 +109,15 @@ pub fn reject_non_import_dependency_directives(source: &str) -> Result<(), Scrip
             .expect("non-import dependency directive regex should capture keyword")
             .as_str()
             .trim();
-        if keyword != "import" {
-            return Err(ScriptLangError::new(
+        (keyword == "import").then_some(()).ok_or_else(|| {
+            ScriptLangError::new(
                 "IMPORT_DIRECTIVE_UNSUPPORTED",
                 format!(
                     "Unsupported dependency directive \"{}\". Only `import` directives are allowed.",
                     keyword
                 ),
-            ));
-        }
+            )
+        })?;
     }
     Ok(())
 }
