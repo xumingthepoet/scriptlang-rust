@@ -767,7 +767,9 @@ impl ScriptLangEngine {
 
         let mut out = String::new();
         out.push_str("let invoke = |name, args| {\n");
-        out.push_str("throw \"__sl_err:ENGINE_INVOKE_TARGET_NOT_FOUND:Invoke target not found.\" + name;\n");
+        out.push_str(
+            "throw \"__sl_err:ENGINE_INVOKE_TARGET_NOT_FOUND:Invoke target not found.\" + name;\n",
+        );
         out.push_str("};\n");
         for (qualified_name, decl) in &self.invoke_all_functions {
             let rhai_name = self
@@ -850,7 +852,8 @@ impl ScriptLangEngine {
             let rewritten = rewrite_function_calls(&preprocessed, &call_rewrite_map);
             let mut function_rewrite_map = self.build_defs_global_rewrite_map_all();
             if let Some((function_namespace, _)) = qualified_name.split_once('.') {
-                for (alias, local_qualified) in self.collect_bundle_defs_short_aliases(function_namespace)
+                for (alias, local_qualified) in
+                    self.collect_bundle_defs_short_aliases(function_namespace)
                 {
                     if decl.params.iter().any(|param| param.name == alias)
                         || alias == decl.return_binding.name
@@ -860,8 +863,10 @@ impl ScriptLangEngine {
                     let Some((namespace, field)) = local_qualified.split_once('.') else {
                         continue;
                     };
-                    function_rewrite_map
-                        .insert(alias, format!("{}.{}", defs_namespace_symbol(namespace), field));
+                    function_rewrite_map.insert(
+                        alias,
+                        format!("{}.{}", defs_namespace_symbol(namespace), field),
+                    );
                 }
                 for (alias, local_qualified) in
                     self.collect_bundle_defs_const_short_aliases(function_namespace)
@@ -874,8 +879,10 @@ impl ScriptLangEngine {
                     let Some((namespace, field)) = local_qualified.split_once('.') else {
                         continue;
                     };
-                    function_rewrite_map
-                        .insert(alias, format!("{}.{}", defs_namespace_symbol(namespace), field));
+                    function_rewrite_map.insert(
+                        alias,
+                        format!("{}.{}", defs_namespace_symbol(namespace), field),
+                    );
                 }
             }
             let rewritten = rewrite_defs_global_qualified_access(&rewritten, &function_rewrite_map);

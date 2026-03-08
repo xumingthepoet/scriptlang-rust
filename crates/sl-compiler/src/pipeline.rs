@@ -673,6 +673,40 @@ mod pipeline_tests {
     }
 
     #[test]
+    fn pipeline_propagates_resolve_visible_defs_errors() {
+        // Test duplicate type declaration error through resolve_visible_defs
+        // Two different modules define types with the same qualified name
+        // When main imports both, resolve_visible_defs sees the conflict
+        let conflict = map(&[
+            (
+                "a.xml",
+                r#"<module name="shared" default_access="public">
+<type name="Obj"><field name="x" type="int"/></type>
+</module>"#,
+            ),
+            (
+                "b.xml",
+                r#"<module name="shared" default_access="public">
+<type name="Obj"><field name="y" type="int"/></type>
+</module>"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<!-- import shared from a.xml -->
+<!-- import shared from b.xml -->
+<module name="main" default_access="public">
+<script name="main"><text>Hello</text></script>
+</module>
+"#,
+            ),
+        ]);
+        let error = compile_project_bundle_from_xml_map(&conflict)
+            .expect_err("duplicate type across imported modules should fail");
+        assert_eq!(error.code, "TYPE_DECL_DUPLICATE");
+    }
+
+    #[test]
     fn pipeline_helpers_propagate_module_parse_and_lookup_errors() {
         let bad_sources = BTreeMap::from([(
             "bad.xml".to_string(),

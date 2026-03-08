@@ -1255,6 +1255,38 @@ mod defs_resolver_tests {
     }
 
     #[test]
+    fn resolve_visible_defs_rejects_duplicate_function_names() {
+        let span = SourceSpan::synthetic();
+        // Two files with the same function qualified name
+        let duplicate_func = DefsDeclarations {
+            type_decls: Vec::new(),
+            function_decls: vec![ParsedFunctionDecl {
+                name: "foo".to_string(),
+                qualified_name: "shared.foo".to_string(),
+                access: AccessLevel::Public,
+                params: vec![],
+                return_binding: ParsedFunctionParamDecl {
+                    name: "out".to_string(),
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    location: span.clone(),
+                },
+                code: "out = 1;".to_string(),
+                location: span.clone(),
+            }],
+            defs_global_var_decls: Vec::new(),
+            defs_global_const_decls: Vec::new(),
+        };
+        let duplicate_defs_by_path = BTreeMap::from([
+            ("a.xml".to_string(), duplicate_func.clone()),
+            ("b.xml".to_string(), duplicate_func),
+        ]);
+        let reachable = BTreeSet::from(["a.xml".to_string(), "b.xml".to_string()]);
+        let error = resolve_visible_defs(&reachable, &duplicate_defs_by_path, Some("shared"))
+            .expect_err("duplicate function should fail");
+        assert_eq!(error.code, "FUNCTION_DECL_DUPLICATE");
+    }
+
+    #[test]
     fn resolve_visible_defs_applies_defs_global_short_alias_rules() {
         let span = SourceSpan::synthetic();
         let make_decl = |namespace: &str, name: &str| ParsedDefsGlobalVarDecl {

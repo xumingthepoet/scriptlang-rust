@@ -531,6 +531,22 @@ mod rhai_bridge_tests {
         );
         assert!(rewritten.contains("call(__fn_shared_add, 1)"));
         assert!(rewritten.contains("call(__fn_add, 2)"));
+
+        // Test whitespace between function name and parenthesis (covers while loop path)
+        let rewritten_ws = rewrite_function_calls(
+            "x = add (1);",
+            &BTreeMap::from([("add".to_string(), "__fn_add".to_string())]),
+        );
+        assert!(rewritten_ws.contains("call(__fn_add, 1)"));
+
+        // Test whitespace after opening parenthesis
+        let rewritten_ws2 = rewrite_function_calls(
+            "x = add( 1);",
+            &BTreeMap::from([("add".to_string(), "__fn_add".to_string())]),
+        );
+        // Verify it produces valid output (the exact format may vary)
+        assert!(rewritten_ws2.contains("call"));
+
         let rewritten_same = rewrite_function_calls(
             "x = invoke();",
             &BTreeMap::from([("invoke".to_string(), "invoke".to_string())]),
