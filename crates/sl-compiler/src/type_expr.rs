@@ -529,5 +529,35 @@ mod type_expr_tests {
             }),
             "object"
         );
+
+        // Test invalid access attribute on type
+        let type_invalid_access = parse_type_declaration_node_with_namespace(
+            &xml_element(
+                "type",
+                &[("name", "T"), ("access", "invalid")],
+                vec![XmlNode::Element(xml_element(
+                    "field",
+                    &[("name", "v"), ("type", "int")],
+                    vec![],
+                ))],
+            ),
+            "defs",
+            AccessLevel::Private,
+        )
+        .expect_err("invalid access should fail");
+        assert_eq!(type_invalid_access.code, "XML_ACCESS_INVALID");
+
+        // Test invalid access attribute on function
+        let function_invalid_access = parse_function_declaration_node_with_namespace(
+            &xml_element(
+                "function",
+                &[("name", "f"), ("access", "bad"), ("return", "int:r")],
+                vec![xml_text("r = 1;")],
+            ),
+            "defs",
+            AccessLevel::Private,
+        )
+        .expect_err("invalid access should fail");
+        assert_eq!(function_invalid_access.code, "XML_ACCESS_INVALID");
     }
 }

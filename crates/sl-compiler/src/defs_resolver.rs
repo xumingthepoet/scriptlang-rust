@@ -1904,4 +1904,94 @@ mod defs_resolver_tests {
         assert!(functions.contains_key("boost"));
         assert!(defs_globals.contains_key("hp"));
     }
+
+    #[test]
+    fn parse_defs_global_var_rejects_invalid_access() {
+        let files = map(&[
+            (
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><var name="hp" type="int" access="invalid">1</var></module>"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<!-- include: shared.xml -->
+<module name="main" default_access="public">
+<script name="main"><text>ok</text></script>
+</module>
+"#,
+            ),
+        ]);
+        let error =
+            compile_project_bundle_from_xml_map(&files).expect_err("invalid access should fail");
+        assert_eq!(error.code, "XML_ACCESS_INVALID");
+    }
+
+    #[test]
+    fn resolve_visible_defs_skips_private_types_from_non_local_module() {
+        let span = SourceSpan::synthetic();
+        let defs = DefsDeclarations {
+            type_decls: vec![ParsedTypeDecl {
+                name: "Secret".to_string(),
+                qualified_name: "other.Secret".to_string(),
+                access: AccessLevel::Private,
+                fields: vec![ParsedTypeFieldDecl {
+                    name: "v".to_string(),
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    location: span.clone(),
+                }],
+                location: span.clone(),
+            }],
+            function_decls: Vec::new(),
+            defs_global_var_decls: Vec::new(),
+        };
+
+        let reachable = BTreeSet::from(["other.xml".to_string()]);
+        let defs_by_path = BTreeMap::from([("other.xml".to_string(), defs)]);
+
+        // Query from module "main" should NOT see "other.Secret" because it's private
+        let (types, functions, defs_globals) =
+            resolve_visible_defs(&reachable, &defs_by_path, Some("main")).expect("should resolve");
+        assert!(
+            !types.contains_key("Secret"),
+            "private type from non-local should be hidden"
+        );
+        assert!(functions.is_empty());
+        assert!(defs_globals.is_empty());
+    }
+
+    #[test]
+    fn resolve_visible_defs_skips_private_functions_from_non_local_module() {
+        let span = SourceSpan::synthetic();
+        let defs = DefsDeclarations {
+            type_decls: Vec::new(),
+            function_decls: vec![ParsedFunctionDecl {
+                name: "hidden".to_string(),
+                qualified_name: "other.hidden".to_string(),
+                access: AccessLevel::Private,
+                params: Vec::new(),
+                return_binding: ParsedFunctionParamDecl {
+                    name: "out".to_string(),
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    location: span.clone(),
+                },
+                code: "out = 1;".to_string(),
+                location: span.clone(),
+            }],
+            defs_global_var_decls: Vec::new(),
+        };
+
+        let reachable = BTreeSet::from(["other.xml".to_string()]);
+        let defs_by_path = BTreeMap::from([("other.xml".to_string(), defs)]);
+
+        // Query from module "main" should NOT see "other.hidden" because it's private
+        let (types, functions, defs_globals) =
+            resolve_visible_defs(&reachable, &defs_by_path, Some("main")).expect("should resolve");
+        assert!(types.is_empty());
+        assert!(
+            !functions.contains_key("hidden"),
+            "private function from non-local should be hidden"
+        );
+        assert!(defs_globals.is_empty());
+    }
 }
