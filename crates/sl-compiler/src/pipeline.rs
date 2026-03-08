@@ -707,6 +707,34 @@ mod pipeline_tests {
     }
 
     #[test]
+    fn pipeline_resolve_visible_defs_error_propagates_to_script() {
+        // Test that resolve_visible_defs error propagates through .map_err at line 37
+        // This creates a defs with function using unknown type - error at resolve stage
+        let files = map(&[
+            (
+                "defs.xml",
+                r#"<module name="game" default_access="public">
+<function name="getObj" access="public" args="UnknownType:x" return="int:out">
+out = 1;
+</function>
+</module>"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<module name="main" default_access="public">
+<script name="main"><text>Hello</text></script>
+</module>
+"#,
+            ),
+        ]);
+        let error = compile_project_bundle_from_xml_map(&files)
+            .expect_err("unknown type in defs should fail");
+        // The error should propagate through resolve_visible_defs .map_err
+        assert!(error.code == "TYPE_UNKNOWN" || error.code.contains("TYPE"));
+    }
+
+    #[test]
     fn pipeline_helpers_propagate_module_parse_and_lookup_errors() {
         let bad_sources = BTreeMap::from([(
             "bad.xml".to_string(),
