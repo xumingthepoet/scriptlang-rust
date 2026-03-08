@@ -1,0 +1,12 @@
+<!-- import lib from lib.xml -->
+<module name="main" default_access="public">
+  <function name="run" access="public" args="int:x" return="int:out">
+    let step = "lib.add1";
+    let v = invoke(step, [x]);
+    out = invoke("lib.times2", [v]);
+  </function>
+  <script name="main">
+    <temp name="value" type="int">main.run(3)</temp>
+    <text>${value}</text>
+  </script>
+</module>

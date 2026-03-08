@@ -128,3 +128,8 @@ fn example_23_const_basics_matches_testcase() {
 fn example_24_invoke_dynamic_matches_testcase() {
     assert_example("24-invoke-dynamic");
 }
+
+#[test]
+fn example_25_function_invoke_matches_testcase() {
+    assert_example("25-function-invoke");
+}

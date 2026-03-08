@@ -111,6 +111,7 @@ All code must be written with testability in mind:
 - Existing static names like `script="battle"` remain unchanged.
 - Module-qualified static names such as `script="battle.main"` are first-class, and module-local short names resolve against the current module when possible.
 - Target resolution happens at runtime and must resolve to a non-empty compiled script name.
+- `<function>` bodies also support `invoke("module.func", [args])` for dynamic public function dispatch.
 
 ## Commands
 - `make check`: `cargo check --workspace --all-targets --all-features`

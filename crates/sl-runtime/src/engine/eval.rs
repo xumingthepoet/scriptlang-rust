@@ -766,6 +766,9 @@ impl ScriptLangEngine {
         let current_module = script.module_name.as_deref();
 
         let mut out = String::new();
+        out.push_str("let invoke = |name, args| {\n");
+        out.push_str("throw \"__sl_err:ENGINE_INVOKE_TARGET_NOT_FOUND:Invoke target not found.\" + name;\n");
+        out.push_str("};\n");
         for (qualified_name, decl) in &self.invoke_all_functions {
             let rhai_name = self
                 .invoke_function_symbols
@@ -920,7 +923,7 @@ impl ScriptLangEngine {
             }
         }
 
-        out.push_str("let invoke = |name, args| {\n");
+        out.push_str("invoke = |name, args| {\n");
         out.push_str("if type_of(name) != \"string\" || !name.contains(\".\") {\n");
         out.push_str("throw \"__sl_err:ENGINE_INVOKE_NAME_INVALID:invoke(name, [args]) requires name in module.func format.\";\n");
         out.push_str("}\n");
