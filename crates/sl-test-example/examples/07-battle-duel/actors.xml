@@ -1,4 +1,4 @@
-<module name="actors">
+<module name="actors" default_access="public">
   <type name="Combatant">
     <field name="name" type="string"/>
     <field name="hp" type="int"/>

@@ -1,6 +1,6 @@
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="hp" type="int">3</var>
+  <temp name="hp" type="int">3</temp>
   <if when="hp > 2">
     <text>strong</text>
     <else>

@@ -1,4 +1,4 @@
-<module name="shared">
+<module name="shared" default_access="public">
   <type name="CustomType">
     <field name="value" type="int"/>
   </type>

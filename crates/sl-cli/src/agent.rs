@@ -386,7 +386,7 @@ mod agent_tests {
         fs::create_dir_all(&root).expect("root should be created");
         write_file(
             &root.join("main.xml"),
-            r#"<module name="main">
+            r#"<module name="main" default_access="public">
 <script name="main"><debug>dbg=${1+1}</debug><text>ok</text></script>
 </module>"#,
         );
@@ -410,12 +410,12 @@ mod agent_tests {
         write_file(
             &root.join("main.xml"),
             r#"
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
   </choice>
-  <var name="name" type="string">"Traveler"</var>
+  <temp name="name" type="string">"Traveler"</temp>
   <input var="name" text="Name"/>
   <text>${name}</text>
 </script>
@@ -447,12 +447,12 @@ mod agent_tests {
         write_file(
             &root.join("main.xml"),
             r#"
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
   </choice>
-  <var name="name" type="string">"Traveler"</var>
+  <temp name="name" type="string">"Traveler"</temp>
   <input var="name" text="Name"/>
 </script>
 </module>"#,
@@ -509,13 +509,13 @@ mod agent_tests {
         write_file(
             &root.join("main.xml"),
             r#"
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
   <choice text="Pick">
     <option text="A">
-      <var name="r" type="int">random(10)</var>
+      <temp name="r" type="int">random(10)</temp>
       <text>${r}</text>
-      <var name="name" type="string">"Traveler"</var>
+      <temp name="name" type="string">"Traveler"</temp>
       <input var="name" text="Name"/>
     </option>
   </choice>
@@ -556,13 +556,13 @@ mod agent_tests {
         write_file(
             &root.join("main.xml"),
             r#"
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
   <choice text="Pick">
     <option text="A">
-      <var name="r" type="int">random(10)</var>
+      <temp name="r" type="int">random(10)</temp>
       <text>${r}</text>
-      <var name="name" type="string">"Traveler"</var>
+      <temp name="name" type="string">"Traveler"</temp>
       <input var="name" text="Name"/>
     </option>
   </choice>

@@ -1,6 +1,6 @@
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="arr" type="int[]">[2, 3]</var>
+  <temp name="arr" type="int[]">[2, 3]</temp>
   <choice text="Pick">
     <option text="Static"><text>S</text></option>
     <dynamic-options array="arr" item="it" index="i">

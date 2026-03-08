@@ -1,5 +1,5 @@
 <!-- import shared from shared.xml -->
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
   <text>Main entry ${shared.greet('main')}</text>
 </script>

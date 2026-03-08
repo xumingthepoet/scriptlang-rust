@@ -332,6 +332,15 @@ impl ScriptLangEngine {
                 format!("Entry script \"{}\" is not registered.", entry_script_name),
             ));
         };
+        if script.access == AccessLevel::Private {
+            return Err(ScriptLangError::new(
+                "ENGINE_ENTRY_SCRIPT_PRIVATE",
+                format!(
+                    "Entry script \"{}\" is private and cannot be started by host.",
+                    entry_script_name
+                ),
+            ));
+        }
         let root_group_id = script.root_group_id.clone();
         let (scope, var_types) =
             self.create_script_root_scope(entry_script_name, entry_args.unwrap_or_default())?;
@@ -481,7 +490,7 @@ mod lifecycle_tests {
             (
                 "a.xml",
                 r#"
-    <module name="a">
+    <module name="a" default_access="public">
       <function name="b" return="int:out">out = 1;</function>
     </module>
     "#,
@@ -490,7 +499,7 @@ mod lifecycle_tests {
                 "main.xml",
                 r#"
     <!-- include: a.xml -->
-    <module name="main">
+    <module name="main" default_access="public">
       <function name="a_b" return="int:out">out = 2;</function>
       <script name="main"><text>Hello</text></script>
     </module>
@@ -521,7 +530,7 @@ mod lifecycle_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="n" type="int">random(5)</var>
+      <temp name="n" type="int">random(5)</temp>
       <text>${n}</text>
     </script>
     "#,
@@ -544,11 +553,11 @@ mod lifecycle_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="a" type="int">random(5)</var>
+      <temp name="a" type="int">random(5)</temp>
       <text>${a}</text>
-      <var name="b" type="int">random(5)</var>
+      <temp name="b" type="int">random(5)</temp>
       <text>${b}</text>
-      <var name="c" type="int">random(5)</var>
+      <temp name="c" type="int">random(5)</temp>
       <text>${c}</text>
     </script>
     "#,
@@ -599,11 +608,11 @@ mod lifecycle_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="a" type="int">random(7)</var>
+      <temp name="a" type="int">random(7)</temp>
       <text>${a}</text>
-      <var name="b" type="int">random(7)</var>
+      <temp name="b" type="int">random(7)</temp>
       <text>${b}</text>
-      <var name="c" type="int">random(7)</var>
+      <temp name="c" type="int">random(7)</temp>
       <text>${c}</text>
     </script>
     "#,
@@ -663,7 +672,7 @@ mod lifecycle_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="a" type="int">random(5)</var>
+      <temp name="a" type="int">random(5)</temp>
       <text>${a}</text>
     </script>
     "#,
@@ -766,6 +775,18 @@ mod lifecycle_tests {
     }
 
     #[test]
+    pub(super) fn start_rejects_private_entry_script() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.xml",
+            r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#,
+        )]));
+        let error = engine
+            .start("main.main", None)
+            .expect_err("private entry should fail");
+        assert_eq!(error.code, "ENGINE_ENTRY_SCRIPT_PRIVATE");
+    }
+
+    #[test]
     pub(super) fn start_rejects_defs_global_initializer_type_mismatch() {
         let mut engine = engine_from_sources(map(&[
             (
@@ -816,6 +837,7 @@ mod lifecycle_tests {
                 namespace: "shared".to_string(),
                 name: "hp".to_string(),
                 qualified_name: "shared.hp".to_string(),
+                access: AccessLevel::Private,
                 r#type: ScriptType::Primitive {
                     name: "int".to_string(),
                 },

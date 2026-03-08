@@ -2,6 +2,50 @@ use super::lifecycle::{CompletionKind, RuntimeFrame};
 use super::*;
 
 impl ScriptLangEngine {
+    fn resolve_current_module_name(&self) -> Option<String> {
+        self.resolve_current_script_name()
+            .and_then(|current_script_name| self.scripts.get(&current_script_name).cloned())
+            .and_then(|script| script.module_name)
+    }
+
+    fn validate_script_access_from_current(
+        &self,
+        target_script_name: &str,
+        target: &ScriptIr,
+    ) -> Result<(), ScriptLangError> {
+        if target.access != AccessLevel::Private {
+            return Ok(());
+        }
+        let Some(target_module_name) = target.module_name.as_deref() else {
+            return Err(ScriptLangError::new(
+                "ENGINE_SCRIPT_ACCESS_DENIED",
+                format!(
+                    "Script \"{}\" is private and cannot be called from current context.",
+                    target_script_name
+                ),
+            ));
+        };
+        let Some(current_module_name) = self.resolve_current_module_name() else {
+            return Err(ScriptLangError::new(
+                "ENGINE_SCRIPT_ACCESS_DENIED",
+                format!(
+                    "Script \"{}\" is private and cannot be called from current context.",
+                    target_script_name
+                ),
+            ));
+        };
+        if current_module_name != target_module_name {
+            return Err(ScriptLangError::new(
+                "ENGINE_SCRIPT_ACCESS_DENIED",
+                format!(
+                    "Script \"{}\" is private and cannot be called from current context.",
+                    target_script_name
+                ),
+            ));
+        }
+        Ok(())
+    }
+
     fn resolve_target_script(
         &mut self,
         template: &str,
@@ -14,11 +58,7 @@ impl ScriptLangEngine {
             return Err(ScriptLangError::new(missing_code, missing_message));
         }
         if !target_script.contains('.') {
-            if let Some(module_name) = self
-                .resolve_current_script_name()
-                .and_then(|current_script_name| self.scripts.get(&current_script_name).cloned())
-                .and_then(|script| script.module_name)
-            {
+            if let Some(module_name) = self.resolve_current_module_name() {
                 target_script = format!("{}.{}", module_name, target_script);
             }
         }
@@ -93,6 +133,7 @@ impl ScriptLangEngine {
                 format!("Call target script \"{}\" not found.", target_script),
             ));
         };
+        self.validate_script_access_from_current(&target_script, &target)?;
 
         let mut arg_values = BTreeMap::new();
         let mut ref_bindings = BTreeMap::new();
@@ -186,6 +227,7 @@ impl ScriptLangEngine {
                     format!("Return target script \"{}\" not found.", target_name),
                 ));
             };
+            self.validate_script_access_from_current(&target_name, &target)?;
 
             for (index, arg) in args.iter().enumerate() {
                 let Some(param) = target.params.get(index) else {
@@ -305,7 +347,7 @@ mod callstack_tests {
                 r#"
     <!-- include: greeting.script.xml -->
     <script name="main">
-      <var name="nextScene" type="string">"greeting.greeting"</var>
+      <temp name="nextScene" type="string">"greeting.greeting"</temp>
       <call script="${nextScene}"/>
     </script>
     "#,
@@ -337,7 +379,7 @@ mod callstack_tests {
 
         let mut call_empty_target = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><var name="dst" type="string">""</var><call script="${dst}"/></script>"#,
+            r#"<script name="main"><temp name="dst" type="string">""</temp><call script="${dst}"/></script>"#,
         )]));
         call_empty_target.start("main", None).expect("start");
         let error = call_empty_target
@@ -361,7 +403,7 @@ mod callstack_tests {
                 r#"
     <!-- include: callee.script.xml -->
     <script name="main">
-      <var name="hp" type="int">1</var>
+      <temp name="hp" type="int">1</temp>
       <call script="callee.callee" args="hp"/>
     </script>
     "#,
@@ -389,7 +431,7 @@ mod callstack_tests {
 
         let mut return_empty_target = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><var name="dst" type="string">""</var><return script="${dst}"/></script>"#,
+            r#"<script name="main"><temp name="dst" type="string">""</temp><return script="${dst}"/></script>"#,
         )]));
         return_empty_target.start("main", None).expect("start");
         let error = return_empty_target
@@ -764,7 +806,7 @@ mod callstack_tests {
                 r#"
     <!-- include: next.script.xml -->
     <script name="main">
-      <var name="nextScene" type="string">"next.next"</var>
+      <temp name="nextScene" type="string">"next.next"</temp>
       <return script="${nextScene}"/>
     </script>
     "#,
@@ -799,7 +841,7 @@ mod callstack_tests {
                 r#"
     <!-- include: callee.script.xml -->
     <script name="main">
-      <var name="x" type="int">1</var>
+      <temp name="x" type="int">1</temp>
       <call script="callee.callee" args="ref:x"/>
     </script>
     "#,
@@ -906,7 +948,7 @@ mod callstack_tests {
                 "main.script.xml",
                 r#"
     <script name="main">
-      <var name="x" type="int">1</var>
+      <temp name="x" type="int">1</temp>
       <code>x = x + game.score;</code>
       <text>${x}</text>
     </script>
@@ -1333,8 +1375,8 @@ mod callstack_tests {
                 r#"
 <!-- include: bump.script.xml -->
 <script name="main">
-  <var name="arr" type="int[]">[10, 20, 30]</var>
-  <var name="idx" type="int">0</var>
+  <temp name="arr" type="int[]">[10, 20, 30]</temp>
+  <temp name="idx" type="int">0</temp>
   <call script="bump.bump" args="ref:idx"/>
   <text>${arr[idx]}</text>
 </script>
@@ -1361,8 +1403,8 @@ mod callstack_tests {
         let mut engine = engine_from_sources(map(&[(
             "battle.module.xml",
             r#"
-<module name="battle">
-  <script name="main"><var name="cmd" type="string">""</var><input var="cmd" text="go"/></script>
+<module name="battle" default_access="public">
+  <script name="main"><temp name="cmd" type="string">""</temp><input var="cmd" text="go"/></script>
   <script name="next"><text>x</text></script>
 </module>
 "#,
@@ -1386,7 +1428,7 @@ mod callstack_tests {
 
         let mut plain_engine = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><var name="cmd" type="string">""</var><input var="cmd" text="go"/></script>"#,
+            r#"<script name="main"><temp name="cmd" type="string">""</temp><input var="cmd" text="go"/></script>"#,
         )]));
         plain_engine.start("main.main", None).expect("start");
         let plain = plain_engine
@@ -1434,7 +1476,7 @@ mod callstack_tests {
     pub(super) fn resolve_target_script_keeps_short_name_for_alias_without_module() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><var name="cmd" type="string">""</var><input var="cmd" text="go"/></script>"#,
+            r#"<script name="main"><temp name="cmd" type="string">""</temp><input var="cmd" text="go"/></script>"#,
         )]));
         engine.start("main.main", None).expect("start");
         let group_id = engine.frames.last().expect("frame").group_id.clone();
@@ -1450,5 +1492,65 @@ mod callstack_tests {
             .resolve_target_script("next", "ERR", "err")
             .expect("alias-backed current script should keep short name");
         assert_eq!(target, "next");
+    }
+
+    #[test]
+    pub(super) fn call_access_control_enforces_private_visibility_rules() {
+        let mut same_module = engine_from_sources(map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="private">
+<script name="main" access="public"><call script="hidden"/></script>
+<script name="hidden"><text>ok</text></script>
+</module>"#,
+        )]));
+        same_module.start("main.main", None).expect("start");
+        let output = same_module
+            .next_output()
+            .expect("private sibling call should pass");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "ok"));
+
+        let mut cross_module = engine_from_sources(map(&[
+            (
+                "shared.xml",
+                r#"<module name="shared"><script name="hidden"><text>hidden</text></script></module>"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<!-- include: shared.xml -->
+<module name="main" default_access="public">
+<script name="main"><call script="shared.hidden"/></script>
+</module>
+"#,
+            ),
+        ]));
+        cross_module.start("main.main", None).expect("start");
+        let cross_module_error = cross_module
+            .next_output()
+            .expect_err("cross-module private call should fail");
+        assert_eq!(cross_module_error.code, "ENGINE_SCRIPT_ACCESS_DENIED");
+
+        let mut dynamic_cross_module = engine_from_sources(map(&[
+            (
+                "shared.xml",
+                r#"<module name="shared"><script name="hidden"><text>hidden</text></script></module>"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<!-- include: shared.xml -->
+<module name="main" default_access="public">
+<script name="main"><call script="${'shared.hidden'}"/></script>
+</module>
+"#,
+            ),
+        ]));
+        dynamic_cross_module
+            .start("main.main", None)
+            .expect("start");
+        let dynamic_error = dynamic_cross_module
+            .next_output()
+            .expect_err("dynamic cross-module private call should fail");
+        assert_eq!(dynamic_error.code, "ENGINE_SCRIPT_ACCESS_DENIED");
     }
 }

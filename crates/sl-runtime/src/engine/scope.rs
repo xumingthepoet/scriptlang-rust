@@ -196,8 +196,8 @@ mod scope_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="x" type="int">1</var>
-      <var name="x" type="int">2</var>
+      <temp name="x" type="int">1</temp>
+      <temp name="x" type="int">2</temp>
     </script>
     "#,
         )]));
@@ -209,7 +209,7 @@ mod scope_tests {
 
         let mut bad_type = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><var name="x" type="int">"str"</var></script>"#,
+            r#"<script name="main"><temp name="x" type="int">"str"</temp></script>"#,
         )]));
         bad_type.start("main", None).expect("start");
         let error = bad_type
@@ -235,7 +235,7 @@ mod scope_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="x" type="int">1</var>
+      <temp name="x" type="int">1</temp>
       <code>x.value = 1;</code>
     </script>
     "#,
@@ -335,11 +335,11 @@ mod scope_tests {
             r#"
 <script name="main">
   <group>
-    <var name="same" type="int">1</var>
+    <temp name="same" type="int">1</temp>
     <text>${same}</text>
   </group>
   <group>
-    <var name="same" type="int">2</var>
+    <temp name="same" type="int">2</temp>
     <text>${same}</text>
   </group>
 </script>
@@ -437,7 +437,7 @@ mod scope_tests {
                 r#"
 <!-- include: shared.defs.xml -->
 <script name="main">
-  <var name="hp" type="int">1</var>
+  <temp name="hp" type="int">1</temp>
   <code>hp = hp + 1; shared.hp = shared.hp + 5;</code>
   <text>${hp}</text>
   <text>${shared.hp}</text>

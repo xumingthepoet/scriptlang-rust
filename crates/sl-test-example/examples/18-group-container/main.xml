@@ -1,11 +1,11 @@
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
   <group>
-    <var name="title" type="string">"Knight"</var>
+    <temp name="title" type="string">"Knight"</temp>
     <text>In group: ${title}</text>
   </group>
   <group>
-    <var name="title" type="string">"Mage"</var>
+    <temp name="title" type="string">"Mage"</temp>
     <text>In group: ${title}</text>
   </group>
 </script>

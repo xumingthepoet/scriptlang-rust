@@ -1,4 +1,4 @@
-<module name="victory">
+<module name="victory" default_access="public">
 <script name="victory">
   <text>Ending: Victory</text>
   <text>

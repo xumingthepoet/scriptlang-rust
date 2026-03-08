@@ -6,6 +6,14 @@ use crate::value::SlValue;
 
 pub const COMPILED_PROJECT_SCHEMA: &str = "compiled-project";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AccessLevel {
+    Public,
+    #[default]
+    Private,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceLocation {
     pub line: usize,
@@ -59,6 +67,8 @@ pub struct DefsGlobalVarDecl {
     pub namespace: String,
     pub name: String,
     pub qualified_name: String,
+    #[serde(default)]
+    pub access: AccessLevel,
     pub r#type: ScriptType,
     pub initial_value_expr: Option<String>,
     pub location: SourceSpan,
@@ -230,6 +240,8 @@ pub struct ImplicitGroup {
 pub struct ScriptIr {
     pub script_path: String,
     pub script_name: String,
+    #[serde(default)]
+    pub access: AccessLevel,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub module_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

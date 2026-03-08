@@ -731,7 +731,7 @@ mod eval_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="hp" type="int">1</var>
+      <temp name="hp" type="int">1</temp>
       <input var="hp" text="bad"/>
     </script>
     "#,
@@ -754,7 +754,7 @@ mod eval_tests {
 
         let mut random_bad = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><var name="x" type="int">random(0)</var></script>"#,
+            r#"<script name="main"><temp name="x" type="int">random(0)</temp></script>"#,
         )]));
         random_bad.start("main", None).expect("start");
         let error = random_bad.next_output().expect_err("random(0) should fail");
@@ -764,7 +764,7 @@ mod eval_tests {
             "main.script.xml",
             r#"
 <script name="main">
-  <var name="count" type="int">1</var>
+  <temp name="count" type="int">1</temp>
   <code>count = count + 1;</code>
 </script>
 "#,
@@ -797,8 +797,8 @@ mod eval_tests {
             "main.script.xml",
             r#"
 <script name="main">
-  <var name="hp" type="int">1</var>
-  <var name="name" type="string">"Rin"</var>
+  <temp name="hp" type="int">1</temp>
+  <temp name="name" type="string">"Rin"</temp>
   <if when="hp LTE 1 AND name == 'Rin'">
     <code>name = "Win";</code>
   </if>
@@ -822,7 +822,7 @@ mod eval_tests {
 
         let mut legacy_logic = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><var name="hp" type="int">1</var><if when="hp > 0 &amp;&amp; true"><text>x</text></if></script>"#,
+            r#"<script name="main"><temp name="hp" type="int">1</temp><if when="hp > 0 &amp;&amp; true"><text>x</text></if></script>"#,
         )]));
         legacy_logic.start("main", None).expect("start");
         let error = legacy_logic
@@ -832,7 +832,7 @@ mod eval_tests {
 
         let mut legacy_quote = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><var name="name" type="string">"Rin"</var><if when="name == &quot;Rin&quot;"><text>x</text></if></script>"#,
+            r#"<script name="main"><temp name="name" type="string">"Rin"</temp><if when="name == &quot;Rin&quot;"><text>x</text></if></script>"#,
         )]));
         legacy_quote.start("main", None).expect("start");
         let error = legacy_quote
@@ -1045,7 +1045,7 @@ mod eval_tests {
             "main.script.xml",
             r#"
 <script name="main">
-  <var name="game" type="int">1</var>
+  <temp name="game" type="int">1</temp>
   <code>game = game + 1;</code>
   <text>${game}</text>
 </script>
@@ -1202,6 +1202,7 @@ mod eval_tests {
                 namespace: "other".to_string(),
                 name: "hp".to_string(),
                 qualified_name: "other.hp".to_string(),
+                access: AccessLevel::Private,
                 r#type: ScriptType::Primitive {
                     name: "int".to_string(),
                 },
@@ -1223,6 +1224,7 @@ mod eval_tests {
                     namespace: "shared".to_string(),
                     name: "bad".to_string(),
                     qualified_name: "bad".to_string(),
+                    access: AccessLevel::Private,
                     r#type: ScriptType::Primitive {
                         name: "int".to_string(),
                     },
@@ -1236,6 +1238,7 @@ mod eval_tests {
                     namespace: "shared".to_string(),
                     name: "ok".to_string(),
                     qualified_name: "shared.ok".to_string(),
+                    access: AccessLevel::Private,
                     r#type: ScriptType::Primitive {
                         name: "int".to_string(),
                     },
@@ -1307,7 +1310,7 @@ mod eval_tests {
         let files = map(&[(
             "main.xml",
             r#"
-<module name="main">
+<module name="main" default_access="public">
   <var name="hp" type="int">7</var>
   <script name="main">
     <code>hp = hp + 1;</code>
@@ -1328,7 +1331,7 @@ mod eval_tests {
         let mismatch_files = map(&[(
             "main.xml",
             r#"
-<module name="main">
+<module name="main" default_access="public">
   <var name="hp" type="int">7</var>
   <script name="main">
     <code>hp = "bad";</code>
@@ -1346,7 +1349,7 @@ mod eval_tests {
         let unsupported_files = map(&[(
             "main.xml",
             r#"
-<module name="main">
+<module name="main" default_access="public">
   <var name="hp" type="int">7</var>
   <script name="main">
     <code>hp = ();</code>
@@ -1504,7 +1507,7 @@ mod eval_tests {
                     r#"
 <!-- include: shared.defs.xml -->
 <script name="main">
-  <var name="hp" type="int">1</var>
+  <temp name="hp" type="int">1</temp>
   <code>hp = shared.add_bonus(hp);</code>
   <text>${hp}</text>
 </script>
@@ -1568,7 +1571,7 @@ mod eval_tests {
 
         let mut mutable_unit = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><var name="x" type="int">1</var><code>x = ();</code></script>"#,
+            r#"<script name="main"><temp name="x" type="int">1</temp><code>x = ();</code></script>"#,
         )]));
         mutable_unit.start("main", None).expect("start");
         let error = mutable_unit
@@ -1578,7 +1581,7 @@ mod eval_tests {
 
         let mut mutable_type = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><var name="x" type="int">1</var><code>x = "bad";</code></script>"#,
+            r#"<script name="main"><temp name="x" type="int">1</temp><code>x = "bad";</code></script>"#,
         )]));
         mutable_type.start("main", None).expect("start");
         let error = mutable_type
@@ -1686,9 +1689,9 @@ mod eval_tests {
             map(&[(
                 "main.xml",
                 r#"
-<module name="main">
+<module name="main" default_access="public">
   <script name="main">
-    <var name="game" type="int">1</var>
+    <temp name="game" type="int">1</temp>
     <code>game = game + 1;</code>
     <text>${game}</text>
   </script>

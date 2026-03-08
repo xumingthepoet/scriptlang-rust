@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "sl-tool-case",
+  "entryScript": "main.main",
+  "actions": [],
+  "expectedEvents": [
+    { "kind": "text", "text": "private sibling ok" },
+    { "kind": "text", "text": "public import ok" },
+    { "kind": "end" }
+  ]
+}

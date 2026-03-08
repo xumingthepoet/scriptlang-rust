@@ -202,15 +202,17 @@ pub(crate) fn resolve_type_expr_in_namespace(
 pub(crate) fn parse_type_declaration_node(
     node: &XmlElementNode,
 ) -> Result<ParsedTypeDecl, ScriptLangError> {
-    parse_type_declaration_node_with_namespace(node, "defs")
+    parse_type_declaration_node_with_namespace(node, "defs", AccessLevel::Private)
 }
 
 pub(crate) fn parse_type_declaration_node_with_namespace(
     node: &XmlElementNode,
     namespace: &str,
+    default_access: AccessLevel,
 ) -> Result<ParsedTypeDecl, ScriptLangError> {
     let name = get_required_non_empty_attr(node, "name")?;
     assert_name_not_reserved(&name, "type", node.location.clone())?;
+    let access = parse_access_attr(node, "access", default_access)?;
 
     let mut fields = Vec::new();
     let mut seen = HashSet::new();
@@ -247,6 +249,7 @@ pub(crate) fn parse_type_declaration_node_with_namespace(
     Ok(ParsedTypeDecl {
         name,
         qualified_name,
+        access,
         fields,
         location: node.location.clone(),
     })
@@ -256,15 +259,17 @@ pub(crate) fn parse_type_declaration_node_with_namespace(
 pub(crate) fn parse_function_declaration_node(
     node: &XmlElementNode,
 ) -> Result<ParsedFunctionDecl, ScriptLangError> {
-    parse_function_declaration_node_with_namespace(node, "defs")
+    parse_function_declaration_node_with_namespace(node, "defs", AccessLevel::Private)
 }
 
 pub(crate) fn parse_function_declaration_node_with_namespace(
     node: &XmlElementNode,
     namespace: &str,
+    default_access: AccessLevel,
 ) -> Result<ParsedFunctionDecl, ScriptLangError> {
     let name = get_required_non_empty_attr(node, "name")?;
     assert_name_not_reserved(&name, "function", node.location.clone())?;
+    let access = parse_access_attr(node, "access", default_access)?;
 
     let params = parse_function_args(node)?;
     let return_binding = parse_function_return(node)?;
@@ -274,6 +279,7 @@ pub(crate) fn parse_function_declaration_node_with_namespace(
     Ok(ParsedFunctionDecl {
         name,
         qualified_name,
+        access,
         params,
         return_binding,
         code,
@@ -305,6 +311,7 @@ mod type_expr_tests {
             ParsedTypeDecl {
                 name: "Obj".to_string(),
                 qualified_name: "Obj".to_string(),
+                access: AccessLevel::Private,
                 fields: vec![ParsedTypeFieldDecl {
                     name: "n".to_string(),
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),

@@ -73,22 +73,41 @@ fn resolve_entry_script(
     explicit: Option<String>,
 ) -> Result<String, ScriptLangError> {
     if let Some(entry) = explicit {
-        if !scripts.contains_key(&entry) {
+        let Some(script) = scripts.get(&entry) else {
             return Err(ScriptLangError::new(
                 "ARTIFACT_ENTRY_SCRIPT_NOT_FOUND",
                 format!("Entry script \"{}\" is not registered.", entry),
             ));
-        }
+        };
+        validate_entry_script_access(script, &entry)?;
         return Ok(entry);
     }
 
     if scripts.contains_key("main.main") {
-        return Ok("main.main".to_string());
+        let entry = "main.main".to_string();
+        let script = scripts
+            .get(&entry)
+            .expect("main.main existence should be checked before retrieval");
+        validate_entry_script_access(script, &entry)?;
+        return Ok(entry);
     }
 
     Err(ScriptLangError::new(
         "ARTIFACT_ENTRY_MAIN_NOT_FOUND",
         "Expected script with name=\"main.main\" as default entry.",
+    ))
+}
+
+fn validate_entry_script_access(script: &ScriptIr, entry: &str) -> Result<(), ScriptLangError> {
+    if script.access != AccessLevel::Private {
+        return Ok(());
+    }
+    Err(ScriptLangError::new(
+        "ARTIFACT_ENTRY_SCRIPT_PRIVATE",
+        format!(
+            "Entry script \"{}\" is private and cannot be started by host.",
+            entry
+        ),
     ))
 }
 
@@ -110,7 +129,7 @@ mod artifact_tests {
     fn compile_artifact_from_xml_map_builds_v1_artifact() {
         let files = compiler_test_support::map(&[(
             "main.xml",
-            r#"<module name="main">
+            r#"<module name="main" default_access="public">
 <script name="main"><text>Hello</text></script>
 </module>"#,
         )]);
@@ -126,7 +145,7 @@ mod artifact_tests {
     fn compile_artifact_from_xml_map_validates_entry_script() {
         let files = compiler_test_support::map(&[(
             "main.xml",
-            r#"<module name="main">
+            r#"<module name="main" default_access="public">
 <script name="main"><text>Hello</text></script>
 </module>"#,
         )]);
@@ -141,13 +160,13 @@ mod artifact_tests {
         let files = compiler_test_support::map(&[
             (
                 "main.xml",
-                r#"<module name="main">
+                r#"<module name="main" default_access="public">
 <script name="main"><text>Main</text></script>
 </module>"#,
             ),
             (
                 "alt.xml",
-                r#"<module name="alt">
+                r#"<module name="alt" default_access="public">
 <script name="alt"><text>Alt</text></script>
 </module>"#,
             ),
@@ -158,13 +177,41 @@ mod artifact_tests {
 
         let no_main = compiler_test_support::map(&[(
             "alt.xml",
-            r#"<module name="alt">
+            r#"<module name="alt" default_access="public">
 <script name="alt"><text>Alt</text></script>
 </module>"#,
         )]);
         let error = compile_artifact_from_xml_map(&no_main, None)
             .expect_err("missing default main should fail");
         assert_eq!(error.code, "ARTIFACT_ENTRY_MAIN_NOT_FOUND");
+    }
+
+    #[test]
+    fn compile_artifact_from_xml_map_rejects_private_entry_script() {
+        let private_default = compiler_test_support::map(&[(
+            "main.xml",
+            r#"<module name="main">
+<script name="main"><text>Main</text></script>
+</module>"#,
+        )]);
+        let private_default_error = compile_artifact_from_xml_map(&private_default, None)
+            .expect_err("private default entry should fail");
+        assert_eq!(private_default_error.code, "ARTIFACT_ENTRY_SCRIPT_PRIVATE");
+
+        let private_explicit = compiler_test_support::map(&[
+            (
+                "main.xml",
+                r#"<module name="main" default_access="public"><script name="main"><text>Main</text></script></module>"#,
+            ),
+            (
+                "hidden.xml",
+                r#"<module name="hidden"><script name="entry"><text>Hidden</text></script></module>"#,
+            ),
+        ]);
+        let private_explicit_error =
+            compile_artifact_from_xml_map(&private_explicit, Some("hidden.entry".to_string()))
+                .expect_err("private explicit entry should fail");
+        assert_eq!(private_explicit_error.code, "ARTIFACT_ENTRY_SCRIPT_PRIVATE");
     }
 
     #[test]
@@ -179,7 +226,7 @@ mod artifact_tests {
     fn write_and_read_artifact_json_roundtrip() {
         let files = compiler_test_support::map(&[(
             "main.xml",
-            r#"<module name="main">
+            r#"<module name="main" default_access="public">
 <script name="main"><text>Hello</text></script>
 </module>"#,
         )]);
@@ -197,7 +244,7 @@ mod artifact_tests {
     fn write_and_read_artifact_json_reports_io_and_schema_errors() {
         let files = compiler_test_support::map(&[(
             "main.xml",
-            r#"<module name="main">
+            r#"<module name="main" default_access="public">
 <script name="main"><text>Hello</text></script>
 </module>"#,
         )]);

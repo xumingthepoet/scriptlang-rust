@@ -1,8 +1,8 @@
 <!-- import shared from shared.xml -->
 <!-- import battle from battle.xml -->
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="hp" type="int">10</var>
+  <temp name="hp" type="int">10</temp>
   <text>main.local.before=${hp}</text>
   <text>main.global.before=${shared.hp}</text>
   <call script="battle.battle"/>

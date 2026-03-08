@@ -1,15 +1,15 @@
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
   <text>Scenario 09: random builtin</text>
-  <var name="weatherRoll" type="int">random(100)</var>
+  <temp name="weatherRoll" type="int">random(100)</temp>
   <text>weather roll=${weatherRoll}</text>
   <choice text="Pick action (rng=${random(10)})">
     <option text="Attack (rng=${random(6)})">
-      <var name="damage" type="int">random(4) + 1</var>
+      <temp name="damage" type="int">random(4) + 1</temp>
       <text>attack damage=${damage}</text>
     </option>
     <option text="Defend (rng=${random(6)})">
-      <var name="guard" type="int">random(3) + 1</var>
+      <temp name="guard" type="int">random(3) + 1</temp>
       <text>guard=${guard}</text>
     </option>
   </choice>

@@ -1,5 +1,5 @@
 <!-- import next from next.xml -->
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
   <text>jumping</text>
   <return script="next.next"/>

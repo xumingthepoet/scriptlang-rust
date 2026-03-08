@@ -235,7 +235,7 @@ mod tests {
 <!-- include:   nested/b.xml   -->
 <!-- include: assets/ -->
 <!-- include:    -->
-<module name="main"></module>
+<module name="main" default_access="public"></module>
 "#;
 
         let includes = parse_legacy_include_directives(source);

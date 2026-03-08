@@ -1,7 +1,7 @@
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="i" type="int">0</var>
-  <var name="times" type="int">3</var>
+  <temp name="i" type="int">0</temp>
+  <temp name="times" type="int">3</temp>
 
   <loop times="times">
     <code>i = i + 1;</code>

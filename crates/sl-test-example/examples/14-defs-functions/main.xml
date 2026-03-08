@@ -1,8 +1,8 @@
 <!-- import shared from shared.xml -->
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="base" type="int">2</var>
-  <var name="obj" type="shared.CustomType">#{value: 5}</var>
+  <temp name="base" type="int">2</temp>
+  <temp name="obj" type="shared.CustomType">#{value: 5}</temp>
   <code>base = shared.addWithGameBonus(base, obj);</code>
   <text>Result ${shared.addWithGameBonus(base, obj)}</text>
 </script>

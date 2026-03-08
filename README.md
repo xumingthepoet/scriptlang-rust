@@ -63,10 +63,14 @@ All code must be written with testability in mind:
 ## Module Sources
 - XML source files now use plain `*.xml` names and must have a `<module name="...">` root.
 - `<module>` may contain `<type>`, `<function>`, `<var>`, and multiple `<script>` nodes.
+- `<module default_access="public|private">` controls default visibility for module children; default is `private`.
+- `<type>/<function>/<var>/<script>` support `access="public|private"`; default follows `default_access`.
 - Legacy `*.script.xml`, `*.defs.xml`, and `*.module.xml` inputs are rejected; migrate them to `<module>` in `name.xml`.
 - Module scripts compile to qualified names like `battle.main`; host entry/call/return targets should use that qualified form.
-- Default host entry is `main.main`.
+- Host entry script must be `public`; private scripts cannot be used as host entry.
 - Inside the same module, scripts may reference sibling scripts with short names (`<call script="next"/>`), which resolves to the qualified module target.
+- Script-local variables now use `<temp ...>...</temp>` (legacy `<script><var>` is removed).
+- Import visibility is public-only across modules; private members remain accessible inside their own module.
 - Module `<var>` is the only global-variable source in XML and remains writable, snapshotted, and visible through import-closure rules.
 
 ## Module Globals (`<module><var>`)
@@ -156,6 +160,6 @@ Each example directory also carries a `testcase.json` consumed by `sl-test-examp
 ## User Pitfalls And Guardrails
 - ScriptLang expr syntax uses `LT`, `LTE`, and `AND` instead of `<`, `<=`, and `&&`.
 - Type visibility is per import-closure: each module must import the other `*.xml` sources it depends on, directly or through directory imports.
-- In XML attributes, ScriptLang expr strings use single quotes like `'Rin'`; in `<code>`, `<function>`, and `<var>...</var>` initializer bodies, use double quotes like `"Rin"`.
+- In XML attributes, ScriptLang expr strings use single quotes like `'Rin'`; in `<code>`, `<function>`, `<var>...</var>`, and `<temp>...</temp>` bodies, use double quotes like `"Rin"`.
 - `Data type incorrect: f64 (expecting i64)` in array indexing is treated as a runtime type-stability bug; prioritize runtime fix/upgrade over user-side workarounds.
 - Validation should be `compile --dry-run` + `replay --rand "<fixed-seq>"` together; compile-only is not enough for runtime-path safety.

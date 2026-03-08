@@ -1,4 +1,4 @@
-<module name="next">
+<module name="next" default_access="public">
 <script name="next">
   <text>arrived</text>
 </script>

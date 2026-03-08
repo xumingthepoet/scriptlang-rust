@@ -21,6 +21,7 @@ pub(crate) fn compile_script(
     let CompileScriptOptions {
         script_path,
         root,
+        script_access,
         qualified_script_name,
         module_name,
         visible_types,
@@ -75,6 +76,7 @@ pub(crate) fn compile_script(
     Ok(ScriptIr {
         script_path: script_path.to_string(),
         script_name,
+        access: script_access,
         module_name: module_name.map(|value| value.to_string()),
         local_script_name: module_name.map(|_| local_script_name.clone()),
         params,
@@ -235,7 +237,7 @@ pub(crate) fn compile_group_nodes(
                     location: child.location.clone(),
                 }
             }
-            "var" => {
+            "temp" => {
                 let declaration = parse_var_declaration(child, visible_types)?;
                 local_var_types.insert(declaration.name.clone(), declaration.r#type.clone());
                 ScriptNode::Var {
@@ -623,7 +625,7 @@ pub(crate) fn compile_group_nodes(
                     child.location.clone(),
                 ))
             }
-            removed @ ("vars" | "step" | "set" | "push" | "remove") => {
+            removed @ ("var" | "vars" | "step" | "set" | "push" | "remove") => {
                 return Err(ScriptLangError::with_span(
                     "XML_REMOVED_NODE",
                     format!("<{}> is removed in ScriptLang.", removed),
@@ -675,7 +677,7 @@ pub(crate) fn parse_var_declaration(
     if has_attr(node, "value") {
         return Err(ScriptLangError::with_span(
             "XML_ATTR_NOT_ALLOWED",
-            "Attribute \"value\" is not allowed on <var>. Use inline content instead.",
+            "Attribute \"value\" is not allowed on <temp>. Use inline content instead.",
             node.location.clone(),
         ));
     }
@@ -684,7 +686,7 @@ pub(crate) fn parse_var_declaration(
         return Err(ScriptLangError::with_span(
             "XML_VAR_CHILD_INVALID",
             format!(
-                "<var> cannot contain child element <{}>. Use inline expression text only.",
+                "<temp> cannot contain child element <{}>. Use inline expression text only.",
                 child.name
             ),
             child.location.clone(),
@@ -1176,7 +1178,7 @@ mod script_compile_tests {
                     &[],
                     vec![
                         XmlNode::Element(xml_element(
-                            "var",
+                            "temp",
                             &[("name", "name"), ("type", "string")],
                             vec![xml_text("\"Rin\"")],
                         )),
@@ -1636,7 +1638,7 @@ mod script_compile_tests {
                             "main.xml",
                             r#"
     <!-- include: x.xml -->
-    <module name="main">
+    <module name="main" default_access="public">
 <script name="main"><text>x</text></script>
 </module>
     "#,
@@ -1655,7 +1657,7 @@ mod script_compile_tests {
                             "main.xml",
                             r#"
     <!-- include: x.xml -->
-    <module name="main">
+    <module name="main" default_access="public">
 <script name="main"><text>x</text></script>
 </module>
     "#,
@@ -1674,7 +1676,7 @@ mod script_compile_tests {
                             "main.xml",
                             r#"
     <!-- include: x.xml -->
-    <module name="main">
+    <module name="main" default_access="public">
 <script name="main"><text>x</text></script>
 </module>
     "#,
@@ -1693,7 +1695,7 @@ mod script_compile_tests {
                             "main.xml",
                             r#"
     <!-- include: x.xml -->
-    <module name="main">
+    <module name="main" default_access="public">
 <script name="main"><text>x</text></script>
 </module>
     "#,
@@ -1705,7 +1707,7 @@ mod script_compile_tests {
                     "unknown custom type in var",
                     map(&[(
                         "main.xml",
-                        "<script name=\"main\"><var name=\"x\" type=\"Unknown\"/></script>",
+                        "<script name=\"main\"><temp name=\"x\" type=\"Unknown\"/></script>",
                     )]),
                     "TYPE_UNKNOWN",
                 ),
@@ -1953,7 +1955,7 @@ mod script_compile_tests {
                     "input text missing",
                     map(&[(
                         "main.xml",
-                        "<script name=\"main\"><var name=\"n\" type=\"string\">\"\"</var><input var=\"n\"/></script>",
+                        "<script name=\"main\"><temp name=\"n\" type=\"string\">\"\"</temp><input var=\"n\"/></script>",
                     )]),
                     "XML_MISSING_ATTR",
                 ),
@@ -1977,7 +1979,7 @@ mod script_compile_tests {
                     "var missing name",
                     map(&[(
                         "main.xml",
-                        "<script name=\"main\"><var type=\"int\">1</var></script>",
+                        "<script name=\"main\"><temp type=\"int\">1</temp></script>",
                     )]),
                     "XML_MISSING_ATTR",
                 ),
@@ -1985,7 +1987,7 @@ mod script_compile_tests {
                     "var missing type",
                     map(&[(
                         "main.xml",
-                        "<script name=\"main\"><var name=\"x\">1</var></script>",
+                        "<script name=\"main\"><temp name=\"x\">1</temp></script>",
                     )]),
                     "XML_MISSING_ATTR",
                 ),
@@ -1993,7 +1995,7 @@ mod script_compile_tests {
                     "var type parse error",
                     map(&[(
                         "main.xml",
-                        "<script name=\"main\"><var name=\"x\" type=\"#{ }\">1</var></script>",
+                        "<script name=\"main\"><temp name=\"x\" type=\"#{ }\">1</temp></script>",
                     )]),
                     "TYPE_PARSE_ERROR",
                 ),
@@ -2076,6 +2078,7 @@ mod script_compile_tests {
             ParsedTypeDecl {
                 name: "A".to_string(),
                 qualified_name: "A".to_string(),
+                access: AccessLevel::Private,
                 fields: vec![field.clone()],
                 location: span.clone(),
             },
@@ -2100,6 +2103,7 @@ mod script_compile_tests {
             ParsedTypeDecl {
                 name: "Dup".to_string(),
                 qualified_name: "Dup".to_string(),
+                access: AccessLevel::Private,
                 fields: vec![field.clone(), field],
                 location: span.clone(),
             },
@@ -2149,6 +2153,7 @@ mod script_compile_tests {
         let compile_root_error = compile_script(CompileScriptOptions {
             script_path: "x.xml",
             root: &non_script_root,
+            script_access: AccessLevel::Private,
             qualified_script_name: None,
             module_name: None,
             visible_types: &BTreeMap::new(),
@@ -2162,6 +2167,7 @@ mod script_compile_tests {
         let missing_name_error = compile_script(CompileScriptOptions {
             script_path: "x.xml",
             root: &missing_name_root,
+            script_access: AccessLevel::Private,
             qualified_script_name: None,
             module_name: None,
             visible_types: &BTreeMap::new(),
@@ -2175,6 +2181,7 @@ mod script_compile_tests {
         let reserved_name_error = compile_script(CompileScriptOptions {
             script_path: "x.xml",
             root: &reserved_name_root,
+            script_access: AccessLevel::Private,
             qualified_script_name: None,
             module_name: None,
             visible_types: &BTreeMap::new(),
@@ -2188,7 +2195,7 @@ mod script_compile_tests {
             "script",
             &[("name", "main")],
             vec![XmlNode::Element(xml_element(
-                "var",
+                "temp",
                 &[("name", "__bad"), ("type", "int")],
                 vec![xml_text("1")],
             ))],
@@ -2196,6 +2203,7 @@ mod script_compile_tests {
         let reserved_var_error = compile_script(CompileScriptOptions {
             script_path: "x.xml",
             root: &reserved_var_root,
+            script_access: AccessLevel::Private,
             qualified_script_name: Some("x.main"),
             module_name: Some("x"),
             visible_types: &BTreeMap::new(),
@@ -2212,6 +2220,7 @@ mod script_compile_tests {
         let no_module_ir = compile_script(CompileScriptOptions {
             script_path: "x.xml",
             root: &no_module_root,
+            script_access: AccessLevel::Private,
             qualified_script_name: Some("main"),
             module_name: None,
             visible_types: &BTreeMap::new(),
@@ -2229,7 +2238,7 @@ mod script_compile_tests {
         let rich_script = map(&[(
             "main.xml",
             r#"
-    <module name="main">
+    <module name="main" default_access="public">
     <script name="main">
       <if when="true">
         <text>A</text>
@@ -2266,7 +2275,7 @@ mod script_compile_tests {
             (
                 "shared.xml",
                 r##"
-    <module name="shared">
+    <module name="shared" default_access="public">
       <type name="Obj">
         <field name="values" type="#{int[]}"/>
       </type>
@@ -2280,9 +2289,9 @@ mod script_compile_tests {
                 "main.xml",
                 r#"
 	    <!-- include: shared.xml -->
-	    <module name="main">
+	    <module name="main" default_access="public">
 	<script name="main">
-	      <var name="x" type="shared.Obj"/>
+	      <temp name="x" type="shared.Obj"/>
 	    </script>
 	</module>
 	    "#,
@@ -2456,7 +2465,7 @@ mod script_compile_tests {
             "main.xml",
             r#"
     <script name="main">
-      <var name="arr" type="int[]">[1,2]</var>
+      <temp name="arr" type="int[]">[1,2]</temp>
       <choice text="Pick">
         <option text="A"><text>A</text></option>
         <dynamic-options array="arr" item="it" index="i">
@@ -2602,19 +2611,19 @@ mod script_compile_tests {
 
         let mut declared = BTreeSet::new();
         collect_declared_var_names(
-            &xml_element("var", &[("name", "")], Vec::new()),
+            &xml_element("temp", &[("name", "")], Vec::new()),
             &mut declared,
         );
         assert!(declared.is_empty());
-        collect_declared_var_names(&xml_element("var", &[], Vec::new()), &mut declared);
+        collect_declared_var_names(&xml_element("temp", &[], Vec::new()), &mut declared);
         assert!(declared.is_empty());
         validate_reserved_prefix_in_user_var_declarations(&xml_element(
-            "var",
+            "temp",
             &[("name", "")],
             Vec::new(),
         ))
         .expect("empty var name should be ignored");
-        validate_reserved_prefix_in_user_var_declarations(&xml_element("var", &[], Vec::new()))
+        validate_reserved_prefix_in_user_var_declarations(&xml_element("temp", &[], Vec::new()))
             .expect("var without name should be ignored");
 
         let mut context = MacroExpansionContext {

@@ -1,6 +1,6 @@
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="i" type="int">0</var>
+  <temp name="i" type="int">0</temp>
   <while when="i  LT  6">
     <code>i = i + 1;</code>
     <if when="i == 2">

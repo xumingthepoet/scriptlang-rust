@@ -1,6 +1,6 @@
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="round" type="int">0</var>
+  <temp name="round" type="int">0</temp>
   <while when="round  LT  2">
     <choice text="Choose">
       <option text="Pick">

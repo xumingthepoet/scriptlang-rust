@@ -1,6 +1,6 @@
-<module name="middle">
+<module name="middle" default_access="public">
 <script name="middle">
-  <var name="returnTarget" type="string">"end.end"</var>
+  <temp name="returnTarget" type="string">"end.end"</temp>
   <text>middle</text>
   <return script="${returnTarget}"/>
 </script>

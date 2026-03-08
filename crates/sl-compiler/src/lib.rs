@@ -5,10 +5,11 @@ pub(crate) use std::sync::OnceLock;
 pub(crate) use regex::Regex;
 pub(crate) use serde_json::Value as JsonValue;
 pub(crate) use sl_core::{
-    default_value_from_type, CallArgument, ChoiceEntry, ChoiceOption, CompiledProjectArtifact,
-    ContinueTarget, DefsGlobalVarDecl, DynamicChoiceBlock, DynamicChoiceTemplate, FunctionDecl,
-    FunctionParam, FunctionReturn, ImplicitGroup, ScriptIr, ScriptLangError, ScriptNode,
-    ScriptParam, ScriptType, SlValue, SourceSpan, VarDeclaration, COMPILED_PROJECT_SCHEMA,
+    default_value_from_type, AccessLevel, CallArgument, ChoiceEntry, ChoiceOption,
+    CompiledProjectArtifact, ContinueTarget, DefsGlobalVarDecl, DynamicChoiceBlock,
+    DynamicChoiceTemplate, FunctionDecl, FunctionParam, FunctionReturn, ImplicitGroup, ScriptIr,
+    ScriptLangError, ScriptNode, ScriptParam, ScriptType, SlValue, SourceSpan, VarDeclaration,
+    COMPILED_PROJECT_SCHEMA,
 };
 pub(crate) use sl_parser::{
     parse_import_directives, parse_legacy_include_directives, parse_xml_document, ImportDirective,
@@ -143,12 +144,15 @@ pub(crate) mod compiler_test_support {
             .and_then(|caps| caps.get(1).map(|m| m.as_str().to_string()))?;
 
         let replaced_open = if root_name == "defs" {
-            regex.replace(source, format!(r#"{prefix}<module name="{module_name}">"#))
+            regex.replace(
+                source,
+                format!(r#"{prefix}<module name="{module_name}" default_access="public">"#),
+            )
         } else {
             regex.replace(
                 source,
                 format!(
-                    r#"{prefix}<module name="{module_name}">
+                    r#"{prefix}<module name="{module_name}" default_access="public">
 <{root_name}{attrs}>"#
                 ),
             )
@@ -207,7 +211,7 @@ pub(crate) mod compiler_test_support {
 </module>
 "#,
             );
-            assert!(script.contains(r#"<module name="main">"#));
+            assert!(script.contains(r#"<module name="main" default_access="public">"#));
             assert!(script.contains(r#"<script name="main">"#));
             assert!(!script.trim_end().ends_with("</module>\n</module>"));
 
@@ -219,7 +223,7 @@ pub(crate) mod compiler_test_support {
 </module>
 "#,
             );
-            assert!(defs.contains(r#"<module name="shared">"#));
+            assert!(defs.contains(r#"<module name="shared" default_access="public">"#));
             assert!(defs.trim_end().ends_with("</module>"));
         }
 
@@ -228,7 +232,7 @@ pub(crate) mod compiler_test_support {
             let module = normalize_test_source_content(
                 r#"
 <!-- include: shared.xml -->
-<module name="main">
+<module name="main" default_access="public">
   <script name="main"/>
 </module>
 "#,

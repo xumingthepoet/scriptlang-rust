@@ -1,0 +1,8 @@
+<module name="shared" default_access="private">
+<script name="show" access="public">
+  <text>public import ok</text>
+</script>
+<script name="hide">
+  <text>private import hidden</text>
+</script>
+</module>

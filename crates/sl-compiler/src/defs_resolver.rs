@@ -68,6 +68,18 @@ fn parse_module_source(
         .map_err(|error| with_file_context(error, file_path))?;
     assert_name_not_reserved(&namespace, "module", root.location.clone())
         .map_err(|error| with_file_context(error, file_path))?;
+    if has_attr(root, "defaul_access") {
+        return Err(with_file_context(
+            ScriptLangError::with_span(
+                "XML_ATTR_NOT_ALLOWED",
+                "Attribute \"defaul_access\" is invalid. Use \"default_access\".",
+                root.location.clone(),
+            ),
+            file_path,
+        ));
+    }
+    let default_access = parse_access_attr(root, "default_access", AccessLevel::Private)
+        .map_err(|error| with_file_context(error, file_path))?;
 
     let mut type_decls = Vec::new();
     let mut function_decls = Vec::new();
@@ -77,17 +89,20 @@ fn parse_module_source(
     for child in element_children(root) {
         match child.name.as_str() {
             "type" => type_decls.push(
-                parse_type_declaration_node_with_namespace(child, &namespace)
+                parse_type_declaration_node_with_namespace(child, &namespace, default_access)
                     .map_err(|error| with_file_context(error, file_path))?,
             ),
             "function" => {
-                let function_decl =
-                    parse_function_declaration_node_with_namespace(child, &namespace)
-                        .map_err(|error| with_file_context(error, file_path))?;
+                let function_decl = parse_function_declaration_node_with_namespace(
+                    child,
+                    &namespace,
+                    default_access,
+                )
+                .map_err(|error| with_file_context(error, file_path))?;
                 function_decls.push(function_decl);
             }
             "var" => defs_global_var_decls.push(
-                parse_defs_global_var_declaration(child, &namespace)
+                parse_defs_global_var_declaration(child, &namespace, default_access)
                     .map_err(|error| with_file_context(error, file_path))?,
             ),
             "script" => {
@@ -95,8 +110,11 @@ fn parse_module_source(
                     .map_err(|error| with_file_context(error, file_path))?;
                 assert_name_not_reserved(&script_name, "script", child.location.clone())
                     .map_err(|error| with_file_context(error, file_path))?;
+                let access = parse_access_attr(child, "access", default_access)
+                    .map_err(|error| with_file_context(error, file_path))?;
                 scripts.push(ParsedModuleScript {
                     qualified_script_name: format!("{}.{}", namespace, script_name),
+                    access,
                     root: child.clone(),
                 });
             }
@@ -135,9 +153,11 @@ fn with_file_context(error: ScriptLangError, file_path: &str) -> ScriptLangError
 pub(crate) fn parse_defs_global_var_declaration(
     node: &XmlElementNode,
     namespace: &str,
+    default_access: AccessLevel,
 ) -> Result<ParsedDefsGlobalVarDecl, ScriptLangError> {
     let name = get_required_non_empty_attr(node, "name")?;
     assert_name_not_reserved(&name, "defs var", node.location.clone())?;
+    let access = parse_access_attr(node, "access", default_access)?;
 
     let type_raw = get_required_non_empty_attr(node, "type")?;
     let type_expr = parse_type_expr(&type_raw, &node.location)?;
@@ -172,6 +192,7 @@ pub(crate) fn parse_defs_global_var_declaration(
         namespace: namespace.to_string(),
         name: name.clone(),
         qualified_name: format!("{}.{}", namespace, name),
+        access,
         type_expr,
         initial_value_expr,
         location: node.location.clone(),
@@ -285,6 +306,12 @@ pub(crate) fn resolve_visible_defs(
             continue;
         };
         for decl in &defs.type_decls {
+            let is_local = local_module_name.is_some_and(|module_name| {
+                decl.qualified_name.starts_with(&format!("{module_name}."))
+            });
+            if !is_local && decl.access != AccessLevel::Public {
+                continue;
+            }
             if type_decls_map.contains_key(&decl.qualified_name) {
                 return Err(ScriptLangError::with_span(
                     "TYPE_DECL_DUPLICATE",
@@ -299,9 +326,7 @@ pub(crate) fn resolve_visible_defs(
                     .or_default()
                     .insert(decl.name.clone(), decl.qualified_name.clone());
             }
-            if local_module_name.is_some_and(|module_name| {
-                decl.qualified_name.starts_with(&format!("{module_name}."))
-            }) {
+            if is_local {
                 local_type_short_candidates
                     .entry(decl.name.clone())
                     .or_default()
@@ -354,6 +379,12 @@ pub(crate) fn resolve_visible_defs(
         };
 
         for decl in &defs.function_decls {
+            let is_local = local_module_name.is_some_and(|module_name| {
+                decl.qualified_name.starts_with(&format!("{module_name}."))
+            });
+            if !is_local && decl.access != AccessLevel::Public {
+                continue;
+            }
             if functions.contains_key(&decl.qualified_name) {
                 return Err(ScriptLangError::with_span(
                     "FUNCTION_DECL_DUPLICATE",
@@ -406,9 +437,7 @@ pub(crate) fn resolve_visible_defs(
                     location: decl.location.clone(),
                 },
             );
-            if local_module_name.is_some_and(|module_name| {
-                decl.qualified_name.starts_with(&format!("{module_name}."))
-            }) {
+            if is_local {
                 function_short_candidates
                     .entry(decl.name.clone())
                     .or_default()
@@ -442,6 +471,10 @@ pub(crate) fn resolve_visible_defs(
         };
 
         for decl in &defs.defs_global_var_decls {
+            let is_local = local_module_name == Some(decl.namespace.as_str());
+            if !is_local && decl.access != AccessLevel::Public {
+                continue;
+            }
             if defs_globals_qualified.contains_key(&decl.qualified_name) {
                 return Err(ScriptLangError::with_span(
                     "DEFS_GLOBAL_VAR_DUPLICATE",
@@ -458,6 +491,7 @@ pub(crate) fn resolve_visible_defs(
                     namespace: decl.namespace.clone(),
                     name: decl.name.clone(),
                     qualified_name: decl.qualified_name.clone(),
+                    access: decl.access,
                     r#type: resolve_type_expr_in_namespace(
                         &decl.type_expr,
                         &visible_types,
@@ -468,7 +502,7 @@ pub(crate) fn resolve_visible_defs(
                     location: decl.location.clone(),
                 },
             );
-            if local_module_name == Some(decl.namespace.as_str()) {
+            if is_local {
                 defs_global_short_candidates
                     .entry(decl.name.clone())
                     .or_default()
@@ -565,6 +599,7 @@ pub(crate) fn collect_defs_globals_for_bundle(
                     namespace: decl.namespace.clone(),
                     name: decl.name.clone(),
                     qualified_name: decl.qualified_name.clone(),
+                    access: decl.access,
                     r#type: resolve_type_expr(&decl.type_expr, &visible_types, &decl.location)?,
                     initial_value_expr: decl.initial_value_expr.clone(),
                     location: decl.location.clone(),
@@ -653,6 +688,7 @@ mod defs_resolver_tests {
             type_decls: vec![ParsedTypeDecl {
                 name: "Obj".to_string(),
                 qualified_name: "shared.Obj".to_string(),
+                access: AccessLevel::Public,
                 fields: vec![ParsedTypeFieldDecl {
                     name: "value".to_string(),
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
@@ -663,6 +699,7 @@ mod defs_resolver_tests {
             function_decls: vec![ParsedFunctionDecl {
                 name: "make".to_string(),
                 qualified_name: "shared.make".to_string(),
+                access: AccessLevel::Public,
                 params: vec![ParsedFunctionParamDecl {
                     name: "seed".to_string(),
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
@@ -700,6 +737,7 @@ mod defs_resolver_tests {
             type_decls: vec![ParsedTypeDecl {
                 name: "T".to_string(),
                 qualified_name: "shared.T".to_string(),
+                access: AccessLevel::Public,
                 fields: vec![ParsedTypeFieldDecl {
                     name: "v".to_string(),
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
@@ -731,6 +769,7 @@ mod defs_resolver_tests {
                     function_decls: vec![ParsedFunctionDecl {
                         name: "doit".to_string(),
                         qualified_name: "a.doit".to_string(),
+                        access: AccessLevel::Public,
                         params: Vec::new(),
                         return_binding: ParsedFunctionParamDecl {
                             name: "out".to_string(),
@@ -750,6 +789,7 @@ mod defs_resolver_tests {
                     function_decls: vec![ParsedFunctionDecl {
                         name: "doit".to_string(),
                         qualified_name: "b.doit".to_string(),
+                        access: AccessLevel::Public,
                         params: Vec::new(),
                         return_binding: ParsedFunctionParamDecl {
                             name: "out".to_string(),
@@ -784,6 +824,7 @@ mod defs_resolver_tests {
             namespace: namespace.to_string(),
             name: name.to_string(),
             qualified_name: format!("{}.{}", namespace, name),
+            access: AccessLevel::Public,
             type_expr: ParsedTypeExpr::Primitive("int".to_string()),
             initial_value_expr: None,
             location: span.clone(),
@@ -851,7 +892,7 @@ mod defs_resolver_tests {
             (
                 "shared.xml",
                 r#"
-<module name="shared">
+<module name="shared" default_access="public">
   <var name="a" type="int">b + 1</var>
   <var name="b" type="int">1</var>
 </module>
@@ -861,7 +902,7 @@ mod defs_resolver_tests {
                 "main.xml",
                 r#"
 <!-- include: shared.xml -->
-<module name="main">
+<module name="main" default_access="public">
 <script name="main"><text>ok</text></script>
 </module>
 "#,
@@ -879,7 +920,7 @@ mod defs_resolver_tests {
             (
                 "shared.xml",
                 r#"
-<module name="shared">
+<module name="shared" default_access="public">
   <var name="b" type="int">1</var>
   <var name="a" type="int">b + 1</var>
 </module>
@@ -889,7 +930,7 @@ mod defs_resolver_tests {
                 "main.xml",
                 r#"
 <!-- include: shared.xml -->
-<module name="main">
+<module name="main" default_access="public">
 <script name="main"><text>ok</text></script>
 </module>
 "#,
@@ -907,13 +948,13 @@ mod defs_resolver_tests {
         let files_with_value = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared"><var name="hp" type="int" value="1"/></module>"#,
+                r#"<module name="shared" default_access="public"><var name="hp" type="int" value="1"/></module>"#,
             ),
             (
                 "main.xml",
                 r#"
 <!-- include: shared.xml -->
-<module name="main">
+<module name="main" default_access="public">
 <script name="main"><text>ok</text></script>
 </module>
 "#,
@@ -926,13 +967,13 @@ mod defs_resolver_tests {
         let files_with_child = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared"><var name="hp" type="int"><text>1</text></var></module>"#,
+                r#"<module name="shared" default_access="public"><var name="hp" type="int"><text>1</text></var></module>"#,
             ),
             (
                 "main.xml",
                 r#"
 <!-- include: shared.xml -->
-<module name="main">
+<module name="main" default_access="public">
 <script name="main"><text>ok</text></script>
 </module>
 "#,
@@ -948,11 +989,11 @@ mod defs_resolver_tests {
         let duplicate_types_bundle = map(&[
             (
                 "a.xml",
-                r#"<module name="shared"><type name="T"><field name="v" type="int"/></type></module>"#,
+                r#"<module name="shared" default_access="public"><type name="T"><field name="v" type="int"/></type></module>"#,
             ),
             (
                 "b.xml",
-                r#"<module name="shared"><type name="T"><field name="v" type="int"/></type></module>"#,
+                r#"<module name="shared" default_access="public"><type name="T"><field name="v" type="int"/></type></module>"#,
             ),
         ]);
         let duplicate_types_error = compile_project_bundle_from_xml_map(&duplicate_types_bundle)
@@ -962,11 +1003,11 @@ mod defs_resolver_tests {
         let duplicate_globals_bundle = map(&[
             (
                 "a.xml",
-                r#"<module name="shared"><var name="hp" type="int">1</var></module>"#,
+                r#"<module name="shared" default_access="public"><var name="hp" type="int">1</var></module>"#,
             ),
             (
                 "b.xml",
-                r#"<module name="shared"><var name="hp" type="int">2</var></module>"#,
+                r#"<module name="shared" default_access="public"><var name="hp" type="int">2</var></module>"#,
             ),
         ]);
         let duplicate_globals_error =
@@ -977,13 +1018,13 @@ mod defs_resolver_tests {
         let empty_initializer = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared"><var name="hp" type="int"/></module>"#,
+                r#"<module name="shared" default_access="public"><var name="hp" type="int"/></module>"#,
             ),
             (
                 "main.xml",
                 r#"
 <!-- include: shared.xml -->
-<module name="main">
+<module name="main" default_access="public">
 <script name="main"><text>${shared.hp}</text></script>
 </module>
 "#,
@@ -1004,6 +1045,7 @@ mod defs_resolver_tests {
             namespace: "shared".to_string(),
             name: "hp".to_string(),
             qualified_name: "shared.hp".to_string(),
+            access: AccessLevel::Public,
             type_expr: ParsedTypeExpr::Primitive("int".to_string()),
             initial_value_expr: Some("1".to_string()),
             location: span.clone(),
@@ -1057,19 +1099,19 @@ mod defs_resolver_tests {
         let duplicate_types = map(&[
             (
                 "a.xml",
-                r#"<module name="a"><type name="T"><field name="v" type="int"/></type></module>"#,
+                r#"<module name="a" default_access="public"><type name="T"><field name="v" type="int"/></type></module>"#,
             ),
             (
                 "b.xml",
-                r#"<module name="b"><type name="T"><field name="v" type="int"/></type></module>"#,
+                r#"<module name="b" default_access="public"><type name="T"><field name="v" type="int"/></type></module>"#,
             ),
             (
                 "main.xml",
                 r#"
     <!-- include: a.xml -->
     <!-- include: b.xml -->
-    <module name="main">
-<script name="main"><var name="v" type="T"/></script>
+    <module name="main" default_access="public">
+<script name="main"><temp name="v" type="T"/></script>
 </module>
     "#,
             ),
@@ -1081,14 +1123,14 @@ mod defs_resolver_tests {
         let recursive = map(&[
             (
                 "x.xml",
-                r#"<module name="x"><type name="A"><field name="b" type="B"/></type><type name="B"><field name="a" type="A"/></type></module>"#,
+                r#"<module name="x" default_access="public"><type name="A"><field name="b" type="B"/></type><type name="B"><field name="a" type="A"/></type></module>"#,
             ),
             (
                 "main.xml",
                 r#"
     <!-- include: x.xml -->
-    <module name="main">
-<script name="main"><var name="v" type="A"/></script>
+    <module name="main" default_access="public">
+<script name="main"><temp name="v" type="A"/></script>
 </module>
     "#,
             ),
@@ -1104,7 +1146,7 @@ mod defs_resolver_tests {
         let files = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared">
+                r#"<module name="shared" default_access="public">
   <function name="add" args="int:a,int:b" return="int:result">
     result = a + b;
   </function>
@@ -1114,7 +1156,7 @@ mod defs_resolver_tests {
                 "main.xml",
                 r#"
 <!-- include: shared.xml -->
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
   <code>let x = shared.add(1, 2);</code>
   <text>${x}</text>
@@ -1131,7 +1173,7 @@ mod defs_resolver_tests {
     fn parse_defs_files_and_type_resolution_success_paths_are_covered() {
         let files = map(&[(
             "shared.xml",
-            r#"<module name="shared">
+            r#"<module name="shared" default_access="public">
   <type name="Obj"><field name="value" type="int"/></type>
   <function name="make" args="int:seed" return="Obj:ret">
     ret = #{ value: seed };
@@ -1151,7 +1193,7 @@ mod defs_resolver_tests {
     fn parse_defs_files_attaches_file_path_for_defs_errors() {
         let files = map(&[(
             "bad.xml",
-            r#"<module name="shared">
+            r#"<module name="shared" default_access="public">
   <oops/>
 </module>"#,
         )]);
@@ -1186,7 +1228,10 @@ mod defs_resolver_tests {
             .message
             .contains("In file \"missing-name.xml\":"));
 
-        let reserved_name = map(&[("reserved.xml", r#"<module name="__sl_bad"></module>"#)]);
+        let reserved_name = map(&[(
+            "reserved.xml",
+            r#"<module name="__sl_bad" default_access="public"></module>"#,
+        )]);
         let reserved_name_sources = parse_sources(&reserved_name).expect("parse sources");
         let reserved_name_error =
             parse_defs_files(&reserved_name_sources).expect_err("reserved name should fail");
@@ -1196,7 +1241,7 @@ mod defs_resolver_tests {
 
         let bad_function = map(&[(
             "bad-function.xml",
-            r#"<module name="shared">
+            r#"<module name="shared" default_access="public">
   <function name="bad" args="int:a" return="int">
     a = a + 1;
   </function>
@@ -1217,7 +1262,8 @@ mod defs_resolver_tests {
             &[("name", "hp"), ("type", "int")],
             vec![xml_text("1")],
         );
-        let parsed = parse_defs_global_var_declaration(&node, "shared").expect("parse defs var");
+        let parsed = parse_defs_global_var_declaration(&node, "shared", AccessLevel::Private)
+            .expect("parse defs var");
         assert_eq!(parsed.qualified_name, "shared.hp");
         assert_eq!(parsed.initial_value_expr.as_deref(), Some("1"));
 
@@ -1226,8 +1272,9 @@ mod defs_resolver_tests {
             &[("name", "__sl_hp"), ("type", "int")],
             vec![xml_text("1")],
         );
-        let error = parse_defs_global_var_declaration(&reserved_name, "shared")
-            .expect_err("reserved name should fail");
+        let error =
+            parse_defs_global_var_declaration(&reserved_name, "shared", AccessLevel::Private)
+                .expect_err("reserved name should fail");
         assert_eq!(error.code, "NAME_RESERVED_PREFIX");
 
         let invalid_type = xml_element(
@@ -1236,17 +1283,20 @@ mod defs_resolver_tests {
             vec![xml_text("1")],
         );
         let error =
-            parse_defs_global_var_declaration(&invalid_type, "shared").expect_err("bad type");
+            parse_defs_global_var_declaration(&invalid_type, "shared", AccessLevel::Private)
+                .expect_err("bad type");
         assert_eq!(error.code, "TYPE_PARSE_ERROR");
 
         let missing_name = xml_element("var", &[("type", "int")], vec![xml_text("1")]);
-        let error = parse_defs_global_var_declaration(&missing_name, "shared")
-            .expect_err("name should be required");
+        let error =
+            parse_defs_global_var_declaration(&missing_name, "shared", AccessLevel::Private)
+                .expect_err("name should be required");
         assert_eq!(error.code, "XML_MISSING_ATTR");
 
         let missing_type = xml_element("var", &[("name", "hp")], vec![xml_text("1")]);
-        let error = parse_defs_global_var_declaration(&missing_type, "shared")
-            .expect_err("type should be required");
+        let error =
+            parse_defs_global_var_declaration(&missing_type, "shared", AccessLevel::Private)
+                .expect_err("type should be required");
         assert_eq!(error.code, "XML_MISSING_ATTR");
 
         let mut invalid_sources = BTreeMap::new();
@@ -1297,6 +1347,7 @@ mod defs_resolver_tests {
                 type_decls: vec![ParsedTypeDecl {
                     name: "Obj".to_string(),
                     qualified_name: "one.Obj".to_string(),
+                    access: AccessLevel::Public,
                     fields: vec![ParsedTypeFieldDecl {
                         name: "v".to_string(),
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
@@ -1307,6 +1358,7 @@ mod defs_resolver_tests {
                 function_decls: vec![ParsedFunctionDecl {
                     name: "make".to_string(),
                     qualified_name: "one.make".to_string(),
+                    access: AccessLevel::Public,
                     params: vec![ParsedFunctionParamDecl {
                         name: "x".to_string(),
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
@@ -1324,6 +1376,7 @@ mod defs_resolver_tests {
                     namespace: "one".to_string(),
                     name: "hp".to_string(),
                     qualified_name: "one.hp".to_string(),
+                    access: AccessLevel::Public,
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                     initial_value_expr: None,
                     location: span.clone(),
@@ -1352,6 +1405,7 @@ mod defs_resolver_tests {
                 type_decls: vec![ParsedTypeDecl {
                     name: "T".to_string(),
                     qualified_name: "bundle.T".to_string(),
+                    access: AccessLevel::Public,
                     fields: vec![ParsedTypeFieldDecl {
                         name: "v".to_string(),
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
@@ -1364,6 +1418,7 @@ mod defs_resolver_tests {
                     namespace: "bundle".to_string(),
                     name: "item".to_string(),
                     qualified_name: "bundle.item".to_string(),
+                    access: AccessLevel::Public,
                     type_expr: ParsedTypeExpr::Custom("T".to_string()),
                     initial_value_expr: None,
                     location: span.clone(),
@@ -1381,6 +1436,7 @@ mod defs_resolver_tests {
                 type_decls: vec![ParsedTypeDecl {
                     name: "Broken".to_string(),
                     qualified_name: "bad_type.Broken".to_string(),
+                    access: AccessLevel::Public,
                     fields: vec![ParsedTypeFieldDecl {
                         name: "v".to_string(),
                         type_expr: ParsedTypeExpr::Custom("Missing".to_string()),
@@ -1404,6 +1460,7 @@ mod defs_resolver_tests {
                 function_decls: vec![ParsedFunctionDecl {
                     name: "make".to_string(),
                     qualified_name: "make".to_string(),
+                    access: AccessLevel::Public,
                     params: Vec::new(),
                     return_binding: ParsedFunctionParamDecl {
                         name: "ret".to_string(),
@@ -1428,6 +1485,7 @@ mod defs_resolver_tests {
                 type_decls: vec![ParsedTypeDecl {
                     name: "Obj".to_string(),
                     qualified_name: "Obj".to_string(),
+                    access: AccessLevel::Public,
                     fields: vec![ParsedTypeFieldDecl {
                         name: "v".to_string(),
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
@@ -1439,6 +1497,7 @@ mod defs_resolver_tests {
                     ParsedFunctionDecl {
                         name: "make".to_string(),
                         qualified_name: "odd.make".to_string(),
+                        access: AccessLevel::Public,
                         params: Vec::new(),
                         return_binding: ParsedFunctionParamDecl {
                             name: "ret".to_string(),
@@ -1451,6 +1510,7 @@ mod defs_resolver_tests {
                     ParsedFunctionDecl {
                         name: "make".to_string(),
                         qualified_name: "make".to_string(),
+                        access: AccessLevel::Public,
                         params: Vec::new(),
                         return_binding: ParsedFunctionParamDecl {
                             name: "ret".to_string(),
@@ -1484,6 +1544,7 @@ mod defs_resolver_tests {
                 function_decls: vec![ParsedFunctionDecl {
                     name: "f".to_string(),
                     qualified_name: "bad.f".to_string(),
+                    access: AccessLevel::Public,
                     params: vec![ParsedFunctionParamDecl {
                         name: "x".to_string(),
                         type_expr: ParsedTypeExpr::Custom("Missing".to_string()),
@@ -1512,6 +1573,7 @@ mod defs_resolver_tests {
                 function_decls: vec![ParsedFunctionDecl {
                     name: "f".to_string(),
                     qualified_name: "bad.f".to_string(),
+                    access: AccessLevel::Public,
                     params: Vec::new(),
                     return_binding: ParsedFunctionParamDecl {
                         name: "ret".to_string(),
@@ -1538,6 +1600,7 @@ mod defs_resolver_tests {
                     namespace: "bad".to_string(),
                     name: "hp".to_string(),
                     qualified_name: "bad.hp".to_string(),
+                    access: AccessLevel::Public,
                     type_expr: ParsedTypeExpr::Custom("Missing".to_string()),
                     initial_value_expr: None,
                     location: span.clone(),
@@ -1582,7 +1645,7 @@ mod defs_resolver_tests {
     fn parse_module_helpers_cover_module_specific_paths() {
         let sources = parse_sources(&compiler_test_support::map(&[(
             "battle.xml",
-            r#"<module name="battle"><script name="main"><text>x</text></script></module>"#,
+            r#"<module name="battle" default_access="public"><script name="main"><text>x</text></script></module>"#,
         )]))
         .expect("sources should parse");
 
@@ -1762,6 +1825,7 @@ mod defs_resolver_tests {
                 type_decls: vec![ParsedTypeDecl {
                     name: "Player".to_string(),
                     qualified_name: "main.Player".to_string(),
+                    access: AccessLevel::Public,
                     fields: vec![ParsedTypeFieldDecl {
                         name: "hp".to_string(),
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
@@ -1772,6 +1836,7 @@ mod defs_resolver_tests {
                 function_decls: vec![ParsedFunctionDecl {
                     name: "boost".to_string(),
                     qualified_name: "main.boost".to_string(),
+                    access: AccessLevel::Public,
                     params: Vec::new(),
                     return_binding: ParsedFunctionParamDecl {
                         name: "out".to_string(),
@@ -1785,6 +1850,7 @@ mod defs_resolver_tests {
                     namespace: "main".to_string(),
                     name: "hp".to_string(),
                     qualified_name: "main.hp".to_string(),
+                    access: AccessLevel::Public,
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                     initial_value_expr: None,
                     location: span,

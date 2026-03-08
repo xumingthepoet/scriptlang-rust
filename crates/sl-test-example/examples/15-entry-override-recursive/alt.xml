@@ -1,7 +1,7 @@
 <!-- import shared from shared.xml -->
-<module name="alt">
+<module name="alt" default_access="public">
 <script name="alt" args="string:name">
-  <var name="who" type="string">name</var>
+  <temp name="who" type="string">name</temp>
   <text>Alt entry ${shared.greet(who)}</text>
 </script>
 </module>

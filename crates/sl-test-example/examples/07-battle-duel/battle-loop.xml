@@ -1,32 +1,32 @@
 <!-- import actors from actors.xml -->
-<module name="battle-loop">
+<module name="battle-loop" default_access="public">
 <script
   name="battle-loop"
   args="ref:actors.Combatant:player,ref:actors.Combatant:enemy"
 >
-  <var name="potions" type="int">1</var>
-  <var name="rounds" type="int">0</var>
+  <temp name="potions" type="int">1</temp>
+  <temp name="rounds" type="int">0</temp>
 
   <while when="player.hp > 0  AND  enemy.hp > 0">
     <code>rounds = rounds + 1;</code>
-    <var name="roundBanner" type="string"/>
+    <temp name="roundBanner" type="string"/>
     <code>roundBanner = "Round " + rounds;</code>
     <text>== ${roundBanner} ==</text>
     <text>${player.name} hp=${player.hp}, ${enemy.name} hp=${enemy.hp}, potions=${potions}</text>
 
     <choice text="Choose">
       <option text="Heavy Slash (4 dmg)">
-        <var name="damage" type="int">4</var>
+        <temp name="damage" type="int">4</temp>
         <text>You use Heavy Slash for ${damage}.</text>
         <code>enemy.hp = enemy.hp - damage;</code>
       </option>
       <option text="Quick Jab (1 dmg)">
-        <var name="damage" type="int">1</var>
+        <temp name="damage" type="int">1</temp>
         <text>You use Quick Jab for ${damage}.</text>
         <code>enemy.hp = enemy.hp - damage;</code>
       </option>
       <option text="Drink Potion (+3 hp)" when="potions > 0">
-        <var name="heal" type="int">3</var>
+        <temp name="heal" type="int">3</temp>
         <code>potions = potions - 1; player.hp = player.hp + heal;</code>
         <text>You drink a potion and recover ${heal}. hp=${player.hp}, potions=${potions}</text>
       </option>
@@ -35,13 +35,13 @@
     <if when="enemy.hp  LTE  0">
       <text>${enemy.name} is down.</text>
       <else>
-        <var name="enemyRoll" type="int">(rounds + player.hp + enemy.hp) % 3</var>
+        <temp name="enemyRoll" type="int">(rounds + player.hp + enemy.hp) % 3</temp>
         <if when="enemyRoll == 0">
-          <var name="enemyDamage" type="int">3</var>
+          <temp name="enemyDamage" type="int">3</temp>
           <text>${enemy.name} uses Wild Smash for ${enemyDamage}.</text>
           <code>player.hp = player.hp - enemyDamage;</code>
           <else>
-            <var name="enemyDamage" type="int">2</var>
+            <temp name="enemyDamage" type="int">2</temp>
             <text>${enemy.name} uses Guard Break for ${enemyDamage}.</text>
             <code>player.hp = player.hp - enemyDamage;</code>
           </else>

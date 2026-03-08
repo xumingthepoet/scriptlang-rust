@@ -38,3 +38,8 @@
 - 发现：新增 `*.module.xml` 时，最稳妥的做法是把 `*.defs.xml` 视作“不能声明 `<script>` 的 module 兼容层”，而不是再引入一套平行声明模型。
 - 细节：类型、函数、全局变量都继续走同一套命名空间与 include-closure 可见性逻辑；新增能力只落在 module 脚本注册为 `module.script`，以及同 module 内允许短名脚本跳转。
 - 证据：这样可以直接复用 defs global 的 snapshot/resume 与短名冲突规则，避免 runtime 再维护第二套全局状态。
+
+### 2026-03-08 — 失败模式 — 可见性默认值变更后的入口回归
+- 发现：当 `module` 默认可见性是 `private` 且 host entry 要求 `public` 时，旧样例/测试会在 entry 解析阶段集中失败。
+- 细节：迁移时优先给“预期可对外运行”的 module 显式加 `default_access="public"`，并只把需要收敛的符号改成元素级 `access="private"`；否则会在 `compile_artifact/create_engine/start` 三层同时触发 private-entry 错误。
+- 证据：本次新增访问控制后，未声明可见性的 `main.main` 在 artifact/api/runtime 各层都被拒绝，补齐 `default_access="public"` 后恢复。

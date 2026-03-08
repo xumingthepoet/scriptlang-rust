@@ -1,7 +1,7 @@
 <!-- import shared from shared.xml -->
-<module name="battle">
+<module name="battle" default_access="public">
 <script name="battle">
-  <var name="hp" type="int">30</var>
+  <temp name="hp" type="int">30</temp>
   <code>hp = hp + 5; shared.hp = shared.hp - 40;</code>
   <text>battle.local=${hp}</text>
   <text>battle.global=${shared.hp}</text>

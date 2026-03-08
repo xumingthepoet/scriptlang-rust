@@ -1,8 +1,8 @@
 <!-- import middle from middle.xml -->
 <!-- import end from end.xml -->
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="callTarget" type="string">"middle.middle"</var>
+  <temp name="callTarget" type="string">"middle.middle"</temp>
   <text>before</text>
   <call script="${callTarget}"/>
 </script>

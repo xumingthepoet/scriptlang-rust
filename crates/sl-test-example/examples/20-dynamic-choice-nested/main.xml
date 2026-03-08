@@ -1,7 +1,7 @@
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="arr1" type="int[]">[1]</var>
-  <var name="arr2" type="int[]">[10]</var>
+  <temp name="arr1" type="int[]">[1]</temp>
+  <temp name="arr2" type="int[]">[10]</temp>
   <choice text="Outer">
     <dynamic-options array="arr1" item="it" index="i">
       <option text="${it}-${i}">

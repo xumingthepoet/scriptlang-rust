@@ -2,10 +2,10 @@
 <!-- import battle-loop from battle-loop.xml -->
 <!-- import victory from victory.xml -->
 <!-- import defeat from defeat.xml -->
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="player" type="actors.Combatant">#{name: "Hero", hp: 12}</var>
-  <var name="enemy" type="actors.Combatant">#{name: "Bandit", hp: 12}</var>
+  <temp name="player" type="actors.Combatant">#{name: "Hero", hp: 12}</temp>
+  <temp name="enemy" type="actors.Combatant">#{name: "Bandit", hp: 12}</temp>
 
   <text>Battle start: ${player.name}(${player.hp}) vs ${enemy.name}(${enemy.hp})</text>
   <text>Tip: if you keep using weak attacks, you will lose.</text>

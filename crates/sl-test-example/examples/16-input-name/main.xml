@@ -1,10 +1,10 @@
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="heroName" type="string">"Traveler"</var>
+  <temp name="heroName" type="string">"Traveler"</temp>
   <input var="heroName" text="Name your hero"/>
   <text>Hero: ${heroName}</text>
 
-  <var name="guildName" type="string">"Nameless Guild"</var>
+  <temp name="guildName" type="string">"Nameless Guild"</temp>
   <code>guildName = guildName + " Mk2";</code>
   <input var="guildName" text="Name your guild"/>
   <text>Guild: ${guildName}</text>

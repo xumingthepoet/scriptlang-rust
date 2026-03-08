@@ -193,9 +193,9 @@ pub(crate) mod cli_test_support {
                 write_file(
                     &root.join("main.xml"),
                     r#"
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="count" type="int">1</var>
+  <temp name="count" type="int">1</temp>
   <text>Scenario 01: text + code</text>
   <code>count = count + 1;</code>
   <text>count=${count}</text>
@@ -207,7 +207,7 @@ pub(crate) mod cli_test_support {
                 write_file(
                     &root.join("main.xml"),
                     r#"
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -220,9 +220,9 @@ pub(crate) mod cli_test_support {
                 write_file(
                     &root.join("main.xml"),
                     r#"
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="name" type="string">"Traveler"</var>
+  <temp name="name" type="string">"Traveler"</temp>
   <input var="name" text="Name"/>
   <text>${name}</text>
 </script>

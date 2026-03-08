@@ -189,7 +189,7 @@ mod source_loader_tests {
         fs::create_dir_all(&root).expect("root");
         write_file(
             &root.join("main.xml"),
-            r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#,
+            r#"<module name="main" default_access="public"><script name="main"><text>Hello</text></script></module>"#,
         );
 
         let loaded = load_source_by_scripts_dir(&root.to_string_lossy(), "main.main")
@@ -205,7 +205,7 @@ mod source_loader_tests {
         fs::create_dir_all(&root).expect("root");
         write_file(
             &root.join("game.xml"),
-            r#"<module name="game"><script name="game"><text>Game</text></script></module>"#,
+            r#"<module name="game" default_access="public"><script name="game"><text>Game</text></script></module>"#,
         );
 
         let loaded = load_source_by_scripts_dir(&root.to_string_lossy(), "game.game")

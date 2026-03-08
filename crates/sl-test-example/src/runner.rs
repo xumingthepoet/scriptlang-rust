@@ -193,7 +193,7 @@ mod runner_tests {
         let root = temp_dir("text-only");
         write_file(
             &root.join("main.xml"),
-            r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#,
+            r#"<module name="main" default_access="public"><script name="main"><text>Hello</text></script></module>"#,
         );
 
         let case = simple_case(vec![
@@ -215,11 +215,11 @@ mod runner_tests {
         write_file(
             &root.join("main.xml"),
             r#"
-<module name="main"><script name="main">
+<module name="main" default_access="public"><script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
   </choice>
-  <var name="name" type="string">"Traveler"</var>
+  <temp name="name" type="string">"Traveler"</temp>
   <input var="name" text="Name"/>
   <text>${name}</text>
 </script></module>
@@ -267,7 +267,7 @@ mod runner_tests {
         write_file(
             &root.join("main.xml"),
             r#"
-<module name="main"><script name="main">
+<module name="main" default_access="public"><script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
   </choice>
@@ -305,8 +305,8 @@ mod runner_tests {
         write_file(
             &input_root.join("main.xml"),
             r#"
-<module name="main"><script name="main">
-  <var name="name" type="string">"Traveler"</var>
+<module name="main" default_access="public"><script name="main">
+  <temp name="name" type="string">"Traveler"</temp>
   <input var="name" text="Name"/>
 </script></module>
 "#,
@@ -344,7 +344,7 @@ mod runner_tests {
         let unused_root = temp_dir("unused-action");
         write_file(
             &unused_root.join("main.xml"),
-            r#"<module name="main"><script name="main"><text>x</text></script></module>"#,
+            r#"<module name="main" default_access="public"><script name="main"><text>x</text></script></module>"#,
         );
         let unused_case = TestCase {
             schema_version: crate::TESTCASE_SCHEMA.to_string(),
@@ -365,7 +365,7 @@ mod runner_tests {
         write_file(
             &bad_choose_root.join("main.xml"),
             r#"
-<module name="main"><script name="main">
+<module name="main" default_access="public"><script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
   </choice>
@@ -389,8 +389,8 @@ mod runner_tests {
         write_file(
             &root.join("main.xml"),
             r#"
-<module name="main"><script name="main">
-  <var name="i" type="int">0</var>
+<module name="main" default_access="public"><script name="main">
+  <temp name="i" type="int">0</temp>
   <while when="i LT 6000">
     <code>i = i + 1;</code>
     <text>tick</text>
@@ -410,7 +410,7 @@ mod runner_tests {
         fs::create_dir_all(&root).expect("root should exist");
         write_file(
             &root.join("main.xml"),
-            r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#,
+            r#"<module name="main" default_access="public"><script name="main"><text>Hello</text></script></module>"#,
         );
 
         let count_case = root.join("count.json");
@@ -450,7 +450,7 @@ mod runner_tests {
         fs::create_dir_all(&root).expect("root should exist");
         write_file(
             &root.join("main.xml"),
-            r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#,
+            r#"<module name="main" default_access="public"><script name="main"><text>Hello</text></script></module>"#,
         );
 
         let case_path = root.join("testcase.json");

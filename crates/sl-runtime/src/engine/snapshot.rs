@@ -348,7 +348,7 @@ mod snapshot_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="n" type="int">1</var>
+      <temp name="n" type="int">1</temp>
       <text once="true">Intro</text>
       <while when="n > 0">
         <choice text="Pick">
@@ -381,7 +381,7 @@ mod snapshot_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="heroName" type="string">"Traveler"</var>
+      <temp name="heroName" type="string">"Traveler"</temp>
       <input var="heroName" text="Name your hero"/>
       <text>Hello ${heroName}</text>
     </script>
@@ -531,7 +531,7 @@ mod snapshot_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="name" type="string">"X"</var>
+      <temp name="name" type="string">"X"</temp>
       <input var="name" text="name?"/>
     </script>
     "#,
@@ -554,7 +554,7 @@ mod snapshot_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="name" type="string">"X"</var>
+      <temp name="name" type="string">"X"</temp>
       <input var="name" text="name?"/>
     </script>
     "#,
@@ -614,7 +614,7 @@ mod snapshot_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="name" type="string">"X"</var>
+      <temp name="name" type="string">"X"</temp>
       <input var="name" text="name?"/>
     </script>
     "#,
@@ -793,7 +793,7 @@ mod snapshot_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="arr" type="int[]">[5]</var>
+      <temp name="arr" type="int[]">[5]</temp>
       <choice text="Pick">
         <dynamic-options array="arr" item="it" index="i">
           <option text="${it}-${i}">

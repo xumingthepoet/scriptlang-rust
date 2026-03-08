@@ -1,6 +1,6 @@
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="hp" type="int">10</var>
+  <temp name="hp" type="int">10</temp>
   <text>before ${hp}</text>
   <choice text="Choose">
     <option text="Heal">

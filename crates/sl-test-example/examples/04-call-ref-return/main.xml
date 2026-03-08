@@ -1,7 +1,7 @@
 <!-- import buff from buff.xml -->
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="hp" type="int">1</var>
+  <temp name="hp" type="int">1</temp>
   <text>before hp=${hp}</text>
   <call script="buff.buff" args="3,ref:hp"/>
   <text>after hp=${hp}</text>

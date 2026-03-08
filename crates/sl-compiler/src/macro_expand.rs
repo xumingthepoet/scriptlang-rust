@@ -37,7 +37,7 @@ pub(crate) fn expand_script_macros(
 }
 
 pub(crate) fn collect_declared_var_names(node: &XmlElementNode, names: &mut BTreeSet<String>) {
-    if node.name == "var" {
+    if node.name == "temp" {
         if let Some(name) = node.attributes.get("name") {
             if !name.is_empty() {
                 names.insert(name.clone());
@@ -53,10 +53,10 @@ pub(crate) fn collect_declared_var_names(node: &XmlElementNode, names: &mut BTre
 pub(crate) fn validate_reserved_prefix_in_user_var_declarations(
     node: &XmlElementNode,
 ) -> Result<(), ScriptLangError> {
-    if node.name == "var" {
+    if node.name == "temp" {
         if let Some(name) = node.attributes.get("name") {
             if !name.is_empty() {
-                assert_name_not_reserved(name, "var", node.location.clone())?;
+                assert_name_not_reserved(name, "temp", node.location.clone())?;
             }
         }
     }
@@ -118,7 +118,7 @@ pub(crate) fn expand_element_with_macros(
     loop_var_attrs.insert("type".to_string(), "int".to_string());
 
     let loop_var = XmlElementNode {
-        name: "var".to_string(),
+        name: "temp".to_string(),
         attributes: loop_var_attrs,
         children: vec![XmlNode::Text(XmlTextNode {
             value: times_expr,
@@ -177,9 +177,9 @@ mod macro_expand_tests {
         let files = map(&[(
             "main.xml",
             r#"
-    <module name="main">
+    <module name="main" default_access="public">
     <script name="main">
-      <var name="i" type="int">0</var>
+      <temp name="i" type="int">0</temp>
       <loop times="2">
         <code>i = i + 1;</code>
       </loop>
@@ -211,7 +211,7 @@ mod macro_expand_tests {
             "script",
             &[("name", "main")],
             vec![XmlNode::Element(xml_element(
-                "var",
+                "temp",
                 &[("name", "__sl_bad"), ("type", "int")],
                 vec![xml_text("1")],
             ))],

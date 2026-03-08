@@ -1,6 +1,6 @@
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="hasKey" type="boolean">false</var>
+  <temp name="hasKey" type="boolean">false</temp>
   <choice text="Open the gate">
     <option text="Search nearby" when="!hasKey" once="true">
       <text>You keep searching...</text>

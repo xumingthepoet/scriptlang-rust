@@ -569,7 +569,7 @@ mod step_tests {
             "main.script.xml",
             r#"
 <script name="main">
-  <var name="hp" type="int">2</var>
+  <temp name="hp" type="int">2</temp>
   <debug>dbg hp=${hp}</debug>
   <text>text hp=${hp}</text>
 </script>
@@ -643,7 +643,7 @@ mod step_tests {
                 "main.script.xml",
                 r#"
 <script name="main">
-  <var name="name" type="string">"Traveler"</var>
+  <temp name="name" type="string">"Traveler"</temp>
   <debug>dbg=${name}</debug>
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -685,7 +685,7 @@ mod step_tests {
                 r#"
 <!-- include: shared.defs.xml -->
 <script name="battle">
-  <var name="hp" type="int">30</var>
+  <temp name="hp" type="int">30</temp>
   <code>hp = hp + 5; shared.hp = shared.hp - 40;</code>
   <text>battle.local=${hp}</text>
   <text>battle.global=${shared.hp}</text>
@@ -699,7 +699,7 @@ mod step_tests {
 <!-- include: shared.defs.xml -->
 <!-- include: battle.script.xml -->
 <script name="main">
-  <var name="hp" type="int">10</var>
+  <temp name="hp" type="int">10</temp>
   <text>main.local.before=${hp}</text>
   <text>main.global.before=${shared.hp}</text>
   <call script="battle.battle"/>
@@ -747,7 +747,7 @@ mod step_tests {
   <choice text="Pick">
     <option text="A"><text>A</text></option>
   </choice>
-  <var name="name" type="string">""</var>
+  <temp name="name" type="string">""</temp>
   <input var="name" text="Name"/>
   <text>done</text>
 </script>"#,
@@ -792,7 +792,7 @@ mod step_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="hp" type="int">1</var>
+      <temp name="hp" type="int">1</temp>
       <if when="hp > 2">
         <text>strong</text>
         <else>
@@ -815,7 +815,7 @@ mod step_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="hp" type="int">0</var>
+      <temp name="hp" type="int">0</temp>
       <while when="hp > 0">
         <code>hp = hp - 1;</code>
       </while>
@@ -1235,7 +1235,7 @@ mod step_tests {
                 "main.script.xml",
                 r#"
     <script name="main">
-      <var name="x" type="int">1</var>
+      <temp name="x" type="int">1</temp>
       <text>${x + game.score}</text>
     </script>
     "#,
@@ -1345,7 +1345,7 @@ mod step_tests {
                 "main.script.xml",
                 r##"
     <script name="main">
-      <var name="obj" type="#{int}"/>
+      <temp name="obj" type="#{int}"/>
       <code>obj.n = game.score + 1;</code>
       <text>${obj.n}</text>
     </script>
@@ -1507,7 +1507,7 @@ mod step_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="i" type="int">0</var>
+      <temp name="i" type="int">0</temp>
       <while when="i  LT  5">
         <code>i = i + 1;</code>
         <if when="i == 2">
@@ -1552,7 +1552,7 @@ mod step_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="i" type="int">0</var>
+      <temp name="i" type="int">0</temp>
       <while when="i  LT  2">
         <code>i = i + 1;</code>
         <text once="true">only once</text>
@@ -1622,7 +1622,7 @@ mod step_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="count" type="int">0</var>
+      <temp name="count" type="int">0</temp>
       <while when="count  LT  3">
         <code>count = count + 1;</code>
         <choice text="Pick">
@@ -1683,7 +1683,7 @@ mod step_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="arr" type="int[]">[2, 3]</var>
+      <temp name="arr" type="int[]">[2, 3]</temp>
       <choice text="Pick">
         <option text="Static"><text>S</text></option>
         <dynamic-options array="arr" item="it" index="i">
@@ -1716,7 +1716,7 @@ mod step_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="arr" type="int">1</var>
+      <temp name="arr" type="int">1</temp>
       <choice text="Pick">
         <dynamic-options array="arr" item="it">
           <option text="${it}"><text>X</text></option>
@@ -1738,7 +1738,7 @@ mod step_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="arr" type="int[]">[7]</var>
+      <temp name="arr" type="int[]">[7]</temp>
       <choice text="Pick">
         <dynamic-options array="arr" item="it">
           <option text="${it}" when="it > 0">
@@ -1765,8 +1765,8 @@ mod step_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="arr1" type="int[]">[1]</var>
-      <var name="arr2" type="int[]">[10]</var>
+      <temp name="arr1" type="int[]">[1]</temp>
+      <temp name="arr2" type="int[]">[10]</temp>
       <choice text="Outer">
         <dynamic-options array="arr1" item="it" index="i">
           <option text="${it}-${i}">
@@ -1810,7 +1810,7 @@ mod step_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="n" type="int">3</var>
+      <temp name="n" type="int">3</temp>
       <while when="n > 0">
         <if when="n == 3">
           <code>n = n - 1;</code>
@@ -1836,7 +1836,7 @@ mod step_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="arr" type="int[]">[1, 2]</var>
+      <temp name="arr" type="int[]">[1, 2]</temp>
       <choice text="Pick ${arr[0]}">
         <option text="Hidden" when="false"><text>hidden</text></option>
         <dynamic-options array="arr" item="it" index="i">
@@ -1847,7 +1847,7 @@ mod step_tests {
         <option text="Nope" when="false"><text>nope</text></option>
         <option text="F" fall_over="true"><text>fall</text></option>
       </choice>
-      <var name="x" type="int">1</var>
+      <temp name="x" type="int">1</temp>
       <input var="x" text="input"/>
     </script>
     "#,
@@ -1885,7 +1885,7 @@ mod step_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="heroName" type="string">"Traveler"</var>
+      <temp name="heroName" type="string">"Traveler"</temp>
       <input var="heroName" text="Name"/>
     </script>
     "#,
@@ -2007,7 +2007,7 @@ mod step_tests {
 
         let mut dynamic_when_error = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><var name="arr" type="int[]">[1]</var><choice text="Pick"><dynamic-options array="arr" item="it"><option text="${it}" when="bad +"><text>x</text></option></dynamic-options></choice></script>"#,
+            r#"<script name="main"><temp name="arr" type="int[]">[1]</temp><choice text="Pick"><dynamic-options array="arr" item="it"><option text="${it}" when="bad +"><text>x</text></option></dynamic-options></choice></script>"#,
         )]));
         dynamic_when_error.start("main", None).expect("start");
         let error = dynamic_when_error
@@ -2017,7 +2017,7 @@ mod step_tests {
 
         let mut dynamic_text_error = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><var name="arr" type="int[]">[1]</var><choice text="Pick"><dynamic-options array="arr" item="it"><option text="${bad +}"><text>x</text></option></dynamic-options></choice></script>"#,
+            r#"<script name="main"><temp name="arr" type="int[]">[1]</temp><choice text="Pick"><dynamic-options array="arr" item="it"><option text="${bad +}"><text>x</text></option></dynamic-options></choice></script>"#,
         )]));
         dynamic_text_error.start("main", None).expect("start");
         let error = dynamic_text_error

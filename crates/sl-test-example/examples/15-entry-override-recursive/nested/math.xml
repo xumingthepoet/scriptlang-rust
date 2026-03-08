@@ -1,4 +1,4 @@
-<module name="math">
+<module name="math" default_access="public">
   <function name="label" args="string:name,int:level" return="string:out">
     out = name + "#" + level;
   </function>

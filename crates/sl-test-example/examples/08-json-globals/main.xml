@@ -1,12 +1,12 @@
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="title" type="string">"Module Globals Demo"</var>
-  <var name="heroName" type="string">"Rin"</var>
-  <var name="heroHp" type="int">12</var>
-  <var name="heroMp" type="int">5</var>
-  <var name="slot0" type="string">"potion"</var>
-  <var name="slot0Count" type="int">3</var>
-  <var name="hardMode" type="boolean">false</var>
+  <temp name="title" type="string">"Module Globals Demo"</temp>
+  <temp name="heroName" type="string">"Rin"</temp>
+  <temp name="heroHp" type="int">12</temp>
+  <temp name="heroMp" type="int">5</temp>
+  <temp name="slot0" type="string">"potion"</temp>
+  <temp name="slot0Count" type="int">3</temp>
+  <temp name="hardMode" type="boolean">false</temp>
   <text>${title}</text>
   <text>${heroName} hp=${heroHp}, mp=${heroMp}</text>
   <text>slot0=${slot0} x${slot0Count}</text>

@@ -394,21 +394,21 @@ mod source_parse_tests {
                 r#"
 <!-- import Helper from extras/helper.xml -->
 <!-- import { Battle, Common } from shared/ -->
-<module name="Main"><script name="main"></script></module>
+<module name="Main" default_access="public"><script name="main"></script></module>
 "#
                 .to_string(),
             ),
             (
                 "shared/z-last.xml".to_string(),
-                r#"<module name="Battle"><script name="main"></script></module>"#.to_string(),
+                r#"<module name="Battle" default_access="public"><script name="main"></script></module>"#.to_string(),
             ),
             (
                 "shared/a-first.xml".to_string(),
-                r#"<module name="Common"><script name="main"></script></module>"#.to_string(),
+                r#"<module name="Common" default_access="public"><script name="main"></script></module>"#.to_string(),
             ),
             (
                 "extras/helper.xml".to_string(),
-                r#"<module name="Helper"><script name="main"></script></module>"#.to_string(),
+                r#"<module name="Helper" default_access="public"><script name="main"></script></module>"#.to_string(),
             ),
         ]);
 
@@ -431,13 +431,13 @@ mod source_parse_tests {
                 r#"
 <!-- import Base from shared/nested/base.xml -->
 <!-- import { Base } from shared/ -->
-<module name="Main"><script name="main"></script></module>
+<module name="Main" default_access="public"><script name="main"></script></module>
 "#
                 .to_string(),
             ),
             (
                 "shared/nested/base.xml".to_string(),
-                r#"<module name="Base"></module>"#.to_string(),
+                r#"<module name="Base" default_access="public"></module>"#.to_string(),
             ),
         ]);
 
@@ -454,7 +454,7 @@ mod source_parse_tests {
             "main.xml".to_string(),
             r#"
 <!-- include: shared.xml -->
-<module name="Main"><script name="main"></script></module>
+<module name="Main" default_access="public"><script name="main"></script></module>
 "#
             .to_string(),
         )]);
@@ -476,13 +476,13 @@ mod source_parse_tests {
                 "main.xml".to_string(),
                 r#"
 <!-- import Shared from shared.xml -->
-<module name="Main"><script name="main"></script></module>
+<module name="Main" default_access="public"><script name="main"></script></module>
 "#
                 .to_string(),
             ),
             (
                 "shared.xml".to_string(),
-                r#"<module name="Other"><script name="main"></script></module>"#.to_string(),
+                r#"<module name="Other" default_access="public"><script name="main"></script></module>"#.to_string(),
             ),
         ]);
         assert_eq!(
@@ -500,17 +500,17 @@ mod source_parse_tests {
                 "main.xml".to_string(),
                 r#"
 <!-- import { Shared } from mods/ -->
-<module name="Main"><script name="main"></script></module>
+<module name="Main" default_access="public"><script name="main"></script></module>
 "#
                 .to_string(),
             ),
             (
                 "mods/a.xml".to_string(),
-                r#"<module name="Shared"></module>"#.to_string(),
+                r#"<module name="Shared" default_access="public"></module>"#.to_string(),
             ),
             (
                 "mods/nested/b.xml".to_string(),
-                r#"<module name="Shared"></module>"#.to_string(),
+                r#"<module name="Shared" default_access="public"></module>"#.to_string(),
             ),
         ]);
         assert_eq!(
@@ -524,7 +524,7 @@ mod source_parse_tests {
             "main.xml".to_string(),
             r#"
 <!-- import { Shared } from mods/ -->
-<module name="Main"><script name="main"></script></module>
+<module name="Main" default_access="public"><script name="main"></script></module>
 "#
             .to_string(),
         )]);
@@ -540,7 +540,8 @@ mod source_parse_tests {
     fn parse_sources_rejects_blank_module_name_and_helper_dedupes_duplicates() {
         let blank_name = BTreeMap::from([(
             "main.xml".to_string(),
-            r#"<module name="   "><script name="main"></script></module>"#.to_string(),
+            r#"<module name="   " default_access="public"><script name="main"></script></module>"#
+                .to_string(),
         )]);
         assert_eq!(
             parse_sources(&blank_name)

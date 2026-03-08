@@ -95,11 +95,7 @@ pub fn compile_artifact_from_xml_map(
 pub fn create_engine_from_artifact(
     options: CreateEngineFromArtifactOptions,
 ) -> Result<ScriptLangEngine, ScriptLangError> {
-    if !options
-        .artifact
-        .scripts
-        .contains_key(&options.artifact.entry_script)
-    {
+    let Some(entry_script) = options.artifact.scripts.get(&options.artifact.entry_script) else {
         return Err(ScriptLangError::new(
             "API_ARTIFACT_ENTRY_NOT_FOUND",
             format!(
@@ -107,7 +103,12 @@ pub fn create_engine_from_artifact(
                 options.artifact.entry_script
             ),
         ));
-    }
+    };
+    validate_entry_script_access(
+        entry_script,
+        &options.artifact.entry_script,
+        "API_ARTIFACT_ENTRY_PRIVATE",
+    )?;
 
     let compiler_version = options
         .compiler_version
@@ -194,22 +195,45 @@ fn resolve_entry_script(
     explicit: Option<String>,
 ) -> Result<String, ScriptLangError> {
     if let Some(entry) = explicit {
-        if !scripts.contains_key(&entry) {
+        let Some(script) = scripts.get(&entry) else {
             return Err(ScriptLangError::new(
                 "API_ENTRY_SCRIPT_NOT_FOUND",
                 format!("Entry script \"{}\" is not registered.", entry),
             ));
-        }
+        };
+        validate_entry_script_access(script, &entry, "API_ENTRY_SCRIPT_PRIVATE")?;
         return Ok(entry);
     }
 
     if scripts.contains_key("main.main") {
-        return Ok("main.main".to_string());
+        let entry = "main.main".to_string();
+        let script = scripts
+            .get(&entry)
+            .expect("main.main existence should be checked before retrieval");
+        validate_entry_script_access(script, &entry, "API_ENTRY_SCRIPT_PRIVATE")?;
+        return Ok(entry);
     }
 
     Err(ScriptLangError::new(
         "API_ENTRY_MAIN_NOT_FOUND",
         "Expected script with name=\"main.main\" as default entry.",
+    ))
+}
+
+fn validate_entry_script_access(
+    script: &sl_core::ScriptIr,
+    entry: &str,
+    code: &'static str,
+) -> Result<(), ScriptLangError> {
+    if script.access != sl_core::AccessLevel::Private {
+        return Ok(());
+    }
+    Err(ScriptLangError::new(
+        code,
+        format!(
+            "Entry script \"{}\" is private and cannot be started by host.",
+            entry
+        ),
     ))
 }
 
@@ -276,7 +300,7 @@ mod tests {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -295,7 +319,7 @@ mod tests {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -315,11 +339,11 @@ mod tests {
         let scripts = map(&[
             (
                 "main.xml",
-                r#"<module name="main"><script name="main"><text>Main</text></script></module>"#,
+                r#"<module name="main" default_access="public"><script name="main"><text>Main</text></script></module>"#,
             ),
             (
                 "alt.xml",
-                r#"<module name="alt"><script name="alt"><text>Alt</text></script></module>"#,
+                r#"<module name="alt" default_access="public"><script name="alt"><text>Alt</text></script></module>"#,
             ),
         ]);
         let project = compile_project_from_xml_map(&scripts, Some("alt.alt".to_string()))
@@ -333,7 +357,7 @@ mod tests {
         let scripts = map(&[(
             "battle.xml",
             r#"
-<module name="battle">
+<module name="battle" default_access="public">
   <script name="main"><text>Battle</text></script>
 </module>
 "#,
@@ -348,7 +372,7 @@ mod tests {
     fn compile_project_from_xml_map_returns_error_for_missing_explicit_entry() {
         let scripts = map(&[(
             "foo.xml",
-            r#"<module name="foo"><script name="foo"><text>Hello</text></script></module>"#,
+            r#"<module name="foo" default_access="public"><script name="foo"><text>Hello</text></script></module>"#,
         )]);
         let error = compile_project_from_xml_map(&scripts, Some("missing".to_string()))
             .expect_err("missing entry should fail");
@@ -359,7 +383,7 @@ mod tests {
     fn compile_project_from_xml_map_returns_error_without_main_when_entry_missing() {
         let scripts = map(&[(
             "foo.xml",
-            r#"<module name="foo"><script name="foo"><text>Hello</text></script></module>"#,
+            r#"<module name="foo" default_access="public"><script name="foo"><text>Hello</text></script></module>"#,
         )]);
         let error =
             compile_project_from_xml_map(&scripts, None).expect_err("default main should fail");
@@ -367,10 +391,36 @@ mod tests {
     }
 
     #[test]
-    fn compile_artifact_from_xml_map_builds_v1_artifact() {
+    fn compile_project_from_xml_map_rejects_private_entry_script() {
         let scripts = map(&[(
             "main.xml",
             r#"<module name="main"><script name="main"><text>Main</text></script></module>"#,
+        )]);
+        let default_error = compile_project_from_xml_map(&scripts, None)
+            .expect_err("private default entry should fail");
+        assert_eq!(default_error.code, "API_ENTRY_SCRIPT_PRIVATE");
+
+        let explicit_scripts = map(&[
+            (
+                "main.xml",
+                r#"<module name="main" default_access="public"><script name="main"><text>Main</text></script></module>"#,
+            ),
+            (
+                "hidden.xml",
+                r#"<module name="hidden"><script name="entry"><text>Hidden</text></script></module>"#,
+            ),
+        ]);
+        let explicit_error =
+            compile_project_from_xml_map(&explicit_scripts, Some("hidden.entry".to_string()))
+                .expect_err("private explicit entry should fail");
+        assert_eq!(explicit_error.code, "API_ENTRY_SCRIPT_PRIVATE");
+    }
+
+    #[test]
+    fn compile_artifact_from_xml_map_builds_v1_artifact() {
+        let scripts = map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public"><script name="main"><text>Main</text></script></module>"#,
         )]);
         let artifact = compile_artifact_from_xml_map(&scripts, None).expect("compile artifact");
         assert_eq!(artifact.schema_version, sl_core::COMPILED_PROJECT_SCHEMA);
@@ -382,7 +432,7 @@ mod tests {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
   <choice text="Pick"><option text="A"><text>A</text></option></choice>
 </script>
@@ -427,11 +477,40 @@ mod tests {
     }
 
     #[test]
+    fn create_engine_from_artifact_rejects_private_entry_script() {
+        let scripts = map(&[(
+            "main.xml",
+            r#"<module name="main"><script name="main"><text>Main</text></script></module>"#,
+        )]);
+        let bundle = compile_project_bundle_from_xml_map(&scripts).expect("bundle should compile");
+        let error = create_engine_from_artifact(CreateEngineFromArtifactOptions {
+            artifact: CompiledProjectArtifact {
+                schema_version: sl_core::COMPILED_PROJECT_SCHEMA.to_string(),
+                compiler_version: sl_compiler::DEFAULT_COMPILER_VERSION.to_string(),
+                entry_script: "main.main".to_string(),
+                scripts: bundle.scripts,
+                global_json: bundle.global_json,
+                defs_global_declarations: bundle.defs_global_declarations,
+                defs_global_init_order: bundle.defs_global_init_order,
+            },
+            entry_args: None,
+            host_functions: None,
+            random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: None,
+        })
+        .err()
+        .expect("private artifact entry should fail");
+        assert_eq!(error.code, "API_ARTIFACT_ENTRY_PRIVATE");
+    }
+
+    #[test]
     fn resume_engine_from_artifact_resumes_from_snapshot() {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
   <choice text="Pick"><option text="A"><text>A</text></option></choice>
 </script>
@@ -473,7 +552,7 @@ mod tests {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -504,11 +583,11 @@ mod tests {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="a" type="int">random(5)</var>
+  <temp name="a" type="int">random(5)</temp>
   <text>${a}</text>
-  <var name="b" type="int">random(5)</var>
+  <temp name="b" type="int">random(5)</temp>
   <text>${b}</text>
 </script>
 </module>
@@ -547,7 +626,7 @@ mod tests {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -591,11 +670,11 @@ mod tests {
         let scripts = map(&[(
             "battle.xml",
             r#"
-<module name="battle">
+<module name="battle" default_access="public">
   <var name="score" type="int">1</var>
   <function name="boost" args="int:x" return="int:out">out = x + 1;</function>
   <script name="main">
-    <var name="cmd" type="string">""</var>
+    <temp name="cmd" type="string">""</temp>
     <input var="cmd" text="Go"/>
     <code>score = boost(score);</code>
     <call script="next"/>
@@ -646,7 +725,7 @@ mod tests {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -712,9 +791,9 @@ mod tests {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="x" type="int">1</var>
+  <temp name="x" type="int">1</temp>
 </script>
 </module>
 "#,
@@ -821,9 +900,9 @@ mod tests {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
-  <var name="name" type="string">"Traveler"</var>
+  <temp name="name" type="string">"Traveler"</temp>
   <input var="name" text="Name"/>
 </script>
 </module>

@@ -31,6 +31,7 @@ pub(crate) struct SourceFile {
 pub(crate) struct ParsedTypeDecl {
     pub(crate) name: String,
     pub(crate) qualified_name: String,
+    pub(crate) access: AccessLevel,
     pub(crate) fields: Vec<ParsedTypeFieldDecl>,
     pub(crate) location: SourceSpan,
 }
@@ -46,6 +47,7 @@ pub(crate) struct ParsedTypeFieldDecl {
 pub(crate) struct ParsedFunctionDecl {
     pub(crate) name: String,
     pub(crate) qualified_name: String,
+    pub(crate) access: AccessLevel,
     pub(crate) params: Vec<ParsedFunctionParamDecl>,
     pub(crate) return_binding: ParsedFunctionParamDecl,
     pub(crate) code: String,
@@ -57,6 +59,7 @@ pub(crate) struct ParsedDefsGlobalVarDecl {
     pub(crate) namespace: String,
     pub(crate) name: String,
     pub(crate) qualified_name: String,
+    pub(crate) access: AccessLevel,
     pub(crate) type_expr: ParsedTypeExpr,
     pub(crate) initial_value_expr: Option<String>,
     pub(crate) location: SourceSpan,
@@ -87,6 +90,7 @@ pub(crate) struct DefsDeclarations {
 #[derive(Debug, Clone)]
 pub(crate) struct ParsedModuleScript {
     pub(crate) qualified_script_name: String,
+    pub(crate) access: AccessLevel,
     pub(crate) root: XmlElementNode,
 }
 
@@ -99,6 +103,7 @@ pub(crate) struct ModuleDeclarations {
 pub(crate) struct CompileScriptOptions<'a> {
     pub(crate) script_path: &'a str,
     pub(crate) root: &'a XmlElementNode,
+    pub(crate) script_access: AccessLevel,
     pub(crate) qualified_script_name: Option<&'a str>,
     pub(crate) module_name: Option<&'a str>,
     pub(crate) visible_types: &'a BTreeMap<String, ScriptType>,

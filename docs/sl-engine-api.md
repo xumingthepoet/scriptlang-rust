@@ -67,7 +67,7 @@ use std::collections::BTreeMap;
 use sl_api::compile_scripts_from_xml_map;
 
 let mut files = BTreeMap::new();
-files.insert("main.xml".to_string(), r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#.to_string());
+files.insert("main.xml".to_string(), r#"<module name="main" default_access="public"><script name="main"><text>Hello</text></script></module>"#.to_string());
 
 let scripts = compile_scripts_from_xml_map(&files)?;
 assert!(scripts.contains_key("main.main"));
@@ -85,7 +85,7 @@ use std::collections::BTreeMap;
 use sl_api::compile_project_from_xml_map;
 
 let files = BTreeMap::from([
-    ("main.xml".to_string(), r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#.to_string())
+    ("main.xml".to_string(), r#"<module name="main" default_access="public"><script name="main"><text>Hello</text></script></module>"#.to_string())
 ]);
 
 let project = compile_project_from_xml_map(&files, None)?;
@@ -114,7 +114,7 @@ use sl_api::{create_engine_from_xml, CreateEngineFromXmlOptions};
 use sl_core::EngineOutput;
 
 let files = BTreeMap::from([
-    ("main.xml".to_string(), r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#.to_string())
+    ("main.xml".to_string(), r#"<module name="main" default_access="public"><script name="main"><text>Hello</text></script></module>"#.to_string())
 ]);
 
 let mut engine = create_engine_from_xml(CreateEngineFromXmlOptions {
@@ -154,7 +154,7 @@ use sl_core::EngineOutput;
 
 let files = BTreeMap::from([
     ("main.xml".to_string(), r#"
-<module name="main">
+<module name="main" default_access="public">
   <script name="main">
     <choice text="Pick">
       <option text="A"><text>A</text></option>
@@ -199,7 +199,7 @@ use sl_api::compile_artifact_from_xml_map;
 use sl_core::COMPILED_PROJECT_SCHEMA;
 
 let files = BTreeMap::from([
-    ("main.xml".to_string(), r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#.to_string())
+    ("main.xml".to_string(), r#"<module name="main" default_access="public"><script name="main"><text>Hello</text></script></module>"#.to_string())
 ]);
 
 let artifact = compile_artifact_from_xml_map(&files, None)?;
@@ -219,7 +219,7 @@ use sl_api::{
 use sl_core::EngineOutput;
 
 let files = BTreeMap::from([
-    ("main.xml".to_string(), r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#.to_string())
+    ("main.xml".to_string(), r#"<module name="main" default_access="public"><script name="main"><text>Hello</text></script></module>"#.to_string())
 ]);
 let artifact = compile_artifact_from_xml_map(&files, None)?;
 
@@ -250,7 +250,7 @@ use sl_core::EngineOutput;
 
 let files = BTreeMap::from([
     ("main.xml".to_string(), r#"
-<module name="main">
+<module name="main" default_access="public">
   <script name="main">
     <choice text="Pick">
       <option text="A"><text>A</text></option>
@@ -300,7 +300,7 @@ use sl_api::compile_artifact_from_xml_map;
 use sl_compiler::{write_artifact_json, read_artifact_json};
 
 let files = BTreeMap::from([
-    ("main.xml".to_string(), r#"<module name="main"><script name="main"><text>Hello</text></script></module>"#.to_string())
+    ("main.xml".to_string(), r#"<module name="main" default_access="public"><script name="main"><text>Hello</text></script></module>"#.to_string())
 ]);
 
 let artifact = compile_artifact_from_xml_map(&files, None)?;

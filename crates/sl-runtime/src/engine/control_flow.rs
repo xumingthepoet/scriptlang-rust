@@ -217,7 +217,7 @@ mod control_flow_tests {
             "main.script.xml",
             r#"
     <script name="main">
-      <var name="arr" type="int[]">[1]</var>
+      <temp name="arr" type="int[]">[1]</temp>
       <choice text="Pick">
         <dynamic-options array="arr" item="it">
           <option text="${it}">

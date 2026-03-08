@@ -1,4 +1,4 @@
-<module name="defeat">
+<module name="defeat" default_access="public">
 <script name="defeat">
   <text>Ending: Defeat</text>
   <text>

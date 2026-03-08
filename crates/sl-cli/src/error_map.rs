@@ -8,7 +8,7 @@ fn map_error(code: &'static str, error: impl Display) -> ScriptLangError {
 fn hint_for_error(code: &str, message: &str) -> Option<&'static str> {
     if code == "XML_PARSE_ERROR" && message.contains("invalid name token") {
         return Some(
-            "Hint: ScriptLang expressions no longer use XML escape operators. Write LT/LTE/AND instead of <, <=, &&. In XML attributes use 'text'; in <code>/<function>/<var> bodies use \"text\".",
+            "Hint: ScriptLang expressions no longer use XML escape operators. Write LT/LTE/AND instead of <, <=, &&. In XML attributes use 'text'; in <code>/<function>/<var>/<temp> bodies use \"text\".",
         );
     }
 
@@ -16,7 +16,7 @@ fn hint_for_error(code: &str, message: &str) -> Option<&'static str> {
         || code == "RHAI_PREPROCESS_STRING_UNTERMINATED"
     {
         return Some(
-            "Hint: use ScriptLang expr keywords LT/LTE/AND. In XML attributes, write strings with single quotes like 'text'; in <code>/<function>/<var> bodies, use double quotes like \"text\". Raw <, <=, && are forbidden.",
+            "Hint: use ScriptLang expr keywords LT/LTE/AND. In XML attributes, write strings with single quotes like 'text'; in <code>/<function>/<var>/<temp> bodies, use double quotes like \"text\". Raw <, <=, && are forbidden.",
         );
     }
 
@@ -164,6 +164,6 @@ mod error_map_tests {
         let enriched = with_hint(ScriptLangError::new("RHAI_PREPROCESS_FORBIDDEN_AND", "bad"));
         assert!(enriched.message.contains("LT/LTE/AND"));
         assert!(enriched.message.contains("XML attributes"));
-        assert!(enriched.message.contains("<code>/<function>/<var>"));
+        assert!(enriched.message.contains("<code>/<function>/<var>/<temp>"));
     }
 }

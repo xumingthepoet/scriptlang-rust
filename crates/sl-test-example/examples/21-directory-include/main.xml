@@ -1,5 +1,5 @@
 <!-- import {battle, shared} from shared/ -->
-<module name="main">
+<module name="main" default_access="public">
 <script name="main">
   <text>main=${shared.boost(shared.base)}</text>
   <call script="battle.battle"/>
