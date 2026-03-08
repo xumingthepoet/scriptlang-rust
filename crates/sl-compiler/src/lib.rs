@@ -12,8 +12,8 @@ pub(crate) use sl_core::{
     COMPILED_PROJECT_SCHEMA,
 };
 pub(crate) use sl_parser::{
-    parse_import_directives, parse_legacy_include_directives, parse_xml_document, ImportDirective,
-    XmlElementNode, XmlNode, XmlTextNode,
+    parse_import_directives, parse_xml_document, reject_non_import_dependency_directives,
+    ImportDirective, XmlElementNode, XmlNode, XmlTextNode,
 };
 
 mod artifact;
@@ -21,7 +21,7 @@ mod context;
 mod defaults;
 mod defs_resolver;
 mod error_context;
-mod include_graph;
+mod import_graph;
 mod macro_expand;
 mod pipeline;
 mod sanitize;
@@ -40,7 +40,7 @@ pub use pipeline::{compile_project_bundle_from_xml_map, compile_project_scripts_
 pub(crate) use context::*;
 pub(crate) use defs_resolver::*;
 pub(crate) use error_context::with_file_context_shared;
-pub(crate) use include_graph::*;
+pub(crate) use import_graph::*;
 pub(crate) use macro_expand::*;
 pub(crate) use sanitize::*;
 pub(crate) use script_compile::*;
@@ -74,7 +74,6 @@ pub(crate) mod compiler_test_support {
             .replace(".script.xml", ".xml")
             .replace(".defs.xml", ".xml")
             .replace(".module.xml", ".xml");
-        normalized = normalize_legacy_import_comments(&normalized);
 
         let trimmed = normalized.trim_start();
         if !trimmed.starts_with("<module") && normalized.trim_end().ends_with("</module>") {
@@ -102,25 +101,6 @@ pub(crate) mod compiler_test_support {
         }
 
         normalized
-    }
-
-    fn normalize_legacy_import_comments(source: &str) -> String {
-        let regex = Regex::new(r#"(?m)^(\s*)<!--\s*include:\s*([^>\s]+\.xml)\s*-->\s*$"#)
-            .expect("legacy include regex should compile");
-        regex
-            .replace_all(source, |caps: &regex::Captures<'_>| {
-                let indent = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
-                let include_path = caps.get(2).map(|m| m.as_str()).unwrap_or_default();
-                let module_name = Path::new(include_path)
-                    .file_stem()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("module");
-                format!(
-                    r#"{indent}<!-- import {} from {} -->"#,
-                    module_name, include_path
-                )
-            })
-            .into_owned()
     }
 
     fn normalize_wrapped_root(
@@ -233,7 +213,7 @@ pub(crate) mod compiler_test_support {
         fn normalize_test_source_content_handles_module_and_legacy_import_comments() {
             let module = normalize_test_source_content(
                 r#"
-<!-- include: shared.xml -->
+<!-- import shared from shared.xml -->
 <module name="main" default_access="public">
   <script name="main"/>
 </module>

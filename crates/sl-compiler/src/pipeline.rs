@@ -10,7 +10,7 @@ pub fn compile_project_bundle_from_xml_map(
     xml_by_path: &BTreeMap<String, String>,
 ) -> Result<CompileProjectBundleResult, ScriptLangError> {
     let sources = parse_sources(xml_by_path)?;
-    validate_include_graph(&sources)?;
+    validate_import_graph(&sources)?;
 
     let module_scripts_by_path = parse_module_scripts(&sources)?;
     let defs_by_path = parse_defs_files(&sources)
@@ -25,7 +25,7 @@ pub fn compile_project_bundle_from_xml_map(
     for (file_path, source) in &sources {
         let reachable = reachable_cache
             .entry(file_path.clone())
-            .or_insert_with(|| collect_reachable_files(file_path, &sources));
+            .or_insert_with(|| collect_reachable_imports(file_path, &sources));
         let script_roots = collect_source_scripts(source, file_path, &module_scripts_by_path);
         for script_decl in script_roots {
             let (visible_types, visible_functions, visible_defs_globals) =
@@ -291,7 +291,7 @@ mod pipeline_tests {
     }
 
     #[test]
-    fn compile_bundle_supports_directory_includes() {
+    fn compile_bundle_supports_directory_imports() {
         let files = map(&[
             (
                 "shared/support/types.xml",
@@ -373,7 +373,7 @@ mod pipeline_tests {
 
     #[test]
     fn compile_bundle_rejects_missing_import_and_cycle() {
-        let missing_include = map(&[(
+        let missing_import = map(&[(
             "main.xml",
             r#"
     <!-- import missing from missing.xml -->
@@ -382,11 +382,11 @@ mod pipeline_tests {
 </module>
     "#,
         )]);
-        let missing = compile_project_bundle_from_xml_map(&missing_include)
+        let missing = compile_project_bundle_from_xml_map(&missing_import)
             .expect_err("missing import should fail");
         assert_eq!(missing.code, "IMPORT_FILE_NOT_FOUND");
 
-        let empty_directory_include = map(&[(
+        let empty_directory_import = map(&[(
             "main.xml",
             r#"
     <!-- import {missing} from missing/ -->
@@ -395,7 +395,7 @@ mod pipeline_tests {
 </module>
     "#,
         )]);
-        let empty_directory = compile_project_bundle_from_xml_map(&empty_directory_include)
+        let empty_directory = compile_project_bundle_from_xml_map(&empty_directory_import)
             .expect_err("empty directory import should fail");
         assert_eq!(empty_directory.code, "IMPORT_DIR_EMPTY");
         assert!(empty_directory.message.contains("main.xml"));
@@ -422,7 +422,7 @@ mod pipeline_tests {
         ]);
         let cycle_error =
             compile_project_bundle_from_xml_map(&cycle).expect_err("import cycle should fail");
-        assert_eq!(cycle_error.code, "INCLUDE_CYCLE");
+        assert_eq!(cycle_error.code, "IMPORT_CYCLE");
 
         let directory_cycle = map(&[
             (
@@ -445,8 +445,8 @@ mod pipeline_tests {
             ),
         ]);
         let directory_cycle_error = compile_project_bundle_from_xml_map(&directory_cycle)
-            .expect_err("directory include cycle should fail");
-        assert_eq!(directory_cycle_error.code, "INCLUDE_CYCLE");
+            .expect_err("directory import cycle should fail");
+        assert_eq!(directory_cycle_error.code, "IMPORT_CYCLE");
     }
 
     #[test]
@@ -472,7 +472,7 @@ mod pipeline_tests {
     fn collect_source_scripts_and_module_parse_helpers_cover_non_happy_paths() {
         let json_source = SourceFile {
             kind: SourceKind::Json,
-            includes: Vec::new(),
+            imports: Vec::new(),
             xml_root: None,
             json_value: Some(SlValue::Bool(true)),
         };
@@ -494,7 +494,7 @@ mod pipeline_tests {
     }
 
     #[test]
-    fn compile_bundle_errors_include_file_context() {
+    fn compile_bundle_errors_import_file_context() {
         let xml_parse = map(&[("bad.xml", "<script>")]);
         let parse_error =
             compile_project_bundle_from_xml_map(&xml_parse).expect_err("xml parse should fail");
@@ -521,7 +521,7 @@ mod pipeline_tests {
             (
                 "main.xml",
                 r#"
-<!-- include: shared.xml -->
+<!-- import shared from shared.xml -->
 <module name="main" default_access="public">
 <script name="main"><text>${hp + shared.hp}</text></script>
 </module>
@@ -545,8 +545,8 @@ mod pipeline_tests {
             (
                 "main.xml",
                 r#"
-<!-- include: a.xml -->
-<!-- include: b.xml -->
+<!-- import a from a.xml -->
+<!-- import b from b.xml -->
 <module name="main" default_access="public">
 <script name="main"><text>${a.hp + b.hp}</text></script>
 </module>
@@ -578,7 +578,7 @@ mod pipeline_tests {
             (
                 "main.xml",
                 r#"
-<!-- include: shared.xml -->
+<!-- import shared from shared.xml -->
 <module name="main" default_access="public">
 <script name="main"><text>${shared.hp}</text></script>
 </module>
@@ -597,7 +597,7 @@ mod pipeline_tests {
             (
                 "main.xml",
                 r#"
-<!-- include: shared.xml -->
+<!-- import shared from shared.xml -->
 <module name="main" default_access="public">
 <script name="main"><text>${shared.hp}</text></script>
 </module>
@@ -675,7 +675,7 @@ mod pipeline_tests {
                         .root,
                 ),
                 json_value: None,
-                includes: Vec::new(),
+                imports: Vec::new(),
             },
         )]);
         let error = parse_module_scripts(&bad_sources).expect_err("module parse should fail");
@@ -685,7 +685,7 @@ mod pipeline_tests {
             "game.json".to_string(),
             SourceFile {
                 kind: SourceKind::Json,
-                includes: Vec::new(),
+                imports: Vec::new(),
                 xml_root: None,
                 json_value: Some(SlValue::Bool(true)),
             },

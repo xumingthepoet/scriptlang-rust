@@ -105,8 +105,8 @@ fn example_20_dynamic_choice_nested_matches_testcase() {
 }
 
 #[test]
-fn example_21_directory_include_matches_testcase() {
-    assert_example("21-directory-include");
+fn example_21_directory_import_matches_testcase() {
+    assert_example("21-directory-import");
 }
 
 #[test]

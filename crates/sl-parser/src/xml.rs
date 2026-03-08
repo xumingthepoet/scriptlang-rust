@@ -102,12 +102,24 @@ pub fn parse_import_directives(source: &str) -> Vec<ImportDirective> {
     directives
 }
 
-pub fn parse_legacy_include_directives(source: &str) -> Vec<String> {
-    legacy_include_directive_regex()
-        .captures_iter(source)
-        .filter_map(|caps| caps.get(1).map(|m| m.as_str().trim().to_string()))
-        .filter(|value| !value.is_empty())
-        .collect()
+pub fn reject_non_import_dependency_directives(source: &str) -> Result<(), ScriptLangError> {
+    if let Some(caps) = non_import_dependency_directive_regex().captures(source) {
+        let keyword = caps
+            .get(1)
+            .expect("non-import dependency directive regex should capture keyword")
+            .as_str()
+            .trim();
+        if keyword != "import" {
+            return Err(ScriptLangError::new(
+                "IMPORT_DIRECTIVE_UNSUPPORTED",
+                format!(
+                    "Unsupported dependency directive \"{}\". Only `import` directives are allowed.",
+                    keyword
+                ),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn import_directive_regex() -> &'static Regex {
@@ -133,11 +145,11 @@ fn directory_import_body_regex() -> &'static Regex {
     })
 }
 
-fn legacy_include_directive_regex() -> &'static Regex {
+fn non_import_dependency_directive_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
-        Regex::new(r"(?m)^\s*<!--\s*include:\s*(.+?)\s*-->\s*$")
-            .expect("legacy include regex must compile")
+        Regex::new(r"(?m)^\s*<!--\s*([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.+?)\s*-->\s*$")
+            .expect("non-import dependency directive regex must compile")
     })
 }
 
@@ -229,24 +241,22 @@ mod tests {
     }
 
     #[test]
-    fn parse_legacy_include_directives_extracts_non_empty_paths() {
+    fn reject_non_import_dependency_directives_reports_unsupported_directive() {
         let source = r#"
-<!-- include: a.xml -->
-<!-- include:   nested/b.xml   -->
-<!-- include: assets/ -->
-<!-- include:    -->
+<!-- dependency: a.xml -->
 <module name="main" default_access="public"></module>
 "#;
 
-        let includes = parse_legacy_include_directives(source);
-        assert_eq!(
-            includes,
-            vec![
-                "a.xml".to_string(),
-                "nested/b.xml".to_string(),
-                "assets/".to_string()
-            ]
-        );
+        let error = reject_non_import_dependency_directives(source)
+            .expect_err("non-import dependency directive should fail");
+        assert_eq!(error.code, "IMPORT_DIRECTIVE_UNSUPPORTED");
+
+        let valid = r#"
+<!-- import Shared from shared.xml -->
+<module name="main" default_access="public"></module>
+"#;
+        reject_non_import_dependency_directives(valid)
+            .expect("import directive should pass whitelist");
     }
 
     #[test]

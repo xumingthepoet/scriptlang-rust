@@ -22,7 +22,7 @@ pub(crate) fn parse_sources(
 
     let mut sources = BTreeMap::new();
     for parsed in parsed_entries {
-        let includes = resolve_import_directives(
+        let imports = resolve_import_directives(
             &parsed.file_path,
             &parsed.imports,
             &normalized_paths,
@@ -34,7 +34,7 @@ pub(crate) fn parse_sources(
             parsed.file_path,
             SourceFile {
                 kind: SourceKind::ModuleXml,
-                includes,
+                imports,
                 xml_root: Some(parsed.root),
                 json_value: None,
             },
@@ -57,7 +57,8 @@ fn parse_source_entry(
 ) -> Result<ParsedSourceEntry, ScriptLangError> {
     let file_path = normalize_virtual_path(raw_path);
     detect_source_kind(&file_path)?;
-    reject_legacy_include_directives(source_text, &file_path)?;
+    reject_non_import_dependency_directives(source_text)
+        .map_err(|error| with_file_context(error, &file_path))?;
 
     let document =
         parse_xml_document(source_text).map_err(|error| with_file_context(error, &file_path))?;
@@ -75,27 +76,6 @@ fn parse_source_entry(
         module_name,
         imports: parse_import_directives(source_text),
     })
-}
-
-fn reject_legacy_include_directives(
-    source_text: &str,
-    file_path: &str,
-) -> Result<(), ScriptLangError> {
-    let legacy_includes = parse_legacy_include_directives(source_text);
-    if legacy_includes.is_empty() {
-        return Ok(());
-    }
-
-    Err(with_file_context(
-        ScriptLangError::new(
-            "IMPORT_LEGACY_INCLUDE_UNSUPPORTED",
-            format!(
-                "Legacy include directives are no longer supported. Replace `<!-- include: ... -->` with `<!-- import ... from ... -->` in \"{}\".",
-                file_path
-            ),
-        ),
-        file_path,
-    ))
 }
 
 fn with_file_context(error: ScriptLangError, file_path: &str) -> ScriptLangError {
@@ -180,7 +160,7 @@ fn resolve_import_directives(
     available_paths: &BTreeSet<String>,
     module_names_by_path: &BTreeMap<String, String>,
 ) -> Result<Vec<String>, ScriptLangError> {
-    let mut includes = Vec::new();
+    let mut imports = Vec::new();
     let mut seen = BTreeSet::new();
 
     for directive in directives {
@@ -218,7 +198,7 @@ fn resolve_import_directives(
                     ));
                 }
                 if seen.insert(resolved.clone()) {
-                    includes.push(resolved);
+                    imports.push(resolved);
                 }
             }
             ImportDirective::Directory {
@@ -259,14 +239,14 @@ fn resolve_import_directives(
                         ));
                     };
                     if seen.insert(resolved.clone()) {
-                        includes.push(resolved.clone());
+                        imports.push(resolved.clone());
                     }
                 }
             }
         }
     }
 
-    Ok(includes)
+    Ok(imports)
 }
 
 fn resolve_import_directory_prefix(current_path: &str, import_path: &str) -> String {
@@ -436,7 +416,7 @@ mod source_parse_tests {
 
         let sources = parse_sources(&files).expect("imports should resolve");
         assert_eq!(
-            sources.get("main.xml").expect("main source").includes,
+            sources.get("main.xml").expect("main source").imports,
             vec![
                 "extras/helper.xml".to_string(),
                 "shared/z-last.xml".to_string(),
@@ -465,26 +445,26 @@ mod source_parse_tests {
 
         let sources = parse_sources(&files).expect("duplicate imports should dedupe");
         assert_eq!(
-            sources.get("main.xml").expect("main source").includes,
+            sources.get("main.xml").expect("main source").imports,
             vec!["shared/nested/base.xml".to_string()]
         );
     }
 
     #[test]
-    fn parse_sources_rejects_legacy_include_json_and_bad_import_targets() {
-        let legacy = BTreeMap::from([(
+    fn parse_sources_rejects_unsupported_dependency_directive_json_and_bad_import_targets() {
+        let unsupported = BTreeMap::from([(
             "main.xml".to_string(),
             r#"
-<!-- include: shared.xml -->
+<!-- dependency: shared.xml -->
 <module name="Main" default_access="public"><script name="main"></script></module>
 "#
             .to_string(),
         )]);
         assert_eq!(
-            parse_sources(&legacy)
-                .expect_err("legacy include should fail")
+            parse_sources(&unsupported)
+                .expect_err("unsupported directive should fail")
                 .code,
-            "IMPORT_LEGACY_INCLUDE_UNSUPPORTED"
+            "IMPORT_DIRECTIVE_UNSUPPORTED"
         );
 
         let json = BTreeMap::from([("data.json".to_string(), "{}".to_string())]);
@@ -572,7 +552,7 @@ mod source_parse_tests {
             "XML_MODULE_NAME_MISSING"
         );
 
-        let includes = resolve_import_directives(
+        let imports = resolve_import_directives(
             "main.xml",
             &[
                 ImportDirective::File {
@@ -588,7 +568,7 @@ mod source_parse_tests {
             &BTreeMap::from([("shared.xml".to_string(), "Shared".to_string())]),
         )
         .expect("duplicate file imports should dedupe");
-        assert_eq!(includes, vec!["shared.xml".to_string()]);
+        assert_eq!(imports, vec!["shared.xml".to_string()]);
     }
 
     #[test]
@@ -657,7 +637,7 @@ mod source_parse_tests {
         assert_eq!(error.code, "XML_PARSE_ERROR");
         assert!(
             error.message.contains("bad.xml"),
-            "message should include file path: {}",
+            "message should contain file path: {}",
             error.message
         );
     }

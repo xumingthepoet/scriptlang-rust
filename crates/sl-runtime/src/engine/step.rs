@@ -721,7 +721,7 @@ mod step_tests {
             (
                 "battle.script.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- import shared from shared.xml -->
 <script name="battle">
   <temp name="hp" type="int">30</temp>
   <code>hp = hp + 5; shared.hp = shared.hp - 40;</code>
@@ -734,8 +734,8 @@ mod step_tests {
             (
                 "main.script.xml",
                 r#"
-<!-- include: shared.defs.xml -->
-<!-- include: battle.script.xml -->
+<!-- import shared from shared.xml -->
+<!-- import battle from battle.xml -->
 <script name="main">
   <temp name="hp" type="int">10</temp>
   <text>main.local.before=${hp}</text>

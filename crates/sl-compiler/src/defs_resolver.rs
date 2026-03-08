@@ -929,7 +929,7 @@ mod defs_resolver_tests {
             (
                 "main.xml",
                 r#"
-<!-- include: shared.xml -->
+<!-- import shared from shared.xml -->
 <module name="main" default_access="public">
 <script name="main"><text>ok</text></script>
 </module>
@@ -957,7 +957,7 @@ mod defs_resolver_tests {
             (
                 "main.xml",
                 r#"
-<!-- include: shared.xml -->
+<!-- import shared from shared.xml -->
 <module name="main" default_access="public">
 <script name="main"><text>ok</text></script>
 </module>
@@ -981,7 +981,7 @@ mod defs_resolver_tests {
             (
                 "main.xml",
                 r#"
-<!-- include: shared.xml -->
+<!-- import shared from shared.xml -->
 <module name="main" default_access="public">
 <script name="main"><text>ok</text></script>
 </module>
@@ -1000,7 +1000,7 @@ mod defs_resolver_tests {
             (
                 "main.xml",
                 r#"
-<!-- include: shared.xml -->
+<!-- import shared from shared.xml -->
 <module name="main" default_access="public">
 <script name="main"><text>ok</text></script>
 </module>
@@ -1051,7 +1051,7 @@ mod defs_resolver_tests {
             (
                 "main.xml",
                 r#"
-<!-- include: shared.xml -->
+<!-- import shared from shared.xml -->
 <module name="main" default_access="public">
 <script name="main"><text>${shared.hp}</text></script>
 </module>
@@ -1136,8 +1136,8 @@ mod defs_resolver_tests {
             (
                 "main.xml",
                 r#"
-    <!-- include: a.xml -->
-    <!-- include: b.xml -->
+    <!-- import a from a.xml -->
+    <!-- import b from b.xml -->
     <module name="main" default_access="public">
 <script name="main"><temp name="v" type="T"/></script>
 </module>
@@ -1156,7 +1156,7 @@ mod defs_resolver_tests {
             (
                 "main.xml",
                 r#"
-    <!-- include: x.xml -->
+    <!-- import x from x.xml -->
     <module name="main" default_access="public">
 <script name="main"><temp name="v" type="A"/></script>
 </module>
@@ -1183,7 +1183,7 @@ mod defs_resolver_tests {
             (
                 "main.xml",
                 r#"
-<!-- include: shared.xml -->
+<!-- import shared from shared.xml -->
 <module name="main" default_access="public">
 <script name="main">
   <code>let x = shared.add(1, 2);</code>
@@ -1343,7 +1343,7 @@ mod defs_resolver_tests {
             "/".to_string(),
             SourceFile {
                 kind: SourceKind::Json,
-                includes: Vec::new(),
+                imports: Vec::new(),
                 xml_root: None,
                 json_value: Some(SlValue::Number(1.0)),
             },
@@ -1364,7 +1364,7 @@ mod defs_resolver_tests {
             "game.json".to_string(),
             SourceFile {
                 kind: SourceKind::Json,
-                includes: Vec::new(),
+                imports: Vec::new(),
                 xml_root: None,
                 json_value: None,
             },
@@ -1694,7 +1694,7 @@ mod defs_resolver_tests {
 
         let bad_root = SourceFile {
             kind: SourceKind::ModuleXml,
-            includes: Vec::new(),
+            imports: Vec::new(),
             xml_root: Some(compiler_test_support::xml_element(
                 "defs",
                 &[("name", "x")],
@@ -1708,7 +1708,7 @@ mod defs_resolver_tests {
 
         let reserved_script = SourceFile {
             kind: SourceKind::ModuleXml,
-            includes: Vec::new(),
+            imports: Vec::new(),
             xml_root: Some(compiler_test_support::xml_element(
                 "module",
                 &[("name", "battle")],
@@ -1726,7 +1726,7 @@ mod defs_resolver_tests {
 
         let missing_script_name = SourceFile {
             kind: SourceKind::ModuleXml,
-            includes: Vec::new(),
+            imports: Vec::new(),
             xml_root: Some(compiler_test_support::xml_element(
                 "module",
                 &[("name", "battle")],
@@ -1744,7 +1744,7 @@ mod defs_resolver_tests {
 
         let unsupported_kind = SourceFile {
             kind: SourceKind::Json,
-            includes: Vec::new(),
+            imports: Vec::new(),
             xml_root: None,
             json_value: Some(SlValue::Bool(false)),
         };
@@ -1756,7 +1756,7 @@ mod defs_resolver_tests {
             "bad.xml".to_string(),
             SourceFile {
                 kind: SourceKind::ModuleXml,
-                includes: Vec::new(),
+                imports: Vec::new(),
                 xml_root: Some(compiler_test_support::xml_element(
                     "module",
                     &[("name", "battle")],
@@ -1778,13 +1778,13 @@ mod defs_resolver_tests {
     fn defs_resolution_helpers_cover_json_and_missing_path_branches() {
         let json_source = SourceFile {
             kind: SourceKind::Json,
-            includes: Vec::new(),
+            imports: Vec::new(),
             xml_root: None,
             json_value: Some(SlValue::Bool(true)),
         };
         let module_source = SourceFile {
             kind: SourceKind::ModuleXml,
-            includes: Vec::new(),
+            imports: Vec::new(),
             xml_root: Some(compiler_test_support::xml_element(
                 "module",
                 &[("name", "main")],
@@ -1811,7 +1811,7 @@ mod defs_resolver_tests {
                 "main.xml".to_string(),
                 SourceFile {
                     kind: SourceKind::ModuleXml,
-                    includes: Vec::new(),
+                    imports: Vec::new(),
                     xml_root: Some(compiler_test_support::xml_element(
                         "module",
                         &[("name", "main")],
@@ -1842,7 +1842,7 @@ mod defs_resolver_tests {
                     "main.xml".to_string(),
                     SourceFile {
                         kind: SourceKind::ModuleXml,
-                        includes: Vec::new(),
+                        imports: Vec::new(),
                         xml_root: Some(compiler_test_support::xml_element(
                             "module",
                             &[("name", "main")],
@@ -1915,7 +1915,7 @@ mod defs_resolver_tests {
             (
                 "main.xml",
                 r#"
-<!-- include: shared.xml -->
+<!-- import shared from shared.xml -->
 <module name="main" default_access="public">
 <script name="main"><text>ok</text></script>
 </module>

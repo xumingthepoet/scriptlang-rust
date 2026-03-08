@@ -88,7 +88,6 @@ pub(super) mod runtime_test_support {
             .replace(".script.xml", ".xml")
             .replace(".defs.xml", ".xml")
             .replace(".module.xml", ".xml");
-        normalized = normalize_legacy_import_comments(&normalized);
 
         let trimmed = normalized.trim_start();
         if !trimmed.starts_with("<module") && normalized.trim_end().ends_with("</module>") {
@@ -116,25 +115,6 @@ pub(super) mod runtime_test_support {
         }
 
         normalized
-    }
-
-    fn normalize_legacy_import_comments(source: &str) -> String {
-        let regex = Regex::new(r#"(?m)^(\s*)<!--\s*include:\s*([^>\s]+\.xml)\s*-->\s*$"#)
-            .expect("legacy include regex should compile");
-        regex
-            .replace_all(source, |caps: &regex::Captures<'_>| {
-                let indent = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
-                let include_path = caps.get(2).map(|m| m.as_str()).unwrap_or_default();
-                let module_name = Path::new(include_path)
-                    .file_stem()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("module");
-                format!(
-                    r#"{indent}<!-- import {} from {} -->"#,
-                    module_name, include_path
-                )
-            })
-            .into_owned()
     }
 
     fn normalize_wrapped_root(source: &str, root_name: &str) -> Option<String> {

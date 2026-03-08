@@ -253,7 +253,7 @@ mod scope_tests {
             (
                 "main.script.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- import shared from shared.xml -->
 <script name="main"><text>ok</text></script>
 "#,
             ),
@@ -383,7 +383,7 @@ mod scope_tests {
             (
                 "main.script.xml",
                 r#"
-    <!-- include: callee.script.xml -->
+    <!-- import callee from callee.xml -->
     <script name="main">
       <call script="callee.callee" args="1"/>
     </script>
@@ -403,7 +403,7 @@ mod scope_tests {
             (
                 "main.script.xml",
                 r#"
-    <!-- include: callee.script.xml -->
+    <!-- import callee from callee.xml -->
     <script name="main">
       <call script="callee.callee" args="'str'"/>
     </script>
@@ -435,7 +435,7 @@ mod scope_tests {
             (
                 "main.script.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- import shared from shared.xml -->
 <script name="main">
   <temp name="hp" type="int">1</temp>
   <code>hp = hp + 1; shared.hp = shared.hp + 5;</code>
@@ -481,7 +481,7 @@ mod scope_tests {
             (
                 "main.script.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- import shared from shared.xml -->
 <script name="main">
   <code>shared.hp = shared.hp + 3;</code>
   <text>${shared.hp}</text>
@@ -509,7 +509,7 @@ mod scope_tests {
             (
                 "main.script.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- import shared from shared.xml -->
 <script name="main"><text>${shared.hp}</text></script>
 "#,
             ),
@@ -541,7 +541,7 @@ mod scope_tests {
             ),
             (
                 "main.script.xml",
-                r#"<!-- include: shared.defs.xml -->
+                r#"<!-- import shared from shared.xml -->
 <script name="main">
   <code>shared.score = 100;</code>
   <text>${shared.score}</text>
@@ -567,7 +567,7 @@ mod scope_tests {
             ),
             (
                 "main.script.xml",
-                r#"<!-- include: shared.defs.xml -->
+                r#"<!-- import shared from shared.xml -->
 <script name="main"><text>${shared.hp}</text></script>"#,
             ),
         ]);

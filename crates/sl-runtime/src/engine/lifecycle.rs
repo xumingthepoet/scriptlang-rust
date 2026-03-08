@@ -450,7 +450,7 @@ mod lifecycle_tests {
             (
                 "main.script.xml",
                 r#"
-    <!-- include: shared.defs.xml -->
+    <!-- import shared from shared.xml -->
     <script name="main"><text>Hello</text></script>
     "#,
             ),
@@ -498,7 +498,7 @@ mod lifecycle_tests {
             (
                 "main.xml",
                 r#"
-    <!-- include: a.xml -->
+    <!-- import a from a.xml -->
     <module name="main" default_access="public">
       <function name="a_b" return="int:out">out = 2;</function>
       <script name="main"><text>Hello</text></script>
@@ -709,7 +709,7 @@ mod lifecycle_tests {
             (
                 "main.script.xml",
                 r#"
-    <!-- include: shared.defs.xml -->
+    <!-- import shared from shared.xml -->
     <script name="main"><text>ok</text></script>
     "#,
             ),
@@ -800,7 +800,7 @@ mod lifecycle_tests {
             (
                 "main.script.xml",
                 r#"
-    <!-- include: shared.defs.xml -->
+    <!-- import shared from shared.xml -->
     <script name="main"><text>ok</text></script>
     "#,
             ),

@@ -246,7 +246,7 @@ cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/06-snap
 3. 用 `save/load` 做中断恢复测试
 
 ### 5.4 推荐验证闭环（避免“仅编译通过”）
-1. 先执行 `agent compile --dry-run`，尽早发现 include/类型/XML 语法问题
+1. 先执行 `agent compile --dry-run`，尽早发现 import/类型/XML 语法问题
 2. 再执行 `agent replay --rand "<固定序列>" --step ...`，覆盖真实运行路径
 3. 将同一组 `--rand` 与 `--step` 固化到 CI/回归脚本，避免随机路径漏测
 

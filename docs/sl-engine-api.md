@@ -399,7 +399,7 @@ match engine.next_output() {
 ## 8. 实战检查清单
 
 - 入口脚本是否存在（默认 `main.main`）。
-- 所有 include 路径是否可解析且无循环。
+- 所有 import 路径是否可解析且无循环。
 - 每次收到 `Choices/Input` 是否及时存档。
 - `compiler_version` 是否在新旧进程间一致。
 - 是否按 `EngineOutput` 协议驱动 `choose/submit_input`。

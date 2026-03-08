@@ -669,7 +669,7 @@ mod snapshot_tests {
             (
                 "main.script.xml",
                 r#"
-    <!-- include: shared.defs.xml -->
+    <!-- import shared from shared.xml -->
     <script name="main">
       <code>shared.hp = shared.hp + 5;</code>
       <choice text="Pick">
@@ -711,7 +711,7 @@ mod snapshot_tests {
             (
                 "main.script.xml",
                 r#"
-    <!-- include: shared.defs.xml -->
+    <!-- import shared from shared.xml -->
     <script name="main">
       <choice text="Pick">
     <option text="A"><text>${shared.hp}</text></option>
@@ -762,7 +762,7 @@ mod snapshot_tests {
             (
                 "main.script.xml",
                 r#"
-    <!-- include: shared.defs.xml -->
+    <!-- import shared from shared.xml -->
     <script name="main">
       <choice text="Pick">
         <option text="A"><text>${shared.hp}</text></option>

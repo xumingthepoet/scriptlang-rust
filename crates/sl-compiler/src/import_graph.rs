@@ -1,16 +1,16 @@
 use crate::*;
 
-pub(crate) fn validate_include_graph(
+pub(crate) fn validate_import_graph(
     sources: &BTreeMap<String, SourceFile>,
 ) -> Result<(), ScriptLangError> {
     for (file_path, source) in sources {
-        for include in &source.includes {
-            if !sources.contains_key(include) {
+        for import in &source.imports {
+            if !sources.contains_key(import) {
                 return Err(ScriptLangError::new(
-                    "INCLUDE_NOT_FOUND",
+                    "IMPORT_NOT_FOUND",
                     format!(
-                        "Include \"{}\" referenced by \"{}\" not found.",
-                        include, file_path
+                        "Import \"{}\" referenced by \"{}\" not found.",
+                        import, file_path
                     ),
                 ));
             }
@@ -34,8 +34,8 @@ pub(crate) fn validate_include_graph(
                 stack.push(node.to_string());
                 let cycle = stack.join(" -> ");
                 return Err(ScriptLangError::new(
-                    "INCLUDE_CYCLE",
-                    format!("Include cycle detected: {}", cycle),
+                    "IMPORT_CYCLE",
+                    format!("Import cycle detected: {}", cycle),
                 ));
             }
             return Ok(());
@@ -46,9 +46,9 @@ pub(crate) fn validate_include_graph(
 
         let source = sources
             .get(node)
-            .expect("include graph nodes should exist after validation");
-        for include in &source.includes {
-            dfs(include, sources, states, stack)?;
+            .expect("import graph nodes should exist after validation");
+        for import in &source.imports {
+            dfs(import, sources, states, stack)?;
         }
 
         stack.pop();
@@ -64,7 +64,7 @@ pub(crate) fn validate_include_graph(
     Ok(())
 }
 
-pub(crate) fn collect_reachable_files(
+pub(crate) fn collect_reachable_imports(
     start: &str,
     sources: &BTreeMap<String, SourceFile>,
 ) -> BTreeSet<String> {
@@ -76,8 +76,8 @@ pub(crate) fn collect_reachable_files(
             continue;
         }
         if let Some(source) = sources.get(&path) {
-            for include in &source.includes {
-                stack.push(include.clone());
+            for import in &source.imports {
+                stack.push(import.clone());
             }
         }
     }
@@ -86,22 +86,22 @@ pub(crate) fn collect_reachable_files(
 }
 
 #[cfg(test)]
-mod include_graph_tests {
+mod import_graph_tests {
     use super::*;
 
     #[test]
-    fn validate_include_graph_reports_missing_include() {
+    fn validate_import_graph_reports_missing_import() {
         let sources = BTreeMap::from([(
             "main.xml".to_string(),
             SourceFile {
                 kind: SourceKind::ModuleXml,
-                includes: vec!["missing.xml".to_string()],
+                imports: vec!["missing.xml".to_string()],
                 xml_root: None,
                 json_value: None,
             },
         )]);
 
-        let error = validate_include_graph(&sources).expect_err("missing include should fail");
-        assert_eq!(error.code, "INCLUDE_NOT_FOUND");
+        let error = validate_import_graph(&sources).expect_err("missing import should fail");
+        assert_eq!(error.code, "IMPORT_NOT_FOUND");
     }
 }

@@ -345,7 +345,7 @@ mod callstack_tests {
             (
                 "main.script.xml",
                 r#"
-    <!-- include: greeting.script.xml -->
+    <!-- import greeting from greeting.xml -->
     <script name="main">
       <temp name="nextScene" type="string">"greeting.greeting"</temp>
       <call script="${nextScene}"/>
@@ -401,7 +401,7 @@ mod callstack_tests {
             (
                 "main.script.xml",
                 r#"
-    <!-- include: callee.script.xml -->
+    <!-- import callee from callee.xml -->
     <script name="main">
       <temp name="hp" type="int">1</temp>
       <call script="callee.callee" args="hp"/>
@@ -804,7 +804,7 @@ mod callstack_tests {
             (
                 "main.script.xml",
                 r#"
-    <!-- include: next.script.xml -->
+    <!-- import next from next.xml -->
     <script name="main">
       <temp name="nextScene" type="string">"next.next"</temp>
       <return script="${nextScene}"/>
@@ -839,7 +839,7 @@ mod callstack_tests {
             (
                 "main.script.xml",
                 r#"
-    <!-- include: callee.script.xml -->
+    <!-- import callee from callee.xml -->
     <script name="main">
       <temp name="x" type="int">1</temp>
       <call script="callee.callee" args="ref:x"/>
@@ -1051,7 +1051,7 @@ mod callstack_tests {
             (
                 "main.script.xml",
                 r#"
-    <!-- include: shared.defs.xml -->
+    <!-- import shared from shared.xml -->
     <script name="main"><text>x</text></script>
     "#,
             ),
@@ -1086,7 +1086,7 @@ mod callstack_tests {
             ),
             (
                 "main.script.xml",
-                r#"<!-- include: shared.defs.xml -->
+                r#"<!-- import shared from shared.xml -->
 <script name="main">
   <text>${shared.add(1, 2)}</text>
 </script>"#,
@@ -1122,7 +1122,7 @@ mod callstack_tests {
             (
                 "main.script.xml",
                 r#"
-    <!-- include: callee.script.xml -->
+    <!-- import callee from callee.xml -->
     <script name="main">
       <call script="callee.callee" args="ref:missing.path"/>
     </script>
@@ -1143,7 +1143,7 @@ mod callstack_tests {
             (
                 "main.script.xml",
                 r#"
-    <!-- include: callee.script.xml -->
+    <!-- import callee from callee.xml -->
     <script name="main">
       <call script="callee.callee" args="unknown +"/>
     </script>
@@ -1373,7 +1373,7 @@ mod callstack_tests {
             (
                 "main.script.xml",
                 r#"
-<!-- include: bump.script.xml -->
+<!-- import bump from bump.xml -->
 <script name="main">
   <temp name="arr" type="int[]">[10, 20, 30]</temp>
   <temp name="idx" type="int">0</temp>
@@ -1517,7 +1517,7 @@ mod callstack_tests {
             (
                 "main.xml",
                 r#"
-<!-- include: shared.xml -->
+<!-- import shared from shared.xml -->
 <module name="main" default_access="public">
 <script name="main"><call script="shared.hidden"/></script>
 </module>
@@ -1538,7 +1538,7 @@ mod callstack_tests {
             (
                 "main.xml",
                 r#"
-<!-- include: shared.xml -->
+<!-- import shared from shared.xml -->
 <module name="main" default_access="public">
 <script name="main"><call script="${'shared.hidden'}"/></script>
 </module>
@@ -1571,7 +1571,7 @@ mod callstack_tests {
             (
                 "main.xml",
                 r#"
-<!-- include: lib.xml -->
+<!-- import lib from lib.xml -->
 <script name="main"><call script="lib.secret"/></script>
 "#,
             ),
@@ -1598,7 +1598,7 @@ mod callstack_tests {
             (
                 "main.xml",
                 r#"
-<!-- include: lib.xml -->
+<!-- import lib from lib.xml -->
 <script name="main">
   <return script="lib.helper"/>
 </script>
@@ -1627,7 +1627,7 @@ mod callstack_tests {
             (
                 "main.xml",
                 r#"
-<!-- include: lib.xml -->
+<!-- import lib from lib.xml -->
 <script name="main"><call script="lib.secret"/></script>
 "#,
             ),

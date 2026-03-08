@@ -42,7 +42,7 @@ impl ScriptLangEngine {
             }
             let expected_type = var_types
                 .get(&name)
-                .expect("script scope types should include all declared params");
+                .expect("script scope types should contain all declared params");
             if !is_type_compatible(&value, expected_type) {
                 return Err(ScriptLangError::new(
                     "ENGINE_TYPE_MISMATCH",
@@ -869,7 +869,7 @@ mod eval_tests {
             (
                 "main.script.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- import shared from shared.xml -->
 <script name="main">
   <code>let value = shared.bad();</code>
   <text>ok</text>
@@ -900,7 +900,7 @@ mod eval_tests {
             (
                 "main.script.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- import shared from shared.xml -->
 <script name="main"><text>ok</text></script>
 "#,
             ),
@@ -939,7 +939,7 @@ mod eval_tests {
                 (
                     "main.script.xml",
                     r#"
-<!-- include: shared.defs.xml -->
+<!-- import shared from shared.xml -->
 <script name="main"><text>${shared.b}</text></script>
 "#,
                 ),
@@ -964,7 +964,7 @@ mod eval_tests {
             (
                 "main.script.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- import shared from shared.xml -->
 <script name="main"><text>ok</text></script>
 "#,
             ),
@@ -984,7 +984,7 @@ mod eval_tests {
                 (
                     "main.script.xml",
                     r#"
-<!-- include: shared.defs.xml -->
+<!-- import shared from shared.xml -->
 <script name="main"><text>ok</text></script>
 "#,
                 ),
@@ -1008,7 +1008,7 @@ mod eval_tests {
             (
                 "main.script.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- import shared from shared.xml -->
 <script name="main">
   <code>shared.hp = shared.hp + 1;</code>
   <text>${shared.hp}</text>
@@ -1064,7 +1064,7 @@ mod eval_tests {
             (
                 "main.script.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- import shared from shared.xml -->
 <script name="main">
   <code>__sl_defs_ns_shared = 1;</code>
 </script>
@@ -1088,7 +1088,7 @@ mod eval_tests {
             (
                 "main.script.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- import shared from shared.xml -->
 <script name="main">
   <code>__sl_defs_ns_shared.extra = 1;</code>
   <text>${shared.hp}</text>
@@ -1119,7 +1119,7 @@ mod eval_tests {
             (
                 "main.script.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- import shared from shared.xml -->
 <script name="main">
   <code>shared.hp = "bad";</code>
 </script>
@@ -1143,7 +1143,7 @@ mod eval_tests {
             (
                 "main.script.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- import shared from shared.xml -->
 <script name="main">
   <code>hp = hp + 1;</code>
   <text>${shared.hp}</text>
@@ -1169,7 +1169,7 @@ mod eval_tests {
             (
                 "main.script.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- import shared from shared.xml -->
 <script name="main">
   <code>shared.hp = "bad";</code>
 </script>
@@ -1261,7 +1261,7 @@ mod eval_tests {
             (
                 "main.script.xml",
                 r#"
-<!-- include: shared.defs.xml -->
+<!-- import shared from shared.xml -->
 <script name="main"><text>ok</text></script>
 "#,
             ),
@@ -1505,7 +1505,7 @@ mod eval_tests {
                 (
                     "main.script.xml",
                     r#"
-<!-- include: shared.defs.xml -->
+<!-- import shared from shared.xml -->
 <script name="main">
   <temp name="hp" type="int">1</temp>
   <code>hp = shared.add_bonus(hp);</code>
@@ -1597,7 +1597,7 @@ mod eval_tests {
             (
                 "main.script.xml",
                 r#"
-    <!-- include: shared.defs.xml -->
+    <!-- import shared from shared.xml -->
     <script name="main"><code>__sl_defs_ns_shared = ();</code></script>
     "#,
             ),
@@ -1616,7 +1616,7 @@ mod eval_tests {
             (
                 "main.script.xml",
                 r#"
-	    <!-- include: shared.defs.xml -->
+	    <!-- import shared from shared.xml -->
 	    <script name="main"><code>shared.hp = ();</code></script>
 	    "#,
             ),
@@ -1635,7 +1635,7 @@ mod eval_tests {
             (
                 "main.script.xml",
                 r#"
-    <!-- include: shared.defs.xml -->
+    <!-- import shared from shared.xml -->
     <script name="main"><text>x</text></script>
     "#,
             ),
@@ -1658,7 +1658,7 @@ mod eval_tests {
             (
                 "main.script.xml",
                 r#"
-    <!-- include: shared.defs.xml -->
+    <!-- import shared from shared.xml -->
     <script name="main"><text>x</text></script>
     "#,
             ),

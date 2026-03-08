@@ -1637,7 +1637,7 @@ mod script_compile_tests {
                         (
                             "main.xml",
                             r#"
-    <!-- include: x.xml -->
+    <!-- import x from x.xml -->
     <module name="main" default_access="public">
 <script name="main"><text>x</text></script>
 </module>
@@ -1656,7 +1656,7 @@ mod script_compile_tests {
                         (
                             "main.xml",
                             r#"
-    <!-- include: x.xml -->
+    <!-- import x from x.xml -->
     <module name="main" default_access="public">
 <script name="main"><text>x</text></script>
 </module>
@@ -1675,7 +1675,7 @@ mod script_compile_tests {
                         (
                             "main.xml",
                             r#"
-    <!-- include: x.xml -->
+    <!-- import x from x.xml -->
     <module name="main" default_access="public">
 <script name="main"><text>x</text></script>
 </module>
@@ -1694,7 +1694,7 @@ mod script_compile_tests {
                         (
                             "main.xml",
                             r#"
-    <!-- include: x.xml -->
+    <!-- import x from x.xml -->
     <module name="main" default_access="public">
 <script name="main"><text>x</text></script>
 </module>
@@ -2028,7 +2028,7 @@ mod script_compile_tests {
             resolve_import_path("scripts/main.xml", "/shared.xml"),
             "shared.xml"
         );
-        let reachable = collect_reachable_files("missing.xml", &BTreeMap::new());
+        let reachable = collect_reachable_imports("missing.xml", &BTreeMap::new());
         assert!(reachable.contains("missing.xml"));
 
         let visible_empty = collect_visible_json_symbols(
@@ -2043,7 +2043,7 @@ mod script_compile_tests {
             "a/x.json".to_string(),
             SourceFile {
                 kind: SourceKind::Json,
-                includes: Vec::new(),
+                imports: Vec::new(),
                 xml_root: None,
                 json_value: Some(SlValue::Number(1.0)),
             },
@@ -2052,7 +2052,7 @@ mod script_compile_tests {
             "b/x.json".to_string(),
             SourceFile {
                 kind: SourceKind::Json,
-                includes: Vec::new(),
+                imports: Vec::new(),
                 xml_root: None,
                 json_value: Some(SlValue::Number(2.0)),
             },
@@ -2288,7 +2288,7 @@ mod script_compile_tests {
             (
                 "main.xml",
                 r#"
-	    <!-- include: shared.xml -->
+	    <!-- import shared from shared.xml -->
 	    <module name="main" default_access="public">
 	<script name="main">
 	      <temp name="x" type="shared.Obj"/>
