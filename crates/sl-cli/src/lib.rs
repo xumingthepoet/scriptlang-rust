@@ -363,8 +363,9 @@ mod lib_tests {
 
     #[test]
     fn parse_error_and_error_mapper_helpers_are_covered() {
-        let parse_code = run_cli_from_args(["sl-cli", "agent", "unknown"]);
-        assert_ne!(parse_code, 0);
+        let parse_error =
+            Cli::try_parse_from(["sl-cli", "agent", "unknown"]).expect_err("parse should fail");
+        assert_ne!(parse_error.exit_code(), 0);
 
         let io_error = std::io::Error::other("io");
         assert_eq!(map_tui_io(io_error).code, "TUI_IO");

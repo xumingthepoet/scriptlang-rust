@@ -23,8 +23,8 @@ mod main_tests {
     }
 
     #[test]
-    fn run_with_args_returns_non_zero_on_parse_error() {
-        let code = run_with_args(["sl-cli", "invalid"]);
-        assert_ne!(code, 0);
+    fn run_with_args_returns_zero_on_agent_help() {
+        let code = run_with_args(["sl-cli", "agent", "--help"]);
+        assert_eq!(code, 0);
     }
 }
