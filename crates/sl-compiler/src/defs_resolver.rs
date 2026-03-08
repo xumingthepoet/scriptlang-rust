@@ -1287,6 +1287,68 @@ mod defs_resolver_tests {
     }
 
     #[test]
+    fn resolve_visible_defs_rejects_unknown_param_type() {
+        let span = SourceSpan::synthetic();
+        // Function with param type that doesn't exist
+        let unknown_param_type = DefsDeclarations {
+            type_decls: Vec::new(),
+            function_decls: vec![ParsedFunctionDecl {
+                name: "foo".to_string(),
+                qualified_name: "shared.foo".to_string(),
+                access: AccessLevel::Public,
+                params: vec![ParsedFunctionParamDecl {
+                    name: "x".to_string(),
+                    type_expr: ParsedTypeExpr::Custom("UnknownType".to_string()),
+                    location: span.clone(),
+                }],
+                return_binding: ParsedFunctionParamDecl {
+                    name: "out".to_string(),
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    location: span.clone(),
+                },
+                code: "out = 1;".to_string(),
+                location: span.clone(),
+            }],
+            defs_global_var_decls: Vec::new(),
+            defs_global_const_decls: Vec::new(),
+        };
+        let defs_by_path = BTreeMap::from([("a.xml".to_string(), unknown_param_type)]);
+        let reachable = BTreeSet::from(["a.xml".to_string()]);
+        let error = resolve_visible_defs(&reachable, &defs_by_path, Some("shared"))
+            .expect_err("unknown param type should fail");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
+
+    #[test]
+    fn resolve_visible_defs_rejects_unknown_return_type() {
+        let span = SourceSpan::synthetic();
+        // Function with return type that doesn't exist
+        let unknown_return_type = DefsDeclarations {
+            type_decls: Vec::new(),
+            function_decls: vec![ParsedFunctionDecl {
+                name: "foo".to_string(),
+                qualified_name: "shared.foo".to_string(),
+                access: AccessLevel::Public,
+                params: vec![],
+                return_binding: ParsedFunctionParamDecl {
+                    name: "out".to_string(),
+                    type_expr: ParsedTypeExpr::Custom("NonExistentType".to_string()),
+                    location: span.clone(),
+                },
+                code: "out = 1;".to_string(),
+                location: span.clone(),
+            }],
+            defs_global_var_decls: Vec::new(),
+            defs_global_const_decls: Vec::new(),
+        };
+        let defs_by_path = BTreeMap::from([("a.xml".to_string(), unknown_return_type)]);
+        let reachable = BTreeSet::from(["a.xml".to_string()]);
+        let error = resolve_visible_defs(&reachable, &defs_by_path, Some("shared"))
+            .expect_err("unknown return type should fail");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
+
+    #[test]
     fn resolve_visible_defs_applies_defs_global_short_alias_rules() {
         let span = SourceSpan::synthetic();
         let make_decl = |namespace: &str, name: &str| ParsedDefsGlobalVarDecl {
