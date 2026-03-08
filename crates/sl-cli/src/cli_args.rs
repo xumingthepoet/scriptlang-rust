@@ -46,7 +46,7 @@ pub(crate) enum AgentCommand {
 #[derive(Debug, Args)]
 pub(crate) struct StartArgs {
     #[arg(long = "scripts-dir")]
-    #[arg(help = "Directory containing *.xml / *.json")]
+    #[arg(help = "Directory containing *.xml")]
     pub(crate) scripts_dir: String,
     #[arg(long = "entry-script")]
     #[arg(help = "Entry script name (default: main.main)")]
@@ -106,7 +106,7 @@ pub(crate) struct InputArgs {
 )]
 pub(crate) struct ReplayArgs {
     #[arg(long = "scripts-dir")]
-    #[arg(help = "Directory containing *.xml / *.json")]
+    #[arg(help = "Directory containing *.xml")]
     pub(crate) scripts_dir: String,
     #[arg(long = "entry-script")]
     #[arg(help = "Entry script name (default: main.main)")]
@@ -126,7 +126,7 @@ pub(crate) struct ReplayArgs {
 #[command(about = "Interactive TUI mode (auto-fallback to line mode in non-TTY/test env)")]
 pub(crate) struct TuiArgs {
     #[arg(long = "scripts-dir")]
-    #[arg(help = "Directory containing *.xml / *.json")]
+    #[arg(help = "Directory containing *.xml")]
     pub(crate) scripts_dir: String,
     #[arg(long = "entry-script")]
     #[arg(help = "Entry script name (default: main.main)")]
@@ -145,7 +145,7 @@ pub(crate) struct TuiArgs {
 #[derive(Debug, Args)]
 pub(crate) struct CompileArgs {
     #[arg(long = "scripts-dir")]
-    #[arg(help = "Directory containing *.xml / *.json")]
+    #[arg(help = "Directory containing *.xml")]
     pub(crate) scripts_dir: String,
     #[arg(long = "entry-script")]
     #[arg(help = "Entry script name (default: main.main)")]

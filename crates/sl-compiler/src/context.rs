@@ -11,9 +11,10 @@ pub struct CompileProjectBundleResult {
     pub defs_global_init_order: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SourceKind {
     ModuleXml,
+    #[allow(dead_code)]
     Json,
 }
 
@@ -22,6 +23,7 @@ pub(crate) struct SourceFile {
     pub(crate) kind: SourceKind,
     pub(crate) includes: Vec<String>,
     pub(crate) xml_root: Option<XmlElementNode>,
+    #[allow(dead_code)]
     pub(crate) json_value: Option<SlValue>,
 }
 
@@ -102,8 +104,6 @@ pub(crate) struct CompileScriptOptions<'a> {
     pub(crate) visible_types: &'a BTreeMap<String, ScriptType>,
     pub(crate) visible_functions: &'a BTreeMap<String, FunctionDecl>,
     pub(crate) visible_defs_globals: &'a BTreeMap<String, DefsGlobalVarDecl>,
-    pub(crate) visible_json_globals: &'a [String],
-    pub(crate) all_json_symbols: &'a BTreeSet<String>,
 }
 
 pub(crate) type VisibleTypeMap = BTreeMap<String, ScriptType>;

@@ -16,7 +16,7 @@
 ### 2.1 输入源
 
 - 所有 API 都以 `BTreeMap<String, String>` 输入脚本源：
-  - `key`: 虚拟路径（如 `main.xml`、`shared.xml`、`game.json`）
+  - `key`: 虚拟路径（如 `main.xml`、`shared.xml`）
   - `value`: 文件文本内容
 
 ### 2.2 运行输出
@@ -53,14 +53,14 @@
 
 推荐把宿主流程固定为两步：
 
-1. `XML/JSON -> CompiledProjectArtifact`
+1. `XML module sources -> CompiledProjectArtifact`
 2. `CompiledProjectArtifact -> Engine start/resume`
 
 这样可以在“运行前”尽早暴露编译错误，并支持产物缓存、分发和复用。
 
 ## 3.1 `compile_scripts_from_xml_map`
 
-仅编译并返回 `scripts`（不返回 entry/global_json）。
+仅编译并返回 `scripts`（不返回 entry）。
 
 ```rust
 use std::collections::BTreeMap;
@@ -79,7 +79,6 @@ assert!(scripts.contains_key("main.main"));
 编译完整工程，返回：
 - `scripts`
 - `entry_script`（显式指定或默认 `main.main`）
-- `global_json`
 
 ```rust
 use std::collections::BTreeMap;
@@ -365,10 +364,9 @@ loop {
 ## 5. API 行为要点（集成注意）
 
 1. `create_engine_from_xml` 会自动 `start`。  
-2. `compile_project_from_xml_map(..., None)` 默认入口脚本必须是 `main`。  
+2. `compile_project_from_xml_map(..., None)` 默认入口脚本必须是 `main.main`。  
 3. `choose(index)` / `submit_input(text)` 必须在对应 pending boundary 下调用。  
 4. `random(n)` 要求 `n > 0`。  
-5. JSON 全局变量在 runtime 只读。  
 6. 传 `random_seed` 可保证可复现实验。  
 7. 若传 `random_sequence`，`random(n)` 会按序列返回 `value % n`，序列耗尽后固定返回 `0`。
 

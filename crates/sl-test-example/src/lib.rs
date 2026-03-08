@@ -23,7 +23,7 @@ pub enum SlTestExampleError {
     },
     #[error("Invalid testcase schema version \"{found}\", expected \"{expected}\".")]
     InvalidSchemaVersion { expected: String, found: String },
-    #[error("No .xml/.json files under {path}.")]
+    #[error("No .xml files under {path}.")]
     SourceEmpty { path: PathBuf },
     #[error("Failed to relativize path {path}: {source}")]
     PathStrip {

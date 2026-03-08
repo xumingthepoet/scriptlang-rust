@@ -1,4 +1,4 @@
-<!-- include: shared.xml -->
+<!-- import shared from shared.xml -->
 <module name="battle">
 <script name="battle">
   <var name="hp" type="int">30</var>

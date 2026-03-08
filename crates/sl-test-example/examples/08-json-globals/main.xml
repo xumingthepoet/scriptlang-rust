@@ -1,12 +1,18 @@
-<!-- include: game.json -->
 <module name="main">
 <script name="main">
-  <text>${game.meta.title}</text>
-  <text>${game.player.name} hp=${game.player.stats.hp}, mp=${game.player.stats.mp}</text>
-  <text>slot0=${game.inventory[0].id} x${game.inventory[0].count}</text>
+  <var name="title" type="string">"Module Globals Demo"</var>
+  <var name="heroName" type="string">"Rin"</var>
+  <var name="heroHp" type="int">12</var>
+  <var name="heroMp" type="int">5</var>
+  <var name="slot0" type="string">"potion"</var>
+  <var name="slot0Count" type="int">3</var>
+  <var name="hardMode" type="boolean">false</var>
+  <text>${title}</text>
+  <text>${heroName} hp=${heroHp}, mp=${heroMp}</text>
+  <text>slot0=${slot0} x${slot0Count}</text>
   <choice text="Choose">
     <option text="View mode">
-      <if when="game.flags.hardMode">
+      <if when="hardMode">
         <text>hard mode</text>
         <else>
           <text>normal mode</text>

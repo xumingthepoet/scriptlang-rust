@@ -1,4 +1,3 @@
-<!-- include: game.json -->
 <module name="shared">
   <type name="CustomType">
     <field name="value" type="int"/>
@@ -9,6 +8,6 @@
   </function>
 
   <function name="addWithGameBonus" args="int:a1,shared.CustomType:a2" return="int:b2">
-    b2 = a1 + a2.value + game.bonus;
+    b2 = a1 + a2.value + 10;
   </function>
 </module>

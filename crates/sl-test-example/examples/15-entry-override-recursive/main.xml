@@ -1,5 +1,4 @@
-<!-- include: shared.xml -->
-<!-- include: nested/config.json -->
+<!-- import shared from shared.xml -->
 <module name="main">
 <script name="main">
   <text>Main entry ${shared.greet('main')}</text>

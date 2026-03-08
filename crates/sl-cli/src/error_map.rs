@@ -22,7 +22,7 @@ fn hint_for_error(code: &str, message: &str) -> Option<&'static str> {
 
     if code == "TYPE_UNKNOWN" && message.contains("Unknown custom type") {
         return Some(
-            "Hint: custom types are visible by include-closure, not auto inheritance. Add the required `*.xml` include in each script file that references the type.",
+            "Hint: custom types are visible by import-closure, not auto inheritance. Add the required `<!-- import ... from ... -->` directive in each module that references the type.",
         );
     }
 
@@ -140,7 +140,7 @@ mod error_map_tests {
             "Unknown custom type \"game.WorldState\"",
         ));
         assert!(enriched.message.contains("not auto inheritance"));
-        assert!(enriched.message.contains("`*.xml` include"));
+        assert!(enriched.message.contains("`<!-- import ... from ... -->`"));
     }
 
     #[test]

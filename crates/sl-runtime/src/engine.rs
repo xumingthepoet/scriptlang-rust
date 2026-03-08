@@ -6,6 +6,7 @@ use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::collections::{BTreeSet, HashMap};
+use std::path::Path;
 use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
@@ -87,6 +88,7 @@ pub(super) mod runtime_test_support {
             .replace(".script.xml", ".xml")
             .replace(".defs.xml", ".xml")
             .replace(".module.xml", ".xml");
+        normalized = normalize_legacy_import_comments(&normalized);
 
         let trimmed = normalized.trim_start();
         if !trimmed.starts_with("<module") && normalized.trim_end().ends_with("</module>") {
@@ -114,6 +116,25 @@ pub(super) mod runtime_test_support {
         }
 
         normalized
+    }
+
+    fn normalize_legacy_import_comments(source: &str) -> String {
+        let regex = Regex::new(r#"(?m)^(\s*)<!--\s*include:\s*([^>\s]+\.xml)\s*-->\s*$"#)
+            .expect("legacy include regex should compile");
+        regex
+            .replace_all(source, |caps: &regex::Captures<'_>| {
+                let indent = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
+                let include_path = caps.get(2).map(|m| m.as_str()).unwrap_or_default();
+                let module_name = Path::new(include_path)
+                    .file_stem()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("module");
+                format!(
+                    r#"{indent}<!-- import {} from {} -->"#,
+                    module_name, include_path
+                )
+            })
+            .into_owned()
     }
 
     fn normalize_wrapped_root(source: &str, root_name: &str) -> Option<String> {
@@ -170,6 +191,33 @@ pub(super) mod runtime_test_support {
         ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
+            defs_global_declarations: compiled.defs_global_declarations,
+            defs_global_init_order: compiled.defs_global_init_order,
+            host_functions: None,
+            random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: None,
+        })
+        .expect("engine should build")
+    }
+
+    pub(super) fn engine_from_sources_with_global_json(
+        files: BTreeMap<String, String>,
+        global_json: BTreeMap<String, SlValue>,
+        visible_json_symbols: &[&str],
+    ) -> ScriptLangEngine {
+        let mut compiled = compile_project_from_sources(files);
+        let visible_json_globals = visible_json_symbols
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect::<Vec<_>>();
+        for script in compiled.scripts.values_mut() {
+            script.visible_json_globals = visible_json_globals.clone();
+        }
+        ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_json,
             defs_global_declarations: compiled.defs_global_declarations,
             defs_global_init_order: compiled.defs_global_init_order,
             host_functions: None,

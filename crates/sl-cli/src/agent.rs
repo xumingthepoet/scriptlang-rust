@@ -90,7 +90,6 @@ pub(super) fn run_compile(args: CompileArgs) -> Result<i32, ScriptLangError> {
         println!("Compilation successful (dry-run):");
         println!("  Entry: {}", artifact.entry_script);
         println!("  Scripts: {}", artifact.scripts.len());
-        println!("  Global JSON keys: {}", artifact.global_json.len());
         println!(
             "  Defs global declarations: {}",
             artifact.defs_global_declarations.len()

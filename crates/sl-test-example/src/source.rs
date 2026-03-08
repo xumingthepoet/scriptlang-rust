@@ -22,7 +22,7 @@ pub fn read_scripts_xml_from_dir(
 
         let path = entry.path();
         let path_str = path.to_string_lossy();
-        if !(path_str.ends_with(".xml") || path_str.ends_with(".json")) {
+        if !path_str.ends_with(".xml") {
             continue;
         }
 
@@ -111,15 +111,13 @@ mod source_tests {
             &root.join("battle.xml"),
             "<module name=\"battle\"></module>",
         );
-        write_file(&root.join("game.json"), "{}");
         write_file(&root.join("ignore.txt"), "skip");
 
         let files = read_scripts_xml_from_dir(&root).expect("scan should pass");
-        assert_eq!(files.len(), 4);
+        assert_eq!(files.len(), 3);
         assert!(files.contains_key("main.xml"));
         assert!(files.contains_key("shared.xml"));
         assert!(files.contains_key("battle.xml"));
-        assert!(files.contains_key("game.json"));
     }
 
     #[test]

@@ -15,6 +15,115 @@ impl CompileGroupMode {
     }
 }
 
+pub(crate) fn compile_script(
+    options: CompileScriptOptions<'_>,
+) -> Result<ScriptIr, ScriptLangError> {
+    let CompileScriptOptions {
+        script_path,
+        root,
+        qualified_script_name,
+        module_name,
+        visible_types,
+        visible_functions,
+        visible_defs_globals,
+    } = options;
+    if root.name != "script" {
+        return Err(ScriptLangError::with_span(
+            "XML_ROOT_INVALID",
+            "Script file root must be <script>.",
+            root.location.clone(),
+        ));
+    }
+
+    let local_script_name = get_required_non_empty_attr(root, "name")?;
+    assert_name_not_reserved(&local_script_name, "script", root.location.clone())?;
+    let script_name = qualified_script_name
+        .unwrap_or(&local_script_name)
+        .to_string();
+
+    let params = parse_script_args(root, visible_types)?;
+    validate_reserved_prefix_in_user_var_declarations(root)?;
+
+    let mut reserved_names = params
+        .iter()
+        .map(|param| param.name.clone())
+        .collect::<Vec<_>>();
+    reserved_names.sort();
+
+    let expanded_root = expand_script_macros(root, &reserved_names)?;
+
+    let mut builder = GroupBuilder::new(format!("{}::{}", script_path, script_name));
+    let root_group_id = builder.next_group_id();
+
+    let mut visible_var_types = BTreeMap::new();
+    for param in &params {
+        visible_var_types.insert(param.name.clone(), param.r#type.clone());
+    }
+
+    compile_group(
+        &root_group_id,
+        None,
+        &expanded_root,
+        &mut builder,
+        visible_types,
+        &visible_var_types,
+        CompileGroupMode::new(0, false),
+    )?;
+
+    qualify_local_script_targets_for_module(&mut builder.groups, module_name);
+
+    Ok(ScriptIr {
+        script_path: script_path.to_string(),
+        script_name,
+        module_name: module_name.map(|value| value.to_string()),
+        local_script_name: module_name.map(|_| local_script_name.clone()),
+        params,
+        root_group_id,
+        groups: builder.groups,
+        visible_json_globals: Vec::new(),
+        visible_functions: visible_functions.clone(),
+        visible_defs_globals: visible_defs_globals.clone(),
+    })
+}
+
+fn qualify_local_script_targets(groups: &mut BTreeMap<String, ImplicitGroup>, module_name: &str) {
+    for group in groups.values_mut() {
+        for node in &mut group.nodes {
+            match node {
+                ScriptNode::Call { target_script, .. } => {
+                    qualify_static_script_target(target_script, module_name);
+                }
+                ScriptNode::Return {
+                    target_script: Some(target_script),
+                    ..
+                } => {
+                    qualify_static_script_target(target_script, module_name);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn qualify_local_script_targets_for_module(
+    groups: &mut BTreeMap<String, ImplicitGroup>,
+    module_name: Option<&str>,
+) {
+    if let Some(module_name) = module_name {
+        qualify_local_script_targets(groups, module_name);
+    }
+}
+
+fn qualify_static_script_target(target_script: &mut String, module_name: &str) {
+    if target_script.contains('.')
+        || target_script.contains("${")
+        || target_script.trim().is_empty()
+    {
+        return;
+    }
+    *target_script = format!("{}.{}", module_name, target_script);
+}
+
 pub(crate) fn compile_group(
     group_id: &str,
     parent_group_id: Option<&str>,
@@ -1517,14 +1626,6 @@ mod script_compile_tests {
     fn compiler_error_matrix_covers_more_validation_paths() {
         let cases: Vec<(&str, BTreeMap<String, String>, &str)> = vec![
                 (
-                    "json parse error",
-                    map(&[
-                        ("bad.json", "{"),
-                        ("main.xml", "<script name=\"main\"><text>x</text></script>"),
-                    ]),
-                    "JSON_PARSE_ERROR",
-                ),
-                (
                     "defs child invalid",
                     map(&[
                         (
@@ -1899,9 +2000,8 @@ mod script_compile_tests {
             ];
 
         for (name, files, expected_code) in cases {
-            let result = compile_project_bundle_from_xml_map(&files);
-            assert!(result.is_err(), "case should fail: {}", name);
-            let error = result.expect_err("error should exist");
+            let error =
+                compile_project_bundle_from_xml_map(&files).expect_err("error should exist");
             assert_eq!(error.code, expected_code, "case: {}", name);
         }
     }
@@ -1923,7 +2023,7 @@ mod script_compile_tests {
         );
 
         assert_eq!(
-            resolve_include_path("scripts/main.xml", "/shared.xml"),
+            resolve_import_path("scripts/main.xml", "/shared.xml"),
             "shared.xml"
         );
         let reachable = collect_reachable_files("missing.xml", &BTreeMap::new());
@@ -2054,11 +2154,77 @@ mod script_compile_tests {
             visible_types: &BTreeMap::new(),
             visible_functions: &BTreeMap::new(),
             visible_defs_globals: &BTreeMap::new(),
-            visible_json_globals: &[],
-            all_json_symbols: &BTreeSet::new(),
         })
         .expect_err("compile_script should require script root");
         assert_eq!(compile_root_error.code, "XML_ROOT_INVALID");
+
+        let missing_name_root = xml_element("script", &[], Vec::new());
+        let missing_name_error = compile_script(CompileScriptOptions {
+            script_path: "x.xml",
+            root: &missing_name_root,
+            qualified_script_name: None,
+            module_name: None,
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_defs_globals: &BTreeMap::new(),
+        })
+        .expect_err("compile_script should require script name");
+        assert_eq!(missing_name_error.code, "XML_MISSING_ATTR");
+
+        let reserved_name_root = xml_element("script", &[("name", "__bad")], Vec::new());
+        let reserved_name_error = compile_script(CompileScriptOptions {
+            script_path: "x.xml",
+            root: &reserved_name_root,
+            qualified_script_name: None,
+            module_name: None,
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_defs_globals: &BTreeMap::new(),
+        })
+        .expect_err("compile_script should reject reserved name");
+        assert_eq!(reserved_name_error.code, "NAME_RESERVED_PREFIX");
+
+        let reserved_var_root = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element(
+                "var",
+                &[("name", "__bad"), ("type", "int")],
+                vec![xml_text("1")],
+            ))],
+        );
+        let reserved_var_error = compile_script(CompileScriptOptions {
+            script_path: "x.xml",
+            root: &reserved_var_root,
+            qualified_script_name: Some("x.main"),
+            module_name: Some("x"),
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_defs_globals: &BTreeMap::new(),
+        })
+        .expect_err("compile_script should reject reserved var names");
+        assert_eq!(reserved_var_error.code, "NAME_RESERVED_PREFIX");
+
+        let no_module_root =
+            parse_xml_document(r#"<script name="main"><call script="next"/></script>"#)
+                .expect("xml")
+                .root;
+        let no_module_ir = compile_script(CompileScriptOptions {
+            script_path: "x.xml",
+            root: &no_module_root,
+            qualified_script_name: Some("main"),
+            module_name: None,
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_defs_globals: &BTreeMap::new(),
+        })
+        .expect("compile without module name");
+        let root_group = no_module_ir
+            .groups
+            .get(&no_module_ir.root_group_id)
+            .expect("root group");
+        let node_debug = format!("{:?}", &root_group.nodes[0]);
+        assert!(node_debug.contains("target_script: \"next\""));
 
         let rich_script = map(&[(
             "main.xml",
@@ -2083,14 +2249,18 @@ mod script_compile_tests {
             compile_project_bundle_from_xml_map(&rich_script).expect("compile should pass");
         let main = compiled.scripts.get("main.main").expect("main script");
         let root_group = main.groups.get(&main.root_group_id).expect("root group");
-        assert!(root_group
+        let while_count = root_group
             .nodes
             .iter()
-            .any(|node| matches!(node, ScriptNode::While { .. })));
-        assert!(root_group
+            .filter(|node| matches!(node, ScriptNode::While { .. }))
+            .count();
+        let if_count = root_group
             .nodes
             .iter()
-            .any(|node| matches!(node, ScriptNode::If { .. })));
+            .filter(|node| matches!(node, ScriptNode::If { .. }))
+            .count();
+        assert_eq!(while_count, 1);
+        assert_eq!(if_count, 1);
 
         let defs_resolution = map(&[
             (
@@ -2309,15 +2479,21 @@ mod script_compile_tests {
             .groups
             .get(&dynamic_main.root_group_id)
             .expect("root group");
-        assert!(dynamic_root.nodes.iter().any(|node| {
-            matches!(
-                node,
-                ScriptNode::Choice {
-                    entries,
-                    ..
-                } if entries.iter().any(|entry| matches!(entry, ChoiceEntry::Dynamic { .. }))
-            )
-        }));
+        let dynamic_choice_count = dynamic_root
+            .nodes
+            .iter()
+            .filter(|node| match node {
+                ScriptNode::Choice { entries, .. } => {
+                    entries
+                        .iter()
+                        .filter(|entry| matches!(entry, ChoiceEntry::Dynamic { .. }))
+                        .count()
+                        > 0
+                }
+                _ => false,
+            })
+            .count();
+        assert_eq!(dynamic_choice_count, 1);
 
         let empty_args = parse_script_args(
             &xml_element("script", &[("args", "   ")], Vec::new()),
@@ -2449,7 +2625,7 @@ mod script_compile_tests {
         assert!(generated.ends_with("_remaining"));
 
         assert_eq!(
-            slvalue_from_json(JsonValue::Null),
+            crate::defaults::slvalue_from_json(JsonValue::Null),
             SlValue::String("null".to_string())
         );
     }

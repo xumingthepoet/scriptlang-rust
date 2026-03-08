@@ -11,7 +11,8 @@ pub(crate) use sl_core::{
     ScriptParam, ScriptType, SlValue, SourceSpan, VarDeclaration, COMPILED_PROJECT_SCHEMA,
 };
 pub(crate) use sl_parser::{
-    parse_include_directives, parse_xml_document, XmlElementNode, XmlNode, XmlTextNode,
+    parse_import_directives, parse_legacy_include_directives, parse_xml_document, ImportDirective,
+    XmlElementNode, XmlNode, XmlTextNode,
 };
 
 mod artifact;
@@ -19,7 +20,6 @@ mod context;
 mod defaults;
 mod defs_resolver;
 mod include_graph;
-mod json_symbols;
 mod macro_expand;
 mod pipeline;
 mod sanitize;
@@ -36,10 +36,8 @@ pub use context::CompileProjectBundleResult;
 pub use pipeline::{compile_project_bundle_from_xml_map, compile_project_scripts_from_xml_map};
 
 pub(crate) use context::*;
-pub(crate) use defaults::*;
 pub(crate) use defs_resolver::*;
 pub(crate) use include_graph::*;
-pub(crate) use json_symbols::*;
 pub(crate) use macro_expand::*;
 pub(crate) use sanitize::*;
 pub(crate) use script_compile::*;
@@ -73,6 +71,7 @@ pub(crate) mod compiler_test_support {
             .replace(".script.xml", ".xml")
             .replace(".defs.xml", ".xml")
             .replace(".module.xml", ".xml");
+        normalized = normalize_legacy_import_comments(&normalized);
 
         let trimmed = normalized.trim_start();
         if !trimmed.starts_with("<module") && normalized.trim_end().ends_with("</module>") {
@@ -100,6 +99,25 @@ pub(crate) mod compiler_test_support {
         }
 
         normalized
+    }
+
+    fn normalize_legacy_import_comments(source: &str) -> String {
+        let regex = Regex::new(r#"(?m)^(\s*)<!--\s*include:\s*([^>\s]+\.xml)\s*-->\s*$"#)
+            .expect("legacy include regex should compile");
+        regex
+            .replace_all(source, |caps: &regex::Captures<'_>| {
+                let indent = caps.get(1).map(|m| m.as_str()).unwrap_or_default();
+                let include_path = caps.get(2).map(|m| m.as_str()).unwrap_or_default();
+                let module_name = Path::new(include_path)
+                    .file_stem()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("module");
+                format!(
+                    r#"{indent}<!-- import {} from {} -->"#,
+                    module_name, include_path
+                )
+            })
+            .into_owned()
     }
 
     fn normalize_wrapped_root(
@@ -172,6 +190,51 @@ pub(crate) mod compiler_test_support {
                 .collect(),
             children,
             location: SourceSpan::synthetic(),
+        }
+    }
+
+    #[cfg(test)]
+    mod compiler_test_support_tests {
+        use super::*;
+
+        #[test]
+        fn normalize_test_source_content_handles_wrapped_script_and_defs_roots() {
+            let script = normalize_test_source_content(
+                r#"
+<script name="main">
+  <text>x</text>
+</script>
+</module>
+"#,
+            );
+            assert!(script.contains(r#"<module name="main">"#));
+            assert!(script.contains(r#"<script name="main">"#));
+            assert!(!script.trim_end().ends_with("</module>\n</module>"));
+
+            let defs = normalize_test_source_content(
+                r#"
+<defs name="shared">
+  <var name="hp" type="int">1</var>
+</defs>
+</module>
+"#,
+            );
+            assert!(defs.contains(r#"<module name="shared">"#));
+            assert!(defs.trim_end().ends_with("</module>"));
+        }
+
+        #[test]
+        fn normalize_test_source_content_handles_module_and_legacy_import_comments() {
+            let module = normalize_test_source_content(
+                r#"
+<!-- include: shared.xml -->
+<module name="main">
+  <script name="main"/>
+</module>
+"#,
+            );
+            assert!(module.contains(r#"<!-- import shared from shared.xml -->"#));
+            assert!(normalize_wrapped_root(&module, "module", None).is_some());
         }
     }
 }

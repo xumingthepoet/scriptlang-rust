@@ -259,8 +259,8 @@ cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/06-snap
 - 修复：改用 ScriptLang 保留字，写成 `LT` / `LTE` / `AND`
 
 2. `TYPE_UNKNOWN: Unknown custom type "game.WorldState"`
-- 常见原因：脚本所在模块没有 include 对应的 `*.xml` 定义文件
-- 修复：在每个使用该类型的模块文件里显式 `<!-- include: ... -->`，或 include 一个覆盖所需定义的目录（如 `<!-- include: shared/ -->`）
+- 常见原因：脚本所在模块没有 import 对应的 `*.xml` 定义文件
+- 修复：在每个使用该类型的模块文件里显式 `<!-- import ... from ... -->`
 
 3. `when` 字符串比较表达式异常
 - 常见原因：属性表达式里继续使用 XML 转义或双引号字符串

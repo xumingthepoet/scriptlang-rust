@@ -178,6 +178,7 @@ pub(crate) fn parse_defs_global_var_declaration(
     })
 }
 
+#[allow(dead_code)]
 pub(crate) fn collect_global_json(
     sources: &BTreeMap<String, SourceFile>,
 ) -> Result<BTreeMap<String, SlValue>, ScriptLangError> {
@@ -204,6 +205,7 @@ pub(crate) fn collect_global_json(
     Ok(out)
 }
 
+#[allow(dead_code)]
 pub(crate) fn collect_visible_json_symbols(
     reachable: &BTreeSet<String>,
     sources: &BTreeMap<String, SourceFile>,
@@ -233,6 +235,7 @@ pub(crate) fn collect_visible_json_symbols(
     Ok(symbols)
 }
 
+#[allow(dead_code)]
 pub(crate) fn parse_json_global_symbol(file_path: &str) -> Result<String, ScriptLangError> {
     let path = Path::new(file_path);
     let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
@@ -253,6 +256,7 @@ pub(crate) fn parse_json_global_symbol(file_path: &str) -> Result<String, Script
     Ok(stem.to_string())
 }
 
+#[allow(dead_code)]
 pub(crate) fn json_symbol_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
@@ -1172,13 +1176,12 @@ mod defs_resolver_tests {
 
     #[test]
     fn parse_defs_files_wraps_attr_reserved_and_function_parse_errors_with_file_context() {
-        let missing_name_sources = parse_sources(&BTreeMap::from([(
+        let missing_name_error = parse_sources(&BTreeMap::from([(
             "missing-name.xml".to_string(),
             "<module></module>".to_string(),
         )]))
-        .expect("parse sources");
-        let missing_name_error =
-            parse_defs_files(&missing_name_sources).expect_err("missing name should fail");
+        .expect_err("missing name should fail during source parsing");
+        assert_eq!(missing_name_error.code, "XML_MODULE_NAME_MISSING");
         assert!(missing_name_error
             .message
             .contains("In file \"missing-name.xml\":"));
@@ -1263,6 +1266,26 @@ mod defs_resolver_tests {
         let error = collect_visible_json_symbols(&reachable, &invalid_sources)
             .expect_err("invalid visible json symbol path");
         assert_eq!(error.code, "JSON_SYMBOL_INVALID");
+
+        let invalid_basename =
+            parse_json_global_symbol("bad-name.json").expect_err("invalid json basename");
+        assert_eq!(invalid_basename.code, "JSON_SYMBOL_INVALID");
+
+        let missing_value = collect_global_json(&BTreeMap::from([(
+            "game.json".to_string(),
+            SourceFile {
+                kind: SourceKind::Json,
+                includes: Vec::new(),
+                xml_root: None,
+                json_value: None,
+            },
+        )]))
+        .expect_err("json value should be required");
+        assert_eq!(missing_value.code, "JSON_MISSING_VALUE");
+
+        let reserved_json_symbol =
+            parse_json_global_symbol("__hidden.json").expect_err("reserved json symbol");
+        assert_eq!(reserved_json_symbol.code, "NAME_RESERVED_PREFIX");
     }
 
     #[test]
@@ -1647,5 +1670,133 @@ mod defs_resolver_tests {
         let parse_module_scripts_error =
             parse_module_scripts(&bad_module_sources).expect_err("bad module scripts should fail");
         assert_eq!(parse_module_scripts_error.code, "XML_MISSING_ATTR");
+    }
+
+    #[test]
+    fn defs_resolution_helpers_cover_json_and_missing_path_branches() {
+        let json_source = SourceFile {
+            kind: SourceKind::Json,
+            includes: Vec::new(),
+            xml_root: None,
+            json_value: Some(SlValue::Bool(true)),
+        };
+        let module_source = SourceFile {
+            kind: SourceKind::ModuleXml,
+            includes: Vec::new(),
+            xml_root: Some(compiler_test_support::xml_element(
+                "module",
+                &[("name", "main")],
+                Vec::new(),
+            )),
+            json_value: None,
+        };
+        let sources = BTreeMap::from([
+            ("main.xml".to_string(), module_source),
+            ("shared.json".to_string(), json_source.clone()),
+        ]);
+        assert!(parse_defs_files(&sources).is_ok());
+        assert!(parse_module_scripts(&sources).is_ok());
+
+        let duplicate_json = collect_global_json(&BTreeMap::from([
+            ("a/game.json".to_string(), json_source.clone()),
+            ("b/game.json".to_string(), json_source.clone()),
+        ]))
+        .expect_err("duplicate json symbol should fail");
+        assert_eq!(duplicate_json.code, "JSON_SYMBOL_DUPLICATE");
+
+        let collected = collect_global_json(&BTreeMap::from([
+            (
+                "main.xml".to_string(),
+                SourceFile {
+                    kind: SourceKind::ModuleXml,
+                    includes: Vec::new(),
+                    xml_root: Some(compiler_test_support::xml_element(
+                        "module",
+                        &[("name", "main")],
+                        Vec::new(),
+                    )),
+                    json_value: None,
+                },
+            ),
+            ("game.json".to_string(), json_source.clone()),
+        ]))
+        .expect("non-json sources should be skipped");
+        assert_eq!(collected.get("game"), Some(&SlValue::Bool(true)));
+
+        let duplicate_visible = collect_visible_json_symbols(
+            &BTreeSet::from(["a/game.json".to_string(), "b/game.json".to_string()]),
+            &BTreeMap::from([
+                ("a/game.json".to_string(), json_source.clone()),
+                ("b/game.json".to_string(), json_source.clone()),
+            ]),
+        )
+        .expect_err("duplicate visible json symbol should fail");
+        assert_eq!(duplicate_visible.code, "JSON_SYMBOL_DUPLICATE");
+
+        let visible = collect_visible_json_symbols(
+            &BTreeSet::from(["main.xml".to_string(), "game.json".to_string()]),
+            &BTreeMap::from([
+                (
+                    "main.xml".to_string(),
+                    SourceFile {
+                        kind: SourceKind::ModuleXml,
+                        includes: Vec::new(),
+                        xml_root: Some(compiler_test_support::xml_element(
+                            "module",
+                            &[("name", "main")],
+                            Vec::new(),
+                        )),
+                        json_value: None,
+                    },
+                ),
+                ("game.json".to_string(), json_source.clone()),
+            ]),
+        )
+        .expect("non-json visible sources should be skipped");
+        assert_eq!(visible, vec!["game".to_string()]);
+
+        let span = SourceSpan::synthetic();
+        let defs_by_path = BTreeMap::from([(
+            "main.xml".to_string(),
+            DefsDeclarations {
+                type_decls: vec![ParsedTypeDecl {
+                    name: "Player".to_string(),
+                    qualified_name: "main.Player".to_string(),
+                    fields: vec![ParsedTypeFieldDecl {
+                        name: "hp".to_string(),
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        location: span.clone(),
+                    }],
+                    location: span.clone(),
+                }],
+                function_decls: vec![ParsedFunctionDecl {
+                    name: "boost".to_string(),
+                    qualified_name: "main.boost".to_string(),
+                    params: Vec::new(),
+                    return_binding: ParsedFunctionParamDecl {
+                        name: "out".to_string(),
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        location: span.clone(),
+                    },
+                    code: "out = 1;".to_string(),
+                    location: span.clone(),
+                }],
+                defs_global_var_decls: vec![ParsedDefsGlobalVarDecl {
+                    namespace: "main".to_string(),
+                    name: "hp".to_string(),
+                    qualified_name: "main.hp".to_string(),
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    initial_value_expr: None,
+                    location: span,
+                }],
+            },
+        )]);
+        let reachable = BTreeSet::from(["main.xml".to_string(), "missing.xml".to_string()]);
+        let (types, functions, defs_globals) =
+            resolve_visible_defs(&reachable, &defs_by_path, Some("main"))
+                .expect("missing paths in reachable closure should be skipped");
+        assert!(types.contains_key("Player"));
+        assert!(functions.contains_key("boost"));
+        assert!(defs_globals.contains_key("hp"));
     }
 }

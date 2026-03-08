@@ -1,5 +1,5 @@
-<!-- include: middle.xml -->
-<!-- include: end.xml -->
+<!-- import middle from middle.xml -->
+<!-- import end from end.xml -->
 <module name="main">
 <script name="main">
   <var name="callTarget" type="string">"middle.middle"</var>

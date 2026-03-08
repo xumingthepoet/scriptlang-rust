@@ -5,7 +5,7 @@
     { "kind": "choose", "index": 0 }
   ],
   "expectedEvents": [
-    { "kind": "text", "text": "JSON Globals Demo" },
+    { "kind": "text", "text": "Module Globals Demo" },
     { "kind": "text", "text": "Rin hp=12, mp=5" },
     { "kind": "text", "text": "slot0=potion x3" },
     { "kind": "choices", "promptText": "Choose", "choices": ["View mode"] },

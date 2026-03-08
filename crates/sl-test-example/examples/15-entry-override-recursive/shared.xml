@@ -1,10 +1,10 @@
-<!-- include: nested/math.xml -->
+<!-- import math from nested/math.xml -->
 <module name="shared">
   <type name="Player">
     <field name="name" type="string"/>
     <field name="power" type="int"/>
   </type>
   <function name="greet" args="string:name" return="string:out">
-    out = math.label(name, 2) + " @" + config.mode;
+    out = math.label(name, 2) + " @recursive";
   </function>
 </module>

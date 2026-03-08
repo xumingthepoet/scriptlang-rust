@@ -1,4 +1,4 @@
-<!-- include: next.xml -->
+<!-- import next from next.xml -->
 <module name="main">
 <script name="main">
   <text>jumping</text>

@@ -1,5 +1,6 @@
 use crate::*;
 
+#[allow(dead_code)]
 pub(crate) fn slvalue_from_json(value: JsonValue) -> SlValue {
     match value {
         JsonValue::Null => SlValue::String("null".to_string()),

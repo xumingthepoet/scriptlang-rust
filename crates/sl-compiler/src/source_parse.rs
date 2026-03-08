@@ -7,45 +7,65 @@ pub(crate) fn parse_sources(
         .keys()
         .map(|raw_path| normalize_virtual_path(raw_path))
         .collect::<BTreeSet<_>>();
-    let mut sources = BTreeMap::new();
+    let mut parsed_roots = BTreeMap::new();
+    let mut raw_imports = BTreeMap::new();
+    let mut module_names_by_path = BTreeMap::new();
 
     for (raw_path, source_text) in xml_by_path {
         let file_path = normalize_virtual_path(raw_path);
-        let kind = detect_source_kind(&file_path)?;
+        detect_source_kind(&file_path)?;
 
-        let source = match kind {
-            SourceKind::Json => {
-                let parsed = serde_json::from_str::<JsonValue>(source_text).map_err(|error| {
-                    ScriptLangError::new(
-                        "JSON_PARSE_ERROR",
-                        format!("Failed to parse JSON include \"{}\": {}", file_path, error),
-                    )
-                })?;
+        let legacy_includes = parse_legacy_include_directives(source_text);
+        if !legacy_includes.is_empty() {
+            return Err(with_file_context(
+                ScriptLangError::new(
+                    "IMPORT_LEGACY_INCLUDE_UNSUPPORTED",
+                    format!(
+                        "Legacy include directives are no longer supported. Replace `<!-- include: ... -->` with `<!-- import ... from ... -->` in \"{}\".",
+                        file_path
+                    ),
+                ),
+                &file_path,
+            ));
+        }
 
-                SourceFile {
-                    kind,
-                    includes: Vec::new(),
-                    xml_root: None,
-                    json_value: Some(slvalue_from_json(parsed)),
-                }
-            }
-            SourceKind::ModuleXml => {
-                let document = parse_xml_document(source_text)
-                    .map_err(|error| with_file_context(error, &file_path))?;
-                let includes =
-                    expand_include_directives(&file_path, source_text, &normalized_paths)
-                        .map_err(|error| with_file_context(error, &file_path))?;
+        let document = parse_xml_document(source_text)
+            .map_err(|error| with_file_context(error, &file_path))?;
+        let module_name = extract_module_name(&document.root).map_err(|error| {
+            with_file_context(
+                ScriptLangError::with_span(error.code, error.message, error.span.unwrap()),
+                &file_path,
+            )
+        })?;
+        let imports = parse_import_directives(source_text);
 
-                SourceFile {
-                    kind,
-                    includes,
-                    xml_root: Some(document.root),
-                    json_value: None,
-                }
-            }
-        };
+        module_names_by_path.insert(file_path.clone(), module_name);
+        parsed_roots.insert(file_path.clone(), document.root);
+        raw_imports.insert(file_path, imports);
+    }
 
-        sources.insert(file_path, source);
+    let mut sources = BTreeMap::new();
+    for (file_path, root) in parsed_roots {
+        let imports = raw_imports
+            .get(&file_path)
+            .expect("raw imports should exist for parsed source");
+        let includes = resolve_import_directives(
+            &file_path,
+            imports,
+            &normalized_paths,
+            &module_names_by_path,
+        )
+        .map_err(|error| with_file_context(error, &file_path))?;
+
+        sources.insert(
+            file_path,
+            SourceFile {
+                kind: SourceKind::ModuleXml,
+                includes,
+                xml_root: Some(root),
+                json_value: None,
+            },
+        );
     }
 
     Ok(sources)
@@ -72,10 +92,18 @@ pub(crate) fn detect_source_kind(path: &str) -> Result<SourceKind, ScriptLangErr
         ));
     }
 
+    if path.ends_with(".json") {
+        return Err(ScriptLangError::new(
+            "SOURCE_KIND_JSON_UNSUPPORTED",
+            format!(
+                "JSON source \"{}\" is no longer supported. Use only module *.xml sources.",
+                path
+            ),
+        ));
+    }
+
     if path.ends_with(".xml") {
         Ok(SourceKind::ModuleXml)
-    } else if path.ends_with(".json") {
-        Ok(SourceKind::Json)
     } else {
         Err(ScriptLangError::new(
             "SOURCE_KIND_UNSUPPORTED",
@@ -84,86 +112,185 @@ pub(crate) fn detect_source_kind(path: &str) -> Result<SourceKind, ScriptLangErr
     }
 }
 
-pub(crate) fn resolve_include_path(current_path: &str, include: &str) -> String {
+pub(crate) fn resolve_import_path(current_path: &str, import_path: &str) -> String {
     let parent = match Path::new(current_path).parent() {
         Some(parent) => parent,
         None => Path::new(""),
     };
-    let joined = if include.starts_with('/') {
-        PathBuf::from(include)
+    let joined = if import_path.starts_with('/') {
+        PathBuf::from(import_path)
     } else {
-        parent.join(include)
+        parent.join(import_path)
     };
     normalize_virtual_path(joined.to_string_lossy().as_ref())
 }
 
-fn expand_include_directives(
+fn extract_module_name(root: &XmlElementNode) -> Result<String, ScriptLangError> {
+    if root.name != "module" {
+        return Err(ScriptLangError::with_span(
+            "XML_ROOT_INVALID",
+            "Module file root must be <module>.",
+            root.location.clone(),
+        ));
+    }
+
+    let Some(module_name) = root.attributes.get("name").map(String::as_str) else {
+        return Err(ScriptLangError::with_span(
+            "XML_MODULE_NAME_MISSING",
+            "Module root requires non-empty name attribute.",
+            root.location.clone(),
+        ));
+    };
+    if module_name.trim().is_empty() {
+        return Err(ScriptLangError::with_span(
+            "XML_MODULE_NAME_MISSING",
+            "Module root requires non-empty name attribute.",
+            root.location.clone(),
+        ));
+    }
+
+    Ok(module_name.to_string())
+}
+
+fn resolve_import_directives(
     current_path: &str,
-    source_text: &str,
+    directives: &[ImportDirective],
     available_paths: &BTreeSet<String>,
+    module_names_by_path: &BTreeMap<String, String>,
 ) -> Result<Vec<String>, ScriptLangError> {
     let mut includes = Vec::new();
     let mut seen = BTreeSet::new();
 
-    for include in parse_include_directives(source_text) {
-        if include.ends_with('/') {
-            let prefix = resolve_include_directory_prefix(current_path, &include);
-            let matches = collect_directory_include_matches(&prefix, available_paths);
-            if matches.is_empty() {
-                return Err(ScriptLangError::new(
-                    "INCLUDE_DIR_EMPTY",
-                    format!(
-                        "Include directory \"{}\" resolved to \"{}\" in \"{}\" but matched no supported source files.",
-                        include, prefix, current_path
-                    ),
-                ));
-            }
-
-            for matched in matches {
-                if seen.insert(matched.clone()) {
-                    includes.push(matched);
+    for directive in directives {
+        match directive {
+            ImportDirective::File {
+                module_name,
+                from_path,
+            } => {
+                let resolved = resolve_import_path(current_path, from_path);
+                if !available_paths.contains(&resolved) {
+                    return Err(ScriptLangError::new(
+                        "IMPORT_FILE_NOT_FOUND",
+                        format!(
+                            "Import target file \"{}\" resolved to \"{}\" in \"{}\" but was not found.",
+                            from_path, resolved, current_path
+                        ),
+                    ));
+                }
+                let Some(actual_module_name) = module_names_by_path.get(&resolved) else {
+                    return Err(ScriptLangError::new(
+                        "IMPORT_TARGET_INVALID",
+                        format!(
+                            "Import target file \"{}\" resolved to \"{}\" in \"{}\" but is not a module source.",
+                            from_path, resolved, current_path
+                        ),
+                    ));
+                };
+                if actual_module_name != module_name {
+                    return Err(ScriptLangError::new(
+                        "IMPORT_MODULE_MISMATCH",
+                        format!(
+                            "Import requires module \"{}\" from \"{}\", but that file declares module \"{}\".",
+                            module_name, resolved, actual_module_name
+                        ),
+                    ));
+                }
+                if seen.insert(resolved.clone()) {
+                    includes.push(resolved);
                 }
             }
-            continue;
-        }
+            ImportDirective::Directory {
+                module_names,
+                from_path,
+            } => {
+                if !from_path.ends_with('/') {
+                    return Err(ScriptLangError::new(
+                        "IMPORT_DIR_PATH_INVALID",
+                        format!("Directory import from \"{}\" must end with '/'.", from_path),
+                    ));
+                }
+                let prefix = resolve_import_directory_prefix(current_path, from_path);
+                let module_paths = collect_directory_import_modules(
+                    &prefix,
+                    available_paths,
+                    module_names_by_path,
+                )
+                .map_err(|error| with_file_context(error, current_path))?;
+                if module_paths.is_empty() {
+                    return Err(ScriptLangError::new(
+                        "IMPORT_DIR_EMPTY",
+                        format!(
+                            "Import directory \"{}\" resolved to \"{}\" in \"{}\" but matched no module sources.",
+                            from_path, prefix, current_path
+                        ),
+                    ));
+                }
 
-        let resolved = resolve_include_path(current_path, &include);
-        if seen.insert(resolved.clone()) {
-            includes.push(resolved);
+                for module_name in module_names {
+                    let Some(resolved) = module_paths.get(module_name) else {
+                        return Err(ScriptLangError::new(
+                            "IMPORT_MODULE_NOT_FOUND",
+                            format!(
+                                "Import directory \"{}\" in \"{}\" does not contain module \"{}\".",
+                                from_path, current_path, module_name
+                            ),
+                        ));
+                    };
+                    if seen.insert(resolved.clone()) {
+                        includes.push(resolved.clone());
+                    }
+                }
+            }
         }
     }
 
     Ok(includes)
 }
 
-fn resolve_include_directory_prefix(current_path: &str, include: &str) -> String {
-    let trimmed = include.trim_end_matches('/');
-    if trimmed.is_empty() && include.starts_with('/') {
+fn resolve_import_directory_prefix(current_path: &str, import_path: &str) -> String {
+    let trimmed = import_path.trim_end_matches('/');
+    if trimmed.is_empty() && import_path.starts_with('/') {
         return String::new();
     }
-    resolve_include_path(current_path, trimmed)
+    resolve_import_path(current_path, trimmed)
 }
 
-fn collect_directory_include_matches(
+fn collect_directory_import_modules(
     directory_prefix: &str,
     available_paths: &BTreeSet<String>,
-) -> Vec<String> {
-    let mut matches = available_paths
-        .iter()
-        .filter(|path| {
-            is_supported_include_path(path) && is_path_within_directory(path, directory_prefix)
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    matches.sort();
-    matches
+    module_names_by_path: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, String>, ScriptLangError> {
+    let mut modules = BTreeMap::new();
+    let mut matched_any = false;
+
+    for path in available_paths {
+        if !is_supported_import_path(path) || !is_path_within_directory(path, directory_prefix) {
+            continue;
+        }
+        matched_any = true;
+        let Some(module_name) = module_names_by_path.get(path) else {
+            continue;
+        };
+        if let Some(existing_path) = modules.insert(module_name.clone(), path.clone()) {
+            return Err(ScriptLangError::new(
+                "IMPORT_MODULE_DUPLICATE",
+                format!(
+                    "Directory import prefix \"{}\" contains duplicate module name \"{}\" in \"{}\" and \"{}\".",
+                    directory_prefix, module_name, existing_path, path
+                ),
+            ));
+        }
+    }
+
+    if !matched_any {
+        return Ok(BTreeMap::new());
+    }
+
+    Ok(modules)
 }
 
-fn is_supported_include_path(path: &str) -> bool {
-    matches!(
-        detect_source_kind(path),
-        Ok(SourceKind::ModuleXml | SourceKind::Json)
-    )
+fn is_supported_import_path(path: &str) -> bool {
+    matches!(detect_source_kind(path), Ok(SourceKind::ModuleXml))
 }
 
 fn is_path_within_directory(path: &str, directory_prefix: &str) -> bool {
@@ -200,14 +327,16 @@ mod source_parse_tests {
 
     #[test]
     fn source_kind_and_path_helpers_cover_common_cases() {
-        let kind_name = |kind: SourceKind| match kind {
-            SourceKind::ModuleXml => "module",
-            SourceKind::Json => "json",
-        };
-        let module_kind = detect_source_kind("a.xml").expect("module kind");
-        let json_kind = detect_source_kind("a.json").expect("json kind");
-        assert_eq!(kind_name(module_kind), "module");
-        assert_eq!(kind_name(json_kind), "json");
+        assert_eq!(
+            detect_source_kind("a.xml").expect("module kind"),
+            SourceKind::ModuleXml
+        );
+        assert_eq!(
+            detect_source_kind("a.json")
+                .expect_err("json should fail")
+                .code,
+            "SOURCE_KIND_JSON_UNSUPPORTED"
+        );
         assert_eq!(
             detect_source_kind("a.script.xml")
                 .expect_err("legacy script should fail")
@@ -234,22 +363,22 @@ mod source_parse_tests {
         );
 
         assert_eq!(
-            resolve_include_path("nested/main.xml", "../shared.xml"),
+            resolve_import_path("nested/main.xml", "../shared.xml"),
             "shared.xml"
         );
         assert_eq!(
-            resolve_include_path("/", "shared/main.xml"),
+            resolve_import_path("/", "shared/main.xml"),
             "shared/main.xml"
         );
         assert_eq!(
-            resolve_include_directory_prefix("nested/main.xml", "../shared/"),
+            resolve_import_directory_prefix("nested/main.xml", "../shared/"),
             "shared"
         );
         assert_eq!(normalize_virtual_path("./a/./b/../c\\d.xml"), "a/c/d.xml");
         assert_eq!(stable_base("a*b?c"), "a_b_c");
-        assert!(is_supported_include_path("a.xml"));
-        assert!(is_supported_include_path("a.json"));
-        assert!(!is_supported_include_path("a.txt"));
+        assert!(is_supported_import_path("a.xml"));
+        assert!(!is_supported_import_path("a.json"));
+        assert!(!is_supported_import_path("a.txt"));
 
         assert_eq!(normalize_virtual_path("a/b/c/../d"), "a/b/d");
         assert_eq!(normalize_virtual_path("../a"), "a");
@@ -258,68 +387,61 @@ mod source_parse_tests {
     }
 
     #[test]
-    fn parse_sources_expands_directory_includes_in_sorted_order() {
+    fn parse_sources_resolves_file_and_directory_imports() {
         let files = BTreeMap::from([
             (
                 "main.xml".to_string(),
                 r#"
-<!-- include: shared/ -->
-<!-- include: extras/helper.xml -->
-<module name="main"><script name="main"></script></module>
+<!-- import Helper from extras/helper.xml -->
+<!-- import { Battle, Common } from shared/ -->
+<module name="Main"><script name="main"></script></module>
 "#
                 .to_string(),
             ),
             (
                 "shared/z-last.xml".to_string(),
-                r#"<module name="z-last"><script name="main"></script></module>"#.to_string(),
+                r#"<module name="Battle"><script name="main"></script></module>"#.to_string(),
             ),
             (
                 "shared/a-first.xml".to_string(),
-                r#"<module name="a-first"><script name="main"></script></module>"#.to_string(),
-            ),
-            ("shared/data.json".to_string(), r#"{"ok":true}"#.to_string()),
-            (
-                "shared/nested/base.xml".to_string(),
-                r#"<module name="base"></module>"#.to_string(),
+                r#"<module name="Common"><script name="main"></script></module>"#.to_string(),
             ),
             (
                 "extras/helper.xml".to_string(),
-                r#"<module name="helper"><script name="main"></script></module>"#.to_string(),
+                r#"<module name="Helper"><script name="main"></script></module>"#.to_string(),
             ),
         ]);
 
-        let sources = parse_sources(&files).expect("directory includes should expand");
+        let sources = parse_sources(&files).expect("imports should resolve");
         assert_eq!(
             sources.get("main.xml").expect("main source").includes,
             vec![
-                "shared/a-first.xml".to_string(),
-                "shared/data.json".to_string(),
-                "shared/nested/base.xml".to_string(),
-                "shared/z-last.xml".to_string(),
                 "extras/helper.xml".to_string(),
+                "shared/z-last.xml".to_string(),
+                "shared/a-first.xml".to_string(),
             ]
         );
     }
 
     #[test]
-    fn parse_sources_deduplicates_directory_and_file_includes() {
+    fn parse_sources_deduplicates_file_and_directory_imports() {
         let files = BTreeMap::from([
             (
                 "main.xml".to_string(),
                 r#"
-<!-- include: shared/ -->
-<!-- include: shared/nested/base.xml -->
-<module name="main"><script name="main"></script></module>
+<!-- import Base from shared/nested/base.xml -->
+<!-- import { Base } from shared/ -->
+<module name="Main"><script name="main"></script></module>
 "#
                 .to_string(),
             ),
             (
                 "shared/nested/base.xml".to_string(),
-                r#"<module name="base"></module>"#.to_string(),
+                r#"<module name="Base"></module>"#.to_string(),
             ),
         ]);
 
-        let sources = parse_sources(&files).expect("duplicate includes should dedupe");
+        let sources = parse_sources(&files).expect("duplicate imports should dedupe");
         assert_eq!(
             sources.get("main.xml").expect("main source").includes,
             vec!["shared/nested/base.xml".to_string()]
@@ -327,53 +449,182 @@ mod source_parse_tests {
     }
 
     #[test]
-    fn parse_sources_deduplicates_overlapping_directory_includes_and_supports_root_prefix() {
-        let files = BTreeMap::from([
+    fn parse_sources_rejects_legacy_include_json_and_bad_import_targets() {
+        let legacy = BTreeMap::from([(
+            "main.xml".to_string(),
+            r#"
+<!-- include: shared.xml -->
+<module name="Main"><script name="main"></script></module>
+"#
+            .to_string(),
+        )]);
+        assert_eq!(
+            parse_sources(&legacy)
+                .expect_err("legacy include should fail")
+                .code,
+            "IMPORT_LEGACY_INCLUDE_UNSUPPORTED"
+        );
+
+        let json = BTreeMap::from([("data.json".to_string(), "{}".to_string())]);
+        assert_eq!(
+            parse_sources(&json).expect_err("json should fail").code,
+            "SOURCE_KIND_JSON_UNSUPPORTED"
+        );
+
+        let mismatch = BTreeMap::from([
             (
-                "nested/main.xml".to_string(),
+                "main.xml".to_string(),
                 r#"
-<!-- include: / -->
-<!-- include: ../shared/ -->
-<module name="main"><script name="main"></script></module>
+<!-- import Shared from shared.xml -->
+<module name="Main"><script name="main"></script></module>
 "#
                 .to_string(),
             ),
             (
-                "shared/base.xml".to_string(),
-                r#"<module name="base"></module>"#.to_string(),
+                "shared.xml".to_string(),
+                r#"<module name="Other"><script name="main"></script></module>"#.to_string(),
             ),
-            ("shared/data.json".to_string(), r#"{"ok":true}"#.to_string()),
         ]);
-
-        let sources = parse_sources(&files).expect("root directory include should expand");
         assert_eq!(
-            sources
-                .get("nested/main.xml")
-                .expect("main source")
-                .includes,
-            vec![
-                "nested/main.xml".to_string(),
-                "shared/base.xml".to_string(),
-                "shared/data.json".to_string(),
-            ]
+            parse_sources(&mismatch)
+                .expect_err("mismatch should fail")
+                .code,
+            "IMPORT_MODULE_MISMATCH"
         );
     }
 
     #[test]
-    fn parse_sources_rejects_empty_directory_includes() {
-        let files = BTreeMap::from([(
+    fn parse_sources_rejects_duplicate_or_missing_directory_modules() {
+        let duplicate = BTreeMap::from([
+            (
+                "main.xml".to_string(),
+                r#"
+<!-- import { Shared } from mods/ -->
+<module name="Main"><script name="main"></script></module>
+"#
+                .to_string(),
+            ),
+            (
+                "mods/a.xml".to_string(),
+                r#"<module name="Shared"></module>"#.to_string(),
+            ),
+            (
+                "mods/nested/b.xml".to_string(),
+                r#"<module name="Shared"></module>"#.to_string(),
+            ),
+        ]);
+        assert_eq!(
+            parse_sources(&duplicate)
+                .expect_err("duplicate module should fail")
+                .code,
+            "IMPORT_MODULE_DUPLICATE"
+        );
+
+        let missing = BTreeMap::from([(
             "main.xml".to_string(),
             r#"
-<!-- include: shared/ -->
-<module name="main"><script name="main"></script></module>
+<!-- import { Shared } from mods/ -->
+<module name="Main"><script name="main"></script></module>
 "#
             .to_string(),
         )]);
+        assert_eq!(
+            parse_sources(&missing)
+                .expect_err("missing dir import should fail")
+                .code,
+            "IMPORT_DIR_EMPTY"
+        );
+    }
 
-        let error = parse_sources(&files).expect_err("empty directory include should fail");
-        assert_eq!(error.code, "INCLUDE_DIR_EMPTY");
-        assert!(error.message.contains("shared/"));
-        assert!(error.message.contains("main.xml"));
+    #[test]
+    fn parse_sources_rejects_blank_module_name_and_helper_dedupes_duplicates() {
+        let blank_name = BTreeMap::from([(
+            "main.xml".to_string(),
+            r#"<module name="   "><script name="main"></script></module>"#.to_string(),
+        )]);
+        assert_eq!(
+            parse_sources(&blank_name)
+                .expect_err("blank module name should fail")
+                .code,
+            "XML_MODULE_NAME_MISSING"
+        );
+
+        let includes = resolve_import_directives(
+            "main.xml",
+            &[
+                ImportDirective::File {
+                    module_name: "Shared".to_string(),
+                    from_path: "shared.xml".to_string(),
+                },
+                ImportDirective::File {
+                    module_name: "Shared".to_string(),
+                    from_path: "shared.xml".to_string(),
+                },
+            ],
+            &BTreeSet::from(["shared.xml".to_string()]),
+            &BTreeMap::from([("shared.xml".to_string(), "Shared".to_string())]),
+        )
+        .expect("duplicate file imports should dedupe");
+        assert_eq!(includes, vec!["shared.xml".to_string()]);
+    }
+
+    #[test]
+    fn import_resolution_helpers_cover_private_error_branches() {
+        let directives = vec![ImportDirective::File {
+            module_name: "Shared".to_string(),
+            from_path: "shared.xml".to_string(),
+        }];
+        let available_paths = BTreeSet::from(["shared.xml".to_string()]);
+        let invalid_target =
+            resolve_import_directives("main.xml", &directives, &available_paths, &BTreeMap::new())
+                .expect_err("missing module index should fail");
+        assert_eq!(invalid_target.code, "IMPORT_TARGET_INVALID");
+
+        let invalid_dir = resolve_import_directives(
+            "main.xml",
+            &[ImportDirective::Directory {
+                module_names: vec!["Shared".to_string()],
+                from_path: "mods".to_string(),
+            }],
+            &available_paths,
+            &BTreeMap::new(),
+        )
+        .expect_err("directory imports must end with slash");
+        assert_eq!(invalid_dir.code, "IMPORT_DIR_PATH_INVALID");
+
+        let missing_module = resolve_import_directives(
+            "main.xml",
+            &[ImportDirective::Directory {
+                module_names: vec!["Shared".to_string()],
+                from_path: "mods/".to_string(),
+            }],
+            &BTreeSet::from(["mods/other.xml".to_string()]),
+            &BTreeMap::from([("mods/other.xml".to_string(), "Other".to_string())]),
+        )
+        .expect_err("missing named module should fail");
+        assert_eq!(missing_module.code, "IMPORT_MODULE_NOT_FOUND");
+
+        assert_eq!(resolve_import_directory_prefix("main.xml", "/"), "");
+        assert!(is_path_within_directory("any.xml", ""));
+
+        let duplicate_dir = collect_directory_import_modules(
+            "mods",
+            &BTreeSet::from(["mods/a.xml".to_string(), "mods/nested/b.xml".to_string()]),
+            &BTreeMap::from([
+                ("mods/a.xml".to_string(), "Shared".to_string()),
+                ("mods/nested/b.xml".to_string(), "Shared".to_string()),
+            ]),
+        )
+        .expect_err("duplicate names should fail");
+        assert_eq!(duplicate_dir.code, "IMPORT_MODULE_DUPLICATE");
+
+        let skipped_missing_index = collect_directory_import_modules(
+            "mods",
+            &BTreeSet::from(["mods/a.xml".to_string()]),
+            &BTreeMap::new(),
+        )
+        .expect("paths without module index should be skipped");
+        assert!(skipped_missing_index.is_empty());
     }
 
     #[test]

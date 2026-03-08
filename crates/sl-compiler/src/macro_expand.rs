@@ -191,14 +191,18 @@ mod macro_expand_tests {
         let result = compile_project_bundle_from_xml_map(&files).expect("project should compile");
         let main = result.scripts.get("main.main").expect("main script");
         let root = main.groups.get(&main.root_group_id).expect("root group");
-        assert!(root
+        let var_count = root
             .nodes
             .iter()
-            .any(|node| matches!(node, ScriptNode::Var { .. })));
-        assert!(root
+            .filter(|node| matches!(node, ScriptNode::Var { .. }))
+            .count();
+        let while_count = root
             .nodes
             .iter()
-            .any(|node| matches!(node, ScriptNode::While { .. })));
+            .filter(|node| matches!(node, ScriptNode::While { .. }))
+            .count();
+        assert!(var_count > 0);
+        assert_eq!(while_count, 1);
     }
 
     #[test]

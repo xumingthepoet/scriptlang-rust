@@ -57,8 +57,8 @@ All code must be written with testability in mind:
 - `sl-runtime` reuses a single internal `rhai::Engine` instance and keeps `random` builtin state in shared runtime storage, avoiding per-eval engine re-construction.
 - defs prelude generation is cached per script in runtime, so repeated expression/code evaluation does not rebuild identical prelude text.
 - parser/compiler/runtime regex usage for stable patterns is lazily initialized once via static caches.
-- `sl-compiler` memoizes per-script reachable include closures during project compilation to avoid repeated DFS work.
-- include supports both single files and directory expansion via `<!-- include: dir/ -->`; directory expansion is recursive and uses stable path-sorted ordering.
+- `sl-compiler` memoizes per-script reachable import closures during project compilation to avoid repeated DFS work.
+- XML dependencies use explicit import comments like `<!-- import shared from shared.xml -->` and `<!-- import {battle, shared} from shared/ -->`.
 
 ## Module Sources
 - XML source files now use plain `*.xml` names and must have a `<module name="...">` root.
@@ -67,11 +67,11 @@ All code must be written with testability in mind:
 - Module scripts compile to qualified names like `battle.main`; host entry/call/return targets should use that qualified form.
 - Default host entry is `main.main`.
 - Inside the same module, scripts may reference sibling scripts with short names (`<call script="next"/>`), which resolves to the qualified module target.
-- Module `<var>` is the only global-variable source in XML and remains writable, snapshotted, and visible through include-closure rules.
+- Module `<var>` is the only global-variable source in XML and remains writable, snapshotted, and visible through import-closure rules.
 
 ## Module Globals (`<module><var>`)
 - `<module><var name="..." type="...">expr</var>` defines writable module globals.
-- globals initialize on `engine.start`, support short name and `ns.var` access, and follow include-closure visibility.
+- globals initialize on `engine.start`, support short name and `ns.var` access, and follow import-closure visibility.
 - when short names conflict across namespaces, only fully-qualified `ns.var` remains available.
 
 ## Choice Dynamic Options
@@ -111,7 +111,7 @@ All code must be written with testability in mind:
 
 ScriptLang now supports a clear two-step host flow:
 
-1. Compile source files (`*.xml` / `*.json`) into `CompiledProjectArtifact`.
+1. Compile source files (`*.xml`) into `CompiledProjectArtifact`.
 2. Run or resume engine from that artifact.
 
 Recommended API entry points are in `sl-api`:
@@ -155,7 +155,7 @@ Each example directory also carries a `testcase.json` consumed by `sl-test-examp
 
 ## User Pitfalls And Guardrails
 - ScriptLang expr syntax uses `LT`, `LTE`, and `AND` instead of `<`, `<=`, and `&&`.
-- Type visibility is per include-closure: each module must include the other `*.xml` sources it depends on, directly or through directory includes.
+- Type visibility is per import-closure: each module must import the other `*.xml` sources it depends on, directly or through directory imports.
 - In XML attributes, ScriptLang expr strings use single quotes like `'Rin'`; in `<code>`, `<function>`, and `<var>...</var>` initializer bodies, use double quotes like `"Rin"`.
 - `Data type incorrect: f64 (expecting i64)` in array indexing is treated as a runtime type-stability bug; prioritize runtime fix/upgrade over user-side workarounds.
 - Validation should be `compile --dry-run` + `replay --rand "<fixed-seq>"` together; compile-only is not enough for runtime-path safety.

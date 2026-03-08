@@ -84,3 +84,24 @@ pub(crate) fn collect_reachable_files(
 
     visited
 }
+
+#[cfg(test)]
+mod include_graph_tests {
+    use super::*;
+
+    #[test]
+    fn validate_include_graph_reports_missing_include() {
+        let sources = BTreeMap::from([(
+            "main.xml".to_string(),
+            SourceFile {
+                kind: SourceKind::ModuleXml,
+                includes: vec!["missing.xml".to_string()],
+                xml_root: None,
+                json_value: None,
+            },
+        )]);
+
+        let error = validate_include_graph(&sources).expect_err("missing include should fail");
+        assert_eq!(error.code, "INCLUDE_NOT_FOUND");
+    }
+}

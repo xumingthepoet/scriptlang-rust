@@ -1,4 +1,4 @@
-<!-- include: actors.xml -->
+<!-- import actors from actors.xml -->
 <module name="battle-loop">
 <script
   name="battle-loop"

@@ -15,8 +15,7 @@ pub fn compile_project_bundle_from_xml_map(
     let module_scripts_by_path = parse_module_scripts(&sources)?;
     let defs_by_path = parse_defs_files(&sources)
         .expect("defs parsing should match previously validated module parsing");
-    let global_json = collect_global_json(&sources)?;
-    let all_json_symbols = global_json.keys().cloned().collect::<BTreeSet<_>>();
+    let global_json = BTreeMap::new();
     let (defs_global_declarations, defs_global_init_order) =
         collect_defs_globals_for_bundle(&defs_by_path)?;
 
@@ -24,15 +23,9 @@ pub fn compile_project_bundle_from_xml_map(
     let mut reachable_cache = HashMap::new();
 
     for (file_path, source) in &sources {
-        if !matches!(source.kind, SourceKind::ModuleXml) {
-            continue;
-        }
-
         let reachable = reachable_cache
             .entry(file_path.clone())
             .or_insert_with(|| collect_reachable_files(file_path, &sources));
-        let visible_json_symbols = collect_visible_json_symbols(reachable, &sources)
-            .expect("collect_visible_json_symbols should be infallible after collect_global_json");
         let script_roots = collect_source_scripts(source, file_path, &module_scripts_by_path);
         for script_decl in script_roots {
             let (visible_types, visible_functions, visible_defs_globals) =
@@ -46,8 +39,6 @@ pub fn compile_project_bundle_from_xml_map(
                 visible_types: &visible_types,
                 visible_functions: &visible_functions,
                 visible_defs_globals: &visible_defs_globals,
-                visible_json_globals: &visible_json_symbols,
-                all_json_symbols: &all_json_symbols,
             })
             .map_err(|error| with_file_context(error, file_path))?;
             if scripts.contains_key(&ir.script_name) {
@@ -152,11 +143,10 @@ mod pipeline_tests {
 </module>
 "#,
             ),
-            ("config.json", r#"{"base": 3}"#),
             (
                 "battle.xml",
                 r#"
-<!-- include: shared.xml -->
+<!-- import shared from shared.xml -->
 <module name="battle">
 <script name="battle">
   <text>battle.hp=${shared.hp}</text>
@@ -167,12 +157,11 @@ mod pipeline_tests {
             (
                 "main.xml",
                 r#"
-<!-- include: shared.xml -->
-<!-- include: battle.xml -->
-<!-- include: config.json -->
+<!-- import shared from shared.xml -->
+<!-- import battle from battle.xml -->
 <module name="main">
 <script name="main">
-  <text>main.base=${config.base}</text>
+  <text>main.hp=${shared.hp}</text>
   <call script="battle"/>
 </script>
 </module>
@@ -183,7 +172,7 @@ mod pipeline_tests {
         let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
         assert!(bundle.scripts.contains_key("main.main"));
         assert!(bundle.scripts.contains_key("battle.battle"));
-        assert!(bundle.global_json.contains_key("config"));
+        assert!(bundle.global_json.is_empty());
     }
 
     #[test]
@@ -257,7 +246,7 @@ mod pipeline_tests {
         )]);
         let missing_name_error =
             compile_project_bundle_from_xml_map(&missing_name).expect_err("module name required");
-        assert_eq!(missing_name_error.code, "XML_MISSING_ATTR");
+        assert_eq!(missing_name_error.code, "XML_MODULE_NAME_MISSING");
 
         let invalid_child = map(&[("bad.xml", r#"<module name="bad"><unknown/></module>"#)]);
         let invalid_child_error =
@@ -286,14 +275,13 @@ mod pipeline_tests {
 </module>
 "#,
             ),
-            ("shared/support/config.json", r#"{"base": 3}"#),
             (
                 "shared/nested/battle.xml",
                 r#"
-<!-- include: ../support/ -->
+<!-- import {shared} from ../support/ -->
 <module name="battle">
 <script name="battle">
-  <text>battle=${shared.boost(config.base)}</text>
+  <text>battle=${shared.boost(3)}</text>
 </script>
 </module>
 "#,
@@ -301,10 +289,10 @@ mod pipeline_tests {
             (
                 "main.xml",
                 r#"
-<!-- include: shared/ -->
+<!-- import {battle, shared} from shared/ -->
 <module name="main">
 <script name="main">
-  <text>main=${shared.boost(config.base)}</text>
+  <text>main=${shared.boost(3)}</text>
   <call script="battle"/>
 </script>
 </module>
@@ -315,7 +303,7 @@ mod pipeline_tests {
         let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
         assert!(bundle.scripts.contains_key("main.main"));
         assert!(bundle.scripts.contains_key("battle.battle"));
-        assert!(bundle.global_json.contains_key("config"));
+        assert!(bundle.global_json.is_empty());
     }
 
     #[test]
@@ -356,39 +344,39 @@ mod pipeline_tests {
     }
 
     #[test]
-    fn compile_bundle_rejects_missing_include_and_cycle() {
+    fn compile_bundle_rejects_missing_import_and_cycle() {
         let missing_include = map(&[(
             "main.xml",
             r#"
-    <!-- include: missing.xml -->
+    <!-- import missing from missing.xml -->
     <module name="main">
 <script name="main"></script>
 </module>
     "#,
         )]);
         let missing = compile_project_bundle_from_xml_map(&missing_include)
-            .expect_err("missing include should fail");
-        assert_eq!(missing.code, "INCLUDE_NOT_FOUND");
+            .expect_err("missing import should fail");
+        assert_eq!(missing.code, "IMPORT_FILE_NOT_FOUND");
 
         let empty_directory_include = map(&[(
             "main.xml",
             r#"
-    <!-- include: missing/ -->
+    <!-- import {missing} from missing/ -->
     <module name="main">
 <script name="main"></script>
 </module>
     "#,
         )]);
         let empty_directory = compile_project_bundle_from_xml_map(&empty_directory_include)
-            .expect_err("empty directory include should fail");
-        assert_eq!(empty_directory.code, "INCLUDE_DIR_EMPTY");
+            .expect_err("empty directory import should fail");
+        assert_eq!(empty_directory.code, "IMPORT_DIR_EMPTY");
         assert!(empty_directory.message.contains("main.xml"));
 
         let cycle = map(&[
             (
                 "a.xml",
                 r#"
-    <!-- include: b.xml -->
+    <!-- import b from b.xml -->
     <module name="a">
 <script name="a"></script>
 </module>
@@ -397,7 +385,7 @@ mod pipeline_tests {
             (
                 "b.xml",
                 r#"
-    <!-- include: a.xml -->
+    <!-- import a from a.xml -->
     <module name="b">
 <script name="b"></script>
 </module>
@@ -405,14 +393,14 @@ mod pipeline_tests {
             ),
         ]);
         let cycle_error =
-            compile_project_bundle_from_xml_map(&cycle).expect_err("include cycle should fail");
+            compile_project_bundle_from_xml_map(&cycle).expect_err("import cycle should fail");
         assert_eq!(cycle_error.code, "INCLUDE_CYCLE");
 
         let directory_cycle = map(&[
             (
                 "main.xml",
                 r#"
-    <!-- include: shared/ -->
+    <!-- import {loop} from shared/ -->
     <module name="main">
 <script name="main"></script>
 </module>
@@ -421,7 +409,7 @@ mod pipeline_tests {
             (
                 "shared/loop.xml",
                 r#"
-    <!-- include: ../main.xml -->
+    <!-- import main from ../main.xml -->
     <module name="loop">
 <script name="loop"></script>
 </module>
@@ -462,6 +450,11 @@ mod pipeline_tests {
         };
         let collected = collect_source_scripts(&json_source, "shared.json", &BTreeMap::new());
         assert!(collected.is_empty());
+
+        let global_json =
+            collect_global_json(&BTreeMap::from([("shared.json".to_string(), json_source)]))
+                .expect("internal json helper should still collect manual sources");
+        assert_eq!(global_json.get("shared"), Some(&SlValue::Bool(true)));
 
         let bad_module = map(&[(
             "bad.xml",

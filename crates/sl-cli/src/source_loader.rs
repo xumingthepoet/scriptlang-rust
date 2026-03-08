@@ -87,7 +87,7 @@ pub(crate) fn read_scripts_xml_from_dir(
         let path = entry.path();
         let path_str = path.to_string_lossy();
 
-        if !(path_str.ends_with(".xml") || path_str.ends_with(".json")) {
+        if !path_str.ends_with(".xml") {
             continue;
         }
 
@@ -104,7 +104,7 @@ pub(crate) fn read_scripts_xml_from_dir(
     if scripts.is_empty() {
         return Err(ScriptLangError::new(
             "CLI_SOURCE_EMPTY",
-            format!("No .xml/.json files under {}", scripts_dir.display()),
+            format!("No .xml files under {}", scripts_dir.display()),
         ));
     }
 
@@ -164,14 +164,12 @@ mod source_loader_tests {
             "<module name=\"main\"><script name=\"main\"></script></module>",
         );
         write_file(&root.join("defs.xml"), "<module name=\"defs\"></module>");
-        write_file(&root.join("data.json"), "{\"ok\":true}");
         write_file(&root.join("skip.txt"), "ignored");
 
         let scripts = read_scripts_xml_from_dir(&root).expect("scan should pass");
-        assert_eq!(scripts.len(), 3);
+        assert_eq!(scripts.len(), 2);
         assert!(scripts.contains_key("main.xml"));
         assert!(scripts.contains_key("defs.xml"));
-        assert!(scripts.contains_key("data.json"));
     }
 
     #[test]

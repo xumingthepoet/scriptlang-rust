@@ -30,19 +30,114 @@ pub struct XmlTextNode {
     pub location: SourceSpan,
 }
 
-pub fn parse_include_directives(source: &str) -> Vec<String> {
-    include_directive_regex()
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ImportDirective {
+    File {
+        module_name: String,
+        from_path: String,
+    },
+    Directory {
+        module_names: Vec<String>,
+        from_path: String,
+    },
+}
+
+pub fn parse_import_directives(source: &str) -> Vec<ImportDirective> {
+    let mut directives = Vec::new();
+
+    for caps in import_directive_regex().captures_iter(source) {
+        let raw = caps
+            .get(1)
+            .expect("import directive regex should always capture body")
+            .as_str()
+            .trim();
+        if let Some(file_caps) = file_import_body_regex().captures(raw) {
+            let module_name = file_caps
+                .get(1)
+                .expect("file import regex should capture module name")
+                .as_str()
+                .trim();
+            let from_path = file_caps
+                .get(2)
+                .expect("file import regex should capture import path")
+                .as_str()
+                .trim();
+            directives.extend((!module_name.is_empty() && !from_path.is_empty()).then(|| {
+                ImportDirective::File {
+                    module_name: module_name.to_string(),
+                    from_path: from_path.to_string(),
+                }
+            }));
+            continue;
+        }
+
+        let Some(dir_caps) = directory_import_body_regex().captures(raw) else {
+            continue;
+        };
+        let module_names = dir_caps
+            .get(1)
+            .expect("directory import regex should capture module list")
+            .as_str();
+        let from_path = dir_caps
+            .get(2)
+            .expect("directory import regex should capture import path")
+            .as_str()
+            .trim();
+        let module_names = module_names
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        directives.extend(
+            (!from_path.is_empty() && !module_names.is_empty()).then(|| {
+                ImportDirective::Directory {
+                    module_names,
+                    from_path: from_path.to_string(),
+                }
+            }),
+        );
+    }
+
+    directives
+}
+
+pub fn parse_legacy_include_directives(source: &str) -> Vec<String> {
+    legacy_include_directive_regex()
         .captures_iter(source)
         .filter_map(|caps| caps.get(1).map(|m| m.as_str().trim().to_string()))
         .filter(|value| !value.is_empty())
         .collect()
 }
 
-fn include_directive_regex() -> &'static Regex {
+fn import_directive_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"(?m)^\s*<!--\s*(import.+?)\s*-->\s*$").expect("import regex must compile")
+    })
+}
+
+fn file_import_body_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"^import\s+([A-Za-z_][A-Za-z0-9_-]*)\s+from\s+(.+?)$")
+            .expect("file import body regex must compile")
+    })
+}
+
+fn directory_import_body_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"^import\s*\{\s*(.+?)\s*\}\s+from\s+(.+?)$")
+            .expect("directory import body regex must compile")
+    })
+}
+
+fn legacy_include_directive_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
         Regex::new(r"(?m)^\s*<!--\s*include:\s*(.+?)\s*-->\s*$")
-            .expect("include regex must compile")
+            .expect("legacy include regex must compile")
     })
 }
 
@@ -109,24 +204,80 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_include_directives_extracts_non_empty_paths() {
+    fn parse_import_directives_extracts_file_and_directory_imports() {
         let source = r#"
-<!-- include: a.script.xml -->
-<!-- include:   nested/b.script.xml   -->
-<!-- include: assets/ -->
-<!-- include:    -->
+<!-- import Shared from shared.xml -->
+<!-- import { Battle, Common } from modules/ -->
+<!-- import {    } from ignored/ -->
 <script name="main"></script>
 "#;
 
-        let includes = parse_include_directives(source);
+        let imports = parse_import_directives(source);
+        assert_eq!(
+            imports,
+            vec![
+                ImportDirective::File {
+                    module_name: "Shared".to_string(),
+                    from_path: "shared.xml".to_string(),
+                },
+                ImportDirective::Directory {
+                    module_names: vec!["Battle".to_string(), "Common".to_string()],
+                    from_path: "modules/".to_string(),
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_legacy_include_directives_extracts_non_empty_paths() {
+        let source = r#"
+<!-- include: a.xml -->
+<!-- include:   nested/b.xml   -->
+<!-- include: assets/ -->
+<!-- include:    -->
+<module name="main"></module>
+"#;
+
+        let includes = parse_legacy_include_directives(source);
         assert_eq!(
             includes,
             vec![
-                "a.script.xml".to_string(),
-                "nested/b.script.xml".to_string(),
+                "a.xml".to_string(),
+                "nested/b.xml".to_string(),
                 "assets/".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn parse_import_directives_ignores_malformed_entries() {
+        let source = r#"
+<!-- import from shared.xml -->
+<!-- import Shared from -->
+<!-- import { } from modules/ -->
+<!-- import { Shared } from -->
+<!-- import -->
+<!-- import Shared from shared.xml -->
+<!-- import { Battle, Common } from modules/ -->
+"#;
+
+        let imports = parse_import_directives(source);
+        assert_eq!(
+            imports,
+            vec![
+                ImportDirective::File {
+                    module_name: "Shared".to_string(),
+                    from_path: "shared.xml".to_string(),
+                },
+                ImportDirective::Directory {
+                    module_names: vec!["Battle".to_string(), "Common".to_string()],
+                    from_path: "modules/".to_string(),
+                }
+            ]
+        );
+
+        assert!(parse_import_directives("<!-- import Shared from    -->").is_empty());
+        assert!(parse_import_directives("<!-- import { Shared } from    -->").is_empty());
     }
 
     #[test]

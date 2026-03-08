@@ -610,18 +610,24 @@ mod eval_tests {
 
     #[test]
     pub(super) fn global_json_is_readonly_during_code_execution() {
-        let mut engine = engine_from_sources(map(&[
-            ("game.json", r#"{ "bonus": 10 }"#),
-            (
+        let mut engine = engine_from_sources_with_global_json(
+            map(&[(
                 "main.script.xml",
                 r#"
-    <!-- include: game.json -->
     <script name="main">
       <code>game.bonus = 11;</code>
     </script>
     "#,
-            ),
-        ]));
+            )]),
+            BTreeMap::from([(
+                "game".to_string(),
+                SlValue::Map(BTreeMap::from([(
+                    "bonus".to_string(),
+                    SlValue::Number(10.0),
+                )])),
+            )]),
+            &["game"],
+        );
         engine.start("main", None).expect("start");
         let error = engine
             .next_output()
@@ -841,16 +847,11 @@ mod eval_tests {
         let bad_initializer = map(&[
             (
                 "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int">base &lt;= 1</var></defs>"#,
+                r#"<defs name="shared"><var name="hp" type="int">1 &lt;= 1</var></defs>"#,
             ),
-            ("base.json", r#"{ "base": 1 }"#),
             (
                 "main.script.xml",
-                r#"
-<!-- include: shared.defs.xml -->
-<!-- include: base.json -->
-<script name="main"><text>ok</text></script>
-"#,
+                r#"<script name="main"><text>ok</text></script>"#,
             ),
         ]);
         let mut bad_initializer_engine = engine_from_sources(bad_initializer);
@@ -924,27 +925,31 @@ mod eval_tests {
             .expect_err("initializer should reject host function mode");
         assert_eq!(error.code, "ENGINE_HOST_FUNCTION_UNSUPPORTED");
 
-        let initializer_files = map(&[
-            ("game.json", r#"{ "hp": 5 }"#),
-            (
-                "shared.defs.xml",
-                r#"
+        let mut initializer_engine = engine_from_sources_with_global_json(
+            map(&[
+                (
+                    "shared.defs.xml",
+                    r#"
 <defs name="shared">
   <var name="a" type="int">1</var>
   <var name="b" type="int">a + game.hp</var>
 </defs>
 "#,
-            ),
-            (
-                "main.script.xml",
-                r#"
+                ),
+                (
+                    "main.script.xml",
+                    r#"
 <!-- include: shared.defs.xml -->
-<!-- include: game.json -->
 <script name="main"><text>${shared.b}</text></script>
 "#,
-            ),
-        ]);
-        let mut initializer_engine = engine_from_sources(initializer_files);
+                ),
+            ]),
+            BTreeMap::from([(
+                "game".to_string(),
+                SlValue::Map(BTreeMap::from([("hp".to_string(), SlValue::Number(5.0))])),
+            )]),
+            &["game"],
+        );
         initializer_engine.start("main.main", None).expect("start");
         assert_eq!(
             initializer_engine.defs_globals_value.get("shared.b"),
@@ -970,22 +975,26 @@ mod eval_tests {
             .expect_err("bad initializer should fail");
         assert_eq!(error.code, "ENGINE_EVAL_ERROR");
 
-        let readonly_initializer = map(&[
-            ("game.json", r#"{ "hp": 5 }"#),
-            (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int">{ game = 1; 1 }</var></defs>"#,
-            ),
-            (
-                "main.script.xml",
-                r#"
+        let mut readonly_initializer_engine = engine_from_sources_with_global_json(
+            map(&[
+                (
+                    "shared.defs.xml",
+                    r#"<defs name="shared"><var name="hp" type="int">{ game = 1; 1 }</var></defs>"#,
+                ),
+                (
+                    "main.script.xml",
+                    r#"
 <!-- include: shared.defs.xml -->
-<!-- include: game.json -->
 <script name="main"><text>ok</text></script>
 "#,
-            ),
-        ]);
-        let mut readonly_initializer_engine = engine_from_sources(readonly_initializer);
+                ),
+            ]),
+            BTreeMap::from([(
+                "game".to_string(),
+                SlValue::Map(BTreeMap::from([("hp".to_string(), SlValue::Number(5.0))])),
+            )]),
+            &["game"],
+        );
         let error = readonly_initializer_engine
             .start("main.main", None)
             .expect_err("json mutation in initializer should fail");
@@ -1032,20 +1041,16 @@ mod eval_tests {
             .expect_err("invalid alias target should fail");
         assert_eq!(error.code, "ENGINE_DEFS_GLOBAL_MISSING");
 
-        let json_shadow = map(&[
-            ("game.json", r#"{ "hp": 5 }"#),
-            (
-                "main.script.xml",
-                r#"
-<!-- include: game.json -->
+        let json_shadow = map(&[(
+            "main.script.xml",
+            r#"
 <script name="main">
   <var name="game" type="int">1</var>
   <code>game = game + 1;</code>
   <text>${game}</text>
 </script>
 "#,
-            ),
-        ]);
+        )]);
         let mut json_shadow_engine = engine_from_sources(json_shadow);
         json_shadow_engine.start("main.main", None).expect("start");
         let output = json_shadow_engine.next_output().expect("text");
@@ -1482,31 +1487,39 @@ mod eval_tests {
 
     #[test]
     pub(super) fn code_eval_with_defs_prelude_and_visible_json_is_covered() {
-        let mut engine = engine_from_sources(map(&[
-            ("game.json", r#"{ "bonus": 10 }"#),
-            (
-                "shared.defs.xml",
-                r#"
+        let mut engine = engine_from_sources_with_global_json(
+            map(&[
+                (
+                    "shared.defs.xml",
+                    r#"
 <defs name="shared">
   <function name="add_bonus" args="int:x" return="int:out">
     out = x + game.bonus;
   </function>
 </defs>
 "#,
-            ),
-            (
-                "main.script.xml",
-                r#"
+                ),
+                (
+                    "main.script.xml",
+                    r#"
 <!-- include: shared.defs.xml -->
-<!-- include: game.json -->
 <script name="main">
   <var name="hp" type="int">1</var>
   <code>hp = shared.add_bonus(hp);</code>
   <text>${hp}</text>
 </script>
 "#,
-            ),
-        ]));
+                ),
+            ]),
+            BTreeMap::from([(
+                "game".to_string(),
+                SlValue::Map(BTreeMap::from([(
+                    "bonus".to_string(),
+                    SlValue::Number(10.0),
+                )])),
+            )]),
+            &["game"],
+        );
 
         engine.start("main", None).expect("start");
         let output = engine.next_output().expect("text");
@@ -1515,32 +1528,38 @@ mod eval_tests {
 
     #[test]
     pub(super) fn eval_conversion_and_prelude_error_branches_are_covered() {
-        let mut initializer_unit = engine_from_sources(map(&[
-            ("game.json", r#"{ "hp": 5 }"#),
-            (
+        let mut initializer_unit = engine_from_sources_with_global_json(
+            map(&[(
                 "main.script.xml",
                 r#"
-    <!-- include: game.json -->
     <script name="main"><text>x</text></script>
     "#,
-            ),
-        ]));
+            )]),
+            BTreeMap::from([(
+                "game".to_string(),
+                SlValue::Map(BTreeMap::from([("hp".to_string(), SlValue::Number(5.0))])),
+            )]),
+            &["game"],
+        );
         initializer_unit.start("main", None).expect("start");
         let error = initializer_unit
             .eval_defs_global_initializer("{ game = (); 1 }", "shared")
             .expect_err("initializer should reject unsupported global value type");
         assert_eq!(error.code, "ENGINE_VALUE_UNSUPPORTED");
 
-        let mut readonly_unit = engine_from_sources(map(&[
-            ("game.json", r#"{ "hp": 5 }"#),
-            (
+        let mut readonly_unit = engine_from_sources_with_global_json(
+            map(&[(
                 "main.script.xml",
                 r#"
-    <!-- include: game.json -->
     <script name="main"><code>game = ();</code></script>
     "#,
-            ),
-        ]));
+            )]),
+            BTreeMap::from([(
+                "game".to_string(),
+                SlValue::Map(BTreeMap::from([("hp".to_string(), SlValue::Number(5.0))])),
+            )]),
+            &["game"],
+        );
         readonly_unit.start("main", None).expect("start");
         let error = readonly_unit
             .next_output()
@@ -1659,5 +1678,28 @@ mod eval_tests {
             )
             .expect("prelude build should ignore missing global binding");
         assert!(prelude.contains("fn shared_add("));
+    }
+
+    #[test]
+    pub(super) fn visible_global_snapshot_skips_shadowed_mutable_binding() {
+        let mut engine = engine_from_sources_with_global_json(
+            map(&[(
+                "main.xml",
+                r#"
+<module name="main">
+  <script name="main">
+    <var name="game" type="int">1</var>
+    <code>game = game + 1;</code>
+    <text>${game}</text>
+  </script>
+</module>
+"#,
+            )]),
+            BTreeMap::from([("game".to_string(), SlValue::Number(99.0))]),
+            &["game"],
+        );
+        engine.start("main.main", None).expect("start");
+        let output = engine.next_output().expect("text");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "2"));
     }
 }

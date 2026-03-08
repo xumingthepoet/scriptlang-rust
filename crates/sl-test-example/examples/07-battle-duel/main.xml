@@ -1,7 +1,7 @@
-<!-- include: actors.xml -->
-<!-- include: battle-loop.xml -->
-<!-- include: victory.xml -->
-<!-- include: defeat.xml -->
+<!-- import actors from actors.xml -->
+<!-- import battle-loop from battle-loop.xml -->
+<!-- import victory from victory.xml -->
+<!-- import defeat from defeat.xml -->
 <module name="main">
 <script name="main">
   <var name="player" type="actors.Combatant">#{name: "Hero", hp: 12}</var>

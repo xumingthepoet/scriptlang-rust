@@ -1,4 +1,4 @@
-<!-- include: shared.xml -->
+<!-- import shared from shared.xml -->
 <module name="main">
 <script name="main">
   <var name="base" type="int">2</var>

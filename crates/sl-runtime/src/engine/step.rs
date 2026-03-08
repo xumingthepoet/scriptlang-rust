@@ -1230,19 +1230,25 @@ mod step_tests {
         assert!(found.is_some());
         assert_eq!(choice_ctx.find_frame_index(9999), None);
 
-        let mut expr_engine = engine_from_sources(map(&[
-            ("game.json", r#"{ "score": 5 }"#),
-            (
+        let mut expr_engine = engine_from_sources_with_global_json(
+            map(&[(
                 "main.script.xml",
                 r#"
-    <!-- include: game.json -->
     <script name="main">
       <var name="x" type="int">1</var>
       <text>${x + game.score}</text>
     </script>
     "#,
-            ),
-        ]));
+            )]),
+            BTreeMap::from([(
+                "game".to_string(),
+                SlValue::Map(BTreeMap::from([(
+                    "score".to_string(),
+                    SlValue::Number(5.0),
+                )])),
+            )]),
+            &["game"],
+        );
         expr_engine.start("main", None).expect("start");
         let output = expr_engine.next_output().expect("next");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "6"));
@@ -1334,20 +1340,26 @@ mod step_tests {
         );
         assert_eq!(finisher.frames[0].node_index, 5);
 
-        let mut globals = engine_from_sources(map(&[
-            ("game.json", r#"{ "score": 5 }"#),
-            (
+        let mut globals = engine_from_sources_with_global_json(
+            map(&[(
                 "main.script.xml",
                 r##"
-    <!-- include: game.json -->
     <script name="main">
       <var name="obj" type="#{int}"/>
       <code>obj.n = game.score + 1;</code>
       <text>${obj.n}</text>
     </script>
     "##,
-            ),
-        ]));
+            )]),
+            BTreeMap::from([(
+                "game".to_string(),
+                SlValue::Map(BTreeMap::from([(
+                    "score".to_string(),
+                    SlValue::Number(5.0),
+                )])),
+            )]),
+            &["game"],
+        );
         globals.start("main", None).expect("start");
         let global = globals
             .read_variable("game")

@@ -1,4 +1,4 @@
-<!-- include: buff.xml -->
+<!-- import buff from buff.xml -->
 <module name="main">
 <script name="main">
   <var name="hp" type="int">1</var>

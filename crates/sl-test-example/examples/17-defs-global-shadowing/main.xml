@@ -1,5 +1,5 @@
-<!-- include: shared.xml -->
-<!-- include: battle.xml -->
+<!-- import shared from shared.xml -->
+<!-- import battle from battle.xml -->
 <module name="main">
 <script name="main">
   <var name="hp" type="int">10</var>
