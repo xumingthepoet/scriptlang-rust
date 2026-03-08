@@ -9,6 +9,11 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 - [Example testing with sl-test-example runner](docs/testing-examples.md)
 - [Rust testability playbook for 100% coverage](docs/rust-testability-playbook.md)
 
+## Doc Boundary
+- `README.md` and `docs/`: user-facing behavior, integration usage, commands, and examples.
+- `KNOWLEDGE.md`: agent-facing long-term engineering constraints and reusable pitfalls (file/module guardrails, failure modes).
+- Do not put “this feature was implemented by steps A/B/C” or “how this specific commit was done” into `KNOWLEDGE.md`.
+
 ## Workspace Crates
 - `crates/sl-core`: shared types, values, errors, snapshot/player schemas.
 - `crates/sl-parser`: XML parser + include directive extraction.
