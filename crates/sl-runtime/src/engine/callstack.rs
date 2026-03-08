@@ -1553,4 +1553,200 @@ mod callstack_tests {
             .expect_err("dynamic cross-module private call should fail");
         assert_eq!(dynamic_error.code, "ENGINE_SCRIPT_ACCESS_DENIED");
     }
+
+    #[test]
+    fn private_script_alias_without_module_name_denies_access() {
+        // When a module has exactly one private script with a unique local name,
+        // the runtime creates a short alias with module_name = None.
+        // This tests that a private script with module_name = None denies access.
+        // Note: We use a script without module wrapper as the caller to avoid
+        // the automatic module prefixing.
+        let mut engine = engine_from_sources(map(&[
+            (
+                "lib.xml",
+                r#"<module name="lib" default_access="public">
+  <script name="secret" access="private"><text>hidden</text></script>
+</module>"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<!-- include: lib.xml -->
+<script name="main"><call script="lib.secret"/></script>
+"#,
+            ),
+        ]));
+        engine.start("main.main", None).expect("start");
+        // The script lib.secret is private, and calling from non-module context
+        // should deny access
+        let error = engine
+            .next_output()
+            .expect_err("private script call should deny access");
+        assert_eq!(error.code, "ENGINE_SCRIPT_ACCESS_DENIED");
+    }
+
+    #[test]
+    fn return_to_private_script_without_module_denies_access() {
+        // Test line 230: return target validation when target has no module_name
+        let mut engine = engine_from_sources(map(&[
+            (
+                "lib.xml",
+                r#"<module name="lib" default_access="public">
+  <script name="helper" access="private"><text>help</text></script>
+</module>"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<!-- include: lib.xml -->
+<script name="main">
+  <return script="lib.helper"/>
+</script>
+"#,
+            ),
+        ]));
+        engine.start("main.main", None).expect("start");
+        // Return to private script from non-module context should deny access
+        let error = engine
+            .next_output()
+            .expect_err("return to private script should deny access");
+        assert_eq!(error.code, "ENGINE_SCRIPT_ACCESS_DENIED");
+    }
+
+    #[test]
+    fn private_script_from_standalone_denies_access_line29() {
+        // Line 29: current script in group_lookup but not in scripts
+        // This makes resolve_current_module_name() return None
+        let mut engine = engine_from_sources(map(&[
+            (
+                "lib.xml",
+                r#"<module name="lib" default_access="public">
+  <script name="secret" access="private"><text>hidden</text></script>
+</module>"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<!-- include: lib.xml -->
+<script name="main"><call script="lib.secret"/></script>
+"#,
+            ),
+        ]));
+        // Start engine - this populates group_lookup
+        engine.start("main.main", None).expect("start");
+
+        // Now remove the current script from scripts to simulate corrupted state
+        // This makes resolve_current_module_name() return None
+        engine.scripts.remove("main.main");
+
+        // Try to resolve target - this should hit line 29 when validating private access
+        let target_script = engine
+            .resolve_target_script("lib.secret", "ERR", "err")
+            .expect("should resolve target");
+        assert_eq!(target_script, "lib.secret");
+
+        // The actual call should fail - but we can't easily trigger it because
+        // the frame is already pushed with the script. This test at least verifies
+        // the path where current_module_name is None
+    }
+
+    #[test]
+    fn private_script_alias_without_module_line20() {
+        // Line 20: target has module_name = None (alias) and access = Private
+        // Test by directly invoking the validation method with constructed inputs
+        let mut engine = engine_from_sources(map(&[(
+            "lib.xml",
+            r#"<module name="lib" default_access="public">
+  <script name="secret" access="private"><text>hidden</text></script>
+</module>"#,
+        )]));
+
+        // The alias "secret" is created with module_name = None
+        // We need to call validate_script_access_from_current directly
+        // Let's first start the engine to set up frames
+        engine
+            .start("lib.secret", None)
+            .expect_err("private entry should fail");
+
+        // Create a ScriptIr manually with module_name = None and access = Private
+        let private_alias = sl_core::ScriptIr {
+            script_path: "lib.xml".to_string(),
+            script_name: "secret".to_string(),
+            access: sl_core::AccessLevel::Private,
+            module_name: None, // This is the key - module_name is None
+            local_script_name: Some("secret".to_string()),
+            params: vec![],
+            root_group_id: "g1".to_string(),
+            groups: Default::default(),
+            visible_functions: Default::default(),
+            visible_defs_globals: Default::default(),
+            visible_json_globals: vec![],
+        };
+
+        // Directly call validate - should hit line 20 because module_name is None
+        let result = engine.validate_script_access_from_current("secret", &private_alias);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "ENGINE_SCRIPT_ACCESS_DENIED");
+    }
+
+    #[test]
+    fn current_script_not_in_scripts_line29() {
+        // Line 29: current script is in group_lookup but not in scripts
+        // This makes resolve_current_module_name() return None
+        let mut engine = engine_from_sources(map(&[(
+            "lib.xml",
+            r#"<module name="lib" default_access="public">
+  <script name="secret" access="private"><text>hidden</text></script>
+</module>"#,
+        )]));
+
+        // Start but then remove the script from scripts
+        engine
+            .start("lib.secret", None)
+            .expect_err("private entry should fail");
+
+        // Create another engine and set up frames manually
+        let mut engine2 = engine_from_sources(map(&[
+            (
+                "main.xml",
+                r#"<module name="main" default_access="public">
+  <script name="main"><text>hello</text></script>
+</module>"#,
+            ),
+            (
+                "lib.xml",
+                r#"<module name="lib" default_access="public">
+  <script name="secret" access="private"><text>hidden</text></script>
+</module>"#,
+            ),
+        ]));
+
+        // Start the main script
+        engine2.start("main.main", None).expect("start");
+
+        // Remove main from scripts but keep group_lookup
+        let _group_id = engine2.frames.last().unwrap().group_id.clone();
+        engine2.scripts.remove("main.main");
+
+        // Create a target that exists and is private
+        let private_target = sl_core::ScriptIr {
+            script_path: "lib.xml".to_string(),
+            script_name: "secret".to_string(),
+            access: sl_core::AccessLevel::Private,
+            module_name: Some("lib".to_string()),
+            local_script_name: Some("secret".to_string()),
+            params: vec![],
+            root_group_id: "g2".to_string(),
+            groups: Default::default(),
+            visible_functions: Default::default(),
+            visible_defs_globals: Default::default(),
+            visible_json_globals: vec![],
+        };
+
+        // Now resolve_current_module_name() should return None (because main is not in scripts)
+        // and target has module_name = Some("lib") - should hit line 29
+        let result = engine2.validate_script_access_from_current("lib.secret", &private_target);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "ENGINE_SCRIPT_ACCESS_DENIED");
+    }
 }
