@@ -648,6 +648,125 @@ pub(crate) fn resolve_visible_defs(
     Ok((visible_types, functions, defs_globals, defs_consts))
 }
 
+pub(crate) fn collect_functions_for_bundle(
+    defs_by_path: &BTreeMap<String, DefsDeclarations>,
+) -> Result<(BTreeMap<String, FunctionDecl>, BTreeSet<String>), ScriptLangError> {
+    let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
+    let mut type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for defs in defs_by_path.values() {
+        for decl in &defs.type_decls {
+            if type_decls_map.contains_key(&decl.qualified_name) {
+                return Err(ScriptLangError::with_span(
+                    "TYPE_DECL_DUPLICATE",
+                    format!("Duplicate type declaration \"{}\".", decl.qualified_name),
+                    decl.location.clone(),
+                ));
+            }
+            type_decls_map.insert(decl.qualified_name.clone(), decl.clone());
+            type_short_candidates
+                .entry(decl.name.clone())
+                .or_default()
+                .push(decl.qualified_name.clone());
+        }
+    }
+
+    let type_aliases = type_short_candidates
+        .into_iter()
+        .filter_map(|(short, qualified)| {
+            if qualified.len() == 1 {
+                Some((short, qualified[0].clone()))
+            } else {
+                None
+            }
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let mut resolved_types: BTreeMap<String, ScriptType> = BTreeMap::new();
+    let mut visiting = HashSet::new();
+    for type_name in type_decls_map.keys() {
+        resolve_named_type_with_aliases(
+            type_name,
+            &type_decls_map,
+            &type_aliases,
+            &mut resolved_types,
+            &mut visiting,
+        )?;
+    }
+
+    let mut visible_types = resolved_types.clone();
+    for (alias, qualified_name) in &type_aliases {
+        let ty = resolved_types
+            .get(qualified_name)
+            .cloned()
+            .expect("resolved type aliases must point to resolved types");
+        visible_types.insert(alias.clone(), ty);
+    }
+
+    let mut functions = BTreeMap::new();
+    let mut public_functions = BTreeSet::new();
+    for defs in defs_by_path.values() {
+        for decl in &defs.function_decls {
+            if functions.contains_key(&decl.qualified_name) {
+                return Err(ScriptLangError::with_span(
+                    "FUNCTION_DECL_DUPLICATE",
+                    format!(
+                        "Duplicate function declaration \"{}\".",
+                        decl.qualified_name
+                    ),
+                    decl.location.clone(),
+                ));
+            }
+
+            let function_namespace = decl
+                .qualified_name
+                .split_once('.')
+                .map(|(namespace, _)| namespace)
+                .unwrap_or_default();
+
+            let mut params = Vec::new();
+            for param in &decl.params {
+                params.push(FunctionParam {
+                    name: param.name.clone(),
+                    r#type: resolve_type_expr_in_namespace(
+                        &param.type_expr,
+                        &visible_types,
+                        function_namespace,
+                        &param.location,
+                    )?,
+                    location: param.location.clone(),
+                });
+            }
+
+            let return_type = resolve_type_expr_in_namespace(
+                &decl.return_binding.type_expr,
+                &visible_types,
+                function_namespace,
+                &decl.return_binding.location,
+            )?;
+
+            functions.insert(
+                decl.qualified_name.clone(),
+                FunctionDecl {
+                    name: decl.qualified_name.clone(),
+                    params,
+                    return_binding: FunctionReturn {
+                        name: decl.return_binding.name.clone(),
+                        r#type: return_type,
+                        location: decl.return_binding.location.clone(),
+                    },
+                    code: decl.code.clone(),
+                    location: decl.location.clone(),
+                },
+            );
+            if decl.access == AccessLevel::Public {
+                public_functions.insert(decl.qualified_name.clone());
+            }
+        }
+    }
+
+    Ok((functions, public_functions))
+}
+
 pub(crate) fn collect_defs_globals_for_bundle(
     defs_by_path: &BTreeMap<String, DefsDeclarations>,
 ) -> Result<(BTreeMap<String, DefsGlobalVarDecl>, Vec<String>), ScriptLangError> {

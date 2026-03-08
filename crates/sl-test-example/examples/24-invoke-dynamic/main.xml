@@ -1,0 +1,7 @@
+<module name="main" default_access="public">
+  <script name="main">
+    <temp name="foo" type="string">"shared.add"</temp>
+    <temp name="value" type="int">invoke(foo, [3, 4])</temp>
+    <text>${value}</text>
+  </script>
+</module>

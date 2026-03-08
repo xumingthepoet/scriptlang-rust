@@ -123,3 +123,8 @@ fn example_22_access_control_matches_testcase() {
 fn example_23_const_basics_matches_testcase() {
     assert_example("23-const-basics");
 }
+
+#[test]
+fn example_24_invoke_dynamic_matches_testcase() {
+    assert_example("24-invoke-dynamic");
+}

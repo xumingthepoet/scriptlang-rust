@@ -1,4 +1,5 @@
 use super::*;
+use sl_core::FunctionDecl;
 
 pub const DEFAULT_COMPILER_VERSION: &str = "player";
 pub const SNAPSHOT_SCHEMA: &str = "snapshot";
@@ -123,6 +124,9 @@ pub struct ScriptLangEngine {
     pub(super) visible_consts_by_script: HashMap<String, BTreeSet<String>>,
     pub(super) defs_const_alias_by_script: HashMap<String, BTreeMap<String, String>>,
     pub(super) visible_function_symbols_by_script: HashMap<String, BTreeMap<String, String>>,
+    pub(super) invoke_all_functions: BTreeMap<String, FunctionDecl>,
+    pub(super) invoke_public_functions: BTreeSet<String>,
+    pub(super) invoke_function_symbols: BTreeMap<String, String>,
     pub(super) defs_prelude_by_script: HashMap<String, String>,
     pub(super) initial_random_seed: u32,
     pub(super) initial_random_sequence: Option<Vec<u32>>,
@@ -144,10 +148,14 @@ impl ScriptLangEngine {
             .host_functions
             .unwrap_or_else(|| Arc::new(EmptyHostFunctionRegistry::default()));
 
-        if host_functions.names().iter().any(|name| name == "random") {
+        if host_functions
+            .names()
+            .iter()
+            .any(|name| name == "random" || name == "invoke")
+        {
             return Err(ScriptLangError::new(
                 "ENGINE_HOST_FUNCTION_RESERVED",
-                "hostFunctions cannot register reserved builtin name \"random\".",
+                "hostFunctions cannot register reserved builtin names \"random\" or \"invoke\".",
             ));
         }
 
@@ -159,7 +167,18 @@ impl ScriptLangEngine {
         let mut defs_const_alias_by_script = HashMap::new();
         let mut visible_function_symbols_by_script = HashMap::new();
 
+        let mut invoke_all_functions = BTreeMap::new();
+        let mut invoke_public_functions = BTreeSet::new();
+        let mut invoke_symbol_to_name = BTreeMap::new();
+        let mut invoke_function_symbols = BTreeMap::new();
+
         for (script_name, script) in &options.scripts {
+            if script.visible_functions.contains_key("invoke") {
+                return Err(ScriptLangError::new(
+                    "ENGINE_DEFS_FUNCTION_RESERVED",
+                    "Defs function name \"invoke\" is reserved for runtime builtin.",
+                ));
+            }
             for group_id in script.groups.keys() {
                 let should_replace = match group_lookup.get(group_id) {
                     None => true,
@@ -235,6 +254,39 @@ impl ScriptLangEngine {
                 public_to_symbol.insert(function_name.clone(), symbol);
             }
             visible_function_symbols_by_script.insert(script_name.clone(), public_to_symbol);
+
+            for (qualified_name, decl) in &script.invoke_all_functions {
+                match invoke_all_functions.get(qualified_name) {
+                    Some(existing) if existing != decl => {
+                        return Err(ScriptLangError::new(
+                            "ENGINE_INVOKE_DECL_CONFLICT",
+                            format!(
+                                "Invoke function declaration conflict on \"{}\".",
+                                qualified_name
+                            ),
+                        ));
+                    }
+                    Some(_) => {}
+                    None => {
+                        invoke_all_functions.insert(qualified_name.clone(), decl.clone());
+                    }
+                }
+            }
+            invoke_public_functions.extend(script.invoke_public_functions.iter().cloned());
+        }
+        for qualified_name in invoke_all_functions.keys() {
+            let symbol = rhai_function_symbol(qualified_name);
+            if let Some(existing) = invoke_symbol_to_name.get(&symbol) {
+                return Err(ScriptLangError::new(
+                    "ENGINE_DEFS_FUNCTION_SYMBOL_CONFLICT",
+                    format!(
+                        "Defs function \"{}\" conflicts with \"{}\" after Rhai symbol normalization.",
+                        qualified_name, existing
+                    ),
+                ));
+            }
+            invoke_symbol_to_name.insert(symbol.clone(), qualified_name.clone());
+            invoke_function_symbols.insert(qualified_name.clone(), symbol);
         }
         let initial_random_seed = options.random_seed.unwrap_or(1);
         let initial_random_sequence = options.random_sequence.clone();
@@ -309,6 +361,9 @@ impl ScriptLangEngine {
             visible_consts_by_script,
             defs_const_alias_by_script,
             visible_function_symbols_by_script,
+            invoke_all_functions,
+            invoke_public_functions,
+            invoke_function_symbols,
             defs_prelude_by_script: HashMap::new(),
             initial_random_seed,
             initial_random_sequence,
@@ -522,6 +577,33 @@ mod lifecycle_tests {
     }
 
     #[test]
+    pub(super) fn new_rejects_reserved_host_function_name_invoke() {
+        let files = map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]);
+        let compiled = compile_project_from_sources(files);
+        let result = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_json: compiled.global_json,
+            defs_global_declarations: compiled.defs_global_declarations,
+            defs_global_init_order: compiled.defs_global_init_order,
+            defs_global_const_declarations: compiled.defs_global_const_declarations,
+            defs_global_const_init_order: compiled.defs_global_const_init_order,
+            host_functions: Some(Arc::new(TestRegistry {
+                names: vec!["invoke".to_string()],
+            })),
+            random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        });
+        assert!(result.is_err());
+        let error = result.err().expect("reserved invoke name should fail");
+        assert_eq!(error.code, "ENGINE_HOST_FUNCTION_RESERVED");
+    }
+
+    #[test]
     pub(super) fn new_rejects_host_function_conflicting_with_defs_function() {
         let files = map(&[
             (
@@ -561,6 +643,38 @@ mod lifecycle_tests {
         assert!(result.is_err());
         let error = result.err().expect("conflicting defs function should fail");
         assert_eq!(error.code, "ENGINE_HOST_FUNCTION_CONFLICT");
+    }
+
+    #[test]
+    pub(super) fn new_rejects_defs_function_named_invoke() {
+        let files = map(&[(
+            "main.xml",
+            r#"
+<module name="main" default_access="public">
+  <function name="invoke" return="int:out">out = 1;</function>
+  <script name="main"><text>ok</text></script>
+</module>
+"#,
+        )]);
+        let compiled = compile_project_from_sources(files);
+        let result = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_json: compiled.global_json,
+            defs_global_declarations: compiled.defs_global_declarations,
+            defs_global_init_order: compiled.defs_global_init_order,
+            defs_global_const_declarations: compiled.defs_global_const_declarations,
+            defs_global_const_init_order: compiled.defs_global_const_init_order,
+            host_functions: None,
+            random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        });
+        assert!(result.is_err());
+        let error = result
+            .err()
+            .expect("defs function invoke should be reserved");
+        assert_eq!(error.code, "ENGINE_DEFS_FUNCTION_RESERVED");
     }
 
     #[test]

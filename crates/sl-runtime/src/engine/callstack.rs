@@ -1047,7 +1047,7 @@ mod callstack_tests {
                 .expect("missing script prelude should be empty"),
             ""
         );
-        let defs_engine = engine_from_sources(map(&[
+        let mut defs_engine = engine_from_sources(map(&[
             (
                 "main.script.xml",
                 r#"
@@ -1060,6 +1060,7 @@ mod callstack_tests {
                 r#"<defs name="shared"><function name="make" return="int:out">out = 1;</function></defs>"#,
             ),
         ]));
+        defs_engine.invoke_function_symbols.clear();
         let error = defs_engine
             .build_defs_prelude("main", &BTreeMap::new())
             .expect_err("missing symbol mapping should fail");
@@ -1682,6 +1683,8 @@ mod callstack_tests {
             visible_defs_globals: Default::default(),
             visible_defs_consts: Default::default(),
             visible_json_globals: vec![],
+            invoke_all_functions: Default::default(),
+            invoke_public_functions: Default::default(),
         };
 
         // Directly call validate - should hit line 20 because module_name is None
@@ -1743,6 +1746,8 @@ mod callstack_tests {
             visible_defs_globals: Default::default(),
             visible_defs_consts: Default::default(),
             visible_json_globals: vec![],
+            invoke_all_functions: Default::default(),
+            invoke_public_functions: Default::default(),
         };
 
         // Now resolve_current_module_name() should return None (because main is not in scripts)

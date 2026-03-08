@@ -16,6 +16,8 @@ pub fn compile_project_bundle_from_xml_map(
     let defs_by_path = parse_defs_files(&sources)
         .expect("defs parsing should match previously validated module parsing");
     let global_json = BTreeMap::new();
+    let (invoke_all_functions, invoke_public_functions) =
+        collect_functions_for_bundle(&defs_by_path)?;
     let (defs_global_declarations, defs_global_init_order) =
         collect_defs_globals_for_bundle(&defs_by_path)?;
     let (defs_global_const_declarations, defs_global_const_init_order) =
@@ -43,6 +45,8 @@ pub fn compile_project_bundle_from_xml_map(
                 visible_functions: &visible_functions,
                 visible_defs_globals: &visible_defs_globals,
                 visible_defs_consts: &visible_defs_consts,
+                invoke_all_functions: &invoke_all_functions,
+                invoke_public_functions: &invoke_public_functions,
             })
             .map_err(|error| with_file_context(error, file_path))?;
             if scripts.contains_key(&ir.script_name) {

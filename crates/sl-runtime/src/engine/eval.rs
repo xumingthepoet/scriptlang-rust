@@ -8,6 +8,33 @@ fn text_interpolation_regex() -> &'static Regex {
     REGEX.get_or_init(|| Regex::new(r"\$\{([^{}]+)\}").expect("template regex must compile"))
 }
 
+const INVOKE_ERROR_PREFIX: &str = "__sl_err:";
+
+fn parse_invoke_runtime_error(message: &str) -> Option<ScriptLangError> {
+    let marker = message.find(INVOKE_ERROR_PREFIX)?;
+    let payload = &message[(marker + INVOKE_ERROR_PREFIX.len())..];
+    let (code, rest) = payload.split_once(':')?;
+    let cleaned = rest
+        .split(" (line ")
+        .next()
+        .unwrap_or(rest)
+        .trim()
+        .to_string();
+    Some(ScriptLangError::new(code, cleaned))
+}
+
+fn map_rhai_error(
+    default_code: &str,
+    default_message: String,
+    error: Box<EvalAltResult>,
+) -> ScriptLangError {
+    let rendered = error.to_string();
+    if let Some(mapped) = parse_invoke_runtime_error(&rendered) {
+        return mapped;
+    }
+    ScriptLangError::new(default_code, default_message)
+}
+
 impl ScriptLangEngine {
     pub(super) fn create_script_root_scope(
         &self,
@@ -497,9 +524,10 @@ impl ScriptLangEngine {
             self.rhai_engine
                 .eval_with_scope::<Dynamic>(&mut scope, &source)
                 .map_err(|error| {
-                    ScriptLangError::new(
+                    map_rhai_error(
                         "ENGINE_EVAL_ERROR",
                         format!("Expression eval failed: {}", error),
+                        error,
                     )
                 })
                 .and_then(dynamic_to_slvalue)
@@ -507,9 +535,10 @@ impl ScriptLangEngine {
             self.rhai_engine
                 .run_with_scope(&mut scope, &source)
                 .map_err(|error| {
-                    ScriptLangError::new(
+                    map_rhai_error(
                         "ENGINE_EVAL_ERROR",
                         format!("Code eval failed: {}", error),
+                        error,
                     )
                 })
                 .map(|_| SlValue::Bool(true))
@@ -684,15 +713,24 @@ impl ScriptLangEngine {
             .get(script_name)
             .expect("script visibility should exist for registered script");
         let qualified_rewrite_map = self.build_defs_global_qualified_rewrite_map(script_name);
+        let current_module = script.module_name.as_deref();
 
         let mut out = String::new();
-        for (name, decl) in &script.visible_functions {
-            let rhai_name = function_symbol_map.get(name).cloned().ok_or_else(|| {
-                ScriptLangError::new(
-                    "ENGINE_DEFS_FUNCTION_SYMBOL_MISSING",
-                    format!("Missing Rhai function symbol mapping for \"{}\".", name),
-                )
-            })?;
+        for (qualified_name, decl) in &self.invoke_all_functions {
+            let rhai_name = self
+                .invoke_function_symbols
+                .get(qualified_name)
+                .cloned()
+                .ok_or_else(|| {
+                    ScriptLangError::new(
+                        "ENGINE_DEFS_FUNCTION_SYMBOL_MISSING",
+                        format!(
+                            "Missing Rhai function symbol mapping for \"{}\".",
+                            qualified_name
+                        ),
+                    )
+                })?;
+            let body_symbol_map = self.invoke_body_symbol_map(qualified_name);
             out.push_str("fn ");
             out.push_str(&rhai_name);
             out.push('(');
@@ -727,7 +765,7 @@ impl ScriptLangEngine {
                 "function body",
                 RhaiInputMode::CodeBlock,
             )?;
-            let rewritten = rewrite_function_calls(&preprocessed, function_symbol_map);
+            let rewritten = rewrite_function_calls(&preprocessed, &body_symbol_map);
             let rewritten =
                 rewrite_defs_global_qualified_access(&rewritten, &qualified_rewrite_map);
             out.push_str(&rewritten);
@@ -736,7 +774,132 @@ impl ScriptLangEngine {
             out.push_str("\n}\n");
         }
 
+        if let Some(module_name) = current_module {
+            let local_aliases = self.invoke_module_local_qualified(module_name);
+            for (local_name, qualified_name) in local_aliases {
+                let Some(decl) = self.invoke_all_functions.get(&qualified_name) else {
+                    continue;
+                };
+                let rhai_name = function_symbol_map
+                    .get(&local_name)
+                    .cloned()
+                    .ok_or_else(|| {
+                        ScriptLangError::new(
+                            "ENGINE_DEFS_FUNCTION_SYMBOL_MISSING",
+                            format!(
+                                "Missing Rhai function symbol mapping for \"{}\".",
+                                local_name
+                            ),
+                        )
+                    })?;
+                let target_symbol = self
+                    .invoke_function_symbols
+                    .get(&qualified_name)
+                    .cloned()
+                    .ok_or_else(|| {
+                        ScriptLangError::new(
+                            "ENGINE_DEFS_FUNCTION_SYMBOL_MISSING",
+                            format!(
+                                "Missing Rhai function symbol mapping for \"{}\".",
+                                qualified_name
+                            ),
+                        )
+                    })?;
+                let params = decl
+                    .params
+                    .iter()
+                    .map(|param| param.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                out.push_str("fn ");
+                out.push_str(&rhai_name);
+                out.push('(');
+                out.push_str(&params);
+                out.push_str(") {\n");
+                out.push_str(&target_symbol);
+                out.push('(');
+                out.push_str(&params);
+                out.push_str(")\n}\n");
+            }
+        }
+
+        out.push_str("fn invoke(name, args) {\n");
+        out.push_str("if type_of(name) != \"string\" || !name.contains(\".\") {\n");
+        out.push_str("throw \"__sl_err:ENGINE_INVOKE_NAME_INVALID:invoke(name, [args]) requires name in module.func format.\";\n");
+        out.push_str("}\n");
+        out.push_str("if type_of(args) != \"array\" {\n");
+        out.push_str("throw \"__sl_err:ENGINE_INVOKE_ARGS_NOT_ARRAY:invoke(name, [args]) requires args to be an array.\";\n");
+        out.push_str("}\n");
+        for qualified_name in &self.invoke_public_functions {
+            let Some(decl) = self.invoke_all_functions.get(qualified_name) else {
+                continue;
+            };
+            let Some(target_symbol) = self.invoke_function_symbols.get(qualified_name) else {
+                continue;
+            };
+            out.push_str("if name == \"");
+            out.push_str(qualified_name);
+            out.push_str("\" {\n");
+            out.push_str("if args.len != ");
+            out.push_str(&decl.params.len().to_string());
+            out.push_str(" {\n");
+            out.push_str("throw \"__sl_err:ENGINE_INVOKE_ARG_COUNT_MISMATCH:Invoke target ");
+            out.push_str(qualified_name);
+            out.push_str(" received unexpected arg count.\";\n");
+            out.push_str("}\n");
+            out.push_str("return ");
+            out.push_str(target_symbol);
+            out.push('(');
+            out.push_str(
+                &(0..decl.params.len())
+                    .map(|index| format!("args[{index}]"))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+            out.push_str(")\n}\n");
+        }
+        for qualified_name in self.invoke_all_functions.keys() {
+            if self.invoke_public_functions.contains(qualified_name) {
+                continue;
+            }
+            out.push_str("if name == \"");
+            out.push_str(qualified_name);
+            out.push_str("\" {\n");
+            out.push_str("throw \"__sl_err:ENGINE_INVOKE_ACCESS_DENIED:Invoke target is private and cannot be called.\";\n");
+            out.push_str("}\n");
+        }
+        out.push_str(
+            "throw \"__sl_err:ENGINE_INVOKE_TARGET_NOT_FOUND:Invoke target not found.\" + name;\n",
+        );
+        out.push_str("}\n");
+
         Ok(out)
+    }
+
+    fn invoke_module_local_qualified(&self, module_name: &str) -> BTreeMap<String, String> {
+        let mut local = BTreeMap::new();
+        for qualified_name in self.invoke_all_functions.keys() {
+            let Some((namespace, short_name)) = qualified_name.as_str().split_once('.') else {
+                continue;
+            };
+            if namespace == module_name {
+                local.insert(short_name.to_string(), qualified_name.to_string());
+            }
+        }
+        local
+    }
+
+    fn invoke_body_symbol_map(&self, qualified_name: &str) -> BTreeMap<String, String> {
+        let mut map = self.invoke_function_symbols.clone();
+        let Some((namespace, _)) = qualified_name.split_once('.') else {
+            return map;
+        };
+        for (short_name, local_qualified) in self.invoke_module_local_qualified(namespace) {
+            if let Some(symbol) = self.invoke_function_symbols.get(&local_qualified) {
+                map.entry(short_name).or_insert_with(|| symbol.clone());
+            }
+        }
+        map
     }
 
     pub(super) fn build_defs_global_qualified_rewrite_map(
@@ -1948,9 +2111,7 @@ mod eval_tests {
         ]));
         missing_symbol.start("main.main", None).expect("start");
         missing_symbol.defs_prelude_by_script.clear();
-        missing_symbol
-            .visible_function_symbols_by_script
-            .insert("main.main".to_string(), BTreeMap::new());
+        missing_symbol.invoke_function_symbols.clear();
         let error = missing_symbol
             .eval_expression("1")
             .expect_err("missing defs symbol map should fail");
@@ -2193,5 +2354,129 @@ mod eval_tests {
         let result = engine.eval_defs_global_initializer("score + 1", "main");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), SlValue::Number(11.0));
+    }
+
+    #[test]
+    pub(super) fn invoke_calls_public_function_without_import_and_supports_local_function_refs() {
+        let files = map(&[
+            (
+                "shared.xml",
+                r#"
+<module name="shared" default_access="public">
+  <function name="helper" access="private" args="int:x" return="int:out">
+    out = x + 1;
+  </function>
+  <function name="add" access="public" args="int:a,int:b" return="int:out">
+    out = helper(a) + b;
+  </function>
+</module>
+"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<module name="main" default_access="public">
+  <script name="main">
+    <temp name="value" type="int">invoke(&quot;shared.add&quot;, [3, 4])</temp>
+    <text>${value}</text>
+  </script>
+</module>
+"#,
+            ),
+        ]);
+        let mut engine = engine_from_sources(files);
+        engine.start("main.main", None).expect("start");
+        let output = engine.next_output().expect("text");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "8"));
+    }
+
+    #[test]
+    pub(super) fn invoke_reports_private_missing_name_and_shape_errors() {
+        let files = map(&[
+            (
+                "shared.xml",
+                r#"
+<module name="shared" default_access="public">
+  <function name="hidden" access="private" args="int:a" return="int:out">
+    out = a + 1;
+  </function>
+  <function name="add" access="public" args="int:a,int:b" return="int:out">
+    out = a + b;
+  </function>
+</module>
+"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<module name="main" default_access="public">
+  <script name="private_call">
+    <temp name="x" type="int">invoke(&quot;shared.hidden&quot;, [1])</temp>
+    <text>${x}</text>
+  </script>
+  <script name="missing_call">
+    <temp name="x" type="int">invoke(&quot;shared.missing&quot;, [1])</temp>
+    <text>${x}</text>
+  </script>
+  <script name="bad_name">
+    <temp name="x" type="int">invoke(&quot;add&quot;, [1, 2])</temp>
+    <text>${x}</text>
+  </script>
+  <script name="bad_args_shape">
+    <temp name="x" type="int">invoke(&quot;shared.add&quot;, 1)</temp>
+    <text>${x}</text>
+  </script>
+  <script name="bad_arity">
+    <temp name="x" type="int">invoke(&quot;shared.add&quot;, [1])</temp>
+    <text>${x}</text>
+  </script>
+</module>
+"#,
+            ),
+        ]);
+        let mut private_engine = engine_from_sources(files.clone());
+        private_engine
+            .start("main.private_call", None)
+            .expect("start private");
+        let private_error = private_engine
+            .next_output()
+            .expect_err("private invoke should fail");
+        assert_eq!(private_error.code, "ENGINE_INVOKE_ACCESS_DENIED");
+
+        let mut missing_engine = engine_from_sources(files.clone());
+        missing_engine
+            .start("main.missing_call", None)
+            .expect("start missing");
+        let missing_error = missing_engine
+            .next_output()
+            .expect_err("missing invoke should fail");
+        assert_eq!(missing_error.code, "ENGINE_INVOKE_TARGET_NOT_FOUND");
+
+        let mut bad_name_engine = engine_from_sources(files.clone());
+        bad_name_engine
+            .start("main.bad_name", None)
+            .expect("start bad name");
+        let bad_name_error = bad_name_engine
+            .next_output()
+            .expect_err("bad name should fail");
+        assert_eq!(bad_name_error.code, "ENGINE_INVOKE_NAME_INVALID");
+
+        let mut bad_shape_engine = engine_from_sources(files.clone());
+        bad_shape_engine
+            .start("main.bad_args_shape", None)
+            .expect("start bad args shape");
+        let bad_shape_error = bad_shape_engine
+            .next_output()
+            .expect_err("bad args shape should fail");
+        assert_eq!(bad_shape_error.code, "ENGINE_INVOKE_ARGS_NOT_ARRAY");
+
+        let mut bad_arity_engine = engine_from_sources(files);
+        bad_arity_engine
+            .start("main.bad_arity", None)
+            .expect("start bad arity");
+        let bad_arity_error = bad_arity_engine
+            .next_output()
+            .expect_err("bad arity should fail");
+        assert_eq!(bad_arity_error.code, "ENGINE_INVOKE_ARG_COUNT_MISMATCH");
     }
 }

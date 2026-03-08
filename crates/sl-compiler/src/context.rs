@@ -124,6 +124,8 @@ pub(crate) struct CompileScriptOptions<'a> {
     pub(crate) visible_functions: &'a BTreeMap<String, FunctionDecl>,
     pub(crate) visible_defs_globals: &'a BTreeMap<String, DefsGlobalVarDecl>,
     pub(crate) visible_defs_consts: &'a BTreeMap<String, DefsGlobalConstDecl>,
+    pub(crate) invoke_all_functions: &'a BTreeMap<String, FunctionDecl>,
+    pub(crate) invoke_public_functions: &'a BTreeSet<String>,
 }
 
 pub(crate) type VisibleTypeMap = BTreeMap<String, ScriptType>;

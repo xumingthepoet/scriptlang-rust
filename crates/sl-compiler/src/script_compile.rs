@@ -1,4 +1,6 @@
 use crate::*;
+#[cfg(test)]
+use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CompileGroupMode {
@@ -28,6 +30,8 @@ pub(crate) fn compile_script(
         visible_functions,
         visible_defs_globals,
         visible_defs_consts,
+        invoke_all_functions,
+        invoke_public_functions,
     } = options;
     if root.name != "script" {
         return Err(ScriptLangError::with_span(
@@ -87,6 +91,8 @@ pub(crate) fn compile_script(
         visible_functions: visible_functions.clone(),
         visible_defs_globals: visible_defs_globals.clone(),
         visible_defs_consts: visible_defs_consts.clone(),
+        invoke_all_functions: invoke_all_functions.clone(),
+        invoke_public_functions: invoke_public_functions.clone(),
     })
 }
 
@@ -2162,6 +2168,8 @@ mod script_compile_tests {
             visible_functions: &BTreeMap::new(),
             visible_defs_globals: &BTreeMap::new(),
             visible_defs_consts: &BTreeMap::new(),
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("compile_script should require script root");
         assert_eq!(compile_root_error.code, "XML_ROOT_INVALID");
@@ -2177,6 +2185,8 @@ mod script_compile_tests {
             visible_functions: &BTreeMap::new(),
             visible_defs_globals: &BTreeMap::new(),
             visible_defs_consts: &BTreeMap::new(),
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("compile_script should require script name");
         assert_eq!(missing_name_error.code, "XML_MISSING_ATTR");
@@ -2192,6 +2202,8 @@ mod script_compile_tests {
             visible_functions: &BTreeMap::new(),
             visible_defs_globals: &BTreeMap::new(),
             visible_defs_consts: &BTreeMap::new(),
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("compile_script should reject reserved name");
         assert_eq!(reserved_name_error.code, "NAME_RESERVED_PREFIX");
@@ -2215,6 +2227,8 @@ mod script_compile_tests {
             visible_functions: &BTreeMap::new(),
             visible_defs_globals: &BTreeMap::new(),
             visible_defs_consts: &BTreeMap::new(),
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("compile_script should reject reserved var names");
         assert_eq!(reserved_var_error.code, "NAME_RESERVED_PREFIX");
@@ -2233,6 +2247,8 @@ mod script_compile_tests {
             visible_functions: &BTreeMap::new(),
             visible_defs_globals: &BTreeMap::new(),
             visible_defs_consts: &BTreeMap::new(),
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
         })
         .expect("compile without module name");
         let root_group = no_module_ir
