@@ -1306,6 +1306,97 @@ mod defs_resolver_tests {
     }
 
     #[test]
+    fn parse_defs_global_const_rejects_missing_name_or_type() {
+        // Missing name attribute
+        let files_missing_name = map(&[
+            (
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><const type="int">1</const></module>"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<!-- import shared from shared.xml -->
+<module name="main" default_access="public">
+<script name="main"><text>ok</text></script>
+</module>
+"#,
+            ),
+        ]);
+        let name_error = compile_project_bundle_from_xml_map(&files_missing_name)
+            .expect_err("missing name should fail");
+        assert_eq!(name_error.code, "XML_MISSING_ATTR");
+
+        // Missing type attribute
+        let files_missing_type = map(&[
+            (
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><const name="base">1</const></module>"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<!-- import shared from shared.xml -->
+<module name="main" default_access="public">
+<script name="main"><text>ok</text></script>
+</module>
+"#,
+            ),
+        ]);
+        let type_error = compile_project_bundle_from_xml_map(&files_missing_type)
+            .expect_err("missing type should fail");
+        assert_eq!(type_error.code, "XML_MISSING_ATTR");
+    }
+
+    #[test]
+    fn parse_defs_const_rejects_invalid_type() {
+        let files = map(&[
+            (
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><const name="base" type="UnknownType">1</const></module>"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<!-- import shared from shared.xml -->
+<module name="main" default_access="public">
+<script name="main"><text>ok</text></script>
+</module>
+"#,
+            ),
+        ]);
+        let error =
+            compile_project_bundle_from_xml_map(&files).expect_err("invalid type should fail");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
+
+    #[test]
+    fn resolve_visible_defs_rejects_const_with_unresolved_type() {
+        let span = SourceSpan::synthetic();
+        let defs_with_bad_const = BTreeMap::from([(
+            "shared.xml".to_string(),
+            DefsDeclarations {
+                type_decls: Vec::new(),
+                function_decls: Vec::new(),
+                defs_global_var_decls: Vec::new(),
+                defs_global_const_decls: vec![ParsedDefsGlobalConstDecl {
+                    namespace: "shared".to_string(),
+                    name: "base".to_string(),
+                    qualified_name: "shared.base".to_string(),
+                    access: AccessLevel::Public,
+                    type_expr: ParsedTypeExpr::Custom("UnknownType".to_string()),
+                    initial_value_expr: Some("1".to_string()),
+                    location: span.clone(),
+                }],
+            },
+        )]);
+        let reachable = BTreeSet::from(["shared.xml".to_string()]);
+        let error = resolve_visible_defs(&reachable, &defs_with_bad_const, Some("shared"))
+            .expect_err("unresolved type should fail");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
+
+    #[test]
     fn defs_global_resolution_rejects_duplicates_and_allows_empty_initializer() {
         let duplicate_types_bundle = map(&[
             (
@@ -2529,5 +2620,231 @@ mod defs_resolver_tests {
         let order_error = collect_defs_consts_for_bundle(&bad_order, &defs_globals)
             .expect_err("forward const reference should fail");
         assert_eq!(order_error.code, "DEFS_CONST_INIT_ORDER");
+    }
+
+    #[test]
+    fn resolve_visible_defs_rejects_duplicate_defs_const_in_closure() {
+        let span = SourceSpan::synthetic();
+        let duplicate = ParsedDefsGlobalConstDecl {
+            namespace: "shared".to_string(),
+            name: "base".to_string(),
+            qualified_name: "shared.base".to_string(),
+            access: AccessLevel::Public,
+            type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+            initial_value_expr: Some("1".to_string()),
+            location: span.clone(),
+        };
+        let defs_by_path = BTreeMap::from([
+            (
+                "a.xml".to_string(),
+                DefsDeclarations {
+                    type_decls: Vec::new(),
+                    function_decls: Vec::new(),
+                    defs_global_var_decls: Vec::new(),
+                    defs_global_const_decls: vec![duplicate.clone()],
+                },
+            ),
+            (
+                "b.xml".to_string(),
+                DefsDeclarations {
+                    type_decls: Vec::new(),
+                    function_decls: Vec::new(),
+                    defs_global_var_decls: Vec::new(),
+                    defs_global_const_decls: vec![duplicate],
+                },
+            ),
+        ]);
+        let reachable = BTreeSet::from(["a.xml".to_string(), "b.xml".to_string()]);
+        let error = resolve_visible_defs(&reachable, &defs_by_path, Some("a"))
+            .expect_err("duplicate defs const should fail");
+        assert_eq!(error.code, "DEFS_GLOBAL_CONST_DUPLICATE");
+    }
+
+    #[test]
+    fn collect_defs_consts_rejects_duplicate_type_in_bundle() {
+        let span = SourceSpan::synthetic();
+        let duplicate_type = ParsedTypeDecl {
+            name: "T".to_string(),
+            qualified_name: "main.T".to_string(),
+            access: AccessLevel::Public,
+            fields: vec![],
+            location: span.clone(),
+        };
+        let defs_by_path = BTreeMap::from([
+            (
+                "a.xml".to_string(),
+                DefsDeclarations {
+                    type_decls: vec![duplicate_type.clone()],
+                    function_decls: Vec::new(),
+                    defs_global_var_decls: Vec::new(),
+                    defs_global_const_decls: Vec::new(),
+                },
+            ),
+            (
+                "b.xml".to_string(),
+                DefsDeclarations {
+                    type_decls: vec![duplicate_type],
+                    function_decls: Vec::new(),
+                    defs_global_var_decls: Vec::new(),
+                    defs_global_const_decls: Vec::new(),
+                },
+            ),
+        ]);
+        let defs_globals = BTreeMap::new();
+        let error = collect_defs_consts_for_bundle(&defs_by_path, &defs_globals)
+            .expect_err("duplicate type should fail");
+        assert_eq!(error.code, "TYPE_DECL_DUPLICATE");
+    }
+
+    #[test]
+    fn validate_defs_const_init_rules_handles_ambiguous_short_name() {
+        // Test when multiple defs_const have the same short name (candidates.len() > 1)
+        let span = SourceSpan::synthetic();
+        let defs_consts = BTreeMap::from([
+            (
+                "main.base".to_string(),
+                DefsGlobalConstDecl {
+                    namespace: "main".to_string(),
+                    name: "base".to_string(),
+                    qualified_name: "main.base".to_string(),
+                    access: AccessLevel::Public,
+                    r#type: ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                    initial_value_expr: Some("1".to_string()),
+                    location: span.clone(),
+                },
+            ),
+            (
+                "other.base".to_string(),
+                DefsGlobalConstDecl {
+                    namespace: "other".to_string(),
+                    name: "base".to_string(),
+                    qualified_name: "other.base".to_string(),
+                    access: AccessLevel::Public,
+                    r#type: ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                    initial_value_expr: Some("2".to_string()),
+                    location: span.clone(),
+                },
+            ),
+        ]);
+        let defs_globals = BTreeMap::new();
+        let init_order = vec!["main.base".to_string(), "other.base".to_string()];
+        // This should NOT error because we just validate the init order
+        let result = validate_defs_const_init_rules(&defs_consts, &init_order, &defs_globals);
+        assert!(
+            result.is_ok(),
+            "ambiguous short name should be filtered out in mapping"
+        );
+    }
+
+    #[test]
+    fn validate_defs_const_init_rules_rejects_forward_reference() {
+        // Test when a defs_const references another const that hasn't been initialized yet
+        let span = SourceSpan::synthetic();
+        let defs_consts = BTreeMap::from([
+            (
+                "main.first".to_string(),
+                DefsGlobalConstDecl {
+                    namespace: "main".to_string(),
+                    name: "first".to_string(),
+                    qualified_name: "main.first".to_string(),
+                    access: AccessLevel::Public,
+                    r#type: ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                    initial_value_expr: Some("second".to_string()), // references second before init
+                    location: span.clone(),
+                },
+            ),
+            (
+                "main.second".to_string(),
+                DefsGlobalConstDecl {
+                    namespace: "main".to_string(),
+                    name: "second".to_string(),
+                    qualified_name: "main.second".to_string(),
+                    access: AccessLevel::Public,
+                    r#type: ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                    initial_value_expr: Some("1".to_string()),
+                    location: span.clone(),
+                },
+            ),
+        ]);
+        let defs_globals = BTreeMap::new();
+        // Initialize first before second - this should fail
+        let init_order = vec!["main.first".to_string(), "main.second".to_string()];
+        let error = validate_defs_const_init_rules(&defs_consts, &init_order, &defs_globals)
+            .expect_err("forward reference should fail");
+        assert_eq!(error.code, "DEFS_CONST_INIT_ORDER");
+    }
+
+    #[test]
+    fn resolve_visible_defs_reports_type_resolution_error() {
+        // Test that type resolution errors propagate through line 784
+        // This creates a type with a field referencing a non-existent type
+        let span = SourceSpan::synthetic();
+        let defs = DefsDeclarations {
+            type_decls: vec![ParsedTypeDecl {
+                name: "MyType".to_string(),
+                qualified_name: "shared.MyType".to_string(),
+                access: AccessLevel::Public,
+                fields: vec![ParsedTypeFieldDecl {
+                    name: "field".to_string(),
+                    type_expr: ParsedTypeExpr::Custom("NonExistentType".to_string()),
+                    location: span.clone(),
+                }],
+                location: span.clone(),
+            }],
+            function_decls: Vec::new(),
+            defs_global_var_decls: Vec::new(),
+            defs_global_const_decls: Vec::new(),
+        };
+
+        let reachable = BTreeSet::from(["shared.xml".to_string()]);
+        let defs_by_path = BTreeMap::from([("shared.xml".to_string(), defs)]);
+
+        let error = resolve_visible_defs(&reachable, &defs_by_path, None)
+            .expect_err("type resolution should fail for non-existent type");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
+
+    #[test]
+    fn resolve_visible_defs_reports_duplicate_field_error() {
+        // Test that duplicate field errors propagate through line 784
+        let span = SourceSpan::synthetic();
+        let defs = DefsDeclarations {
+            type_decls: vec![ParsedTypeDecl {
+                name: "MyType".to_string(),
+                qualified_name: "shared.MyType".to_string(),
+                access: AccessLevel::Public,
+                fields: vec![
+                    ParsedTypeFieldDecl {
+                        name: "field".to_string(),
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        location: span.clone(),
+                    },
+                    ParsedTypeFieldDecl {
+                        name: "field".to_string(), // duplicate field name
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        location: span.clone(),
+                    },
+                ],
+                location: span.clone(),
+            }],
+            function_decls: Vec::new(),
+            defs_global_var_decls: Vec::new(),
+            defs_global_const_decls: Vec::new(),
+        };
+
+        let reachable = BTreeSet::from(["shared.xml".to_string()]);
+        let defs_by_path = BTreeMap::from([("shared.xml".to_string(), defs)]);
+
+        let error = resolve_visible_defs(&reachable, &defs_by_path, None)
+            .expect_err("duplicate field should fail");
+        assert_eq!(error.code, "TYPE_FIELD_DUPLICATE");
     }
 }

@@ -467,6 +467,7 @@ impl ScriptLangEngine {
 mod lifecycle_tests {
     use super::*;
     use crate::engine::runtime_test_support::*;
+    use sl_core::SourceSpan;
 
     fn output_kind(output: &EngineOutput) -> &'static str {
         match output {
@@ -1060,5 +1061,122 @@ mod lifecycle_tests {
             )
             .expect_err("start with invalid arg type should fail");
         assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
+    }
+
+    #[test]
+    pub(super) fn initialize_defs_consts_uses_default_when_no_initializer() {
+        // Test line 442: when defs const has no initial_value_expr, uses default value
+        let mut engine = engine_from_sources(map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public"><script name="main"><text>ok</text></script></module>"#,
+        )]));
+        // Manually add a defs const without initial_value_expr
+        engine.defs_const_declarations.insert(
+            "main.count".to_string(),
+            DefsGlobalConstDecl {
+                namespace: "main".to_string(),
+                name: "count".to_string(),
+                qualified_name: "main.count".to_string(),
+                r#type: ScriptType::Primitive {
+                    name: "int".to_string(),
+                },
+                initial_value_expr: None, // No initializer - should use default
+                access: AccessLevel::Public,
+                location: SourceSpan::synthetic(),
+            },
+        );
+        engine.defs_const_init_order = vec!["main.count".to_string()];
+        engine
+            .initialize_defs_consts()
+            .expect("init should succeed");
+        // Verify default value is 0
+        let value = engine
+            .defs_consts_value
+            .get("main.count")
+            .expect("should exist");
+        assert_eq!(*value, SlValue::Number(0.0));
+    }
+
+    #[test]
+    pub(super) fn initialize_defs_consts_handles_missing_const_in_order() {
+        // Test line 441: when defs const initializer references missing variable
+        let mut engine = engine_from_sources(map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public"><script name="main"><text>ok</text></script></module>"#,
+        )]));
+        // Add defs const with invalid initializer
+        engine.defs_const_declarations.insert(
+            "main.bad".to_string(),
+            DefsGlobalConstDecl {
+                namespace: "main".to_string(),
+                name: "bad".to_string(),
+                qualified_name: "main.bad".to_string(),
+                r#type: ScriptType::Primitive {
+                    name: "int".to_string(),
+                },
+                initial_value_expr: Some("nonexistent + 1".to_string()), // Invalid: references undefined
+                access: AccessLevel::Public,
+                location: SourceSpan::synthetic(),
+            },
+        );
+        engine.defs_const_init_order = vec!["main.bad".to_string()];
+        let error = engine
+            .initialize_defs_consts()
+            .expect_err("invalid initializer should fail");
+        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
+    }
+
+    #[test]
+    pub(super) fn initialize_defs_consts_with_const_not_in_init_order() {
+        // Test lines 457-460: defs const not in init_order uses default value
+        let mut engine = engine_from_sources(map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public"><script name="main"><text>ok</text></script></module>"#,
+        )]));
+        // Add two defs consts: one in init_order, one not
+        engine.defs_const_declarations.insert(
+            "main.uninitialized".to_string(),
+            DefsGlobalConstDecl {
+                namespace: "main".to_string(),
+                name: "uninitialized".to_string(),
+                qualified_name: "main.uninitialized".to_string(),
+                r#type: ScriptType::Primitive {
+                    name: "int".to_string(),
+                },
+                initial_value_expr: None, // Not in init_order - should use default
+                access: AccessLevel::Public,
+                location: SourceSpan::synthetic(),
+            },
+        );
+        engine.defs_const_declarations.insert(
+            "main.initialized".to_string(),
+            DefsGlobalConstDecl {
+                namespace: "main".to_string(),
+                name: "initialized".to_string(),
+                qualified_name: "main.initialized".to_string(),
+                r#type: ScriptType::Primitive {
+                    name: "int".to_string(),
+                },
+                initial_value_expr: Some("42".to_string()),
+                access: AccessLevel::Public,
+                location: SourceSpan::synthetic(),
+            },
+        );
+        // Only initialize the second one
+        engine.defs_const_init_order = vec!["main.initialized".to_string()];
+        engine
+            .initialize_defs_consts()
+            .expect("init should succeed");
+        // uninitialized should be 0 (default), initialized should be 42
+        let uninit = engine
+            .defs_consts_value
+            .get("main.uninitialized")
+            .expect("should exist");
+        let init = engine
+            .defs_consts_value
+            .get("main.initialized")
+            .expect("should exist");
+        assert_eq!(*uninit, SlValue::Number(0.0));
+        assert_eq!(*init, SlValue::Number(42.0));
     }
 }
