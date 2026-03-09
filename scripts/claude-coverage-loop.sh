@@ -37,10 +37,10 @@ for ((round = 1; round <= MAX_ROUNDS; round++)); do
     exit 0
   fi
 
-  # If gate passed but coverage line wasn't parsed, stop to avoid blind looping.
+  # Even when gate succeeds, keep looping until MAX_ROUNDS.
   if [[ "$gate_status" -eq 0 ]]; then
-    echo "make gate succeeded, exiting loop."
-    exit 0
+    echo "make gate succeeded; continuing to next round."
+    continue
   fi
 
   if ! printf '%s\n' "$gate_output" | grep -q "uncovered regions"; then

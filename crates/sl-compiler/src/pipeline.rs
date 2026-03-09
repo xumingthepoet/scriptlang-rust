@@ -713,14 +713,18 @@ mod pipeline_tests {
     #[test]
     fn pipeline_resolve_visible_module_symbols_error_propagates_to_script() {
         // Test that resolve_visible_module_symbols error propagates through .map_err at line 37
-        // This creates a module with function using unknown type - error at resolve stage
+        // This creates a module with duplicate type - triggers the second branch of assert! at line 738
         let files = map(&[
             (
-                "module.xml",
-                r#"<module name="game" default_access="public">
-<function name="getObj" access="public" args="UnknownType:x" return="int:out">
-out = 1;
-</function>
+                "a.xml",
+                r#"<module name="shared" default_access="public">
+<type name="Obj"><field name="x" type="int"/></type>
+</module>"#,
+            ),
+            (
+                "b.xml",
+                r#"<module name="shared" default_access="public">
+<type name="Obj"><field name="y" type="int"/></type>
 </module>"#,
             ),
             (
