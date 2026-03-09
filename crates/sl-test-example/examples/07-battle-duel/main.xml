@@ -11,16 +11,16 @@
   <text>Tip: if you keep using weak attacks, you will lose.</text>
 
   <call
-    script="battle-loop.battle-loop"
+    script="@battle-loop.battle-loop"
     args="ref:player,ref:enemy"
   />
 
   <if when="player.hp > 0  AND  enemy.hp  LTE  0">
     <text>Result: ${player.name} wins. hp=${player.hp}</text>
-    <return script="victory.victory"/>
+    <return script="@victory.victory"/>
     <else>
       <text>Result: ${enemy.name} wins. hp=${enemy.hp}</text>
-      <return script="defeat.defeat"/>
+      <return script="@defeat.defeat"/>
     </else>
   </if>
 </script>

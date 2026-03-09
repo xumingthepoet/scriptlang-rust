@@ -691,7 +691,7 @@ mod tests {
     <temp name="cmd" type="string">""</temp>
     <input var="cmd" text="Go"/>
     <code>score = boost(score);</code>
-    <call script="next"/>
+    <call script="@next"/>
   </script>
   <script name="next">
     <text>${score}</text>

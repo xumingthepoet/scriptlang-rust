@@ -53,6 +53,7 @@ pub fn default_value_from_type(ty: &ScriptType) -> SlValue {
             "boolean" => SlValue::Bool(false),
             _ => SlValue::String(String::new()),
         },
+        ScriptType::Script => SlValue::String(String::new()),
         ScriptType::Array { .. } => SlValue::Array(Vec::new()),
         ScriptType::Map { .. } => SlValue::Map(BTreeMap::new()),
         ScriptType::Object { fields, .. } => {
@@ -72,6 +73,10 @@ pub fn is_type_compatible(value: &SlValue, ty: &ScriptType) -> bool {
             ("float", SlValue::Number(v)) => v.is_finite(),
             ("string", SlValue::String(_)) => true,
             ("boolean", SlValue::Bool(_)) => true,
+            _ => false,
+        },
+        ScriptType::Script => match value {
+            SlValue::String(value) => value.starts_with('@'),
             _ => false,
         },
         ScriptType::Array { element_type } => match value {
@@ -219,6 +224,7 @@ mod tests {
         let float_type = ScriptType::Primitive {
             name: "float".to_string(),
         };
+        let script_type = ScriptType::Script;
         assert!(is_type_compatible(&SlValue::Number(1.0), &int_type));
         assert!(!is_type_compatible(&SlValue::Number(1.25), &int_type));
         assert!(is_type_compatible(&SlValue::Number(1.25), &float_type));
@@ -226,6 +232,15 @@ mod tests {
             &SlValue::String("1".to_string()),
             &int_type
         ));
+        assert!(is_type_compatible(
+            &SlValue::String("@main.next".to_string()),
+            &script_type
+        ));
+        assert!(!is_type_compatible(
+            &SlValue::String("main.next".to_string()),
+            &script_type
+        ));
+        assert!(!is_type_compatible(&SlValue::Number(1.0), &script_type));
 
         let array_type = ScriptType::Array {
             element_type: Box::new(ScriptType::Primitive {

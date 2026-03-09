@@ -5,6 +5,10 @@ pub(crate) fn parse_type_expr(
     span: &SourceSpan,
 ) -> Result<ParsedTypeExpr, ScriptLangError> {
     let source = raw.trim();
+    if source == "script" {
+        return Ok(ParsedTypeExpr::Script);
+    }
+
     if source == "int" || source == "float" || source == "string" || source == "boolean" {
         return Ok(ParsedTypeExpr::Primitive(source.to_string()));
     }
@@ -304,6 +308,7 @@ mod xml_utils_tests {
     fn parsed_type_kind(expr: ParsedTypeExpr) -> &'static str {
         match expr {
             ParsedTypeExpr::Primitive(_) => "primitive",
+            ParsedTypeExpr::Script => "script",
             ParsedTypeExpr::Array(_) => "array",
             ParsedTypeExpr::Map(_) => "map",
             ParsedTypeExpr::Custom(_) => "custom",
@@ -314,10 +319,12 @@ mod xml_utils_tests {
     fn parse_type_and_call_argument_helpers_cover_valid_and_invalid_inputs() {
         let span = SourceSpan::synthetic();
         let primitive = parse_type_expr("int", &span).expect("primitive");
+        let script = parse_type_expr("script", &span).expect("script");
         let array = parse_type_expr("int[]", &span).expect("array");
         let map = parse_type_expr("#{int}", &span).expect("map");
         let custom = parse_type_expr("CustomType", &span).expect("custom");
         assert_eq!(parsed_type_kind(primitive), "primitive");
+        assert_eq!(parsed_type_kind(script), "script");
         assert_eq!(parsed_type_kind(array), "array");
         assert_eq!(parsed_type_kind(map), "map");
         assert_eq!(parsed_type_kind(custom), "custom");

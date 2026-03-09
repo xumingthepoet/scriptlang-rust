@@ -28,7 +28,7 @@ use sl_core::{
     default_value_from_type, is_type_compatible, AccessLevel, ChoiceEntry, ChoiceItem,
     ContinuationFrame, ContinueTarget, EngineOutput, ModuleConstDecl, ModuleVarDecl,
     PendingBoundary, PendingDynamicChoiceBinding, ScriptIr, ScriptLangError, ScriptNode,
-    ScriptType, SlValue, Snapshot, SnapshotCompletion, SnapshotFrame,
+    ScriptTarget, ScriptType, SlValue, Snapshot, SnapshotCompletion, SnapshotFrame,
 };
 
 mod boundary;

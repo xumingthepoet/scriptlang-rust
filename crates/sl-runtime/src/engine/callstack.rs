@@ -46,14 +46,13 @@ impl ScriptLangEngine {
         Ok(())
     }
 
-    fn resolve_target_script(
-        &mut self,
-        template: &str,
+    fn qualify_target_script(
+        &self,
+        resolved: &str,
         missing_code: &str,
         missing_message: &str,
     ) -> Result<String, ScriptLangError> {
-        let rendered_target = self.render_text(template)?;
-        let mut target_script = rendered_target.trim().to_string();
+        let mut target_script = resolved.trim().to_string();
         if target_script.is_empty() {
             return Err(ScriptLangError::new(missing_code, missing_message));
         }
@@ -63,6 +62,35 @@ impl ScriptLangEngine {
             }
         }
         Ok(target_script)
+    }
+
+    fn resolve_target_script(
+        &mut self,
+        target: &ScriptTarget,
+        missing_code: &str,
+        missing_message: &str,
+    ) -> Result<String, ScriptLangError> {
+        match target {
+            ScriptTarget::Literal { script_name } => {
+                self.qualify_target_script(script_name, missing_code, missing_message)
+            }
+            ScriptTarget::Variable { var_name } => {
+                let value = self.read_variable(var_name)?;
+                let SlValue::String(raw) = value else {
+                    return Err(ScriptLangError::new(
+                        "ENGINE_TARGET_VAR_TYPE",
+                        format!("Target variable \"{}\" must be script.", var_name),
+                    ));
+                };
+                let stripped = raw.trim().strip_prefix('@').ok_or_else(|| {
+                    ScriptLangError::new(
+                        "ENGINE_TARGET_VAR_TYPE",
+                        format!("Target variable \"{}\" must be script.", var_name),
+                    )
+                })?;
+                self.qualify_target_script(stripped, missing_code, missing_message)
+            }
+        }
     }
 
     pub(super) fn execute_var_declaration(
@@ -109,7 +137,7 @@ impl ScriptLangEngine {
 
     pub(super) fn execute_call(
         &mut self,
-        target_script: &str,
+        target_script: &ScriptTarget,
         args: &[sl_core::CallArgument],
     ) -> Result<(), ScriptLangError> {
         let target_script = self.resolve_target_script(
@@ -205,7 +233,7 @@ impl ScriptLangEngine {
 
     pub(super) fn execute_return(
         &mut self,
-        target_script: Option<String>,
+        target_script: Option<ScriptTarget>,
         args: &[sl_core::CallArgument],
     ) -> Result<(), ScriptLangError> {
         let root_index = self.find_current_root_frame_index()?;
@@ -319,6 +347,18 @@ mod callstack_tests {
     use super::runtime_test_support::*;
     use super::*;
 
+    fn lit(name: &str) -> ScriptTarget {
+        ScriptTarget::Literal {
+            script_name: name.to_string(),
+        }
+    }
+
+    fn var(name: &str) -> ScriptTarget {
+        ScriptTarget::Variable {
+            var_name: name.to_string(),
+        }
+    }
+
     #[test]
     pub(super) fn nested_script_calls_covered() {
         // Test nested script calls
@@ -327,7 +367,7 @@ mod callstack_tests {
                 "main.script.xml",
                 r#"
     <script name="main">
-      <call script="greeting.greeting"/>
+      <call script="@greeting.greeting"/>
     </script>
     "#,
             ),
@@ -347,8 +387,8 @@ mod callstack_tests {
                 r#"
     <!-- import greeting from greeting.xml -->
     <script name="main">
-      <temp name="nextScene" type="string">"greeting.greeting"</temp>
-      <call script="${nextScene}"/>
+      <temp name="nextScene" type="script">@greeting.greeting</temp>
+      <call script="nextScene"/>
     </script>
     "#,
             ),
@@ -369,33 +409,133 @@ mod callstack_tests {
     pub(super) fn runtime_errors_cover_call_argument_and_return_target_paths() {
         let mut call_missing_target = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><call script="missing"/></script>"#,
+            r#"<script name="main"><text>x</text></script>"#,
         )]));
         call_missing_target.start("main", None).expect("start");
+        let group_id = call_missing_target
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        call_missing_target.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::new(),
+        }];
         let error = call_missing_target
-            .next_output()
+            .execute_call(&lit("missing"), &[])
             .expect_err("missing call target should fail");
         assert_eq!(error.code, "ENGINE_CALL_TARGET");
 
         let mut call_empty_target = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><temp name="dst" type="string">""</temp><call script="${dst}"/></script>"#,
+            r#"<script name="main"><text>x</text></script>"#,
         )]));
         call_empty_target.start("main", None).expect("start");
+        let group_id = call_empty_target
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        call_empty_target.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::from([("dst".to_string(), SlValue::String("@".to_string()))]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
+        }];
         let error = call_empty_target
-            .next_output()
+            .execute_call(&var("dst"), &[])
             .expect_err("empty call target should fail");
         assert_eq!(error.code, "ENGINE_CALL_TARGET_EMPTY");
 
-        let mut call_bad_template = engine_from_sources(map(&[(
+        let mut call_bad_type = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><call script="${bad +}"/></script>"#,
+            r#"<script name="main"><text>x</text></script>"#,
         )]));
-        call_bad_template.start("main", None).expect("start");
-        let error = call_bad_template
-            .next_output()
-            .expect_err("invalid call target template should fail");
-        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
+        call_bad_type.start("main", None).expect("start");
+        let group_id = call_bad_type
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        call_bad_type.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::from([("dst".to_string(), SlValue::String("bad".to_string()))]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
+        }];
+        let error = call_bad_type
+            .execute_call(&var("dst"), &[])
+            .expect_err("non-script target value should fail");
+        assert_eq!(error.code, "ENGINE_TARGET_VAR_TYPE");
+
+        let mut call_non_string_target = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>x</text></script>"#,
+        )]));
+        call_non_string_target.start("main", None).expect("start");
+        let group_id = call_non_string_target
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        call_non_string_target.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::from([("dst".to_string(), SlValue::Number(1.0))]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
+        }];
+        let error = call_non_string_target
+            .execute_call(&var("dst"), &[])
+            .expect_err("non-string target value should fail");
+        assert_eq!(error.code, "ENGINE_TARGET_VAR_TYPE");
+
+        let mut call_missing_var_target = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>x</text></script>"#,
+        )]));
+        call_missing_var_target.start("main", None).expect("start");
+        let group_id = call_missing_var_target
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        call_missing_var_target.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::new(),
+        }];
+        let error = call_missing_var_target
+            .execute_call(&var("dst"), &[])
+            .expect_err("missing target variable should fail");
+        assert_eq!(error.code, "ENGINE_VAR_READ");
 
         let mut call_arg_mismatch = engine_from_sources(map(&[
             (
@@ -404,7 +544,7 @@ mod callstack_tests {
     <!-- import callee from callee.xml -->
     <script name="main">
       <temp name="hp" type="int">1</temp>
-      <call script="callee.callee" args="hp"/>
+      <call script="@callee.callee" args="hp"/>
     </script>
     "#,
             ),
@@ -421,33 +561,81 @@ mod callstack_tests {
 
         let mut return_target_missing = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><return script="missing"/></script>"#,
+            r#"<script name="main"><text>x</text></script>"#,
         )]));
         return_target_missing.start("main", None).expect("start");
+        let group_id = return_target_missing
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        return_target_missing.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::new(),
+        }];
         let error = return_target_missing
-            .next_output()
+            .execute_return(Some(lit("missing")), &[])
             .expect_err("missing return target should fail");
         assert_eq!(error.code, "ENGINE_RETURN_TARGET");
 
         let mut return_empty_target = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><temp name="dst" type="string">""</temp><return script="${dst}"/></script>"#,
+            r#"<script name="main"><text>x</text></script>"#,
         )]));
         return_empty_target.start("main", None).expect("start");
+        let group_id = return_empty_target
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        return_empty_target.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::from([("dst".to_string(), SlValue::String("@".to_string()))]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
+        }];
         let error = return_empty_target
-            .next_output()
+            .execute_return(Some(var("dst")), &[])
             .expect_err("empty return target should fail");
         assert_eq!(error.code, "ENGINE_RETURN_TARGET_EMPTY");
 
-        let mut return_bad_template = engine_from_sources(map(&[(
+        let mut return_bad_type = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><return script="${bad +}"/></script>"#,
+            r#"<script name="main"><text>x</text></script>"#,
         )]));
-        return_bad_template.start("main", None).expect("start");
-        let error = return_bad_template
-            .next_output()
-            .expect_err("invalid return target template should fail");
-        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
+        return_bad_type.start("main", None).expect("start");
+        let group_id = return_bad_type
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        return_bad_type.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::from([("dst".to_string(), SlValue::String("bad".to_string()))]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
+        }];
+        let error = return_bad_type
+            .execute_return(Some(var("dst")), &[])
+            .expect_err("non-script return target value should fail");
+        assert_eq!(error.code, "ENGINE_TARGET_VAR_TYPE");
     }
 
     #[test]
@@ -573,7 +761,7 @@ mod callstack_tests {
             },
         ];
         engine
-            .execute_return(Some("next.next".to_string()), &[])
+            .execute_return(Some(lit("next.next")), &[])
             .expect("return to next should pass");
         assert_eq!(engine.frames.len(), 2);
         assert_eq!(
@@ -707,7 +895,7 @@ mod callstack_tests {
         ];
 
         engine
-            .execute_return(Some("next.next".to_string()), &[])
+            .execute_return(Some(lit("next.next")), &[])
             .expect("return to target script should pass");
 
         let continuation = engine
@@ -757,7 +945,7 @@ mod callstack_tests {
             var_types: BTreeMap::new(),
         }];
         no_inherited
-            .execute_return(Some("next.next".to_string()), &[])
+            .execute_return(Some(lit("next.next")), &[])
             .expect("return target should work without inherited continuation");
         assert_eq!(no_inherited.frames.len(), 1);
         assert_eq!(no_inherited.frames[0].group_id, next_root);
@@ -806,8 +994,8 @@ mod callstack_tests {
                 r#"
     <!-- import next from next.xml -->
     <script name="main">
-      <temp name="nextScene" type="string">"next.next"</temp>
-      <return script="${nextScene}"/>
+      <temp name="nextScene" type="script">@next.next</temp>
+      <return script="nextScene"/>
     </script>
     "#,
             ),
@@ -831,7 +1019,7 @@ mod callstack_tests {
         )]));
         no_frame.frames.clear();
         let error = no_frame
-            .execute_call("main", &[])
+            .execute_call(&lit("main"), &[])
             .expect_err("execute_call without frame should fail");
         assert_eq!(error.code, "ENGINE_CALL_NO_FRAME");
 
@@ -842,7 +1030,7 @@ mod callstack_tests {
     <!-- import callee from callee.xml -->
     <script name="main">
       <temp name="x" type="int">1</temp>
-      <call script="callee.callee" args="ref:x"/>
+      <call script="@callee.callee" args="ref:x"/>
     </script>
     "#,
             ),
@@ -894,7 +1082,7 @@ mod callstack_tests {
         }];
         let error = tail
             .execute_call(
-                "callee.callee",
+                &lit("callee.callee"),
                 &[sl_core::CallArgument {
                     value_expr: "x".to_string(),
                     is_ref: true,
@@ -934,7 +1122,7 @@ mod callstack_tests {
         }];
         tail_ok
             .execute_call(
-                "callee.callee",
+                &lit("callee.callee"),
                 &[sl_core::CallArgument {
                     value_expr: "x".to_string(),
                     is_ref: false,
@@ -1115,7 +1303,7 @@ mod callstack_tests {
             var_types: BTreeMap::new(),
         }];
         let error = missing_group
-            .execute_call("main", &[])
+            .execute_call(&lit("main"), &[])
             .expect_err("caller group lookup should fail");
         assert_eq!(error.code, "ENGINE_GROUP_NOT_FOUND");
 
@@ -1125,7 +1313,7 @@ mod callstack_tests {
                 r#"
     <!-- import callee from callee.xml -->
     <script name="main">
-      <call script="callee.callee" args="ref:missing.path"/>
+      <call script="@callee.callee" args="ref:missing.path"/>
     </script>
     "#,
             ),
@@ -1146,7 +1334,7 @@ mod callstack_tests {
                 r#"
     <!-- import callee from callee.xml -->
     <script name="main">
-      <call script="callee.callee" args="unknown +"/>
+      <call script="@callee.callee" args="unknown +"/>
     </script>
     "#,
             ),
@@ -1198,7 +1386,7 @@ mod callstack_tests {
         }];
         let error = tail_scope_error
             .execute_call(
-                "callee.callee",
+                &lit("callee.callee"),
                 &[sl_core::CallArgument {
                     value_expr: "x".to_string(),
                     is_ref: false,
@@ -1220,7 +1408,7 @@ mod callstack_tests {
         let mut return_arg_eval_error = engine_from_sources(map(&[
             (
                 "main.script.xml",
-                r#"<script name="main"><return script="next.next" args="bad +"/></script>"#,
+                r#"<script name="main"><return script="@next.next" args="bad +"/></script>"#,
             ),
             (
                 "next.script.xml",
@@ -1345,14 +1533,14 @@ mod callstack_tests {
             },
         ];
         let error = target_return_write_error
-            .execute_return(Some("next.next".to_string()), &[])
+            .execute_return(Some(lit("next.next")), &[])
             .expect_err("target return ref write path should fail");
         assert_eq!(error.code, "ENGINE_REF_PATH_WRITE");
 
         let mut return_target_type_error = engine_from_sources(map(&[
             (
                 "main.script.xml",
-                r#"<script name="main"><return script="next.next" args="'bad'"/></script>"#,
+                r#"<script name="main"><return script="@next.next" args="'bad'"/></script>"#,
             ),
             (
                 "next.script.xml",
@@ -1378,7 +1566,7 @@ mod callstack_tests {
 <script name="main">
   <temp name="arr" type="int[]">[10, 20, 30]</temp>
   <temp name="idx" type="int">0</temp>
-  <call script="bump.bump" args="ref:idx"/>
+  <call script="@bump.bump" args="ref:idx"/>
   <text>${arr[idx]}</text>
 </script>
 "#,
@@ -1413,17 +1601,17 @@ mod callstack_tests {
         engine.start("battle.main", None).expect("start");
 
         let qualified = engine
-            .resolve_target_script("next", "ERR", "err")
+            .resolve_target_script(&lit("next"), "ERR", "err")
             .expect("module local name should qualify");
         assert_eq!(qualified, "battle.next");
 
         let explicit = engine
-            .resolve_target_script("battle.next", "ERR", "err")
+            .resolve_target_script(&lit("battle.next"), "ERR", "err")
             .expect("explicit qualified target should stay as is");
         assert_eq!(explicit, "battle.next");
 
         let missing_local = engine
-            .resolve_target_script("other", "ERR", "err")
+            .resolve_target_script(&lit("other"), "ERR", "err")
             .expect("unknown local name should qualify to current module");
         assert_eq!(missing_local, "battle.other");
 
@@ -1433,7 +1621,7 @@ mod callstack_tests {
         )]));
         plain_engine.start("main.main", None).expect("start");
         let plain = plain_engine
-            .resolve_target_script("next", "ERR", "err")
+            .resolve_target_script(&lit("next"), "ERR", "err")
             .expect("module-local script names should qualify");
         assert_eq!(plain, "main.next");
 
@@ -1442,7 +1630,7 @@ mod callstack_tests {
             r#"<script name="main"><text>x</text></script>"#,
         )]));
         let idle = idle_engine
-            .resolve_target_script("next", "ERR", "err")
+            .resolve_target_script(&lit("next"), "ERR", "err")
             .expect("target resolution without active frame should still work");
         assert_eq!(idle, "next");
 
@@ -1468,7 +1656,7 @@ mod callstack_tests {
         });
         missing_script_engine.scripts.remove("main");
         let missing_script_result = missing_script_engine
-            .resolve_target_script("next", "ERR", "err")
+            .resolve_target_script(&lit("next"), "ERR", "err")
             .expect("group metadata should still qualify to current module");
         assert_eq!(missing_script_result, "main.next");
     }
@@ -1490,7 +1678,7 @@ mod callstack_tests {
         );
 
         let target = engine
-            .resolve_target_script("next", "ERR", "err")
+            .resolve_target_script(&lit("next"), "ERR", "err")
             .expect("alias-backed current script should keep short name");
         assert_eq!(target, "next");
     }
@@ -1500,7 +1688,7 @@ mod callstack_tests {
         let mut same_module = engine_from_sources(map(&[(
             "main.xml",
             r#"<module name="main" default_access="private">
-<script name="main" access="public"><call script="hidden"/></script>
+<script name="main" access="public"><call script="@hidden"/></script>
 <script name="hidden" access="private"><text>ok</text></script>
 </module>"#,
         )]));
@@ -1520,14 +1708,33 @@ mod callstack_tests {
                 r#"
 <!-- import shared from shared.xml -->
 <module name="main" default_access="public">
-<script name="main"><call script="shared.hidden"/></script>
+<script name="main"><text>x</text></script>
 </module>
 "#,
             ),
         ]));
         cross_module.start("main.main", None).expect("start");
+        let group_id = cross_module
+            .scripts
+            .get("main.main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        cross_module.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::from([(
+                "dst".to_string(),
+                SlValue::String("@shared.hidden".to_string()),
+            )]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
+        }];
         let cross_module_error = cross_module
-            .next_output()
+            .execute_call(&var("dst"), &[])
             .expect_err("cross-module private call should fail");
         assert_eq!(cross_module_error.code, "ENGINE_SCRIPT_ACCESS_DENIED");
 
@@ -1541,7 +1748,7 @@ mod callstack_tests {
                 r#"
 <!-- import shared from shared.xml -->
 <module name="main" default_access="public">
-<script name="main"><call script="${'shared.hidden'}"/></script>
+<script name="main"><text>x</text></script>
 </module>
 "#,
             ),
@@ -1549,8 +1756,27 @@ mod callstack_tests {
         dynamic_cross_module
             .start("main.main", None)
             .expect("start");
+        let group_id = dynamic_cross_module
+            .scripts
+            .get("main.main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        dynamic_cross_module.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::from([(
+                "dst".to_string(),
+                SlValue::String("@shared.hidden".to_string()),
+            )]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
+        }];
         let dynamic_error = dynamic_cross_module
-            .next_output()
+            .execute_call(&var("dst"), &[])
             .expect_err("dynamic cross-module private call should fail");
         assert_eq!(dynamic_error.code, "ENGINE_SCRIPT_ACCESS_DENIED");
     }
@@ -1573,15 +1799,34 @@ mod callstack_tests {
                 "main.xml",
                 r#"
 <!-- import lib from lib.xml -->
-<script name="main"><call script="lib.secret"/></script>
+<script name="main"><text>x</text></script>
 "#,
             ),
         ]));
         engine.start("main.main", None).expect("start");
+        let group_id = engine
+            .scripts
+            .get("main.main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        engine.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::from([(
+                "dst".to_string(),
+                SlValue::String("@lib.secret".to_string()),
+            )]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
+        }];
         // The script lib.secret is private, and calling from non-module context
         // should deny access
         let error = engine
-            .next_output()
+            .execute_call(&var("dst"), &[])
             .expect_err("private script call should deny access");
         assert_eq!(error.code, "ENGINE_SCRIPT_ACCESS_DENIED");
     }
@@ -1601,15 +1846,34 @@ mod callstack_tests {
                 r#"
 <!-- import lib from lib.xml -->
 <script name="main">
-  <return script="lib.helper"/>
+  <text>x</text>
 </script>
 "#,
             ),
         ]));
         engine.start("main.main", None).expect("start");
+        let group_id = engine
+            .scripts
+            .get("main.main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+        engine.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::from([(
+                "dst".to_string(),
+                SlValue::String("@lib.helper".to_string()),
+            )]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
+        }];
         // Return to private script from non-module context should deny access
         let error = engine
-            .next_output()
+            .execute_return(Some(var("dst")), &[])
             .expect_err("return to private script should deny access");
         assert_eq!(error.code, "ENGINE_SCRIPT_ACCESS_DENIED");
     }
@@ -1629,7 +1893,7 @@ mod callstack_tests {
                 "main.xml",
                 r#"
 <!-- import lib from lib.xml -->
-<script name="main"><call script="lib.secret"/></script>
+<script name="main"><text>x</text></script>
 "#,
             ),
         ]));
@@ -1640,15 +1904,15 @@ mod callstack_tests {
         // This makes resolve_current_module_name() return None
         engine.scripts.remove("main.main");
 
-        // Try to resolve target - this should hit line 29 when validating private access
-        let target_script = engine
-            .resolve_target_script("lib.secret", "ERR", "err")
-            .expect("should resolve target");
-        assert_eq!(target_script, "lib.secret");
-
-        // The actual call should fail - but we can't easily trigger it because
-        // the frame is already pushed with the script. This test at least verifies
-        // the path where current_module_name is None
+        let target = engine
+            .scripts
+            .get("lib.secret")
+            .expect("target script should exist")
+            .clone();
+        let error = engine
+            .validate_script_access_from_current("lib.secret", &target)
+            .expect_err("private script access should deny when current module is unavailable");
+        assert_eq!(error.code, "ENGINE_SCRIPT_ACCESS_DENIED");
     }
 
     #[test]

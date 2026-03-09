@@ -2,6 +2,6 @@
 <module name="main" default_access="public">
 <script name="main">
   <text>main=${shared.boost(shared.base)}</text>
-  <call script="battle.battle"/>
+  <call script="@battle.battle"/>
 </script>
 </module>

@@ -5,7 +5,7 @@
   <temp name="hp" type="int">10</temp>
   <text>main.local.before=${hp}</text>
   <text>main.global.before=${shared.hp}</text>
-  <call script="battle.battle"/>
+  <call script="@battle.battle"/>
   <text>main.local.after=${hp}</text>
   <text>main.global.after=${shared.hp}</text>
 </script>

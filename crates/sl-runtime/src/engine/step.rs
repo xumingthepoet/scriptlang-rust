@@ -42,11 +42,11 @@ enum PlannedNode {
         prompt_text: String,
     },
     Call {
-        target_script: String,
+        target_script: ScriptTarget,
         args: Vec<sl_core::CallArgument>,
     },
     Return {
-        target_script: Option<String>,
+        target_script: Option<ScriptTarget>,
         args: Vec<sl_core::CallArgument>,
     },
     Break,
@@ -552,6 +552,12 @@ mod step_tests {
     use super::runtime_test_support::*;
     use super::*;
 
+    fn lit(name: &str) -> ScriptTarget {
+        ScriptTarget::Literal {
+            script_name: name.to_string(),
+        }
+    }
+
     fn output_kind(output: &EngineOutput) -> &'static str {
         match output {
             EngineOutput::Text { .. } => "text",
@@ -687,7 +693,7 @@ mod step_tests {
     <option text="A"><text>A</text></option>
   </choice>
   <input var="name" text="Name"/>
-  <call script="next.next"/>
+  <call script="@next.next"/>
   <text>done ${name}</text>
 </script>
 "#,
@@ -740,7 +746,7 @@ mod step_tests {
   <temp name="hp" type="int">10</temp>
   <text>main.local.before=${hp}</text>
   <text>main.global.before=${shared.hp}</text>
-  <call script="battle.battle"/>
+  <call script="@battle.battle"/>
   <text>main.local.after=${hp}</text>
   <text>main.global.after=${shared.hp}</text>
 </script>
@@ -1165,7 +1171,7 @@ mod step_tests {
             },
         ];
         return_engine
-            .execute_return(Some("next.next".to_string()), &[])
+            .execute_return(Some(lit("next.next")), &[])
             .expect("return should pass even when value missing");
         return_engine.frames = vec![
             RuntimeFrame {
@@ -1462,7 +1468,7 @@ mod step_tests {
             },
         ];
         return_skip
-            .execute_return(Some("next.next".to_string()), &[])
+            .execute_return(Some(lit("next.next")), &[])
             .expect("return should pass when source value is missing");
         return_skip.frames = vec![RuntimeFrame {
             frame_id: 12,
@@ -1484,7 +1490,7 @@ mod step_tests {
             var_types: BTreeMap::new(),
         }];
         return_skip
-            .execute_return(Some("next.next".to_string()), &[])
+            .execute_return(Some(lit("next.next")), &[])
             .expect("return should pass when resume frame is missing");
 
         let mut find_ctx = engine_from_sources(map(&[(

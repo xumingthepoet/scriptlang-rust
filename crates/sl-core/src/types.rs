@@ -41,6 +41,7 @@ pub enum ScriptType {
     Primitive {
         name: String,
     },
+    Script,
     Array {
         element_type: Box<ScriptType>,
     },
@@ -121,6 +122,13 @@ pub struct FunctionDecl {
 pub struct CallArgument {
     pub value_expr: String,
     pub is_ref: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ScriptTarget {
+    Literal { script_name: String },
+    Variable { var_name: String },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -221,13 +229,13 @@ pub enum ScriptNode {
     },
     Call {
         id: String,
-        target_script: String,
+        target_script: ScriptTarget,
         args: Vec<CallArgument>,
         location: SourceSpan,
     },
     Return {
         id: String,
-        target_script: Option<String>,
+        target_script: Option<ScriptTarget>,
         args: Vec<CallArgument>,
         location: SourceSpan,
     },

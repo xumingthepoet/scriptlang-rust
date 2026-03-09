@@ -2,8 +2,8 @@
 <!-- import end from end.xml -->
 <module name="main" default_access="public">
 <script name="main">
-  <temp name="callTarget" type="string">"middle.middle"</temp>
+  <temp name="callTarget" type="script">@middle.middle</temp>
   <text>before</text>
-  <call script="${callTarget}"/>
+  <call script="callTarget"/>
 </script>
 </module>

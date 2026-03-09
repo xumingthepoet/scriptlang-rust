@@ -88,6 +88,7 @@ pub(crate) struct ParsedFunctionParamDecl {
 #[derive(Debug, Clone)]
 pub(crate) enum ParsedTypeExpr {
     Primitive(String),
+    Script,
     Array(Box<ParsedTypeExpr>),
     Map(Box<ParsedTypeExpr>),
     Custom(String),
@@ -124,6 +125,7 @@ pub(crate) struct CompileScriptOptions<'a> {
     pub(crate) visible_functions: &'a BTreeMap<String, FunctionDecl>,
     pub(crate) visible_module_vars: &'a BTreeMap<String, ModuleVarDecl>,
     pub(crate) visible_module_consts: &'a BTreeMap<String, ModuleConstDecl>,
+    pub(crate) all_script_access: &'a BTreeMap<String, AccessLevel>,
     pub(crate) invoke_all_functions: &'a BTreeMap<String, FunctionDecl>,
     pub(crate) invoke_public_functions: &'a BTreeSet<String>,
 }

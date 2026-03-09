@@ -1,7 +1,7 @@
 <module name="middle" default_access="public">
 <script name="middle">
-  <temp name="returnTarget" type="string">"end.end"</temp>
+  <temp name="returnTarget" type="script">@end.end</temp>
   <text>middle</text>
-  <return script="${returnTarget}"/>
+  <return script="returnTarget"/>
 </script>
 </module>

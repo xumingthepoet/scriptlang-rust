@@ -1108,6 +1108,7 @@ mod module_resolver_tests {
     fn script_type_kind(ty: &ScriptType) -> &'static str {
         match ty {
             ScriptType::Primitive { .. } => "primitive",
+            ScriptType::Script => "script",
             ScriptType::Array { .. } => "array",
             ScriptType::Map { .. } => "map",
             ScriptType::Object { .. } => "object",

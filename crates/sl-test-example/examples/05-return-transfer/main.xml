@@ -2,6 +2,6 @@
 <module name="main" default_access="public">
 <script name="main">
   <text>jumping</text>
-  <return script="next.next"/>
+  <return script="@next.next"/>
 </script>
 </module>

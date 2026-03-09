@@ -107,6 +107,7 @@ pub(crate) fn resolve_type_expr_with_lookup_with_aliases(
     span: &SourceSpan,
 ) -> Result<ScriptType, ScriptLangError> {
     match expr {
+        ParsedTypeExpr::Script => Ok(ScriptType::Script),
         ParsedTypeExpr::Primitive(name) => Ok(ScriptType::Primitive { name: name.clone() }),
         ParsedTypeExpr::Array(element_type) => {
             let resolved_element = resolve_type_expr_with_lookup_with_aliases(
@@ -160,6 +161,7 @@ pub(crate) fn resolve_type_expr(
     span: &SourceSpan,
 ) -> Result<ScriptType, ScriptLangError> {
     match expr {
+        ParsedTypeExpr::Script => Ok(ScriptType::Script),
         ParsedTypeExpr::Primitive(name) => Ok(ScriptType::Primitive { name: name.clone() }),
         ParsedTypeExpr::Array(element_type) => Ok(ScriptType::Array {
             element_type: Box::new(resolve_type_expr(element_type, resolved_types, span)?),
@@ -295,6 +297,7 @@ mod type_expr_tests {
     fn script_type_kind(ty: &ScriptType) -> &'static str {
         match ty {
             ScriptType::Primitive { .. } => "primitive",
+            ScriptType::Script => "script",
             ScriptType::Array { .. } => "array",
             ScriptType::Map { .. } => "map",
             ScriptType::Object { .. } => "object",

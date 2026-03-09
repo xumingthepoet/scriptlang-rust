@@ -13,6 +13,12 @@ pub fn compile_project_bundle_from_xml_map(
     validate_import_graph(&sources)?;
 
     let module_scripts_by_path = parse_module_scripts(&sources)?;
+    let mut all_script_access = BTreeMap::new();
+    for scripts in module_scripts_by_path.values() {
+        for script in scripts {
+            all_script_access.insert(script.qualified_script_name.clone(), script.access);
+        }
+    }
     let module_by_path = parse_module_files(&sources)
         .expect("module parsing should match previously validated module parsing");
     let global_json = BTreeMap::new();
@@ -49,6 +55,7 @@ pub fn compile_project_bundle_from_xml_map(
                 visible_functions: &visible_functions,
                 visible_module_vars: &visible_module_vars,
                 visible_module_consts: &visible_module_consts,
+                all_script_access: &all_script_access,
                 invoke_all_functions: &invoke_all_functions,
                 invoke_public_functions: &invoke_public_functions,
             })
@@ -175,7 +182,7 @@ mod pipeline_tests {
 <module name="main" default_access="public">
 <script name="main">
   <text>main.hp=${shared.hp}</text>
-  <call script="battle"/>
+  <call script="@battle.battle"/>
 </script>
 </module>
 "#,
@@ -201,7 +208,7 @@ mod pipeline_tests {
   <var name="baseHp" type="int">40</var>
   <script name="main">
     <temp name="hero" type="Combatant">#{hp: baseHp}</temp>
-    <call script="next"/>
+    <call script="@next"/>
   </script>
   <script name="next">
     <text>${boost(hero.hp)}</text>
@@ -221,7 +228,10 @@ mod pipeline_tests {
         let has_qualified_call = root_group.nodes.iter().any(|node| {
             matches!(
                 node,
-                ScriptNode::Call { target_script, .. } if target_script == "battle.next"
+                ScriptNode::Call {
+                    target_script: ScriptTarget::Literal { script_name },
+                    ..
+                } if script_name == "battle.next"
             )
         });
         assert!(
@@ -334,7 +344,7 @@ mod pipeline_tests {
 <module name="main" default_access="public">
 <script name="main">
   <text>main=${shared.boost(3)}</text>
-  <call script="battle"/>
+  <call script="@battle.battle"/>
 </script>
 </module>
 "#,

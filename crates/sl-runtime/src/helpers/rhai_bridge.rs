@@ -235,6 +235,18 @@ pub(crate) fn preprocess_scriptlang_rhai_input(
                     "Use AND instead of &&.",
                 ));
             }
+            '@' if is_script_literal_left_boundary(chars.get(index.wrapping_sub(1)).copied()) => {
+                if let Some((script_name, next_index)) = parse_script_literal_name(&chars, index) {
+                    out.push('"');
+                    out.push('@');
+                    out.push_str(&script_name);
+                    out.push('"');
+                    index = next_index;
+                    continue;
+                }
+                out.push('@');
+                index += 1;
+            }
             ch if is_scriptlang_token_char(ch) => {
                 let start = index;
                 index += 1;
@@ -257,6 +269,45 @@ pub(crate) fn preprocess_scriptlang_rhai_input(
     }
 
     Ok(out)
+}
+
+fn is_script_literal_left_boundary(ch: Option<char>) -> bool {
+    match ch {
+        None => true,
+        Some(value) => !value.is_ascii_alphanumeric() && value != '_' && value != '.',
+    }
+}
+
+fn parse_script_literal_name(chars: &[char], at_index: usize) -> Option<(String, usize)> {
+    let mut index = at_index + 1;
+    let mut name = String::new();
+
+    let first = *chars.get(index)?;
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return None;
+    }
+    name.push(first);
+    index += 1;
+
+    while let Some(ch) = chars.get(index).copied() {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+            name.push(ch);
+            index += 1;
+            continue;
+        }
+        if ch == '.' {
+            let next = chars.get(index + 1).copied()?;
+            if !next.is_ascii_alphabetic() && next != '_' {
+                return None;
+            }
+            name.push(ch);
+            index += 1;
+            continue;
+        }
+        break;
+    }
+
+    Some((name, index))
 }
 
 fn parse_single_quoted_string(
@@ -736,6 +787,45 @@ mod rhai_bridge_tests {
             unterminated_string.code,
             "RHAI_PREPROCESS_STRING_UNTERMINATED"
         );
+    }
+
+    #[test]
+    fn preprocess_script_literals_handles_hyphen_and_invalid_shapes() {
+        let rewritten = preprocess_scriptlang_rhai_input(
+            "dst = @battle-loop.main;",
+            "code",
+            RhaiInputMode::CodeBlock,
+        )
+        .expect("hyphenated script literal should be accepted");
+        assert_eq!(rewritten, "dst = \"@battle-loop.main\";");
+
+        let dotted =
+            preprocess_scriptlang_rhai_input("dst = @main.next;", "code", RhaiInputMode::CodeBlock)
+                .expect("qualified script literal should be accepted");
+        assert_eq!(dotted, "dst = \"@main.next\";");
+
+        let invalid = preprocess_scriptlang_rhai_input("@a.", "code", RhaiInputMode::CodeBlock)
+            .expect("invalid literal shape should keep raw token");
+        assert_eq!(invalid, "@a.");
+
+        let invalid_first =
+            preprocess_scriptlang_rhai_input("@1next", "code", RhaiInputMode::CodeBlock)
+                .expect("invalid first char should keep raw token");
+        assert_eq!(invalid_first, "@1next");
+
+        let invalid_segment =
+            preprocess_scriptlang_rhai_input("@main.1next", "code", RhaiInputMode::CodeBlock)
+                .expect("invalid segment head should keep raw token");
+        assert_eq!(invalid_segment, "@main.1next");
+
+        let trailing_at = preprocess_scriptlang_rhai_input("@", "code", RhaiInputMode::CodeBlock)
+            .expect("trailing @ should keep raw token");
+        assert_eq!(trailing_at, "@");
+
+        let prefixed =
+            preprocess_scriptlang_rhai_input("obj.@next", "code", RhaiInputMode::CodeBlock)
+                .expect("non-boundary @ should keep raw token");
+        assert_eq!(prefixed, "obj.@next");
     }
 
     #[test]

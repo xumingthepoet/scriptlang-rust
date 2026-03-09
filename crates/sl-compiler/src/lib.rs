@@ -8,8 +8,8 @@ pub(crate) use sl_core::{
     default_value_from_type, AccessLevel, CallArgument, ChoiceEntry, ChoiceOption,
     CompiledProjectArtifact, ContinueTarget, DynamicChoiceBlock, DynamicChoiceTemplate,
     FunctionDecl, FunctionParam, FunctionReturn, ImplicitGroup, ModuleConstDecl, ModuleVarDecl,
-    ScriptIr, ScriptLangError, ScriptNode, ScriptParam, ScriptType, SlValue, SourceSpan,
-    VarDeclaration, COMPILED_PROJECT_SCHEMA,
+    ScriptIr, ScriptLangError, ScriptNode, ScriptParam, ScriptTarget, ScriptType, SlValue,
+    SourceSpan, VarDeclaration, COMPILED_PROJECT_SCHEMA,
 };
 pub(crate) use sl_parser::{
     parse_import_directives, parse_xml_document, reject_non_import_dependency_directives,

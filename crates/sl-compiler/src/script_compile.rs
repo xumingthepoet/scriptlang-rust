@@ -17,6 +17,167 @@ impl CompileGroupMode {
     }
 }
 
+fn script_target_var_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").expect("target var regex"))
+}
+
+fn script_literal_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"@([A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)?)")
+            .expect("script literal regex")
+    })
+}
+
+fn script_literal_name_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"^[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)?$")
+            .expect("script literal name regex")
+    })
+}
+
+fn qualify_script_literal_name(
+    literal_name: &str,
+    module_name: Option<&str>,
+    span: &SourceSpan,
+) -> Result<String, ScriptLangError> {
+    if literal_name.contains('.') {
+        return Ok(literal_name.to_string());
+    }
+    if let Some(module_name) = module_name {
+        return Ok(format!("{}.{}", module_name, literal_name));
+    }
+    Err(ScriptLangError::with_span(
+        "XML_SCRIPT_TARGET_INVALID",
+        format!(
+            "Short script literal \"@{}\" requires module context.",
+            literal_name
+        ),
+        span.clone(),
+    ))
+}
+
+fn validate_script_literal_access(
+    qualified: &str,
+    all_script_access: &BTreeMap<String, AccessLevel>,
+    module_name: Option<&str>,
+    span: &SourceSpan,
+) -> Result<(), ScriptLangError> {
+    let Some(access) = all_script_access.get(qualified).copied() else {
+        return Err(ScriptLangError::with_span(
+            "XML_SCRIPT_TARGET_NOT_FOUND",
+            format!("Script target \"{}\" not found.", qualified),
+            span.clone(),
+        ));
+    };
+
+    if access == AccessLevel::Private {
+        let target_module = qualified.split_once('.').map(|(ns, _)| ns).unwrap_or("");
+        if module_name != Some(target_module) {
+            return Err(ScriptLangError::with_span(
+                "XML_SCRIPT_TARGET_ACCESS_DENIED",
+                format!(
+                    "Script target \"{}\" is private and cannot be referenced here.",
+                    qualified
+                ),
+                span.clone(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_script_literals_in_expression(
+    expr: &str,
+    span: &SourceSpan,
+    all_script_access: &BTreeMap<String, AccessLevel>,
+    module_name: Option<&str>,
+) -> Result<(), ScriptLangError> {
+    for caps in script_literal_regex().captures_iter(expr) {
+        let literal_name = caps.get(1).expect("script literal regex capture").as_str();
+        let qualified = qualify_script_literal_name(literal_name, module_name, span)?;
+        validate_script_literal_access(&qualified, all_script_access, module_name, span)?;
+    }
+    Ok(())
+}
+
+fn parse_script_target_attr(
+    raw_target: &str,
+    node: &XmlElementNode,
+    local_var_types: &BTreeMap<String, ScriptType>,
+    visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
+    visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
+    all_script_access: &BTreeMap<String, AccessLevel>,
+    module_name: Option<&str>,
+) -> Result<ScriptTarget, ScriptLangError> {
+    let target = raw_target.trim();
+    if target.contains("${") {
+        return Err(ScriptLangError::with_span(
+            "XML_SCRIPT_TARGET_TEMPLATE_REMOVED",
+            "Attribute \"script\" no longer supports ${...}; use @literal or script variable name.",
+            node.location.clone(),
+        ));
+    }
+
+    if let Some(stripped) = target.strip_prefix('@') {
+        let script_name = stripped.trim();
+        if script_name.is_empty() || !script_literal_name_regex().is_match(script_name) {
+            return Err(ScriptLangError::with_span(
+                "XML_SCRIPT_TARGET_INVALID",
+                format!("Invalid script literal \"{}\".", target),
+                node.location.clone(),
+            ));
+        }
+
+        let qualified = qualify_script_literal_name(script_name, module_name, &node.location)?;
+        validate_script_literal_access(&qualified, all_script_access, module_name, &node.location)?;
+
+        return Ok(ScriptTarget::Literal {
+            script_name: qualified,
+        });
+    }
+
+    if !script_target_var_regex().is_match(target) {
+        return Err(ScriptLangError::with_span(
+            "XML_SCRIPT_TARGET_INVALID",
+            format!(
+                "script=\"{}\" is invalid. Use @module.script or script variable name.",
+                target
+            ),
+            node.location.clone(),
+        ));
+    }
+
+    let declared_type = local_var_types
+        .get(target)
+        .or_else(|| visible_module_vars.get(target).map(|decl| &decl.r#type))
+        .or_else(|| visible_module_consts.get(target).map(|decl| &decl.r#type))
+        .ok_or_else(|| {
+            ScriptLangError::with_span(
+                "XML_SCRIPT_TARGET_VAR_UNKNOWN",
+                format!("Script target variable \"{}\" is not declared.", target),
+                node.location.clone(),
+            )
+        })?;
+
+    if !matches!(declared_type, ScriptType::Script) {
+        return Err(ScriptLangError::with_span(
+            "XML_SCRIPT_TARGET_VAR_TYPE",
+            format!(
+                "Script target variable \"{}\" must declare type=\"script\".",
+                target
+            ),
+            node.location.clone(),
+        ));
+    }
+
+    Ok(ScriptTarget::Variable {
+        var_name: target.to_string(),
+    })
+}
+
 pub(crate) fn compile_script(
     options: CompileScriptOptions<'_>,
 ) -> Result<ScriptIr, ScriptLangError> {
@@ -30,6 +191,7 @@ pub(crate) fn compile_script(
         visible_functions,
         visible_module_vars,
         visible_module_consts,
+        all_script_access,
         invoke_all_functions,
         invoke_public_functions,
     } = options;
@@ -66,17 +228,19 @@ pub(crate) fn compile_script(
         visible_var_types.insert(param.name.clone(), param.r#type.clone());
     }
 
-    compile_group(
+    compile_group_with_context(
         &root_group_id,
         None,
         &expanded_root,
         &mut builder,
         visible_types,
+        visible_module_vars,
+        visible_module_consts,
+        all_script_access,
+        module_name,
         &visible_var_types,
         CompileGroupMode::new(0, false),
     )?;
-
-    qualify_local_script_targets_for_module(&mut builder.groups, module_name);
 
     Ok(ScriptIr {
         script_path: script_path.to_string(),
@@ -96,50 +260,42 @@ pub(crate) fn compile_script(
     })
 }
 
-fn qualify_local_script_targets(groups: &mut BTreeMap<String, ImplicitGroup>, module_name: &str) {
-    for group in groups.values_mut() {
-        for node in &mut group.nodes {
-            match node {
-                ScriptNode::Call { target_script, .. } => {
-                    qualify_static_script_target(target_script, module_name);
-                }
-                ScriptNode::Return {
-                    target_script: Some(target_script),
-                    ..
-                } => {
-                    qualify_static_script_target(target_script, module_name);
-                }
-                _ => {}
-            }
-        }
-    }
-}
-
-fn qualify_local_script_targets_for_module(
-    groups: &mut BTreeMap<String, ImplicitGroup>,
-    module_name: Option<&str>,
-) {
-    if let Some(module_name) = module_name {
-        qualify_local_script_targets(groups, module_name);
-    }
-}
-
-fn qualify_static_script_target(target_script: &mut String, module_name: &str) {
-    if target_script.contains('.')
-        || target_script.contains("${")
-        || target_script.trim().is_empty()
-    {
-        return;
-    }
-    *target_script = format!("{}.{}", module_name, target_script);
-}
-
+#[cfg(test)]
 pub(crate) fn compile_group(
     group_id: &str,
     parent_group_id: Option<&str>,
     container: &XmlElementNode,
     builder: &mut GroupBuilder,
     visible_types: &BTreeMap<String, ScriptType>,
+    visible_var_types: &BTreeMap<String, ScriptType>,
+    mode: CompileGroupMode,
+) -> Result<(), ScriptLangError> {
+    compile_group_with_context(
+        group_id,
+        parent_group_id,
+        container,
+        builder,
+        visible_types,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        None,
+        visible_var_types,
+        mode,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compile_group_with_context(
+    group_id: &str,
+    parent_group_id: Option<&str>,
+    container: &XmlElementNode,
+    builder: &mut GroupBuilder,
+    visible_types: &BTreeMap<String, ScriptType>,
+    visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
+    visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
+    all_script_access: &BTreeMap<String, AccessLevel>,
+    module_name: Option<&str>,
     visible_var_types: &BTreeMap<String, ScriptType>,
     mode: CompileGroupMode,
 ) -> Result<(), ScriptLangError> {
@@ -161,6 +317,10 @@ pub(crate) fn compile_group(
         container,
         builder,
         visible_types,
+        visible_module_vars,
+        visible_module_consts,
+        all_script_access,
+        module_name,
         &mut local_var_types,
         mode,
         &mut nodes,
@@ -174,31 +334,45 @@ pub(crate) fn compile_group(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compile_child_group(
     parent_group_id: &str,
     child_group_id: &str,
     child_container: &XmlElementNode,
     builder: &mut GroupBuilder,
     visible_types: &BTreeMap<String, ScriptType>,
+    visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
+    visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
+    all_script_access: &BTreeMap<String, AccessLevel>,
+    module_name: Option<&str>,
     local_var_types: &mut BTreeMap<String, ScriptType>,
     mode: CompileGroupMode,
 ) -> Result<(), ScriptLangError> {
-    compile_group(
+    compile_group_with_context(
         child_group_id,
         Some(parent_group_id),
         child_container,
         builder,
         visible_types,
+        visible_module_vars,
+        visible_module_consts,
+        all_script_access,
+        module_name,
         local_var_types,
         mode,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn compile_group_nodes(
     group_id: &str,
     container: &XmlElementNode,
     builder: &mut GroupBuilder,
     visible_types: &BTreeMap<String, ScriptType>,
+    visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
+    visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
+    all_script_access: &BTreeMap<String, AccessLevel>,
+    module_name: Option<&str>,
     local_var_types: &mut BTreeMap<String, ScriptType>,
     mode: CompileGroupMode,
     nodes: &mut Vec<ScriptNode>,
@@ -217,12 +391,16 @@ pub(crate) fn compile_group_nodes(
                 let body_group_id = builder.next_group_id();
                 let else_group_id = builder.next_group_id();
 
-                compile_group(
+                compile_group_with_context(
                     &body_group_id,
                     Some(group_id),
                     child,
                     builder,
                     visible_types,
+                    visible_module_vars,
+                    visible_module_consts,
+                    all_script_access,
+                    module_name,
                     local_var_types,
                     CompileGroupMode::new(mode.while_depth, false),
                 )?;
@@ -247,6 +425,24 @@ pub(crate) fn compile_group_nodes(
             }
             "temp" => {
                 let declaration = parse_var_declaration(child, visible_types)?;
+                if let Some(expr) = declaration.initial_value_expr.as_deref() {
+                    validate_script_literals_in_expression(
+                        expr,
+                        &child.location,
+                        all_script_access,
+                        module_name,
+                    )?;
+                    if matches!(declaration.r#type, ScriptType::Script)
+                        && (expr.trim_start().starts_with('"')
+                            || expr.trim_start().starts_with('\''))
+                    {
+                        return Err(ScriptLangError::with_span(
+                            "XML_SCRIPT_ASSIGN_STRING_FORBIDDEN",
+                            "script type does not accept plain string literal; use @module.script.",
+                            child.location.clone(),
+                        ));
+                    }
+                }
                 local_var_types.insert(declaration.name.clone(), declaration.r#type.clone());
                 ScriptNode::Var {
                     id: builder.next_node_id("var"),
@@ -277,11 +473,20 @@ pub(crate) fn compile_group_nodes(
                     location: child.location.clone(),
                 }
             }
-            "code" => ScriptNode::Code {
-                id: builder.next_node_id("code"),
-                code: parse_inline_required(child)?,
-                location: child.location.clone(),
-            },
+            "code" => {
+                let code = parse_inline_required(child)?;
+                validate_script_literals_in_expression(
+                    &code,
+                    &child.location,
+                    all_script_access,
+                    module_name,
+                )?;
+                ScriptNode::Code {
+                    id: builder.next_node_id("code"),
+                    code,
+                    location: child.location.clone(),
+                }
+            }
             "if" => {
                 let then_group_id = builder.next_group_id();
                 let else_group_id = builder.next_group_id();
@@ -309,6 +514,10 @@ pub(crate) fn compile_group_nodes(
                     &then_container,
                     builder,
                     visible_types,
+                    visible_module_vars,
+                    visible_module_consts,
+                    all_script_access,
+                    module_name,
                     local_var_types,
                     group_mode,
                 );
@@ -321,6 +530,10 @@ pub(crate) fn compile_group_nodes(
                         else_child,
                         builder,
                         visible_types,
+                        visible_module_vars,
+                        visible_module_consts,
+                        all_script_access,
+                        module_name,
                         local_var_types,
                         group_mode,
                     );
@@ -339,7 +552,16 @@ pub(crate) fn compile_group_nodes(
 
                 ScriptNode::If {
                     id: builder.next_node_id("if"),
-                    when_expr: get_required_non_empty_attr(child, "when")?,
+                    when_expr: {
+                        let when_expr = get_required_non_empty_attr(child, "when")?;
+                        validate_script_literals_in_expression(
+                            &when_expr,
+                            &child.location,
+                            all_script_access,
+                            module_name,
+                        )?;
+                        when_expr
+                    },
                     then_group_id,
                     else_group_id: Some(else_group_id),
                     location: child.location.clone(),
@@ -354,13 +576,26 @@ pub(crate) fn compile_group_nodes(
                     child,
                     builder,
                     visible_types,
+                    visible_module_vars,
+                    visible_module_consts,
+                    all_script_access,
+                    module_name,
                     local_var_types,
                     while_mode,
                 );
                 while_result?;
                 ScriptNode::While {
                     id: builder.next_node_id("while"),
-                    when_expr: get_required_non_empty_attr(child, "when")?,
+                    when_expr: {
+                        let when_expr = get_required_non_empty_attr(child, "when")?;
+                        validate_script_literals_in_expression(
+                            &when_expr,
+                            &child.location,
+                            all_script_access,
+                            module_name,
+                        )?;
+                        when_expr
+                    },
                     body_group_id,
                     location: child.location.clone(),
                 }
@@ -377,6 +612,14 @@ pub(crate) fn compile_group_nodes(
                             let once = parse_bool_attr(choice_child, "once", false)?;
                             let fall_over = parse_bool_attr(choice_child, "fall_over", false)?;
                             let when_expr = get_optional_attr(choice_child, "when");
+                            if let Some(expr) = when_expr.as_deref() {
+                                validate_script_literals_in_expression(
+                                    expr,
+                                    &choice_child.location,
+                                    all_script_access,
+                                    module_name,
+                                )?;
+                            }
                             if fall_over {
                                 fall_over_seen += 1;
                                 fall_over_entry_index = Some(entries.len());
@@ -397,6 +640,10 @@ pub(crate) fn compile_group_nodes(
                                 choice_child,
                                 builder,
                                 visible_types,
+                                visible_module_vars,
+                                visible_module_consts,
+                                all_script_access,
+                                module_name,
                                 local_var_types,
                                 option_mode,
                             );
@@ -473,6 +720,10 @@ pub(crate) fn compile_group_nodes(
                                 template_option,
                                 builder,
                                 visible_types,
+                                visible_module_vars,
+                                visible_module_consts,
+                                all_script_access,
+                                module_name,
                                 local_var_types,
                                 option_mode,
                             );
@@ -486,7 +737,19 @@ pub(crate) fn compile_group_nodes(
                                     index_name,
                                     template: DynamicChoiceTemplate {
                                         text: get_required_non_empty_attr(template_option, "text")?,
-                                        when_expr: get_optional_attr(template_option, "when"),
+                                        when_expr: {
+                                            let when_expr =
+                                                get_optional_attr(template_option, "when");
+                                            if let Some(expr) = when_expr.as_deref() {
+                                                validate_script_literals_in_expression(
+                                                    expr,
+                                                    &template_option.location,
+                                                    all_script_access,
+                                                    module_name,
+                                                )?;
+                                            }
+                                            when_expr
+                                        },
                                         group_id: option_group_id,
                                         location: template_option.location.clone(),
                                     },
@@ -589,12 +852,39 @@ pub(crate) fn compile_group_nodes(
             }
             "call" => ScriptNode::Call {
                 id: builder.next_node_id("call"),
-                target_script: get_required_non_empty_attr(child, "script")?,
-                args: parse_args(get_optional_attr(child, "args"))?,
+                target_script: parse_script_target_attr(
+                    &get_required_non_empty_attr(child, "script")?,
+                    child,
+                    local_var_types,
+                    visible_module_vars,
+                    visible_module_consts,
+                    all_script_access,
+                    module_name,
+                )?,
+                args: {
+                    let args = parse_args(get_optional_attr(child, "args"))?;
+                    for arg in &args {
+                        validate_script_literals_in_expression(
+                            &arg.value_expr,
+                            &child.location,
+                            all_script_access,
+                            module_name,
+                        )?;
+                    }
+                    args
+                },
                 location: child.location.clone(),
             },
             "return" => {
                 let args = parse_args(get_optional_attr(child, "args"))?;
+                for arg in &args {
+                    validate_script_literals_in_expression(
+                        &arg.value_expr,
+                        &child.location,
+                        all_script_access,
+                        module_name,
+                    )?;
+                }
                 if args.iter().any(|arg| arg.is_ref) {
                     return Err(ScriptLangError::with_span(
                         "XML_RETURN_REF_UNSUPPORTED",
@@ -603,7 +893,19 @@ pub(crate) fn compile_group_nodes(
                     ));
                 }
 
-                let target_script = get_optional_attr(child, "script");
+                let target_script = get_optional_attr(child, "script")
+                    .map(|raw| {
+                        parse_script_target_attr(
+                            &raw,
+                            child,
+                            local_var_types,
+                            visible_module_vars,
+                            visible_module_consts,
+                            all_script_access,
+                            module_name,
+                        )
+                    })
+                    .transpose()?;
                 if !args.is_empty() && target_script.is_none() {
                     return Err(ScriptLangError::with_span(
                         "XML_RETURN_ARGS_REQUIRE_SCRIPT",
@@ -879,6 +1181,7 @@ mod script_compile_tests {
     fn script_type_kind(ty: &ScriptType) -> &'static str {
         match ty {
             ScriptType::Primitive { .. } => "primitive",
+            ScriptType::Script => "script",
             ScriptType::Array { .. } => "array",
             ScriptType::Map { .. } => "map",
             ScriptType::Object { .. } => "object",
@@ -887,6 +1190,7 @@ mod script_compile_tests {
 
     #[test]
     fn parse_var_declaration_rejects_value_attr_and_child_elements() {
+        assert_eq!(script_type_kind(&ScriptType::Script), "script");
         let visible_types = BTreeMap::new();
         let with_value = xml_element(
             "var",
@@ -1859,7 +2163,7 @@ mod script_compile_tests {
                     "call args parse error",
                     map(&[(
                         "main.xml",
-                        "<script name=\"main\"><call script=\"s\" args=\"ref:\"/></script>",
+                        "<script name=\"main\"><call script=\"@main.main\" args=\"ref:\"/></script>",
                     )]),
                     "CALL_ARGS_PARSE_ERROR",
                 ),
@@ -2168,6 +2472,7 @@ mod script_compile_tests {
             visible_functions: &BTreeMap::new(),
             visible_module_vars: &BTreeMap::new(),
             visible_module_consts: &BTreeMap::new(),
+            all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
             invoke_public_functions: &BTreeSet::new(),
         })
@@ -2185,6 +2490,7 @@ mod script_compile_tests {
             visible_functions: &BTreeMap::new(),
             visible_module_vars: &BTreeMap::new(),
             visible_module_consts: &BTreeMap::new(),
+            all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
             invoke_public_functions: &BTreeSet::new(),
         })
@@ -2202,6 +2508,7 @@ mod script_compile_tests {
             visible_functions: &BTreeMap::new(),
             visible_module_vars: &BTreeMap::new(),
             visible_module_consts: &BTreeMap::new(),
+            all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
             invoke_public_functions: &BTreeSet::new(),
         })
@@ -2227,6 +2534,7 @@ mod script_compile_tests {
             visible_functions: &BTreeMap::new(),
             visible_module_vars: &BTreeMap::new(),
             visible_module_consts: &BTreeMap::new(),
+            all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
             invoke_public_functions: &BTreeSet::new(),
         })
@@ -2234,9 +2542,10 @@ mod script_compile_tests {
         assert_eq!(reserved_var_error.code, "NAME_RESERVED_PREFIX");
 
         let no_module_root =
-            parse_xml_document(r#"<script name="main"><call script="next"/></script>"#)
+            parse_xml_document(r#"<script name="main"><call script="@next.next"/></script>"#)
                 .expect("xml")
                 .root;
+        let no_module_scripts = BTreeMap::from([("next.next".to_string(), AccessLevel::Public)]);
         let no_module_ir = compile_script(CompileScriptOptions {
             script_path: "x.xml",
             root: &no_module_root,
@@ -2247,6 +2556,7 @@ mod script_compile_tests {
             visible_functions: &BTreeMap::new(),
             visible_module_vars: &BTreeMap::new(),
             visible_module_consts: &BTreeMap::new(),
+            all_script_access: &no_module_scripts,
             invoke_all_functions: &BTreeMap::new(),
             invoke_public_functions: &BTreeSet::new(),
         })
@@ -2255,8 +2565,13 @@ mod script_compile_tests {
             .groups
             .get(&no_module_ir.root_group_id)
             .expect("root group");
-        let node_debug = format!("{:?}", &root_group.nodes[0]);
-        assert!(node_debug.contains("target_script: \"next\""));
+        assert!(matches!(
+            &root_group.nodes[0],
+            ScriptNode::Call {
+                target_script: ScriptTarget::Literal { script_name },
+                ..
+            } if script_name == "next.next"
+        ));
 
         let rich_script = map(&[(
             "main.xml",
@@ -2424,7 +2739,9 @@ mod script_compile_tests {
         assert_eq!(input_id, "i1");
         let call_node = ScriptNode::Call {
             id: "c1".to_string(),
-            target_script: "main".to_string(),
+            target_script: ScriptTarget::Literal {
+                script_name: "main".to_string(),
+            },
             args: Vec::new(),
             location: SourceSpan::synthetic(),
         };
@@ -2659,6 +2976,260 @@ mod script_compile_tests {
         assert_eq!(
             crate::defaults::slvalue_from_json(JsonValue::Null),
             SlValue::String("null".to_string())
+        );
+    }
+
+    #[test]
+    fn script_target_validation_helpers_cover_literal_and_variable_paths() {
+        let span = SourceSpan::synthetic();
+        assert_eq!(
+            qualify_script_literal_name("main.next", Some("main"), &span).expect("qualified"),
+            "main.next"
+        );
+        assert_eq!(
+            qualify_script_literal_name("next", Some("main"), &span).expect("short with module"),
+            "main.next"
+        );
+        let no_module_error = qualify_script_literal_name("next", None, &span)
+            .expect_err("short literal without module should fail");
+        assert_eq!(no_module_error.code, "XML_SCRIPT_TARGET_INVALID");
+
+        let access_map = BTreeMap::from([
+            ("main.next".to_string(), AccessLevel::Public),
+            ("shared.hidden".to_string(), AccessLevel::Private),
+            ("battle-loop.main".to_string(), AccessLevel::Public),
+        ]);
+        validate_script_literal_access("main.next", &access_map, Some("main"), &span)
+            .expect("public literal should pass");
+        let not_found =
+            validate_script_literal_access("missing.next", &access_map, Some("main"), &span)
+                .expect_err("unknown literal should fail");
+        assert_eq!(not_found.code, "XML_SCRIPT_TARGET_NOT_FOUND");
+        let denied =
+            validate_script_literal_access("shared.hidden", &access_map, Some("main"), &span)
+                .expect_err("private cross-module should fail");
+        assert_eq!(denied.code, "XML_SCRIPT_TARGET_ACCESS_DENIED");
+
+        validate_script_literals_in_expression(
+            "dst = @main.next; alt = @battle-loop.main;",
+            &span,
+            &access_map,
+            Some("main"),
+        )
+        .expect("script literals in expression should validate");
+
+        let node = xml_element("call", &[("script", "@main.next")], Vec::new());
+        let literal_target = parse_script_target_attr(
+            "@battle-loop.main",
+            &node,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &access_map,
+            Some("main"),
+        )
+        .expect("hyphenated literal target should parse");
+        assert!(matches!(
+            literal_target,
+            ScriptTarget::Literal { script_name } if script_name == "battle-loop.main"
+        ));
+
+        let template_error = parse_script_target_attr(
+            "${next}",
+            &node,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &access_map,
+            Some("main"),
+        )
+        .expect_err("template target should be rejected");
+        assert_eq!(template_error.code, "XML_SCRIPT_TARGET_TEMPLATE_REMOVED");
+
+        let invalid_literal = parse_script_target_attr(
+            "@bad.",
+            &node,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &access_map,
+            Some("main"),
+        )
+        .expect_err("invalid literal should fail");
+        assert_eq!(invalid_literal.code, "XML_SCRIPT_TARGET_INVALID");
+
+        let invalid_plain = parse_script_target_attr(
+            "main.next",
+            &node,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &access_map,
+            Some("main"),
+        )
+        .expect_err("plain dotted target should fail");
+        assert_eq!(invalid_plain.code, "XML_SCRIPT_TARGET_INVALID");
+
+        let unknown_var = parse_script_target_attr(
+            "nextScene",
+            &node,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &access_map,
+            Some("main"),
+        )
+        .expect_err("unknown script variable should fail");
+        assert_eq!(unknown_var.code, "XML_SCRIPT_TARGET_VAR_UNKNOWN");
+
+        let typed_vars = BTreeMap::from([(
+            "nextScene".to_string(),
+            ScriptType::Primitive {
+                name: "string".to_string(),
+            },
+        )]);
+        let bad_var_type = parse_script_target_attr(
+            "nextScene",
+            &node,
+            &typed_vars,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &access_map,
+            Some("main"),
+        )
+        .expect_err("non-script variable should fail");
+        assert_eq!(bad_var_type.code, "XML_SCRIPT_TARGET_VAR_TYPE");
+
+        let script_vars = BTreeMap::from([("nextScene".to_string(), ScriptType::Script)]);
+        let var_target = parse_script_target_attr(
+            "nextScene",
+            &node,
+            &script_vars,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &access_map,
+            Some("main"),
+        )
+        .expect("script variable target should pass");
+        assert!(matches!(
+            var_target,
+            ScriptTarget::Variable { var_name } if var_name == "nextScene"
+        ));
+    }
+
+    #[test]
+    fn script_literal_validation_is_applied_in_all_supported_expression_positions() {
+        let root = parse_xml_document(
+            r#"
+<script name="main">
+  <temp name="dst" type="script">@main.next</temp>
+  <code>dst = @main.next;</code>
+  <if when="@main.next != ''"><text>a</text><else><text>b</text></else></if>
+  <while when="@main.next != ''"><text>w</text></while>
+  <choice text="pick">
+    <option text="A" when="@main.next != ''"><text>x</text></option>
+    <dynamic-options array="[1]" item="it">
+      <option text="${it}" when="@main.next != ''"><text>d</text></option>
+    </dynamic-options>
+  </choice>
+  <call script="@main.next" args="@main.next"/>
+  <return script="@main.next" args="@main.next"/>
+</script>
+"#,
+        )
+        .expect("xml")
+        .root;
+
+        let all_scripts = BTreeMap::from([("main.next".to_string(), AccessLevel::Public)]);
+        let compiled = compile_script(CompileScriptOptions {
+            script_path: "main.xml",
+            root: &root,
+            script_access: AccessLevel::Public,
+            qualified_script_name: Some("main.main"),
+            module_name: Some("main"),
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+            all_script_access: &all_scripts,
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
+        })
+        .expect("compile should pass");
+
+        let root_group = compiled
+            .groups
+            .get(&compiled.root_group_id)
+            .expect("root group");
+        assert!(!root_group.nodes.is_empty());
+    }
+
+    #[test]
+    fn script_literal_validation_error_paths_are_reported_at_each_node_kind() {
+        let compile_error = |xml: &str, expected_code: &str| {
+            let root = parse_xml_document(xml).expect("xml").root;
+            let known_scripts = BTreeMap::from([("main.next".to_string(), AccessLevel::Public)]);
+            let error = compile_script(CompileScriptOptions {
+                script_path: "main.xml",
+                root: &root,
+                script_access: AccessLevel::Public,
+                qualified_script_name: Some("main.main"),
+                module_name: Some("main"),
+                visible_types: &BTreeMap::new(),
+                visible_functions: &BTreeMap::new(),
+                visible_module_vars: &BTreeMap::new(),
+                visible_module_consts: &BTreeMap::new(),
+                all_script_access: &known_scripts,
+                invoke_all_functions: &BTreeMap::new(),
+                invoke_public_functions: &BTreeSet::new(),
+            })
+            .expect_err("compile should fail");
+            assert_eq!(error.code, expected_code);
+        };
+
+        compile_error(
+            r#"<script name="main"><temp name="dst" type="script">@missing.next</temp></script>"#,
+            "XML_SCRIPT_TARGET_NOT_FOUND",
+        );
+        compile_error(
+            r#"<script name="main"><temp name="dst" type="script">"main.next"</temp></script>"#,
+            "XML_SCRIPT_ASSIGN_STRING_FORBIDDEN",
+        );
+        compile_error(
+            r#"<script name="main"><code>dst = @missing.next;</code></script>"#,
+            "XML_SCRIPT_TARGET_NOT_FOUND",
+        );
+        compile_error(
+            r#"<script name="main"><if when="@missing.next != ''"><text>x</text></if></script>"#,
+            "XML_SCRIPT_TARGET_NOT_FOUND",
+        );
+        compile_error(
+            r#"<script name="main"><while when="@missing.next != ''"><text>x</text></while></script>"#,
+            "XML_SCRIPT_TARGET_NOT_FOUND",
+        );
+        compile_error(
+            r#"<script name="main"><choice text="c"><option text="a" when="@missing.next != ''"><text>x</text></option></choice></script>"#,
+            "XML_SCRIPT_TARGET_NOT_FOUND",
+        );
+        compile_error(
+            r#"<script name="main"><choice text="c"><dynamic-options array="[1]" item="it"><option text="${it}" when="@missing.next != ''"><text>x</text></option></dynamic-options></choice></script>"#,
+            "XML_SCRIPT_TARGET_NOT_FOUND",
+        );
+        compile_error(
+            r#"<script name="main"><call script="@main.next" args="@missing.next"/></script>"#,
+            "XML_SCRIPT_TARGET_NOT_FOUND",
+        );
+        compile_error(
+            r#"<script name="main"><return script="@main.next" args="@missing.next"/></script>"#,
+            "XML_SCRIPT_TARGET_NOT_FOUND",
+        );
+        compile_error(
+            r#"<script name="main"><call script="@missing.next"/></script>"#,
+            "XML_SCRIPT_TARGET_NOT_FOUND",
+        );
+        compile_error(
+            r#"<script name="main"><return script="@missing.next"/></script>"#,
+            "XML_SCRIPT_TARGET_NOT_FOUND",
         );
     }
 }
