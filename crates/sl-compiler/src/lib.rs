@@ -6,10 +6,10 @@ pub(crate) use regex::Regex;
 pub(crate) use serde_json::Value as JsonValue;
 pub(crate) use sl_core::{
     default_value_from_type, AccessLevel, CallArgument, ChoiceEntry, ChoiceOption,
-    CompiledProjectArtifact, ContinueTarget, ModuleConstDecl, ModuleVarDecl,
-    DynamicChoiceBlock, DynamicChoiceTemplate, FunctionDecl, FunctionParam, FunctionReturn,
-    ImplicitGroup, ScriptIr, ScriptLangError, ScriptNode, ScriptParam, ScriptType, SlValue,
-    SourceSpan, VarDeclaration, COMPILED_PROJECT_SCHEMA,
+    CompiledProjectArtifact, ContinueTarget, DynamicChoiceBlock, DynamicChoiceTemplate,
+    FunctionDecl, FunctionParam, FunctionReturn, ImplicitGroup, ModuleConstDecl, ModuleVarDecl,
+    ScriptIr, ScriptLangError, ScriptNode, ScriptParam, ScriptType, SlValue, SourceSpan,
+    VarDeclaration, COMPILED_PROJECT_SCHEMA,
 };
 pub(crate) use sl_parser::{
     parse_import_directives, parse_xml_document, reject_non_import_dependency_directives,
@@ -19,10 +19,10 @@ pub(crate) use sl_parser::{
 mod artifact;
 mod context;
 mod defaults;
-mod module_resolver;
 mod error_context;
 mod import_graph;
 mod macro_expand;
+mod module_resolver;
 mod pipeline;
 mod sanitize;
 mod script_compile;
@@ -38,10 +38,10 @@ pub use context::CompileProjectBundleResult;
 pub use pipeline::{compile_project_bundle_from_xml_map, compile_project_scripts_from_xml_map};
 
 pub(crate) use context::*;
-pub(crate) use module_resolver::*;
 pub(crate) use error_context::with_file_context_shared;
 pub(crate) use import_graph::*;
 pub(crate) use macro_expand::*;
+pub(crate) use module_resolver::*;
 pub(crate) use sanitize::*;
 pub(crate) use script_compile::*;
 pub(crate) use source_parse::*;
@@ -74,12 +74,13 @@ pub(crate) mod compiler_test_support {
             .replace(".module.xml", ".xml");
 
         let trimmed = normalized.trim_start();
-        if !trimmed.starts_with("<module") && normalized.trim_end().ends_with("</module>") {
-            if trimmed.starts_with("<script") {
-                let end_regex =
-                    Regex::new(r"</module>\s*\z").expect("stray module close regex should compile");
-                normalized = end_regex.replace(&normalized, "").into_owned();
-            }
+        if !trimmed.starts_with("<module")
+            && normalized.trim_end().ends_with("</module>")
+            && trimmed.starts_with("<script")
+        {
+            let end_regex =
+                Regex::new(r"</module>\s*\z").expect("stray module close regex should compile");
+            normalized = end_regex.replace(&normalized, "").into_owned();
         }
 
         if normalize_wrapped_root(&normalized, "module", None).is_some() {

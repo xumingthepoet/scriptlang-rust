@@ -1281,8 +1281,9 @@ mod module_resolver_tests {
             ("b.xml".to_string(), duplicate_func),
         ]);
         let reachable = BTreeSet::from(["a.xml".to_string(), "b.xml".to_string()]);
-        let error = resolve_visible_module_symbols(&reachable, &duplicate_module_by_path, Some("shared"))
-            .expect_err("duplicate function should fail");
+        let error =
+            resolve_visible_module_symbols(&reachable, &duplicate_module_by_path, Some("shared"))
+                .expect_err("duplicate function should fail");
         assert_eq!(error.code, "FUNCTION_DECL_DUPLICATE");
     }
 
@@ -1604,8 +1605,9 @@ mod module_resolver_tests {
             },
         )]);
         let reachable = BTreeSet::from(["shared.xml".to_string()]);
-        let error = resolve_visible_module_symbols(&reachable, &module_with_bad_const, Some("shared"))
-            .expect_err("unresolved type should fail");
+        let error =
+            resolve_visible_module_symbols(&reachable, &module_with_bad_const, Some("shared"))
+                .expect_err("unresolved type should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
     }
 
@@ -1811,7 +1813,8 @@ mod module_resolver_tests {
         let module_by_path = parse_module_files(&sources).expect("parse module");
         let reachable = BTreeSet::from(["shared.xml".to_string()]);
         let (types, functions, _, _module_consts) =
-            resolve_visible_module_symbols(&reachable, &module_by_path, Some("shared")).expect("resolve module");
+            resolve_visible_module_symbols(&reachable, &module_by_path, Some("shared"))
+                .expect("resolve module");
         assert!(types.contains_key("shared.Obj"));
         assert!(functions.contains_key("shared.make"));
     }
@@ -1899,9 +1902,8 @@ mod module_resolver_tests {
             &[("name", "__sl_hp"), ("type", "int")],
             vec![xml_text("1")],
         );
-        let error =
-            parse_module_var_declaration(&reserved_name, "shared", AccessLevel::Private)
-                .expect_err("reserved name should fail");
+        let error = parse_module_var_declaration(&reserved_name, "shared", AccessLevel::Private)
+            .expect_err("reserved name should fail");
         assert_eq!(error.code, "NAME_RESERVED_PREFIX");
 
         let invalid_type = xml_element(
@@ -1909,21 +1911,18 @@ mod module_resolver_tests {
             &[("name", "hp"), ("type", "#{ }")],
             vec![xml_text("1")],
         );
-        let error =
-            parse_module_var_declaration(&invalid_type, "shared", AccessLevel::Private)
-                .expect_err("bad type");
+        let error = parse_module_var_declaration(&invalid_type, "shared", AccessLevel::Private)
+            .expect_err("bad type");
         assert_eq!(error.code, "TYPE_PARSE_ERROR");
 
         let missing_name = xml_element("var", &[("type", "int")], vec![xml_text("1")]);
-        let error =
-            parse_module_var_declaration(&missing_name, "shared", AccessLevel::Private)
-                .expect_err("name should be required");
+        let error = parse_module_var_declaration(&missing_name, "shared", AccessLevel::Private)
+            .expect_err("name should be required");
         assert_eq!(error.code, "XML_MISSING_ATTR");
 
         let missing_type = xml_element("var", &[("name", "hp")], vec![xml_text("1")]);
-        let error =
-            parse_module_var_declaration(&missing_type, "shared", AccessLevel::Private)
-                .expect_err("type should be required");
+        let error = parse_module_var_declaration(&missing_type, "shared", AccessLevel::Private)
+            .expect_err("type should be required");
         assert_eq!(error.code, "XML_MISSING_ATTR");
 
         // Test with explicit access attribute (covers line 160)
@@ -1932,9 +1931,8 @@ mod module_resolver_tests {
             &[("name", "gold"), ("type", "int"), ("access", "public")],
             vec![xml_text("100")],
         );
-        let parsed =
-            parse_module_var_declaration(&with_access, "shared", AccessLevel::Private)
-                .expect("var with access should parse");
+        let parsed = parse_module_var_declaration(&with_access, "shared", AccessLevel::Private)
+            .expect("var with access should parse");
         assert_eq!(parsed.access, AccessLevel::Public);
 
         let mut invalid_sources = BTreeMap::new();
@@ -2065,8 +2063,8 @@ mod module_resolver_tests {
                 module_global_const_decls: Vec::new(),
             },
         )]);
-        let (bundle_globals, init_order) =
-            collect_module_vars_for_bundle(&module_for_bundle).expect("bundle alias should resolve");
+        let (bundle_globals, init_order) = collect_module_vars_for_bundle(&module_for_bundle)
+            .expect("bundle alias should resolve");
         assert!(bundle_globals.contains_key("bundle.item"));
         assert_eq!(init_order, vec!["bundle.item".to_string()]);
 
@@ -2545,9 +2543,7 @@ mod module_resolver_tests {
 </module>"#,
         )]);
         let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
-        assert!(bundle
-            .module_const_declarations
-            .contains_key("main.base"));
+        assert!(bundle.module_const_declarations.contains_key("main.base"));
         assert_eq!(
             bundle.module_const_init_order,
             vec!["main.base".to_string()]
@@ -2606,7 +2602,8 @@ mod module_resolver_tests {
 
         // Query from module "main" should NOT see "other.Secret" because it's private
         let (types, functions, module_vars, _module_consts) =
-            resolve_visible_module_symbols(&reachable, &module_by_path, Some("main")).expect("should resolve");
+            resolve_visible_module_symbols(&reachable, &module_by_path, Some("main"))
+                .expect("should resolve");
         assert!(
             !types.contains_key("Secret"),
             "private type from non-local should be hidden"
@@ -2642,7 +2639,8 @@ mod module_resolver_tests {
 
         // Query from module "main" should NOT see "other.hidden" because it's private
         let (types, functions, module_vars, _module_consts) =
-            resolve_visible_module_symbols(&reachable, &module_by_path, Some("main")).expect("should resolve");
+            resolve_visible_module_symbols(&reachable, &module_by_path, Some("main"))
+                .expect("should resolve");
         assert!(types.is_empty());
         assert!(
             !functions.contains_key("hidden"),
@@ -2667,9 +2665,8 @@ mod module_resolver_tests {
             &[("name", "base"), ("type", "int"), ("value", "1")],
             vec![],
         );
-        let value_error =
-            parse_module_const_declaration(&with_value, "main", AccessLevel::Private)
-                .expect_err("value attr should fail");
+        let value_error = parse_module_const_declaration(&with_value, "main", AccessLevel::Private)
+            .expect_err("value attr should fail");
         assert_eq!(value_error.code, "XML_ATTR_NOT_ALLOWED");
 
         let with_child = xml_element(
@@ -2681,9 +2678,8 @@ mod module_resolver_tests {
                 vec![xml_text("x")],
             ))],
         );
-        let child_error =
-            parse_module_const_declaration(&with_child, "main", AccessLevel::Private)
-                .expect_err("child should fail");
+        let child_error = parse_module_const_declaration(&with_child, "main", AccessLevel::Private)
+            .expect_err("child should fail");
         assert_eq!(child_error.code, "XML_VAR_CHILD_INVALID");
     }
 
@@ -2739,7 +2735,8 @@ mod module_resolver_tests {
         ]);
         let reachable = BTreeSet::from(["main.xml".to_string(), "other.xml".to_string()]);
         let (_types, _functions, _module_vars, module_consts) =
-            resolve_visible_module_symbols(&reachable, &module_by_path, Some("main")).expect("resolve");
+            resolve_visible_module_symbols(&reachable, &module_by_path, Some("main"))
+                .expect("resolve");
         assert!(module_consts.contains_key("main.localConst"));
         assert!(module_consts.contains_key("sharedConst"));
         assert!(!module_consts.contains_key("other.hidden"));
@@ -3144,10 +3141,12 @@ mod module_resolver_tests {
             module_global_var_decls: Vec::new(),
             module_global_const_decls: Vec::new(),
         };
-        let module_by_path =
-            BTreeMap::from([("a.xml".to_string(), module1), ("b.xml".to_string(), module2)]);
-        let error =
-            collect_module_vars_for_bundle(&module_by_path).expect_err("duplicate type should fail");
+        let module_by_path = BTreeMap::from([
+            ("a.xml".to_string(), module1),
+            ("b.xml".to_string(), module2),
+        ]);
+        let error = collect_module_vars_for_bundle(&module_by_path)
+            .expect_err("duplicate type should fail");
         assert_eq!(error.code, "TYPE_DECL_DUPLICATE");
     }
 

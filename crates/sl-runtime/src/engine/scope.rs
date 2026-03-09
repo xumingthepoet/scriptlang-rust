@@ -50,7 +50,8 @@ impl ScriptLangEngine {
         }
 
         let script_name = self.resolve_current_script_name();
-        if let Some(qualified_name) = self.resolve_module_global_alias(script_name.as_deref(), name) {
+        if let Some(qualified_name) = self.resolve_module_global_alias(script_name.as_deref(), name)
+        {
             return self
                 .module_vars_value
                 .get(&qualified_name)
@@ -62,7 +63,8 @@ impl ScriptLangEngine {
                     )
                 });
         }
-        if let Some(qualified_name) = self.resolve_module_const_alias(script_name.as_deref(), name) {
+        if let Some(qualified_name) = self.resolve_module_const_alias(script_name.as_deref(), name)
+        {
             return self
                 .module_consts_value
                 .get(&qualified_name)
@@ -109,7 +111,8 @@ impl ScriptLangEngine {
         }
 
         let script_name = self.resolve_current_script_name();
-        if let Some(qualified_name) = self.resolve_module_global_alias(script_name.as_deref(), name) {
+        if let Some(qualified_name) = self.resolve_module_global_alias(script_name.as_deref(), name)
+        {
             if self
                 .module_vars_type
                 .get(&qualified_name)
@@ -123,7 +126,8 @@ impl ScriptLangEngine {
             self.module_vars_value.insert(qualified_name, value);
             return Ok(());
         }
-        if let Some(qualified_name) = self.resolve_module_const_alias(script_name.as_deref(), name) {
+        if let Some(qualified_name) = self.resolve_module_const_alias(script_name.as_deref(), name)
+        {
             return Err(ScriptLangError::new(
                 "ENGINE_CONST_READONLY",
                 format!(

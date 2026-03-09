@@ -641,7 +641,9 @@ mod lifecycle_tests {
             compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
         });
         assert!(result.is_err());
-        let error = result.err().expect("conflicting module function should fail");
+        let error = result
+            .err()
+            .expect("conflicting module function should fail");
         assert_eq!(error.code, "ENGINE_HOST_FUNCTION_CONFLICT");
     }
 

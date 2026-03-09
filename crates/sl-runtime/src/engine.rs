@@ -11,8 +11,8 @@ use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
 use crate::helpers::rhai_bridge::{
-    module_namespace_symbol, dynamic_to_slvalue, preprocess_scriptlang_rhai_input,
-    replace_module_global_symbol, rewrite_module_global_qualified_access, rewrite_function_calls,
+    dynamic_to_slvalue, module_namespace_symbol, preprocess_scriptlang_rhai_input,
+    replace_module_global_symbol, rewrite_function_calls, rewrite_module_global_qualified_access,
     rhai_function_symbol, slvalue_to_dynamic, slvalue_to_dynamic_with_type,
     slvalue_to_rhai_literal, slvalue_to_text, RhaiInputMode,
 };
@@ -26,7 +26,7 @@ use rng::next_random_bounded;
 use rng::{next_random_bounded_with, next_random_u32};
 use sl_core::{
     default_value_from_type, is_type_compatible, AccessLevel, ChoiceEntry, ChoiceItem,
-    ContinuationFrame, ContinueTarget, ModuleConstDecl, ModuleVarDecl, EngineOutput,
+    ContinuationFrame, ContinueTarget, EngineOutput, ModuleConstDecl, ModuleVarDecl,
     PendingBoundary, PendingDynamicChoiceBinding, ScriptIr, ScriptLangError, ScriptNode,
     ScriptType, SlValue, Snapshot, SnapshotCompletion, SnapshotFrame,
 };
@@ -88,12 +88,13 @@ pub(super) mod runtime_test_support {
             .replace(".module.xml", ".xml");
 
         let trimmed = normalized.trim_start();
-        if !trimmed.starts_with("<module") && normalized.trim_end().ends_with("</module>") {
-            if trimmed.starts_with("<script") {
-                let end_regex =
-                    Regex::new(r"</module>\s*\z").expect("stray module close regex should compile");
-                normalized = end_regex.replace(&normalized, "").into_owned();
-            }
+        if !trimmed.starts_with("<module")
+            && normalized.trim_end().ends_with("</module>")
+            && trimmed.starts_with("<script")
+        {
+            let end_regex =
+                Regex::new(r"</module>\s*\z").expect("stray module close regex should compile");
+            normalized = end_regex.replace(&normalized, "").into_owned();
         }
 
         if let Some(wrapped) = normalize_wrapped_root(&normalized, "module") {
@@ -247,10 +248,7 @@ pub(super) mod runtime_test_support {
         assert!(!normalized_script.contains("</module></module>"));
 
         let normalized_module = normalize_test_source_content("<module name=\"shared\"></module>");
-        assert_eq!(
-            normalized_module,
-            "<module name=\"shared\"></module>"
-        );
+        assert_eq!(normalized_module, "<module name=\"shared\"></module>");
         assert_eq!(
             normalize_test_source_content("<other></module>"),
             "<other></module>"

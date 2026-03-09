@@ -93,7 +93,11 @@ pub(crate) fn rewrite_module_global_qualified_access(
     rewritten
 }
 
-pub(crate) fn replace_module_global_symbol(source: &str, symbol: &str, replacement: &str) -> String {
+pub(crate) fn replace_module_global_symbol(
+    source: &str,
+    symbol: &str,
+    replacement: &str,
+) -> String {
     let mut out = String::with_capacity(source.len());
     let mut cursor = 0usize;
 
@@ -508,7 +512,10 @@ mod rhai_bridge_tests {
     #[test]
     fn bridge_helper_functions_cover_remaining_paths() {
         assert_eq!(rhai_function_symbol("a.b-c"), "a_b_c");
-        assert_eq!(module_namespace_symbol("shared.ns"), "__sl_module_ns_shared_ns");
+        assert_eq!(
+            module_namespace_symbol("shared.ns"),
+            "__sl_module_ns_shared_ns"
+        );
         assert!(is_scriptlang_token_char('a'));
         assert!(is_scriptlang_token_char('_'));
         assert!(!is_scriptlang_token_char('.'));

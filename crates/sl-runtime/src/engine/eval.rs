@@ -196,7 +196,8 @@ impl ScriptLangEngine {
 
         let preprocessed =
             preprocess_scriptlang_rhai_input(expr, "initializer", RhaiInputMode::CodeBlock)?;
-        let rewritten = rewrite_module_global_qualified_access(&preprocessed, &qualified_rewrite_map);
+        let rewritten =
+            rewrite_module_global_qualified_access(&preprocessed, &qualified_rewrite_map);
         let result = self
             .rhai_engine
             .eval_with_scope::<Dynamic>(&mut scope, &format!("({})", rewritten))
@@ -276,7 +277,8 @@ impl ScriptLangEngine {
 
         let preprocessed =
             preprocess_scriptlang_rhai_input(expr, "initializer", RhaiInputMode::CodeBlock)?;
-        let rewritten = rewrite_module_global_qualified_access(&preprocessed, &qualified_rewrite_map);
+        let rewritten =
+            rewrite_module_global_qualified_access(&preprocessed, &qualified_rewrite_map);
         let result = self
             .rhai_engine
             .eval_with_scope::<Dynamic>(&mut scope, &format!("({})", rewritten))
@@ -885,7 +887,8 @@ impl ScriptLangEngine {
                     );
                 }
             }
-            let rewritten = rewrite_module_global_qualified_access(&rewritten, &function_rewrite_map);
+            let rewritten =
+                rewrite_module_global_qualified_access(&rewritten, &function_rewrite_map);
             out.push_str(&rewritten);
             out.push('\n');
             out.push_str(&decl.return_binding.name);
@@ -1879,13 +1882,15 @@ mod eval_tests {
         alias_visibility_engine
             .start("main.main", None)
             .expect("start");
-        alias_visibility_engine.module_global_alias_by_script.insert(
-            "main.main".to_string(),
-            BTreeMap::from([
-                ("ghost".to_string(), "ghost.hp".to_string()),
-                ("hp".to_string(), "shared.hp".to_string()),
-            ]),
-        );
+        alias_visibility_engine
+            .module_global_alias_by_script
+            .insert(
+                "main.main".to_string(),
+                BTreeMap::from([
+                    ("ghost".to_string(), "ghost.hp".to_string()),
+                    ("hp".to_string(), "shared.hp".to_string()),
+                ]),
+            );
         let _ = alias_visibility_engine
             .execute_rhai("hp + 1", true, "expression")
             .expect("eval should pass");

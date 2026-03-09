@@ -33,8 +33,12 @@ pub fn compile_project_bundle_from_xml_map(
         let script_roots = collect_source_scripts(source, file_path, &module_scripts_by_path);
         for script_decl in script_roots {
             let (visible_types, visible_functions, visible_module_vars, visible_module_consts) =
-                resolve_visible_module_symbols(reachable, &module_by_path, script_decl.module_name.as_deref())
-                    .map_err(|error| with_file_context(error, file_path))?;
+                resolve_visible_module_symbols(
+                    reachable,
+                    &module_by_path,
+                    script_decl.module_name.as_deref(),
+                )
+                .map_err(|error| with_file_context(error, file_path))?;
             let ir = compile_script(CompileScriptOptions {
                 script_path: file_path,
                 root: &script_decl.root,
