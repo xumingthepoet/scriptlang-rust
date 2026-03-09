@@ -53,3 +53,12 @@
   - `sl-compiler` 在项目编译阶段缓存 script 可达 import 闭包，避免重复 DFS。
 - 失败模式：若以上护栏回退，常见表现是“冷启动或首次路径显著变慢，重复操作稍快”；容易被误判成业务脚本问题。
 - 如何验证：性能异常优先做“首次执行 vs 再次执行”对比，并优先检查上述四类护栏是否仍在对应模块中生效，再做业务层排查。
+
+### 2026-03-10 — 失败模式 — Rhai 函数重写在“全量匹配”时会放大首轮延迟
+- 发现：`sl-runtime` 的 Rhai 执行路径若对“全部可见函数名”逐个做调用重写，会导致首轮（以及高频 code 步）出现数量级延迟，尤其在 function 数量大时。
+- 细节：已在 `crates/sl-runtime/src/engine/eval.rs` 加入两层护栏：  
+  1) 无 `(` 时跳过函数调用重写；  
+  2) 有 `(` 时先提取源码中真实被调用的 token，只对命中函数名做重写。  
+  同时在 prelude 构建中延迟 `invoke_body_symbol_map`，仅当 function body 含调用时才计算。
+- 证据：本地探针中 `functions=120 + with_temp=true` 的首轮耗时由约 `17.5s` 降到约 `176ms`；`functions=10, steps=100` 由约 `1.56s` 降到约 `294ms`。
+- 剩余瓶颈：当前 `execute_rhai_with_mode` 仍是“构造源码字符串 -> Rhai 解析执行”的模式，循环中大量唯一表达式时仍有显著解析成本。后续优先考虑 AST 缓存（按最终 source 缓存 AST，改用 `eval_ast_with_scope/run_ast_with_scope`）。
