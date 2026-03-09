@@ -1,15 +1,6 @@
 # SL Engine API 使用文档（scriptlang-rs）
 
 本文档面向宿主开发者，说明如何通过 `sl-api` / `sl-runtime` 在 Rust 中完成 ScriptLang 的编译、执行、存档和读档。
-
-文档职责：
-- 本文档只覆盖 Rust API / artifact / snapshot 契约与调用流程。
-- 语法与 CLI 细节由各自专题文档负责（通过 README 导航访问）。
-
-边界约束：
-- 本文档不定义 XML 语法规则、节点语义细节与 import 语法。
-- 本文档不定义 CLI 命令参数、输出行格式与回放协议。
-- 若规则属于语法/CLI，改为链接到对应文档，不在此重复展开。
 - 语言层已引入 `script` 类型与 `@...` 脚本字面量；宿主 API 的 `entry_script` 入参/产物字段保持不变，仍使用限定名字符串（如 `main.main`）。
 
 ## 1. 分层与推荐入口

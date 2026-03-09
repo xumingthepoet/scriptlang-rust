@@ -9,23 +9,6 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 - [Example testing with sl-test-example runner](docs/testing-examples.md): example-case contract and runner usage.
 - [Rust testability playbook for high coverage](docs/rust-testability-playbook.md): testing patterns and coverage tactics.
 
-## Documentation Contract
-- Source-of-truth policy is defined in `AGENTS.md` (“主要文档” and “开发流程 #7”).
-- This README is intentionally concise and acts as a navigation/index page.
-- Detailed behavior must live in exactly one owner doc; other docs should link instead of restating rules.
-- User-facing docs should prefer whitelist-style statements (“what is supported”).
-
-## Doc Ownership
-- Language syntax and semantics: [docs/scriptlang-syntax.md](docs/scriptlang-syntax.md)
-- Host Rust API / artifact / snapshot contract: [docs/sl-engine-api.md](docs/sl-engine-api.md)
-- CLI command flags and output protocol: [docs/sl-cli-usage.md](docs/sl-cli-usage.md)
-- Test example contract and runner: [docs/testing-examples.md](docs/testing-examples.md)
-- Engineering testability tactics: [docs/rust-testability-playbook.md](docs/rust-testability-playbook.md)
-
-Change rule:
-- If behavior changes, update the owner doc first.
-- In non-owner docs, replace duplicated prose with links.
-
 ## Workspace Crates
 - `crates/sl-core`: shared types, values, errors, snapshot/player schemas.
 - `crates/sl-parser`: XML parser + import directive extraction.
@@ -114,8 +97,3 @@ For command details, machine output schema, and replay examples, use:
 ## Examples
 Rhai-authored smoke scenarios live in `crates/sl-test-example/examples`.
 Each example directory also carries a `testcase.json` consumed by `sl-test-example`.
-
-## Guardrails
-- Keep runtime/compiler behavior docs in their dedicated files above.
-- Keep `README.md` as an index; avoid duplicating syntax/API/CLI details here.
-- Keep reusable engineering constraints in `KNOWLEDGE.md`, not feature changelogs.

@@ -2,15 +2,6 @@
 
 本文档按“语法点”逐一说明当前 `scriptlang-rs` 支持的 XML 语法。每个语法点都附带至少一个示例，可直接用于 `examples` 风格工程。
 
-文档职责：
-- 本文档只定义语言语法与语义（source of truth for syntax）。
-- API 与 CLI 细节由各自专题文档负责（通过 README 导航访问）。
-
-边界约束：
-- 本文档不定义 Rust API 函数签名、artifact/snapshot 字段契约。
-- 本文档不定义 CLI 参数、输出行协议和回放流程。
-- 若规则属于 API/CLI，改为链接到对应文档，不在此重复展开。
-
 ## 1. 文件类型
 
 ## 1.1 `*.xml`（模块源码）
