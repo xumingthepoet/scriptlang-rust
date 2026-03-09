@@ -7,10 +7,10 @@ pub(crate) const LOOP_TEMP_VAR_PREFIX: &str = "__sl_loop_";
 pub struct CompileProjectBundleResult {
     pub scripts: BTreeMap<String, ScriptIr>,
     pub global_json: BTreeMap<String, SlValue>,
-    pub defs_global_declarations: BTreeMap<String, DefsGlobalVarDecl>,
-    pub defs_global_init_order: Vec<String>,
-    pub defs_global_const_declarations: BTreeMap<String, DefsGlobalConstDecl>,
-    pub defs_global_const_init_order: Vec<String>,
+    pub module_var_declarations: BTreeMap<String, ModuleVarDecl>,
+    pub module_var_init_order: Vec<String>,
+    pub module_const_declarations: BTreeMap<String, ModuleConstDecl>,
+    pub module_const_init_order: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,7 +57,7 @@ pub(crate) struct ParsedFunctionDecl {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ParsedDefsGlobalVarDecl {
+pub(crate) struct ParsedModuleVarDecl {
     pub(crate) namespace: String,
     pub(crate) name: String,
     pub(crate) qualified_name: String,
@@ -68,7 +68,7 @@ pub(crate) struct ParsedDefsGlobalVarDecl {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ParsedDefsGlobalConstDecl {
+pub(crate) struct ParsedModuleConstDecl {
     pub(crate) namespace: String,
     pub(crate) name: String,
     pub(crate) qualified_name: String,
@@ -94,11 +94,11 @@ pub(crate) enum ParsedTypeExpr {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct DefsDeclarations {
+pub(crate) struct ModuleDeclarations {
     pub(crate) type_decls: Vec<ParsedTypeDecl>,
     pub(crate) function_decls: Vec<ParsedFunctionDecl>,
-    pub(crate) defs_global_var_decls: Vec<ParsedDefsGlobalVarDecl>,
-    pub(crate) defs_global_const_decls: Vec<ParsedDefsGlobalConstDecl>,
+    pub(crate) module_global_var_decls: Vec<ParsedModuleVarDecl>,
+    pub(crate) module_global_const_decls: Vec<ParsedModuleConstDecl>,
 }
 
 #[derive(Debug, Clone)]
@@ -109,8 +109,8 @@ pub(crate) struct ParsedModuleScript {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ModuleDeclarations {
-    pub(crate) defs: DefsDeclarations,
+pub(crate) struct ParsedModuleSource {
+    pub(crate) module: ModuleDeclarations,
     pub(crate) scripts: Vec<ParsedModuleScript>,
 }
 
@@ -122,19 +122,19 @@ pub(crate) struct CompileScriptOptions<'a> {
     pub(crate) module_name: Option<&'a str>,
     pub(crate) visible_types: &'a BTreeMap<String, ScriptType>,
     pub(crate) visible_functions: &'a BTreeMap<String, FunctionDecl>,
-    pub(crate) visible_defs_globals: &'a BTreeMap<String, DefsGlobalVarDecl>,
-    pub(crate) visible_defs_consts: &'a BTreeMap<String, DefsGlobalConstDecl>,
+    pub(crate) visible_module_vars: &'a BTreeMap<String, ModuleVarDecl>,
+    pub(crate) visible_module_consts: &'a BTreeMap<String, ModuleConstDecl>,
     pub(crate) invoke_all_functions: &'a BTreeMap<String, FunctionDecl>,
     pub(crate) invoke_public_functions: &'a BTreeSet<String>,
 }
 
 pub(crate) type VisibleTypeMap = BTreeMap<String, ScriptType>;
 pub(crate) type VisibleFunctionMap = BTreeMap<String, FunctionDecl>;
-pub(crate) type VisibleDefsResolution = (
+pub(crate) type VisibleModuleResolution = (
     VisibleTypeMap,
     VisibleFunctionMap,
-    BTreeMap<String, DefsGlobalVarDecl>,
-    BTreeMap<String, DefsGlobalConstDecl>,
+    BTreeMap<String, ModuleVarDecl>,
+    BTreeMap<String, ModuleConstDecl>,
 );
 
 #[derive(Debug, Clone)]

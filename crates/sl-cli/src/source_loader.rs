@@ -163,13 +163,13 @@ mod source_loader_tests {
             &root.join("main.xml"),
             "<module name=\"main\"><script name=\"main\"></script></module>",
         );
-        write_file(&root.join("defs.xml"), "<module name=\"defs\"></module>");
+        write_file(&root.join("module.xml"), "<module name=\"module\"></module>");
         write_file(&root.join("skip.txt"), "ignored");
 
         let scripts = read_scripts_xml_from_dir(&root).expect("scan should pass");
         assert_eq!(scripts.len(), 2);
         assert!(scripts.contains_key("main.xml"));
-        assert!(scripts.contains_key("defs.xml"));
+        assert!(scripts.contains_key("module.xml"));
     }
 
     #[test]

@@ -75,7 +75,7 @@ mod state_store_tests {
                     prompt_text: None,
                     dynamic_bindings: BTreeMap::new(),
                 },
-                defs_globals: BTreeMap::new(),
+                module_vars: BTreeMap::new(),
                 once_state_by_script: BTreeMap::new(),
             },
             random_mode: PlayerRandomMode::Seeded,

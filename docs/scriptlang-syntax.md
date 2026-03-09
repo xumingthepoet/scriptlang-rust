@@ -33,7 +33,7 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 - module 名只取自 `<module name="...">`，不从文件名推导。
 - `<module default_access="public|private">` 可设置 module 内默认可见性，默认是 `private`。
 - `<type>/<function>/<var>/<const>/<script>` 可单独声明 `access="public|private"`；未声明时继承 `default_access`。
-- 不再支持顶层 `<script>` 或 `<defs>` 根；旧的 `*.script.xml`、`*.defs.xml`、`*.module.xml` 输入会直接报错。
+- 仅支持 `*.xml` 模块文件，且根节点必须是 `<module>`。
 - module 内脚本对外注册名是 `moduleName.scriptName`，例如 `battle.main`。
 - module 内 `type/function/var/const` 仍属于同一命名空间，例如 `battle.Combatant`、`battle.boost`、`battle.baseHp`。
 - 同一个 module 内部，脚本可以直接用短名访问本 module 的 `type/function/var/const`，也可以用短名调用 sibling script。

@@ -91,8 +91,8 @@ pub(super) fn run_compile(args: CompileArgs) -> Result<i32, ScriptLangError> {
         println!("  Entry: {}", artifact.entry_script);
         println!("  Scripts: {}", artifact.scripts.len());
         println!(
-            "  Defs global declarations: {}",
-            artifact.defs_global_declarations.len()
+            "  Module global declarations: {}",
+            artifact.module_var_declarations.len()
         );
     } else {
         // 正常模式：写入文件

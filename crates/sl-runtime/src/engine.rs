@@ -11,8 +11,8 @@ use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
 use crate::helpers::rhai_bridge::{
-    defs_namespace_symbol, dynamic_to_slvalue, preprocess_scriptlang_rhai_input,
-    replace_defs_global_symbol, rewrite_defs_global_qualified_access, rewrite_function_calls,
+    module_namespace_symbol, dynamic_to_slvalue, preprocess_scriptlang_rhai_input,
+    replace_module_global_symbol, rewrite_module_global_qualified_access, rewrite_function_calls,
     rhai_function_symbol, slvalue_to_dynamic, slvalue_to_dynamic_with_type,
     slvalue_to_rhai_literal, slvalue_to_text, RhaiInputMode,
 };
@@ -26,7 +26,7 @@ use rng::next_random_bounded;
 use rng::{next_random_bounded_with, next_random_u32};
 use sl_core::{
     default_value_from_type, is_type_compatible, AccessLevel, ChoiceEntry, ChoiceItem,
-    ContinuationFrame, ContinueTarget, DefsGlobalConstDecl, DefsGlobalVarDecl, EngineOutput,
+    ContinuationFrame, ContinueTarget, ModuleConstDecl, ModuleVarDecl, EngineOutput,
     PendingBoundary, PendingDynamicChoiceBinding, ScriptIr, ScriptLangError, ScriptNode,
     ScriptType, SlValue, Snapshot, SnapshotCompletion, SnapshotFrame,
 };
@@ -79,14 +79,12 @@ pub(super) mod runtime_test_support {
 
     fn normalize_test_source_path(path: &str) -> String {
         path.replace(".script.xml", ".xml")
-            .replace(".defs.xml", ".xml")
             .replace(".module.xml", ".xml")
     }
 
     fn normalize_test_source_content(source: &str) -> String {
         let mut normalized = source
             .replace(".script.xml", ".xml")
-            .replace(".defs.xml", ".xml")
             .replace(".module.xml", ".xml");
 
         let trimmed = normalized.trim_start();
@@ -95,22 +93,14 @@ pub(super) mod runtime_test_support {
                 let end_regex =
                     Regex::new(r"</module>\s*\z").expect("stray module close regex should compile");
                 normalized = end_regex.replace(&normalized, "").into_owned();
-            } else if trimmed.starts_with("<defs") {
-                let end_regex =
-                    Regex::new(r"</module>\s*\z").expect("stray defs close regex should compile");
-                normalized = end_regex.replace(&normalized, "</defs>").into_owned();
             }
         }
 
-        if normalize_wrapped_root(&normalized, "module").is_some() {
-            return normalized;
-        }
-
-        if let Some(wrapped) = normalize_wrapped_root(&normalized, "script") {
+        if let Some(wrapped) = normalize_wrapped_root(&normalized, "module") {
             return wrapped;
         }
 
-        if let Some(wrapped) = normalize_wrapped_defs(&normalized) {
+        if let Some(wrapped) = normalize_wrapped_root(&normalized, "script") {
             return wrapped;
         }
 
@@ -147,36 +137,15 @@ pub(super) mod runtime_test_support {
         )
     }
 
-    fn normalize_wrapped_defs(source: &str) -> Option<String> {
-        let regex = Regex::new(r#"\A(\s*(?:<!--.*?-->\s*)*)<defs\b([^>]*)>"#).expect("defs regex");
-        let captures = regex.captures(source)?;
-        let prefix = captures.get(1).map(|m| m.as_str()).unwrap_or_default();
-        let attrs = captures.get(2).map(|m| m.as_str()).unwrap_or_default();
-        let attr_regex = Regex::new(r#"name="([^"]+)""#).expect("defs attr regex should compile");
-        let module_name = attr_regex
-            .captures(attrs)
-            .and_then(|caps| caps.get(1).map(|m| m.as_str().to_string()))?;
-        let replaced_open = regex.replace(
-            source,
-            format!(r#"{prefix}<module name="{module_name}" default_access="public">"#),
-        );
-        let end_regex = Regex::new(r"</defs>\s*\z").expect("defs close regex should compile");
-        Some(
-            end_regex
-                .replace(replaced_open.as_ref(), "</module>")
-                .into_owned(),
-        )
-    }
-
     pub(super) fn engine_from_sources(files: BTreeMap<String, String>) -> ScriptLangEngine {
         let compiled = compile_project_from_sources(files);
         ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
-            defs_global_declarations: compiled.defs_global_declarations,
-            defs_global_init_order: compiled.defs_global_init_order,
-            defs_global_const_declarations: compiled.defs_global_const_declarations,
-            defs_global_const_init_order: compiled.defs_global_const_init_order,
+            module_var_declarations: compiled.module_var_declarations,
+            module_var_init_order: compiled.module_var_init_order,
+            module_const_declarations: compiled.module_const_declarations,
+            module_const_init_order: compiled.module_const_init_order,
             host_functions: None,
             random_seed: Some(1),
             random_sequence: None,
@@ -202,10 +171,10 @@ pub(super) mod runtime_test_support {
         ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json,
-            defs_global_declarations: compiled.defs_global_declarations,
-            defs_global_init_order: compiled.defs_global_init_order,
-            defs_global_const_declarations: compiled.defs_global_const_declarations,
-            defs_global_const_init_order: compiled.defs_global_const_init_order,
+            module_var_declarations: compiled.module_var_declarations,
+            module_var_init_order: compiled.module_var_init_order,
+            module_const_declarations: compiled.module_const_declarations,
+            module_const_init_order: compiled.module_const_init_order,
             host_functions: None,
             random_seed: Some(1),
             random_sequence: None,
@@ -246,10 +215,10 @@ pub(super) mod runtime_test_support {
             scripts,
             entry_script: "main.main".to_string(),
             global_json: bundle.global_json,
-            defs_global_declarations: bundle.defs_global_declarations,
-            defs_global_init_order: bundle.defs_global_init_order,
-            defs_global_const_declarations: bundle.defs_global_const_declarations,
-            defs_global_const_init_order: bundle.defs_global_const_init_order,
+            module_var_declarations: bundle.module_var_declarations,
+            module_var_init_order: bundle.module_var_init_order,
+            module_const_declarations: bundle.module_const_declarations,
+            module_const_init_order: bundle.module_const_init_order,
         }
     }
 
@@ -277,10 +246,10 @@ pub(super) mod runtime_test_support {
         assert!(normalized_script.contains("<module name=\"main\" default_access=\"public\">"));
         assert!(!normalized_script.contains("</module></module>"));
 
-        let normalized_defs = normalize_test_source_content("<defs name=\"shared\"></module>");
+        let normalized_module = normalize_test_source_content("<module name=\"shared\"></module>");
         assert_eq!(
-            normalized_defs,
-            "<module name=\"shared\" default_access=\"public\"></module>"
+            normalized_module,
+            "<module name=\"shared\"></module>"
         );
         assert_eq!(
             normalize_test_source_content("<other></module>"),
@@ -292,7 +261,6 @@ pub(super) mod runtime_test_support {
             Some("<module name=\"main\"></module>".to_string())
         );
         assert_eq!(normalize_wrapped_root("<script></script>", "script"), None);
-        assert_eq!(normalize_wrapped_defs("<defs></defs>"), None);
     }
 
     #[test]

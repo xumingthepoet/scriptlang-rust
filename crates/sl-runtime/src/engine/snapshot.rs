@@ -83,7 +83,7 @@ impl ScriptLangEngine {
             runtime_frames,
             rng_state: self.current_seeded_rng_state(),
             pending_boundary,
-            defs_globals: self.defs_globals_value.clone(),
+            module_vars: self.module_vars_value.clone(),
             once_state_by_script,
         })
     }
@@ -110,43 +110,43 @@ impl ScriptLangEngine {
         }
 
         self.reset();
-        self.initialize_defs_consts()?;
+        self.initialize_module_consts()?;
         self.seeded_rng_state = snapshot.rng_state;
         if self.initial_random_sequence.is_none() {
             *self.shared_rng_state.borrow_mut() = RuntimeRandomState::Seeded(snapshot.rng_state);
         }
 
-        for qualified_name in snapshot.defs_globals.keys() {
-            if !self.defs_global_declarations.contains_key(qualified_name) {
+        for qualified_name in snapshot.module_vars.keys() {
+            if !self.module_var_declarations.contains_key(qualified_name) {
                 return Err(ScriptLangError::new(
-                    "SNAPSHOT_DEFS_GLOBAL_UNKNOWN",
+                    "SNAPSHOT_MODULE_GLOBAL_UNKNOWN",
                     format!(
-                        "Snapshot contains unknown defs global \"{}\".",
+                        "Snapshot contains unknown module global \"{}\".",
                         qualified_name
                     ),
                 ));
             }
         }
 
-        let mut restored_defs_globals = BTreeMap::new();
-        for (qualified_name, decl) in &self.defs_global_declarations {
+        let mut restored_module_vars = BTreeMap::new();
+        for (qualified_name, decl) in &self.module_var_declarations {
             let value = snapshot
-                .defs_globals
+                .module_vars
                 .get(qualified_name)
                 .cloned()
                 .unwrap_or_else(|| default_value_from_type(&decl.r#type));
             if !is_type_compatible(&value, &decl.r#type) {
                 return Err(ScriptLangError::new(
-                    "SNAPSHOT_DEFS_GLOBAL_TYPE",
+                    "SNAPSHOT_MODULE_GLOBAL_TYPE",
                     format!(
-                        "Defs global \"{}\" from snapshot does not match declared type.",
+                        "Module global \"{}\" from snapshot does not match declared type.",
                         qualified_name
                     ),
                 ));
             }
-            restored_defs_globals.insert(qualified_name.clone(), value);
+            restored_module_vars.insert(qualified_name.clone(), value);
         }
-        self.defs_globals_value = restored_defs_globals;
+        self.module_vars_value = restored_module_vars;
 
         self.once_state_by_script = snapshot
             .once_state_by_script
@@ -657,14 +657,14 @@ mod snapshot_tests {
     }
 
     #[test]
-    pub(super) fn snapshot_resume_persists_defs_globals() {
+    pub(super) fn snapshot_resume_persists_module_vars() {
         let files = map(&[
             (
-                "shared.defs.xml",
+                "shared.xml",
                 r#"
-    <defs name="shared">
+    <module name="shared" default_access="public">
       <var name="hp" type="int">10</var>
-    </defs>
+    </module>
     "#,
             ),
             (
@@ -687,7 +687,7 @@ mod snapshot_tests {
         assert_eq!(output_kind(&first), "choices");
         let snapshot = engine.snapshot().expect("snapshot");
         assert_eq!(
-            snapshot.defs_globals.get("shared.hp"),
+            snapshot.module_vars.get("shared.hp"),
             Some(&SlValue::Number(15.0))
         );
 
@@ -699,7 +699,7 @@ mod snapshot_tests {
     }
 
     #[test]
-    pub(super) fn snapshot_does_not_store_defs_consts_and_resume_rebuilds_them() {
+    pub(super) fn snapshot_does_not_store_module_consts_and_resume_rebuilds_them() {
         let files = map(&[(
             "main.xml",
             r#"<module name="main" default_access="public">
@@ -717,7 +717,7 @@ mod snapshot_tests {
         let first = engine.next_output().expect("choice");
         assert_eq!(output_kind(&first), "choices");
         let snapshot = engine.snapshot().expect("snapshot");
-        assert!(!snapshot.defs_globals.contains_key("main.base"));
+        assert!(!snapshot.module_vars.contains_key("main.base"));
 
         let mut resumed = engine_from_sources(files);
         resumed.resume(snapshot).expect("resume");
@@ -727,7 +727,7 @@ mod snapshot_tests {
     }
 
     #[test]
-    pub(super) fn resume_fails_when_defs_const_declaration_missing() {
+    pub(super) fn resume_fails_when_module_const_declaration_missing() {
         let files = map(&[(
             "main.xml",
             r#"<module name="main" default_access="public">
@@ -744,23 +744,23 @@ mod snapshot_tests {
         let snapshot = engine.snapshot().expect("snapshot");
 
         let mut resumed = engine_from_sources(files);
-        resumed.defs_const_declarations.clear();
-        resumed.defs_const_init_order = vec!["main.base".to_string()];
+        resumed.module_const_declarations.clear();
+        resumed.module_const_init_order = vec!["main.base".to_string()];
         let error = resumed
             .resume(snapshot)
             .expect_err("missing const declaration should fail");
-        assert_eq!(error.code, "ENGINE_DEFS_CONST_DECL_MISSING");
+        assert_eq!(error.code, "ENGINE_MODULE_CONST_DECL_MISSING");
     }
 
     #[test]
-    pub(super) fn resume_validates_defs_globals_shape_and_types() {
+    pub(super) fn resume_validates_module_vars_shape_and_types() {
         let files = map(&[
             (
-                "shared.defs.xml",
+                "shared.xml",
                 r#"
-    <defs name="shared">
+    <module name="shared" default_access="public">
       <var name="hp" type="int">10</var>
-    </defs>
+    </module>
     "#,
             ),
             (
@@ -784,34 +784,34 @@ mod snapshot_tests {
 
         let mut unknown = snapshot.clone();
         unknown
-            .defs_globals
+            .module_vars
             .insert("missing.hp".to_string(), SlValue::Number(1.0));
         let mut unknown_engine = engine_from_sources(files.clone());
         let error = unknown_engine
             .resume(unknown)
-            .expect_err("unknown defs global should fail");
-        assert_eq!(error.code, "SNAPSHOT_DEFS_GLOBAL_UNKNOWN");
+            .expect_err("unknown module global should fail");
+        assert_eq!(error.code, "SNAPSHOT_MODULE_GLOBAL_UNKNOWN");
 
         let mut bad_type = snapshot;
         bad_type
-            .defs_globals
+            .module_vars
             .insert("shared.hp".to_string(), SlValue::String("bad".to_string()));
         let mut bad_type_engine = engine_from_sources(files);
         let error = bad_type_engine
             .resume(bad_type)
-            .expect_err("defs global type mismatch should fail");
-        assert_eq!(error.code, "SNAPSHOT_DEFS_GLOBAL_TYPE");
+            .expect_err("module global type mismatch should fail");
+        assert_eq!(error.code, "SNAPSHOT_MODULE_GLOBAL_TYPE");
     }
 
     #[test]
-    pub(super) fn resume_allows_missing_defs_global_and_uses_type_default() {
+    pub(super) fn resume_allows_missing_module_global_and_uses_type_default() {
         let files = map(&[
             (
-                "shared.defs.xml",
+                "shared.xml",
                 r#"
-    <defs name="shared">
+    <module name="shared" default_access="public">
       <var name="hp" type="int">10</var>
-    </defs>
+    </module>
     "#,
             ),
             (
@@ -831,12 +831,12 @@ mod snapshot_tests {
         engine.start("main", None).expect("start");
         let _ = engine.next_output().expect("choice");
         let mut snapshot = engine.snapshot().expect("snapshot");
-        snapshot.defs_globals.remove("shared.hp");
+        snapshot.module_vars.remove("shared.hp");
 
         let mut resumed = engine_from_sources(files);
         resumed
             .resume(snapshot)
-            .expect("resume should fill missing defs global with default");
+            .expect("resume should fill missing module global with default");
         resumed.choose(0).expect("choose");
         let text = resumed.next_output().expect("text");
         assert!(matches!(text, EngineOutput::Text { text, .. } if text == "0"));
@@ -922,10 +922,10 @@ mod snapshot_tests {
         let mut source = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts.clone(),
             global_json: compiled.global_json.clone(),
-            defs_global_declarations: compiled.defs_global_declarations.clone(),
-            defs_global_init_order: compiled.defs_global_init_order.clone(),
-            defs_global_const_declarations: compiled.defs_global_const_declarations.clone(),
-            defs_global_const_init_order: compiled.defs_global_const_init_order.clone(),
+            module_var_declarations: compiled.module_var_declarations.clone(),
+            module_var_init_order: compiled.module_var_init_order.clone(),
+            module_const_declarations: compiled.module_const_declarations.clone(),
+            module_const_init_order: compiled.module_const_init_order.clone(),
             host_functions: None,
             random_seed: Some(1),
             random_sequence: Some(vec![7, 9]),
@@ -943,10 +943,10 @@ mod snapshot_tests {
         let mut target = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
-            defs_global_declarations: compiled.defs_global_declarations,
-            defs_global_init_order: compiled.defs_global_init_order,
-            defs_global_const_declarations: compiled.defs_global_const_declarations,
-            defs_global_const_init_order: compiled.defs_global_const_init_order,
+            module_var_declarations: compiled.module_var_declarations,
+            module_var_init_order: compiled.module_var_init_order,
+            module_const_declarations: compiled.module_const_declarations,
+            module_const_init_order: compiled.module_const_init_order,
             host_functions: None,
             random_seed: Some(1),
             random_sequence: Some(vec![7, 9]),

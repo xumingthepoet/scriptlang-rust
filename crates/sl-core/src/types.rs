@@ -63,7 +63,7 @@ pub struct VarDeclaration {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DefsGlobalVarDecl {
+pub struct ModuleVarDecl {
     pub namespace: String,
     pub name: String,
     pub qualified_name: String,
@@ -75,7 +75,7 @@ pub struct DefsGlobalVarDecl {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct DefsGlobalConstDecl {
+pub struct ModuleConstDecl {
     pub namespace: String,
     pub name: String,
     pub qualified_name: String,
@@ -263,9 +263,9 @@ pub struct ScriptIr {
     pub groups: BTreeMap<String, ImplicitGroup>,
     pub visible_json_globals: Vec<String>,
     pub visible_functions: BTreeMap<String, FunctionDecl>,
-    pub visible_defs_globals: BTreeMap<String, DefsGlobalVarDecl>,
+    pub visible_module_vars: BTreeMap<String, ModuleVarDecl>,
     #[serde(default)]
-    pub visible_defs_consts: BTreeMap<String, DefsGlobalConstDecl>,
+    pub visible_module_consts: BTreeMap<String, ModuleConstDecl>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub invoke_all_functions: BTreeMap<String, FunctionDecl>,
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
@@ -350,7 +350,7 @@ pub struct Snapshot {
     pub rng_state: u32,
     pub pending_boundary: PendingBoundary,
     #[serde(default)]
-    pub defs_globals: BTreeMap<String, SlValue>,
+    pub module_vars: BTreeMap<String, SlValue>,
     pub once_state_by_script: BTreeMap<String, Vec<String>>,
 }
 
@@ -381,12 +381,12 @@ pub struct CompileProjectResult {
     pub scripts: BTreeMap<String, ScriptIr>,
     pub entry_script: String,
     pub global_json: BTreeMap<String, SlValue>,
-    pub defs_global_declarations: BTreeMap<String, DefsGlobalVarDecl>,
-    pub defs_global_init_order: Vec<String>,
+    pub module_var_declarations: BTreeMap<String, ModuleVarDecl>,
+    pub module_var_init_order: Vec<String>,
     #[serde(default)]
-    pub defs_global_const_declarations: BTreeMap<String, DefsGlobalConstDecl>,
+    pub module_const_declarations: BTreeMap<String, ModuleConstDecl>,
     #[serde(default)]
-    pub defs_global_const_init_order: Vec<String>,
+    pub module_const_init_order: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -397,12 +397,12 @@ pub struct CompiledProjectArtifact {
     pub entry_script: String,
     pub scripts: BTreeMap<String, ScriptIr>,
     pub global_json: BTreeMap<String, SlValue>,
-    pub defs_global_declarations: BTreeMap<String, DefsGlobalVarDecl>,
-    pub defs_global_init_order: Vec<String>,
+    pub module_var_declarations: BTreeMap<String, ModuleVarDecl>,
+    pub module_var_init_order: Vec<String>,
     #[serde(default)]
-    pub defs_global_const_declarations: BTreeMap<String, DefsGlobalConstDecl>,
+    pub module_const_declarations: BTreeMap<String, ModuleConstDecl>,
     #[serde(default)]
-    pub defs_global_const_init_order: Vec<String>,
+    pub module_const_init_order: Vec<String>,
 }
 
 #[cfg(test)]
@@ -431,10 +431,10 @@ mod tests {
             entry_script: "main".to_string(),
             scripts: BTreeMap::new(),
             global_json: BTreeMap::new(),
-            defs_global_declarations: BTreeMap::new(),
-            defs_global_init_order: Vec::new(),
-            defs_global_const_declarations: BTreeMap::new(),
-            defs_global_const_init_order: Vec::new(),
+            module_var_declarations: BTreeMap::new(),
+            module_var_init_order: Vec::new(),
+            module_const_declarations: BTreeMap::new(),
+            module_const_init_order: Vec::new(),
         };
 
         let encoded = serde_json::to_string(&artifact).expect("artifact serialize");

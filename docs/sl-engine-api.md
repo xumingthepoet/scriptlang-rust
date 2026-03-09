@@ -46,10 +46,10 @@
 
 - `CompiledProjectArtifact`（来自 `sl-core`）：
   - `schemaVersion` 固定为 `compiled-project`
-  - 包含 `entryScript / scripts / globalJson / defsGlobalDeclarations / defsGlobalInitOrder`
+  - 包含 `entryScript / scripts / globalJson / moduleVarDeclarations / moduleVarInitOrder`
   - 也包含 const 声明与初始化顺序：
-    - `defsGlobalConstDeclarations`
-    - `defsGlobalConstInitOrder`
+    - `moduleConstDeclarations`
+    - `moduleConstInitOrder`
   - 可作为“离线编译后运行”的稳定输入
 
 ## 3. `sl-api` 高层 API

@@ -70,8 +70,8 @@ fn example_13_loop_times_matches_testcase() {
 }
 
 #[test]
-fn example_14_defs_functions_matches_testcase() {
-    assert_example("14-defs-functions");
+fn example_14_module_functions_matches_testcase() {
+    assert_example("14-module-functions");
 }
 
 #[test]
@@ -85,8 +85,8 @@ fn example_16_input_name_matches_testcase() {
 }
 
 #[test]
-fn example_17_defs_global_shadowing_matches_testcase() {
-    assert_example("17-defs-global-shadowing");
+fn example_17_module_global_shadowing_matches_testcase() {
+    assert_example("17-module-global-shadowing");
 }
 
 #[test]

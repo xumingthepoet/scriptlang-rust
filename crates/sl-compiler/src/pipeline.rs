@@ -13,15 +13,15 @@ pub fn compile_project_bundle_from_xml_map(
     validate_import_graph(&sources)?;
 
     let module_scripts_by_path = parse_module_scripts(&sources)?;
-    let defs_by_path = parse_defs_files(&sources)
-        .expect("defs parsing should match previously validated module parsing");
+    let module_by_path = parse_module_files(&sources)
+        .expect("module parsing should match previously validated module parsing");
     let global_json = BTreeMap::new();
     let (invoke_all_functions, invoke_public_functions) =
-        collect_functions_for_bundle(&defs_by_path)?;
-    let (defs_global_declarations, defs_global_init_order) =
-        collect_defs_globals_for_bundle(&defs_by_path)?;
-    let (defs_global_const_declarations, defs_global_const_init_order) =
-        collect_defs_consts_for_bundle(&defs_by_path, &defs_global_declarations)?;
+        collect_functions_for_bundle(&module_by_path)?;
+    let (module_var_declarations, module_var_init_order) =
+        collect_module_vars_for_bundle(&module_by_path)?;
+    let (module_const_declarations, module_const_init_order) =
+        collect_module_consts_for_bundle(&module_by_path, &module_var_declarations)?;
 
     let mut scripts = BTreeMap::new();
     let mut reachable_cache = HashMap::new();
@@ -32,8 +32,8 @@ pub fn compile_project_bundle_from_xml_map(
             .or_insert_with(|| collect_reachable_imports(file_path, &sources));
         let script_roots = collect_source_scripts(source, file_path, &module_scripts_by_path);
         for script_decl in script_roots {
-            let (visible_types, visible_functions, visible_defs_globals, visible_defs_consts) =
-                resolve_visible_defs(reachable, &defs_by_path, script_decl.module_name.as_deref())
+            let (visible_types, visible_functions, visible_module_vars, visible_module_consts) =
+                resolve_visible_module_symbols(reachable, &module_by_path, script_decl.module_name.as_deref())
                     .map_err(|error| with_file_context(error, file_path))?;
             let ir = compile_script(CompileScriptOptions {
                 script_path: file_path,
@@ -43,8 +43,8 @@ pub fn compile_project_bundle_from_xml_map(
                 module_name: script_decl.module_name.as_deref(),
                 visible_types: &visible_types,
                 visible_functions: &visible_functions,
-                visible_defs_globals: &visible_defs_globals,
-                visible_defs_consts: &visible_defs_consts,
+                visible_module_vars: &visible_module_vars,
+                visible_module_consts: &visible_module_consts,
                 invoke_all_functions: &invoke_all_functions,
                 invoke_public_functions: &invoke_public_functions,
             })
@@ -64,10 +64,10 @@ pub fn compile_project_bundle_from_xml_map(
     Ok(CompileProjectBundleResult {
         scripts,
         global_json,
-        defs_global_declarations,
-        defs_global_init_order,
-        defs_global_const_declarations,
-        defs_global_const_init_order,
+        module_var_declarations,
+        module_var_init_order,
+        module_const_declarations,
+        module_const_init_order,
     })
 }
 
@@ -225,7 +225,7 @@ mod pipeline_tests {
             "local module call should be qualified at compile time"
         );
         assert!(main.visible_functions.contains_key("boost"));
-        assert!(main.visible_defs_globals.contains_key("baseHp"));
+        assert!(main.visible_module_vars.contains_key("baseHp"));
     }
 
     #[test]
@@ -462,7 +462,7 @@ mod pipeline_tests {
     fn compile_bundle_rejects_invalid_root_and_duplicate_script_names() {
         let invalid_root = BTreeMap::from([(
             "main.xml".to_string(),
-            "<defs name=\"x\"></defs>".to_string(),
+            "<script name=\"x\"></script>".to_string(),
         )]);
         let root_error =
             compile_project_bundle_from_xml_map(&invalid_root).expect_err("invalid root");
@@ -521,7 +521,7 @@ mod pipeline_tests {
     }
 
     #[test]
-    fn compile_bundle_exposes_defs_globals_with_short_alias_rules() {
+    fn compile_bundle_exposes_module_vars_with_short_alias_rules() {
         let unique = map(&[
             (
                 "shared.xml",
@@ -539,8 +539,8 @@ mod pipeline_tests {
         ]);
         let unique_bundle = compile_project_bundle_from_xml_map(&unique).expect("compile");
         let unique_main = unique_bundle.scripts.get("main.main").expect("main");
-        assert!(unique_main.visible_defs_globals.contains_key("shared.hp"));
-        assert!(!unique_main.visible_defs_globals.contains_key("hp"));
+        assert!(unique_main.visible_module_vars.contains_key("shared.hp"));
+        assert!(!unique_main.visible_module_vars.contains_key("hp"));
 
         let conflict = map(&[
             (
@@ -564,9 +564,9 @@ mod pipeline_tests {
         ]);
         let conflict_bundle = compile_project_bundle_from_xml_map(&conflict).expect("compile");
         let conflict_main = conflict_bundle.scripts.get("main.main").expect("main");
-        assert!(conflict_main.visible_defs_globals.contains_key("a.hp"));
-        assert!(conflict_main.visible_defs_globals.contains_key("b.hp"));
-        assert!(!conflict_main.visible_defs_globals.contains_key("hp"));
+        assert!(conflict_main.visible_module_vars.contains_key("a.hp"));
+        assert!(conflict_main.visible_module_vars.contains_key("b.hp"));
+        assert!(!conflict_main.visible_module_vars.contains_key("hp"));
     }
 
     #[test]
@@ -596,7 +596,7 @@ mod pipeline_tests {
         ]);
         let private_bundle = compile_project_bundle_from_xml_map(&private_import).expect("compile");
         let private_main = private_bundle.scripts.get("main.main").expect("main");
-        assert!(!private_main.visible_defs_globals.contains_key("shared.hp"));
+        assert!(!private_main.visible_module_vars.contains_key("shared.hp"));
 
         let public_import = map(&[
             (
@@ -615,7 +615,7 @@ mod pipeline_tests {
         ]);
         let public_bundle = compile_project_bundle_from_xml_map(&public_import).expect("compile");
         let public_main = public_bundle.scripts.get("main.main").expect("main");
-        assert!(public_main.visible_defs_globals.contains_key("shared.hp"));
+        assert!(public_main.visible_module_vars.contains_key("shared.hp"));
     }
 
     #[test]
@@ -673,10 +673,10 @@ mod pipeline_tests {
     }
 
     #[test]
-    fn pipeline_propagates_resolve_visible_defs_errors() {
-        // Test duplicate type declaration error through resolve_visible_defs
+    fn pipeline_propagates_resolve_visible_module_symbols_errors() {
+        // Test duplicate type declaration error through resolve_visible_module_symbols
         // Two different modules define types with the same qualified name
-        // When main imports both, resolve_visible_defs sees the conflict
+        // When main imports both, resolve_visible_module_symbols sees the conflict
         let conflict = map(&[
             (
                 "a.xml",
@@ -707,12 +707,12 @@ mod pipeline_tests {
     }
 
     #[test]
-    fn pipeline_resolve_visible_defs_error_propagates_to_script() {
-        // Test that resolve_visible_defs error propagates through .map_err at line 37
-        // This creates a defs with function using unknown type - error at resolve stage
+    fn pipeline_resolve_visible_module_symbols_error_propagates_to_script() {
+        // Test that resolve_visible_module_symbols error propagates through .map_err at line 37
+        // This creates a module with function using unknown type - error at resolve stage
         let files = map(&[
             (
-                "defs.xml",
+                "module.xml",
                 r#"<module name="game" default_access="public">
 <function name="getObj" access="public" args="UnknownType:x" return="int:out">
 out = 1;
@@ -729,8 +729,8 @@ out = 1;
             ),
         ]);
         let error = compile_project_bundle_from_xml_map(&files)
-            .expect_err("unknown type in defs should fail");
-        // The error should propagate through resolve_visible_defs .map_err
+            .expect_err("unknown type in module should fail");
+        // The error should propagate through resolve_visible_module_symbols .map_err
         assert!(error.code == "TYPE_UNKNOWN" || error.code.contains("TYPE"));
     }
 

@@ -43,10 +43,10 @@ impl HostFunctionRegistry for EmptyHostFunctionRegistry {
 pub struct ScriptLangEngineOptions {
     pub scripts: BTreeMap<String, ScriptIr>,
     pub global_json: BTreeMap<String, SlValue>,
-    pub defs_global_declarations: BTreeMap<String, DefsGlobalVarDecl>,
-    pub defs_global_init_order: Vec<String>,
-    pub defs_global_const_declarations: BTreeMap<String, DefsGlobalConstDecl>,
-    pub defs_global_const_init_order: Vec<String>,
+    pub module_var_declarations: BTreeMap<String, ModuleVarDecl>,
+    pub module_var_init_order: Vec<String>,
+    pub module_const_declarations: BTreeMap<String, ModuleConstDecl>,
+    pub module_const_init_order: Vec<String>,
     pub host_functions: Option<Arc<dyn HostFunctionRegistry>>,
     pub random_seed: Option<u32>,
     pub random_sequence: Option<Vec<u32>>,
@@ -110,24 +110,24 @@ pub struct ScriptLangEngine {
     pub(super) compiler_version: String,
     pub(super) group_lookup: HashMap<String, GroupLookup>,
     pub(super) global_json: BTreeMap<String, SlValue>,
-    pub(super) defs_global_declarations: BTreeMap<String, DefsGlobalVarDecl>,
-    pub(super) defs_global_init_order: Vec<String>,
-    pub(super) defs_const_declarations: BTreeMap<String, DefsGlobalConstDecl>,
-    pub(super) defs_const_init_order: Vec<String>,
-    pub(super) defs_globals_value: BTreeMap<String, SlValue>,
-    pub(super) defs_globals_type: BTreeMap<String, ScriptType>,
-    pub(super) defs_consts_value: BTreeMap<String, SlValue>,
-    pub(super) defs_consts_type: BTreeMap<String, ScriptType>,
+    pub(super) module_var_declarations: BTreeMap<String, ModuleVarDecl>,
+    pub(super) module_var_init_order: Vec<String>,
+    pub(super) module_const_declarations: BTreeMap<String, ModuleConstDecl>,
+    pub(super) module_const_init_order: Vec<String>,
+    pub(super) module_vars_value: BTreeMap<String, SlValue>,
+    pub(super) module_vars_type: BTreeMap<String, ScriptType>,
+    pub(super) module_consts_value: BTreeMap<String, SlValue>,
+    pub(super) module_consts_type: BTreeMap<String, ScriptType>,
     pub(super) visible_json_by_script: HashMap<String, BTreeSet<String>>,
-    pub(super) visible_defs_by_script: HashMap<String, BTreeSet<String>>,
-    pub(super) defs_global_alias_by_script: HashMap<String, BTreeMap<String, String>>,
+    pub(super) visible_module_by_script: HashMap<String, BTreeSet<String>>,
+    pub(super) module_global_alias_by_script: HashMap<String, BTreeMap<String, String>>,
     pub(super) visible_consts_by_script: HashMap<String, BTreeSet<String>>,
-    pub(super) defs_const_alias_by_script: HashMap<String, BTreeMap<String, String>>,
+    pub(super) module_const_alias_by_script: HashMap<String, BTreeMap<String, String>>,
     pub(super) visible_function_symbols_by_script: HashMap<String, BTreeMap<String, String>>,
     pub(super) invoke_all_functions: BTreeMap<String, FunctionDecl>,
     pub(super) invoke_public_functions: BTreeSet<String>,
     pub(super) invoke_function_symbols: BTreeMap<String, String>,
-    pub(super) defs_prelude_by_script: HashMap<String, String>,
+    pub(super) module_prelude_by_script: HashMap<String, String>,
     pub(super) initial_random_seed: u32,
     pub(super) initial_random_sequence: Option<Vec<u32>>,
     pub(super) rhai_engine: Engine,
@@ -161,10 +161,10 @@ impl ScriptLangEngine {
 
         let mut group_lookup: HashMap<String, GroupLookup> = HashMap::new();
         let mut visible_json_by_script = HashMap::new();
-        let mut visible_defs_by_script = HashMap::new();
-        let mut defs_global_alias_by_script = HashMap::new();
+        let mut visible_module_by_script = HashMap::new();
+        let mut module_global_alias_by_script = HashMap::new();
         let mut visible_consts_by_script = HashMap::new();
-        let mut defs_const_alias_by_script = HashMap::new();
+        let mut module_const_alias_by_script = HashMap::new();
         let mut visible_function_symbols_by_script = HashMap::new();
 
         let mut invoke_all_functions = BTreeMap::new();
@@ -175,8 +175,8 @@ impl ScriptLangEngine {
         for (script_name, script) in &options.scripts {
             if script.visible_functions.contains_key("invoke") {
                 return Err(ScriptLangError::new(
-                    "ENGINE_DEFS_FUNCTION_RESERVED",
-                    "Defs function name \"invoke\" is reserved for runtime builtin.",
+                    "ENGINE_MODULE_FUNCTION_RESERVED",
+                    "Module function name \"invoke\" is reserved for runtime builtin.",
                 ));
             }
             for group_id in script.groups.keys() {
@@ -203,23 +203,23 @@ impl ScriptLangEngine {
                 script_name.clone(),
                 script.visible_json_globals.iter().cloned().collect(),
             );
-            let mut defs_aliases = BTreeMap::new();
-            let mut visible_defs = BTreeSet::new();
-            for (public_name, decl) in &script.visible_defs_globals {
-                defs_aliases.insert(public_name.clone(), decl.qualified_name.clone());
-                visible_defs.insert(decl.qualified_name.clone());
+            let mut module_aliases = BTreeMap::new();
+            let mut visible_module = BTreeSet::new();
+            for (public_name, decl) in &script.visible_module_vars {
+                module_aliases.insert(public_name.clone(), decl.qualified_name.clone());
+                visible_module.insert(decl.qualified_name.clone());
             }
-            visible_defs_by_script.insert(script_name.clone(), visible_defs);
-            defs_global_alias_by_script.insert(script_name.clone(), defs_aliases);
+            visible_module_by_script.insert(script_name.clone(), visible_module);
+            module_global_alias_by_script.insert(script_name.clone(), module_aliases);
 
             let mut const_aliases = BTreeMap::new();
             let mut visible_consts = BTreeSet::new();
-            for (public_name, decl) in &script.visible_defs_consts {
+            for (public_name, decl) in &script.visible_module_consts {
                 const_aliases.insert(public_name.clone(), decl.qualified_name.clone());
                 visible_consts.insert(decl.qualified_name.clone());
             }
             visible_consts_by_script.insert(script_name.clone(), visible_consts);
-            defs_const_alias_by_script.insert(script_name.clone(), const_aliases);
+            module_const_alias_by_script.insert(script_name.clone(), const_aliases);
 
             for function_name in script.visible_functions.keys() {
                 if host_functions
@@ -230,7 +230,7 @@ impl ScriptLangEngine {
                     return Err(ScriptLangError::new(
                         "ENGINE_HOST_FUNCTION_CONFLICT",
                         format!(
-                            "hostFunctions cannot register \"{}\" because it conflicts with defs function.",
+                            "hostFunctions cannot register \"{}\" because it conflicts with module function.",
                             function_name
                         ),
                     ));
@@ -243,9 +243,9 @@ impl ScriptLangEngine {
                 let symbol = rhai_function_symbol(function_name);
                 if let Some(existing) = symbol_to_public.get(&symbol) {
                     return Err(ScriptLangError::new(
-                        "ENGINE_DEFS_FUNCTION_SYMBOL_CONFLICT",
+                        "ENGINE_MODULE_FUNCTION_SYMBOL_CONFLICT",
                         format!(
-                            "Defs function \"{}\" conflicts with \"{}\" after Rhai symbol normalization.",
+                            "Module function \"{}\" conflicts with \"{}\" after Rhai symbol normalization.",
                             function_name, existing
                         ),
                     ));
@@ -278,9 +278,9 @@ impl ScriptLangEngine {
             let symbol = rhai_function_symbol(qualified_name);
             if let Some(existing) = invoke_symbol_to_name.get(&symbol) {
                 return Err(ScriptLangError::new(
-                    "ENGINE_DEFS_FUNCTION_SYMBOL_CONFLICT",
+                    "ENGINE_MODULE_FUNCTION_SYMBOL_CONFLICT",
                     format!(
-                        "Defs function \"{}\" conflicts with \"{}\" after Rhai symbol normalization.",
+                        "Module function \"{}\" conflicts with \"{}\" after Rhai symbol normalization.",
                         qualified_name, existing
                     ),
                 ));
@@ -329,13 +329,13 @@ impl ScriptLangEngine {
             },
         );
 
-        let defs_globals_type = options
-            .defs_global_declarations
+        let module_vars_type = options
+            .module_var_declarations
             .iter()
             .map(|(qualified_name, decl)| (qualified_name.clone(), decl.r#type.clone()))
             .collect();
-        let defs_consts_type = options
-            .defs_global_const_declarations
+        let module_consts_type = options
+            .module_const_declarations
             .iter()
             .map(|(qualified_name, decl)| (qualified_name.clone(), decl.r#type.clone()))
             .collect();
@@ -347,24 +347,24 @@ impl ScriptLangEngine {
                 .unwrap_or_else(|| DEFAULT_COMPILER_VERSION.to_string()),
             group_lookup,
             global_json: options.global_json,
-            defs_global_declarations: options.defs_global_declarations,
-            defs_global_init_order: options.defs_global_init_order,
-            defs_const_declarations: options.defs_global_const_declarations,
-            defs_const_init_order: options.defs_global_const_init_order,
-            defs_globals_value: BTreeMap::new(),
-            defs_globals_type,
-            defs_consts_value: BTreeMap::new(),
-            defs_consts_type,
+            module_var_declarations: options.module_var_declarations,
+            module_var_init_order: options.module_var_init_order,
+            module_const_declarations: options.module_const_declarations,
+            module_const_init_order: options.module_const_init_order,
+            module_vars_value: BTreeMap::new(),
+            module_vars_type,
+            module_consts_value: BTreeMap::new(),
+            module_consts_type,
             visible_json_by_script,
-            visible_defs_by_script,
-            defs_global_alias_by_script,
+            visible_module_by_script,
+            module_global_alias_by_script,
             visible_consts_by_script,
-            defs_const_alias_by_script,
+            module_const_alias_by_script,
             visible_function_symbols_by_script,
             invoke_all_functions,
             invoke_public_functions,
             invoke_function_symbols,
-            defs_prelude_by_script: HashMap::new(),
+            module_prelude_by_script: HashMap::new(),
             initial_random_seed,
             initial_random_sequence,
             rhai_engine,
@@ -410,8 +410,8 @@ impl ScriptLangEngine {
         entry_args: Option<BTreeMap<String, SlValue>>,
     ) -> Result<(), ScriptLangError> {
         self.reset();
-        self.initialize_defs_consts()?;
-        self.initialize_defs_globals()?;
+        self.initialize_module_consts()?;
+        self.initialize_module_vars()?;
         let Some(script) = self.scripts.get(entry_script_name) else {
             return Err(ScriptLangError::new(
                 "ENGINE_SCRIPT_NOT_FOUND",
@@ -434,40 +434,40 @@ impl ScriptLangEngine {
         Ok(())
     }
 
-    pub(super) fn initialize_defs_globals(&mut self) -> Result<(), ScriptLangError> {
-        self.defs_globals_value.clear();
-        for qualified_name in self.defs_global_init_order.clone() {
+    pub(super) fn initialize_module_vars(&mut self) -> Result<(), ScriptLangError> {
+        self.module_vars_value.clear();
+        for qualified_name in self.module_var_init_order.clone() {
             let decl = self
-                .defs_global_declarations
+                .module_var_declarations
                 .get(&qualified_name)
                 .cloned()
                 .ok_or_else(|| ScriptLangError::new(
-                        "ENGINE_DEFS_GLOBAL_DECL_MISSING",
+                        "ENGINE_MODULE_GLOBAL_DECL_MISSING",
                         format!(
-                            "Defs global \"{}\" is present in init order but missing from declarations.",
+                            "Module global \"{}\" is present in init order but missing from declarations.",
                             qualified_name
                         ),
                     ))?;
             let mut value = default_value_from_type(&decl.r#type);
             if let Some(expr) = &decl.initial_value_expr {
-                value = self.eval_defs_global_initializer(expr, &decl.namespace)?;
+                value = self.eval_module_global_initializer(expr, &decl.namespace)?;
             }
             if !is_type_compatible(&value, &decl.r#type) {
                 return Err(ScriptLangError::new(
                     "ENGINE_TYPE_MISMATCH",
                     format!(
-                        "Defs global \"{}\" does not match declared type.",
+                        "Module global \"{}\" does not match declared type.",
                         qualified_name
                     ),
                 ));
             }
-            self.defs_globals_value.insert(qualified_name, value);
+            self.module_vars_value.insert(qualified_name, value);
         }
-        for (qualified_name, decl) in &self.defs_global_declarations {
-            if self.defs_globals_value.contains_key(qualified_name) {
+        for (qualified_name, decl) in &self.module_var_declarations {
+            if self.module_vars_value.contains_key(qualified_name) {
                 continue;
             }
-            self.defs_globals_value.insert(
+            self.module_vars_value.insert(
                 qualified_name.clone(),
                 default_value_from_type(&decl.r#type),
             );
@@ -475,42 +475,42 @@ impl ScriptLangEngine {
         Ok(())
     }
 
-    pub(super) fn initialize_defs_consts(&mut self) -> Result<(), ScriptLangError> {
-        self.defs_consts_value.clear();
-        for qualified_name in self.defs_const_init_order.clone() {
+    pub(super) fn initialize_module_consts(&mut self) -> Result<(), ScriptLangError> {
+        self.module_consts_value.clear();
+        for qualified_name in self.module_const_init_order.clone() {
             let decl = self
-                .defs_const_declarations
+                .module_const_declarations
                 .get(&qualified_name)
                 .cloned()
                 .ok_or_else(|| {
                     ScriptLangError::new(
-                        "ENGINE_DEFS_CONST_DECL_MISSING",
+                        "ENGINE_MODULE_CONST_DECL_MISSING",
                         format!(
-                            "Defs const \"{}\" is present in init order but missing from declarations.",
+                            "Module const \"{}\" is present in init order but missing from declarations.",
                             qualified_name
                         ),
                     )
                 })?;
             let mut value = default_value_from_type(&decl.r#type);
             if let Some(expr) = &decl.initial_value_expr {
-                value = self.eval_defs_const_initializer(expr, &decl.namespace)?;
+                value = self.eval_module_const_initializer(expr, &decl.namespace)?;
             }
             if !is_type_compatible(&value, &decl.r#type) {
                 return Err(ScriptLangError::new(
                     "ENGINE_TYPE_MISMATCH",
                     format!(
-                        "Defs const \"{}\" does not match declared type.",
+                        "Module const \"{}\" does not match declared type.",
                         qualified_name
                     ),
                 ));
             }
-            self.defs_consts_value.insert(qualified_name, value);
+            self.module_consts_value.insert(qualified_name, value);
         }
-        for (qualified_name, decl) in &self.defs_const_declarations {
-            if self.defs_consts_value.contains_key(qualified_name) {
+        for (qualified_name, decl) in &self.module_const_declarations {
+            if self.module_consts_value.contains_key(qualified_name) {
                 continue;
             }
-            self.defs_consts_value.insert(
+            self.module_consts_value.insert(
                 qualified_name.clone(),
                 default_value_from_type(&decl.r#type),
             );
@@ -559,10 +559,10 @@ mod lifecycle_tests {
         let result = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
-            defs_global_declarations: compiled.defs_global_declarations,
-            defs_global_init_order: compiled.defs_global_init_order,
-            defs_global_const_declarations: compiled.defs_global_const_declarations,
-            defs_global_const_init_order: compiled.defs_global_const_init_order,
+            module_var_declarations: compiled.module_var_declarations,
+            module_var_init_order: compiled.module_var_init_order,
+            module_const_declarations: compiled.module_const_declarations,
+            module_const_init_order: compiled.module_const_init_order,
             host_functions: Some(Arc::new(TestRegistry {
                 names: vec!["random".to_string()],
             })),
@@ -586,10 +586,10 @@ mod lifecycle_tests {
         let result = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
-            defs_global_declarations: compiled.defs_global_declarations,
-            defs_global_init_order: compiled.defs_global_init_order,
-            defs_global_const_declarations: compiled.defs_global_const_declarations,
-            defs_global_const_init_order: compiled.defs_global_const_init_order,
+            module_var_declarations: compiled.module_var_declarations,
+            module_var_init_order: compiled.module_var_init_order,
+            module_const_declarations: compiled.module_const_declarations,
+            module_const_init_order: compiled.module_const_init_order,
             host_functions: Some(Arc::new(TestRegistry {
                 names: vec!["invoke".to_string()],
             })),
@@ -604,7 +604,7 @@ mod lifecycle_tests {
     }
 
     #[test]
-    pub(super) fn new_rejects_host_function_conflicting_with_defs_function() {
+    pub(super) fn new_rejects_host_function_conflicting_with_module_function() {
         let files = map(&[
             (
                 "main.script.xml",
@@ -614,13 +614,13 @@ mod lifecycle_tests {
     "#,
             ),
             (
-                "shared.defs.xml",
+                "shared.xml",
                 r#"
-    <defs name="shared">
+    <module name="shared" default_access="public">
       <function name="addWithGameBonus" args="int:a1,int:a2" return="int:out">
         out = a1 + a2;
       </function>
-    </defs>
+    </module>
     "#,
             ),
         ]);
@@ -628,10 +628,10 @@ mod lifecycle_tests {
         let result = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
-            defs_global_declarations: compiled.defs_global_declarations,
-            defs_global_init_order: compiled.defs_global_init_order,
-            defs_global_const_declarations: compiled.defs_global_const_declarations,
-            defs_global_const_init_order: compiled.defs_global_const_init_order,
+            module_var_declarations: compiled.module_var_declarations,
+            module_var_init_order: compiled.module_var_init_order,
+            module_const_declarations: compiled.module_const_declarations,
+            module_const_init_order: compiled.module_const_init_order,
             host_functions: Some(Arc::new(TestRegistry {
                 names: vec!["shared.addWithGameBonus".to_string()],
             })),
@@ -641,12 +641,12 @@ mod lifecycle_tests {
             compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
         });
         assert!(result.is_err());
-        let error = result.err().expect("conflicting defs function should fail");
+        let error = result.err().expect("conflicting module function should fail");
         assert_eq!(error.code, "ENGINE_HOST_FUNCTION_CONFLICT");
     }
 
     #[test]
-    pub(super) fn new_rejects_defs_function_named_invoke() {
+    pub(super) fn new_rejects_module_function_named_invoke() {
         let files = map(&[(
             "main.xml",
             r#"
@@ -660,10 +660,10 @@ mod lifecycle_tests {
         let result = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
-            defs_global_declarations: compiled.defs_global_declarations,
-            defs_global_init_order: compiled.defs_global_init_order,
-            defs_global_const_declarations: compiled.defs_global_const_declarations,
-            defs_global_const_init_order: compiled.defs_global_const_init_order,
+            module_var_declarations: compiled.module_var_declarations,
+            module_var_init_order: compiled.module_var_init_order,
+            module_const_declarations: compiled.module_const_declarations,
+            module_const_init_order: compiled.module_const_init_order,
             host_functions: None,
             random_seed: Some(1),
             random_sequence: None,
@@ -673,12 +673,12 @@ mod lifecycle_tests {
         assert!(result.is_err());
         let error = result
             .err()
-            .expect("defs function invoke should be reserved");
-        assert_eq!(error.code, "ENGINE_DEFS_FUNCTION_RESERVED");
+            .expect("module function invoke should be reserved");
+        assert_eq!(error.code, "ENGINE_MODULE_FUNCTION_RESERVED");
     }
 
     #[test]
-    pub(super) fn new_rejects_defs_function_symbol_conflict_after_normalization() {
+    pub(super) fn new_rejects_module_function_symbol_conflict_after_normalization() {
         let files = map(&[
             (
                 "a.xml",
@@ -703,10 +703,10 @@ mod lifecycle_tests {
         let result = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
-            defs_global_declarations: compiled.defs_global_declarations,
-            defs_global_init_order: compiled.defs_global_init_order,
-            defs_global_const_declarations: compiled.defs_global_const_declarations,
-            defs_global_const_init_order: compiled.defs_global_const_init_order,
+            module_var_declarations: compiled.module_var_declarations,
+            module_var_init_order: compiled.module_var_init_order,
+            module_const_declarations: compiled.module_const_declarations,
+            module_const_init_order: compiled.module_const_init_order,
             host_functions: None,
             random_seed: Some(1),
             random_sequence: None,
@@ -716,7 +716,7 @@ mod lifecycle_tests {
         let error = result
             .err()
             .expect("normalized symbol conflict should fail");
-        assert_eq!(error.code, "ENGINE_DEFS_FUNCTION_SYMBOL_CONFLICT");
+        assert_eq!(error.code, "ENGINE_MODULE_FUNCTION_SYMBOL_CONFLICT");
     }
 
     #[test]
@@ -761,10 +761,10 @@ mod lifecycle_tests {
         let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
-            defs_global_declarations: compiled.defs_global_declarations,
-            defs_global_init_order: compiled.defs_global_init_order,
-            defs_global_const_declarations: compiled.defs_global_const_declarations,
-            defs_global_const_init_order: compiled.defs_global_const_init_order,
+            module_var_declarations: compiled.module_var_declarations,
+            module_var_init_order: compiled.module_var_init_order,
+            module_const_declarations: compiled.module_const_declarations,
+            module_const_init_order: compiled.module_const_init_order,
             host_functions: None,
             random_seed: Some(1),
             random_sequence: Some(vec![12, 3, 1]),
@@ -818,10 +818,10 @@ mod lifecycle_tests {
         let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
-            defs_global_declarations: compiled.defs_global_declarations,
-            defs_global_init_order: compiled.defs_global_init_order,
-            defs_global_const_declarations: compiled.defs_global_const_declarations,
-            defs_global_const_init_order: compiled.defs_global_const_init_order,
+            module_var_declarations: compiled.module_var_declarations,
+            module_var_init_order: compiled.module_var_init_order,
+            module_const_declarations: compiled.module_const_declarations,
+            module_const_init_order: compiled.module_const_init_order,
             host_functions: None,
             random_seed: Some(1),
             random_sequence: Some(vec![5]),
@@ -880,10 +880,10 @@ mod lifecycle_tests {
         let mut sequence = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
-            defs_global_declarations: compiled.defs_global_declarations,
-            defs_global_init_order: compiled.defs_global_init_order,
-            defs_global_const_declarations: compiled.defs_global_const_declarations,
-            defs_global_const_init_order: compiled.defs_global_const_init_order,
+            module_var_declarations: compiled.module_var_declarations,
+            module_var_init_order: compiled.module_var_init_order,
+            module_const_declarations: compiled.module_const_declarations,
+            module_const_init_order: compiled.module_const_init_order,
             host_functions: None,
             random_seed: Some(9),
             random_sequence: Some(vec![12, 3]),
@@ -905,7 +905,7 @@ mod lifecycle_tests {
     }
 
     #[test]
-    pub(super) fn new_success_path_initializes_defs_and_function_symbols() {
+    pub(super) fn new_success_path_initializes_module_and_function_symbols() {
         let files = map(&[
             (
                 "main.script.xml",
@@ -915,14 +915,14 @@ mod lifecycle_tests {
     "#,
             ),
             (
-                "shared.defs.xml",
+                "shared.xml",
                 r#"
-    <defs name="shared">
+    <module name="shared" default_access="public">
       <var name="hp" type="int">1</var>
       <function name="addWithGameBonus" args="int:a1,int:a2" return="int:out">
     out = a1 + a2;
       </function>
-    </defs>
+    </module>
     "#,
             ),
         ]);
@@ -930,10 +930,10 @@ mod lifecycle_tests {
         let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
-            defs_global_declarations: compiled.defs_global_declarations,
-            defs_global_init_order: compiled.defs_global_init_order,
-            defs_global_const_declarations: compiled.defs_global_const_declarations,
-            defs_global_const_init_order: compiled.defs_global_const_init_order,
+            module_var_declarations: compiled.module_var_declarations,
+            module_var_init_order: compiled.module_var_init_order,
+            module_const_declarations: compiled.module_const_declarations,
+            module_const_init_order: compiled.module_const_init_order,
             host_functions: None,
             random_seed: Some(7),
             random_sequence: None,
@@ -946,8 +946,8 @@ mod lifecycle_tests {
         assert!(!engine.waiting_choice());
         assert!(!engine.ended);
         assert!(
-            engine.defs_globals_type.contains_key("shared.hp"),
-            "defs global type should be initialized"
+            engine.module_vars_type.contains_key("shared.hp"),
+            "module global type should be initialized"
         );
         assert_eq!(
             engine
@@ -960,7 +960,7 @@ mod lifecycle_tests {
 
         engine.start("main", None).expect("start");
         assert_eq!(
-            engine.defs_globals_value.get("shared.hp"),
+            engine.module_vars_value.get("shared.hp"),
             Some(&SlValue::Number(1.0))
         );
     }
@@ -990,14 +990,14 @@ mod lifecycle_tests {
     }
 
     #[test]
-    pub(super) fn start_rejects_defs_global_initializer_type_mismatch() {
+    pub(super) fn start_rejects_module_global_initializer_type_mismatch() {
         let mut engine = engine_from_sources(map(&[
             (
-                "shared.defs.xml",
+                "shared.xml",
                 r#"
-    <defs name="shared">
+    <module name="shared" default_access="public">
       <var name="hp" type="int">"bad"</var>
-    </defs>
+    </module>
     "#,
             ),
             (
@@ -1016,7 +1016,7 @@ mod lifecycle_tests {
     }
 
     #[test]
-    pub(super) fn start_rejects_defs_const_initializer_type_mismatch() {
+    pub(super) fn start_rejects_module_const_initializer_type_mismatch() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
             r#"<module name="main" default_access="public">
@@ -1031,40 +1031,40 @@ mod lifecycle_tests {
     }
 
     #[test]
-    pub(super) fn initialize_defs_consts_reports_missing_decl() {
+    pub(super) fn initialize_module_consts_reports_missing_decl() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
             r#"<module name="main" default_access="public"><script name="main"><text>ok</text></script></module>"#,
         )]));
-        engine.defs_const_init_order = vec!["main.base".to_string()];
+        engine.module_const_init_order = vec!["main.base".to_string()];
         let error = engine
-            .initialize_defs_consts()
+            .initialize_module_consts()
             .expect_err("missing decl should fail");
-        assert_eq!(error.code, "ENGINE_DEFS_CONST_DECL_MISSING");
+        assert_eq!(error.code, "ENGINE_MODULE_CONST_DECL_MISSING");
     }
 
     #[test]
-    pub(super) fn start_rejects_missing_defs_global_decl_in_init_order() {
+    pub(super) fn start_rejects_missing_module_global_decl_in_init_order() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><text>ok</text></script>"#,
         )]));
-        engine.defs_global_init_order = vec!["shared.hp".to_string()];
+        engine.module_var_init_order = vec!["shared.hp".to_string()];
         let error = engine
             .start("main", None)
             .expect_err("missing decl in init order should fail");
-        assert_eq!(error.code, "ENGINE_DEFS_GLOBAL_DECL_MISSING");
+        assert_eq!(error.code, "ENGINE_MODULE_GLOBAL_DECL_MISSING");
     }
 
     #[test]
-    pub(super) fn start_fills_default_for_defs_global_not_present_in_init_order() {
+    pub(super) fn start_fills_default_for_module_global_not_present_in_init_order() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><text>ok</text></script>"#,
         )]));
-        engine.defs_global_declarations.insert(
+        engine.module_var_declarations.insert(
             "shared.hp".to_string(),
-            DefsGlobalVarDecl {
+            ModuleVarDecl {
                 namespace: "shared".to_string(),
                 name: "hp".to_string(),
                 qualified_name: "shared.hp".to_string(),
@@ -1076,11 +1076,11 @@ mod lifecycle_tests {
                 location: sl_core::SourceSpan::synthetic(),
             },
         );
-        engine.defs_global_init_order.clear();
+        engine.module_var_init_order.clear();
 
         engine.start("main", None).expect("start");
         assert_eq!(
-            engine.defs_globals_value.get("shared.hp"),
+            engine.module_vars_value.get("shared.hp"),
             Some(&SlValue::Number(0.0))
         );
     }
@@ -1178,16 +1178,16 @@ mod lifecycle_tests {
     }
 
     #[test]
-    pub(super) fn initialize_defs_consts_uses_default_when_no_initializer() {
-        // Test line 442: when defs const has no initial_value_expr, uses default value
+    pub(super) fn initialize_module_consts_uses_default_when_no_initializer() {
+        // Test line 442: when module const has no initial_value_expr, uses default value
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
             r#"<module name="main" default_access="public"><script name="main"><text>ok</text></script></module>"#,
         )]));
-        // Manually add a defs const without initial_value_expr
-        engine.defs_const_declarations.insert(
+        // Manually add a module const without initial_value_expr
+        engine.module_const_declarations.insert(
             "main.count".to_string(),
-            DefsGlobalConstDecl {
+            ModuleConstDecl {
                 namespace: "main".to_string(),
                 name: "count".to_string(),
                 qualified_name: "main.count".to_string(),
@@ -1199,29 +1199,29 @@ mod lifecycle_tests {
                 location: SourceSpan::synthetic(),
             },
         );
-        engine.defs_const_init_order = vec!["main.count".to_string()];
+        engine.module_const_init_order = vec!["main.count".to_string()];
         engine
-            .initialize_defs_consts()
+            .initialize_module_consts()
             .expect("init should succeed");
         // Verify default value is 0
         let value = engine
-            .defs_consts_value
+            .module_consts_value
             .get("main.count")
             .expect("should exist");
         assert_eq!(*value, SlValue::Number(0.0));
     }
 
     #[test]
-    pub(super) fn initialize_defs_consts_handles_missing_const_in_order() {
-        // Test line 441: when defs const initializer references missing variable
+    pub(super) fn initialize_module_consts_handles_missing_const_in_order() {
+        // Test line 441: when module const initializer references missing variable
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
             r#"<module name="main" default_access="public"><script name="main"><text>ok</text></script></module>"#,
         )]));
-        // Add defs const with invalid initializer
-        engine.defs_const_declarations.insert(
+        // Add module const with invalid initializer
+        engine.module_const_declarations.insert(
             "main.bad".to_string(),
-            DefsGlobalConstDecl {
+            ModuleConstDecl {
                 namespace: "main".to_string(),
                 name: "bad".to_string(),
                 qualified_name: "main.bad".to_string(),
@@ -1233,24 +1233,24 @@ mod lifecycle_tests {
                 location: SourceSpan::synthetic(),
             },
         );
-        engine.defs_const_init_order = vec!["main.bad".to_string()];
+        engine.module_const_init_order = vec!["main.bad".to_string()];
         let error = engine
-            .initialize_defs_consts()
+            .initialize_module_consts()
             .expect_err("invalid initializer should fail");
         assert_eq!(error.code, "ENGINE_EVAL_ERROR");
     }
 
     #[test]
-    pub(super) fn initialize_defs_consts_with_const_not_in_init_order() {
-        // Test lines 457-460: defs const not in init_order uses default value
+    pub(super) fn initialize_module_consts_with_const_not_in_init_order() {
+        // Test lines 457-460: module const not in init_order uses default value
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
             r#"<module name="main" default_access="public"><script name="main"><text>ok</text></script></module>"#,
         )]));
-        // Add two defs consts: one in init_order, one not
-        engine.defs_const_declarations.insert(
+        // Add two module consts: one in init_order, one not
+        engine.module_const_declarations.insert(
             "main.uninitialized".to_string(),
-            DefsGlobalConstDecl {
+            ModuleConstDecl {
                 namespace: "main".to_string(),
                 name: "uninitialized".to_string(),
                 qualified_name: "main.uninitialized".to_string(),
@@ -1262,9 +1262,9 @@ mod lifecycle_tests {
                 location: SourceSpan::synthetic(),
             },
         );
-        engine.defs_const_declarations.insert(
+        engine.module_const_declarations.insert(
             "main.initialized".to_string(),
-            DefsGlobalConstDecl {
+            ModuleConstDecl {
                 namespace: "main".to_string(),
                 name: "initialized".to_string(),
                 qualified_name: "main.initialized".to_string(),
@@ -1277,17 +1277,17 @@ mod lifecycle_tests {
             },
         );
         // Only initialize the second one
-        engine.defs_const_init_order = vec!["main.initialized".to_string()];
+        engine.module_const_init_order = vec!["main.initialized".to_string()];
         engine
-            .initialize_defs_consts()
+            .initialize_module_consts()
             .expect("init should succeed");
         // uninitialized should be 0 (default), initialized should be 42
         let uninit = engine
-            .defs_consts_value
+            .module_consts_value
             .get("main.uninitialized")
             .expect("should exist");
         let init = engine
-            .defs_consts_value
+            .module_consts_value
             .get("main.initialized")
             .expect("should exist");
         assert_eq!(*uninit, SlValue::Number(0.0));

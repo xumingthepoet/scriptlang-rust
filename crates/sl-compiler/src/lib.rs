@@ -6,7 +6,7 @@ pub(crate) use regex::Regex;
 pub(crate) use serde_json::Value as JsonValue;
 pub(crate) use sl_core::{
     default_value_from_type, AccessLevel, CallArgument, ChoiceEntry, ChoiceOption,
-    CompiledProjectArtifact, ContinueTarget, DefsGlobalConstDecl, DefsGlobalVarDecl,
+    CompiledProjectArtifact, ContinueTarget, ModuleConstDecl, ModuleVarDecl,
     DynamicChoiceBlock, DynamicChoiceTemplate, FunctionDecl, FunctionParam, FunctionReturn,
     ImplicitGroup, ScriptIr, ScriptLangError, ScriptNode, ScriptParam, ScriptType, SlValue,
     SourceSpan, VarDeclaration, COMPILED_PROJECT_SCHEMA,
@@ -19,7 +19,7 @@ pub(crate) use sl_parser::{
 mod artifact;
 mod context;
 mod defaults;
-mod defs_resolver;
+mod module_resolver;
 mod error_context;
 mod import_graph;
 mod macro_expand;
@@ -38,7 +38,7 @@ pub use context::CompileProjectBundleResult;
 pub use pipeline::{compile_project_bundle_from_xml_map, compile_project_scripts_from_xml_map};
 
 pub(crate) use context::*;
-pub(crate) use defs_resolver::*;
+pub(crate) use module_resolver::*;
 pub(crate) use error_context::with_file_context_shared;
 pub(crate) use import_graph::*;
 pub(crate) use macro_expand::*;
@@ -65,14 +65,12 @@ pub(crate) mod compiler_test_support {
 
     fn normalize_test_source_path(path: &str) -> String {
         path.replace(".script.xml", ".xml")
-            .replace(".defs.xml", ".xml")
             .replace(".module.xml", ".xml")
     }
 
     fn normalize_test_source_content(source: &str) -> String {
         let mut normalized = source
             .replace(".script.xml", ".xml")
-            .replace(".defs.xml", ".xml")
             .replace(".module.xml", ".xml");
 
         let trimmed = normalized.trim_start();
@@ -81,10 +79,6 @@ pub(crate) mod compiler_test_support {
                 let end_regex =
                     Regex::new(r"</module>\s*\z").expect("stray module close regex should compile");
                 normalized = end_regex.replace(&normalized, "").into_owned();
-            } else if trimmed.starts_with("<defs") {
-                let end_regex =
-                    Regex::new(r"</module>\s*\z").expect("stray defs close regex should compile");
-                normalized = end_regex.replace(&normalized, "</defs>").into_owned();
             }
         }
 
@@ -93,10 +87,6 @@ pub(crate) mod compiler_test_support {
         }
 
         if let Some(wrapped) = normalize_wrapped_root(&normalized, "script", None) {
-            return wrapped;
-        }
-
-        if let Some(wrapped) = normalize_wrapped_root(&normalized, "defs", None) {
             return wrapped;
         }
 
@@ -125,20 +115,13 @@ pub(crate) mod compiler_test_support {
             .captures(attrs)
             .and_then(|caps| caps.get(1).map(|m| m.as_str().to_string()))?;
 
-        let replaced_open = if root_name == "defs" {
-            regex.replace(
-                source,
-                format!(r#"{prefix}<module name="{module_name}" default_access="public">"#),
-            )
-        } else {
-            regex.replace(
-                source,
-                format!(
-                    r#"{prefix}<module name="{module_name}" default_access="public">
+        let replaced_open = regex.replace(
+            source,
+            format!(
+                r#"{prefix}<module name="{module_name}" default_access="public">
 <{root_name}{attrs}>"#
-                ),
-            )
-        };
+            ),
+        );
         let closing = format!("</{root_name}>");
         let end_regex =
             Regex::new(&format!(r"{closing}\s*\z")).expect("closing regex should compile");
@@ -146,7 +129,7 @@ pub(crate) mod compiler_test_support {
             end_regex
                 .replace(
                     replaced_open.as_ref(),
-                    if root_name == "defs" {
+                    if root_name == "module" {
                         "</module>".to_string()
                     } else {
                         format!("{closing}\n</module>")
@@ -184,7 +167,7 @@ pub(crate) mod compiler_test_support {
         use super::*;
 
         #[test]
-        fn normalize_test_source_content_handles_wrapped_script_and_defs_roots() {
+        fn normalize_test_source_content_handles_wrapped_script_and_module_roots() {
             let script = normalize_test_source_content(
                 r#"
 <script name="main">
@@ -197,16 +180,16 @@ pub(crate) mod compiler_test_support {
             assert!(script.contains(r#"<script name="main">"#));
             assert!(!script.trim_end().ends_with("</module>\n</module>"));
 
-            let defs = normalize_test_source_content(
+            let module = normalize_test_source_content(
                 r#"
-<defs name="shared">
+<module name="shared">
   <var name="hp" type="int">1</var>
-</defs>
+</module>
 </module>
 "#,
             );
-            assert!(defs.contains(r#"<module name="shared" default_access="public">"#));
-            assert!(defs.trim_end().ends_with("</module>"));
+            assert!(module.contains(r#"<module name="shared">"#));
+            assert!(module.trim_end().ends_with("</module>"));
         }
 
         #[test]

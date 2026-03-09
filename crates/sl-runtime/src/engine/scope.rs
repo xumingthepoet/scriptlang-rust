@@ -18,25 +18,25 @@ impl ScriptLangEngine {
         visible.contains(name) && self.global_json.contains_key(name)
     }
 
-    pub(super) fn resolve_defs_global_alias(
+    pub(super) fn resolve_module_global_alias(
         &self,
         script_name: Option<&str>,
         alias: &str,
     ) -> Option<String> {
         let script_name = script_name?;
-        self.defs_global_alias_by_script
+        self.module_global_alias_by_script
             .get(script_name)
             .and_then(|aliases| aliases.get(alias))
             .cloned()
     }
 
-    pub(super) fn resolve_defs_const_alias(
+    pub(super) fn resolve_module_const_alias(
         &self,
         script_name: Option<&str>,
         alias: &str,
     ) -> Option<String> {
         let script_name = script_name?;
-        self.defs_const_alias_by_script
+        self.module_const_alias_by_script
             .get(script_name)
             .and_then(|aliases| aliases.get(alias))
             .cloned()
@@ -50,27 +50,27 @@ impl ScriptLangEngine {
         }
 
         let script_name = self.resolve_current_script_name();
-        if let Some(qualified_name) = self.resolve_defs_global_alias(script_name.as_deref(), name) {
+        if let Some(qualified_name) = self.resolve_module_global_alias(script_name.as_deref(), name) {
             return self
-                .defs_globals_value
+                .module_vars_value
                 .get(&qualified_name)
                 .cloned()
                 .ok_or_else(|| {
                     ScriptLangError::new(
-                        "ENGINE_DEFS_GLOBAL_MISSING",
-                        format!("Defs global \"{}\" is not initialized.", qualified_name),
+                        "ENGINE_MODULE_GLOBAL_MISSING",
+                        format!("Module global \"{}\" is not initialized.", qualified_name),
                     )
                 });
         }
-        if let Some(qualified_name) = self.resolve_defs_const_alias(script_name.as_deref(), name) {
+        if let Some(qualified_name) = self.resolve_module_const_alias(script_name.as_deref(), name) {
             return self
-                .defs_consts_value
+                .module_consts_value
                 .get(&qualified_name)
                 .cloned()
                 .ok_or_else(|| {
                     ScriptLangError::new(
-                        "ENGINE_DEFS_CONST_MISSING",
-                        format!("Defs const \"{}\" is not initialized.", qualified_name),
+                        "ENGINE_MODULE_CONST_MISSING",
+                        format!("Module const \"{}\" is not initialized.", qualified_name),
                     )
                 });
         }
@@ -109,9 +109,9 @@ impl ScriptLangEngine {
         }
 
         let script_name = self.resolve_current_script_name();
-        if let Some(qualified_name) = self.resolve_defs_global_alias(script_name.as_deref(), name) {
+        if let Some(qualified_name) = self.resolve_module_global_alias(script_name.as_deref(), name) {
             if self
-                .defs_globals_type
+                .module_vars_type
                 .get(&qualified_name)
                 .is_some_and(|declared_type| !is_type_compatible(&value, declared_type))
             {
@@ -120,14 +120,14 @@ impl ScriptLangEngine {
                     format!("Variable \"{}\" does not match declared type.", name),
                 ));
             }
-            self.defs_globals_value.insert(qualified_name, value);
+            self.module_vars_value.insert(qualified_name, value);
             return Ok(());
         }
-        if let Some(qualified_name) = self.resolve_defs_const_alias(script_name.as_deref(), name) {
+        if let Some(qualified_name) = self.resolve_module_const_alias(script_name.as_deref(), name) {
             return Err(ScriptLangError::new(
                 "ENGINE_CONST_READONLY",
                 format!(
-                    "Defs const \"{}\" is readonly and cannot be mutated.",
+                    "Module const \"{}\" is readonly and cannot be mutated.",
                     qualified_name
                 ),
             ));
@@ -208,13 +208,13 @@ impl ScriptLangEngine {
             let script_name = self.resolve_current_script_name();
             let qualified = format!("{}.{}", parts[0], parts[1]);
             if self
-                .resolve_defs_global_alias(script_name.as_deref(), &qualified)
+                .resolve_module_global_alias(script_name.as_deref(), &qualified)
                 .is_some()
             {
                 return (qualified, 2);
             }
             if self
-                .resolve_defs_const_alias(script_name.as_deref(), &qualified)
+                .resolve_module_const_alias(script_name.as_deref(), &qualified)
                 .is_some()
             {
                 return (qualified, 2);
@@ -297,11 +297,11 @@ mod scope_tests {
 "#,
             ),
             (
-                "shared.defs.xml",
+                "shared.xml",
                 r#"
-<defs name="shared">
+<module name="shared" default_access="public">
   <var name="hp" type="int">1</var>
-</defs>
+</module>
 "#,
             ),
         ]));
@@ -318,7 +318,7 @@ mod scope_tests {
 
         let err = engine
             .write_variable("shared.hp", SlValue::String("bad".to_string()))
-            .expect_err("defs global type mismatch should fail");
+            .expect_err("module global type mismatch should fail");
         assert_eq!(err.code, "ENGINE_TYPE_MISMATCH");
 
         let err = engine
@@ -368,7 +368,7 @@ mod scope_tests {
     }
 
     #[test]
-    pub(super) fn defs_const_is_readonly_for_direct_and_path_writes() {
+    pub(super) fn module_const_is_readonly_for_direct_and_path_writes() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
             r#"<module name="main" default_access="public">
@@ -388,11 +388,11 @@ mod scope_tests {
             .expect_err("const path write should fail");
         assert_eq!(path_error.code, "ENGINE_CONST_READONLY");
 
-        engine.defs_consts_value.clear();
+        engine.module_consts_value.clear();
         let read_error = engine
             .read_variable("base")
             .expect_err("missing const value should fail");
-        assert_eq!(read_error.code, "ENGINE_DEFS_CONST_MISSING");
+        assert_eq!(read_error.code, "ENGINE_MODULE_CONST_MISSING");
     }
 
     #[test]
@@ -489,14 +489,14 @@ mod scope_tests {
     }
 
     #[test]
-    pub(super) fn defs_globals_support_shadowing_short_name_and_qualified_paths() {
+    pub(super) fn module_vars_support_shadowing_short_name_and_qualified_paths() {
         let mut engine = engine_from_sources(map(&[
             (
-                "shared.defs.xml",
+                "shared.xml",
                 r#"
-<defs name="shared">
+<module name="shared" default_access="public">
   <var name="hp" type="int">100</var>
-</defs>
+</module>
 "#,
             ),
             (
@@ -535,14 +535,14 @@ mod scope_tests {
     }
 
     #[test]
-    pub(super) fn defs_global_short_alias_writes_back_when_not_shadowed() {
+    pub(super) fn module_global_short_alias_writes_back_when_not_shadowed() {
         let mut engine = engine_from_sources(map(&[
             (
-                "shared.defs.xml",
+                "shared.xml",
                 r#"
-<defs name="shared">
+<module name="shared" default_access="public">
   <var name="hp" type="int">7</var>
-</defs>
+</module>
 "#,
             ),
             (
@@ -567,11 +567,11 @@ mod scope_tests {
     }
 
     #[test]
-    pub(super) fn defs_global_missing_and_type_mismatch_paths_are_covered() {
+    pub(super) fn module_global_missing_and_type_mismatch_paths_are_covered() {
         let files = map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int">7</var></defs>"#,
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><var name="hp" type="int">7</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -584,11 +584,11 @@ mod scope_tests {
 
         let mut missing_engine = engine_from_sources(files.clone());
         missing_engine.start("main", None).expect("start");
-        missing_engine.defs_globals_value.clear();
+        missing_engine.module_vars_value.clear();
         let error = missing_engine
             .read_variable("shared.hp")
-            .expect_err("missing defs global should fail");
-        assert_eq!(error.code, "ENGINE_DEFS_GLOBAL_MISSING");
+            .expect_err("missing module global should fail");
+        assert_eq!(error.code, "ENGINE_MODULE_GLOBAL_MISSING");
 
         let mut mismatch_engine = engine_from_sources(files);
         mismatch_engine.start("main", None).expect("start");
@@ -599,12 +599,12 @@ mod scope_tests {
     }
 
     #[test]
-    pub(super) fn write_defs_global_variable_succeeds() {
-        // Test successful write to defs global variable (covers scope.rs line 92)
+    pub(super) fn write_module_global_variable_succeeds() {
+        // Test successful write to module global variable (covers scope.rs line 92)
         let files = map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="score" type="int">0</var></defs>"#,
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><var name="score" type="int">0</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -625,12 +625,12 @@ mod scope_tests {
     }
 
     #[test]
-    pub(super) fn write_defs_global_variable_type_compatible_covered() {
+    pub(super) fn write_module_global_variable_type_compatible_covered() {
         // Direct test for type compatible branch (covers scope.rs line 92)
         let files = map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int">10</var></defs>"#,
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><var name="hp" type="int">10</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -661,7 +661,7 @@ mod scope_tests {
         )]));
         engine.frames.clear();
         assert!(engine.resolve_current_script_name().is_none());
-        assert!(engine.resolve_defs_global_alias(None, "hp").is_none());
+        assert!(engine.resolve_module_global_alias(None, "hp").is_none());
 
         let error = engine
             .read_path("missing.value")

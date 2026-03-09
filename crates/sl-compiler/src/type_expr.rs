@@ -202,7 +202,7 @@ pub(crate) fn resolve_type_expr_in_namespace(
 pub(crate) fn parse_type_declaration_node(
     node: &XmlElementNode,
 ) -> Result<ParsedTypeDecl, ScriptLangError> {
-    parse_type_declaration_node_with_namespace(node, "defs", AccessLevel::Private)
+    parse_type_declaration_node_with_namespace(node, "module", AccessLevel::Private)
 }
 
 pub(crate) fn parse_type_declaration_node_with_namespace(
@@ -259,7 +259,7 @@ pub(crate) fn parse_type_declaration_node_with_namespace(
 pub(crate) fn parse_function_declaration_node(
     node: &XmlElementNode,
 ) -> Result<ParsedFunctionDecl, ScriptLangError> {
-    parse_function_declaration_node_with_namespace(node, "defs", AccessLevel::Private)
+    parse_function_declaration_node_with_namespace(node, "module", AccessLevel::Private)
 }
 
 pub(crate) fn parse_function_declaration_node_with_namespace(
@@ -541,7 +541,7 @@ mod type_expr_tests {
                     vec![],
                 ))],
             ),
-            "defs",
+            "module",
             AccessLevel::Private,
         )
         .expect_err("invalid access should fail");
@@ -554,7 +554,7 @@ mod type_expr_tests {
                 &[("name", "f"), ("access", "bad"), ("return", "int:r")],
                 vec![xml_text("r = 1;")],
             ),
-            "defs",
+            "module",
             AccessLevel::Private,
         )
         .expect_err("invalid access should fail");

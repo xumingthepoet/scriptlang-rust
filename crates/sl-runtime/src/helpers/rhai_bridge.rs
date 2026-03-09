@@ -17,8 +17,8 @@ pub(crate) fn rhai_function_symbol(name: &str) -> String {
     out
 }
 
-pub(crate) fn defs_namespace_symbol(namespace: &str) -> String {
-    format!("__sl_defs_ns_{}", rhai_function_symbol(namespace))
+pub(crate) fn module_namespace_symbol(namespace: &str) -> String {
+    format!("__sl_module_ns_{}", rhai_function_symbol(namespace))
 }
 
 pub(crate) fn rewrite_function_calls(
@@ -74,7 +74,7 @@ pub(crate) fn rewrite_function_calls(
     rewritten
 }
 
-pub(crate) fn rewrite_defs_global_qualified_access(
+pub(crate) fn rewrite_module_global_qualified_access(
     source: &str,
     qualified_to_expr: &BTreeMap<String, String>,
 ) -> String {
@@ -87,13 +87,13 @@ pub(crate) fn rewrite_defs_global_qualified_access(
 
     let mut rewritten = source.to_string();
     for (qualified_name, target_expr) in names {
-        rewritten = replace_defs_global_symbol(&rewritten, qualified_name, target_expr);
+        rewritten = replace_module_global_symbol(&rewritten, qualified_name, target_expr);
     }
 
     rewritten
 }
 
-pub(crate) fn replace_defs_global_symbol(source: &str, symbol: &str, replacement: &str) -> String {
+pub(crate) fn replace_module_global_symbol(source: &str, symbol: &str, replacement: &str) -> String {
     let mut out = String::with_capacity(source.len());
     let mut cursor = 0usize;
 
@@ -103,7 +103,7 @@ pub(crate) fn replace_defs_global_symbol(source: &str, symbol: &str, replacement
 
         let left = source[..start].chars().next_back();
         let right = source[end..].chars().next();
-        if is_defs_global_left_boundary(left) && is_defs_global_right_boundary(right) {
+        if is_module_global_left_boundary(left) && is_module_global_right_boundary(right) {
             out.push_str(&source[cursor..start]);
             out.push_str(replacement);
             cursor = end;
@@ -331,21 +331,21 @@ fn is_scriptlang_token_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '_' || ch == '$'
 }
 
-pub(crate) fn is_defs_identifier_char(ch: char) -> bool {
+pub(crate) fn is_module_identifier_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '$' || ch == '_'
 }
 
-pub(crate) fn is_defs_global_left_boundary(left: Option<char>) -> bool {
+pub(crate) fn is_module_global_left_boundary(left: Option<char>) -> bool {
     match left {
         None => true,
-        Some(ch) => !is_defs_identifier_char(ch) && ch != '.',
+        Some(ch) => !is_module_identifier_char(ch) && ch != '.',
     }
 }
 
-pub(crate) fn is_defs_global_right_boundary(right: Option<char>) -> bool {
+pub(crate) fn is_module_global_right_boundary(right: Option<char>) -> bool {
     match right {
         None => true,
-        Some(ch) => !is_defs_identifier_char(ch) && ch != ':',
+        Some(ch) => !is_module_identifier_char(ch) && ch != ':',
     }
 }
 
@@ -483,13 +483,13 @@ mod rhai_bridge_tests {
     use super::*;
 
     #[test]
-    fn replace_defs_global_symbol_skips_non_boundary_matches() {
+    fn replace_module_global_symbol_skips_non_boundary_matches() {
         let source = "shared.hp2 = 1; xshared.hp = 2; shared.hp = 3;";
         let rewritten =
-            replace_defs_global_symbol(source, "shared.hp", "__sl_defs_ns_shared[\"hp\"]");
+            replace_module_global_symbol(source, "shared.hp", "__sl_module_ns_shared[\"hp\"]");
         assert!(rewritten.contains("shared.hp2 = 1;"));
         assert!(rewritten.contains("xshared.hp = 2;"));
-        assert!(rewritten.contains("__sl_defs_ns_shared[\"hp\"] = 3;"));
+        assert!(rewritten.contains("__sl_module_ns_shared[\"hp\"] = 3;"));
     }
 
     #[test]
@@ -508,19 +508,19 @@ mod rhai_bridge_tests {
     #[test]
     fn bridge_helper_functions_cover_remaining_paths() {
         assert_eq!(rhai_function_symbol("a.b-c"), "a_b_c");
-        assert_eq!(defs_namespace_symbol("shared.ns"), "__sl_defs_ns_shared_ns");
+        assert_eq!(module_namespace_symbol("shared.ns"), "__sl_module_ns_shared_ns");
         assert!(is_scriptlang_token_char('a'));
         assert!(is_scriptlang_token_char('_'));
         assert!(!is_scriptlang_token_char('.'));
-        assert!(is_defs_identifier_char('a'));
-        assert!(is_defs_identifier_char('$'));
-        assert!(!is_defs_identifier_char('.'));
-        assert!(is_defs_global_left_boundary(None));
-        assert!(is_defs_global_left_boundary(Some(' ')));
-        assert!(!is_defs_global_left_boundary(Some('a')));
-        assert!(is_defs_global_right_boundary(None));
-        assert!(is_defs_global_right_boundary(Some(' ')));
-        assert!(!is_defs_global_right_boundary(Some(':')));
+        assert!(is_module_identifier_char('a'));
+        assert!(is_module_identifier_char('$'));
+        assert!(!is_module_identifier_char('.'));
+        assert!(is_module_global_left_boundary(None));
+        assert!(is_module_global_left_boundary(Some(' ')));
+        assert!(!is_module_global_left_boundary(Some('a')));
+        assert!(is_module_global_right_boundary(None));
+        assert!(is_module_global_right_boundary(Some(' ')));
+        assert!(!is_module_global_right_boundary(Some(':')));
 
         let rewritten = rewrite_function_calls(
             "x = shared.add(1); y = add(2);",
@@ -554,31 +554,31 @@ mod rhai_bridge_tests {
         assert!(rewritten_same.contains("call(invoke)"));
         assert_eq!(rewrite_function_calls("x = 1;", &BTreeMap::new()), "x = 1;");
 
-        let rewritten_defs = rewrite_defs_global_qualified_access(
+        let rewritten_module = rewrite_module_global_qualified_access(
             "x = shared.hp + other.hp;",
             &BTreeMap::from([(
                 "shared.hp".to_string(),
-                "__sl_defs_ns_shared.hp".to_string(),
+                "__sl_module_ns_shared.hp".to_string(),
             )]),
         );
-        assert!(rewritten_defs.contains("__sl_defs_ns_shared.hp"));
-        assert!(rewritten_defs.contains("other.hp"));
+        assert!(rewritten_module.contains("__sl_module_ns_shared.hp"));
+        assert!(rewritten_module.contains("other.hp"));
 
-        let rewritten_defs_multi = rewrite_defs_global_qualified_access(
+        let rewritten_module_multi = rewrite_module_global_qualified_access(
             "x = shared.hp + shared.hp.max;",
             &BTreeMap::from([
                 (
                     "shared.hp.max".to_string(),
-                    "__sl_defs_ns_shared.hp_max".to_string(),
+                    "__sl_module_ns_shared.hp_max".to_string(),
                 ),
                 (
                     "shared.hp".to_string(),
-                    "__sl_defs_ns_shared.hp".to_string(),
+                    "__sl_module_ns_shared.hp".to_string(),
                 ),
             ]),
         );
-        assert!(rewritten_defs_multi.contains("__sl_defs_ns_shared.hp_max"));
-        assert!(rewritten_defs_multi.contains("__sl_defs_ns_shared.hp"));
+        assert!(rewritten_module_multi.contains("__sl_module_ns_shared.hp_max"));
+        assert!(rewritten_module_multi.contains("__sl_module_ns_shared.hp"));
 
         assert_eq!(slvalue_to_text(&SlValue::Bool(true)), "true");
         assert!(slvalue_to_text(&SlValue::Array(vec![SlValue::Number(1.0)])).contains("Array"));
@@ -732,11 +732,11 @@ mod rhai_bridge_tests {
     }
 
     #[test]
-    fn replace_defs_global_symbol_no_match_covered() {
+    fn replace_module_global_symbol_no_match_covered() {
         // 行93: 当 source 中没有找到任何匹配项时
         let source = "x = 1; y = 2;";
         let rewritten =
-            replace_defs_global_symbol(source, "shared.hp", "__sl_defs_ns_shared[\"hp\"]");
+            replace_module_global_symbol(source, "shared.hp", "__sl_module_ns_shared[\"hp\"]");
         assert_eq!(rewritten, source);
     }
 

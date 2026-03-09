@@ -8,15 +8,15 @@ struct ParsedModuleHeader {
 enum ParsedModuleChild {
     Type(ParsedTypeDecl),
     Function(ParsedFunctionDecl),
-    DefsGlobalVar(ParsedDefsGlobalVarDecl),
-    DefsGlobalConst(ParsedDefsGlobalConstDecl),
+    ModuleVar(ParsedModuleVarDecl),
+    ModuleConst(ParsedModuleConstDecl),
     Script(ParsedModuleScript),
 }
 
-pub(crate) fn parse_defs_files(
+pub(crate) fn parse_module_files(
     sources: &BTreeMap<String, SourceFile>,
-) -> Result<BTreeMap<String, DefsDeclarations>, ScriptLangError> {
-    let mut defs_by_path = BTreeMap::new();
+) -> Result<BTreeMap<String, ModuleDeclarations>, ScriptLangError> {
+    let mut module_by_path = BTreeMap::new();
 
     for (file_path, source) in sources {
         if !matches!(source.kind, SourceKind::ModuleXml) {
@@ -24,10 +24,10 @@ pub(crate) fn parse_defs_files(
         }
 
         let module = parse_module_source(source, file_path)?;
-        defs_by_path.insert(file_path.clone(), module.defs);
+        module_by_path.insert(file_path.clone(), module.module);
     }
 
-    Ok(defs_by_path)
+    Ok(module_by_path)
 }
 
 pub(crate) fn parse_module_scripts(
@@ -50,7 +50,7 @@ pub(crate) fn parse_module_scripts(
 fn parse_module_source(
     source: &SourceFile,
     file_path: &str,
-) -> Result<ModuleDeclarations, ScriptLangError> {
+) -> Result<ParsedModuleSource, ScriptLangError> {
     if !matches!(source.kind, SourceKind::ModuleXml) {
         return Err(ScriptLangError::new(
             "SOURCE_KIND_UNSUPPORTED",
@@ -84,26 +84,26 @@ fn parse_module_source(
 
     let mut type_decls = Vec::new();
     let mut function_decls = Vec::new();
-    let mut defs_global_var_decls = Vec::new();
-    let mut defs_global_const_decls = Vec::new();
+    let mut module_global_var_decls = Vec::new();
+    let mut module_global_const_decls = Vec::new();
     let mut scripts = Vec::new();
 
     for child in element_children(root) {
         match parse_module_child(child, root, file_path, &namespace, default_access)? {
             ParsedModuleChild::Type(decl) => type_decls.push(decl),
             ParsedModuleChild::Function(decl) => function_decls.push(decl),
-            ParsedModuleChild::DefsGlobalVar(decl) => defs_global_var_decls.push(decl),
-            ParsedModuleChild::DefsGlobalConst(decl) => defs_global_const_decls.push(decl),
+            ParsedModuleChild::ModuleVar(decl) => module_global_var_decls.push(decl),
+            ParsedModuleChild::ModuleConst(decl) => module_global_const_decls.push(decl),
             ParsedModuleChild::Script(script) => scripts.push(script),
         }
     }
 
-    Ok(ModuleDeclarations {
-        defs: DefsDeclarations {
+    Ok(ParsedModuleSource {
+        module: ModuleDeclarations {
             type_decls,
             function_decls,
-            defs_global_var_decls,
-            defs_global_const_decls,
+            module_global_var_decls,
+            module_global_const_decls,
         },
         scripts,
     })
@@ -151,11 +151,11 @@ fn parse_module_child(
                 .map(ParsedModuleChild::Function)
                 .map_err(|error| with_file_context(error, file_path))
         }
-        "var" => parse_defs_global_var_declaration(child, namespace, default_access)
-            .map(ParsedModuleChild::DefsGlobalVar)
+        "var" => parse_module_var_declaration(child, namespace, default_access)
+            .map(ParsedModuleChild::ModuleVar)
             .map_err(|error| with_file_context(error, file_path)),
-        "const" => parse_defs_global_const_declaration(child, namespace, default_access)
-            .map(ParsedModuleChild::DefsGlobalConst)
+        "const" => parse_module_const_declaration(child, namespace, default_access)
+            .map(ParsedModuleChild::ModuleConst)
             .map_err(|error| with_file_context(error, file_path)),
         "script" => {
             let script_name = get_required_non_empty_attr(child, "name")
@@ -185,13 +185,13 @@ fn with_file_context(error: ScriptLangError, file_path: &str) -> ScriptLangError
     with_file_context_shared(error, file_path)
 }
 
-pub(crate) fn parse_defs_global_var_declaration(
+pub(crate) fn parse_module_var_declaration(
     node: &XmlElementNode,
     namespace: &str,
     default_access: AccessLevel,
-) -> Result<ParsedDefsGlobalVarDecl, ScriptLangError> {
-    let parsed = parse_defs_global_binding_declaration(node, namespace, default_access, "var")?;
-    Ok(ParsedDefsGlobalVarDecl {
+) -> Result<ParsedModuleVarDecl, ScriptLangError> {
+    let parsed = parse_module_binding_declaration(node, namespace, default_access, "var")?;
+    Ok(ParsedModuleVarDecl {
         namespace: parsed.namespace,
         name: parsed.name,
         qualified_name: parsed.qualified_name,
@@ -202,13 +202,13 @@ pub(crate) fn parse_defs_global_var_declaration(
     })
 }
 
-pub(crate) fn parse_defs_global_const_declaration(
+pub(crate) fn parse_module_const_declaration(
     node: &XmlElementNode,
     namespace: &str,
     default_access: AccessLevel,
-) -> Result<ParsedDefsGlobalConstDecl, ScriptLangError> {
-    let parsed = parse_defs_global_binding_declaration(node, namespace, default_access, "const")?;
-    Ok(ParsedDefsGlobalConstDecl {
+) -> Result<ParsedModuleConstDecl, ScriptLangError> {
+    let parsed = parse_module_binding_declaration(node, namespace, default_access, "const")?;
+    Ok(ParsedModuleConstDecl {
         namespace: parsed.namespace,
         name: parsed.name,
         qualified_name: parsed.qualified_name,
@@ -219,14 +219,14 @@ pub(crate) fn parse_defs_global_const_declaration(
     })
 }
 
-fn parse_defs_global_binding_declaration(
+fn parse_module_binding_declaration(
     node: &XmlElementNode,
     namespace: &str,
     default_access: AccessLevel,
     tag_name: &str,
-) -> Result<ParsedDefsGlobalVarDecl, ScriptLangError> {
+) -> Result<ParsedModuleVarDecl, ScriptLangError> {
     let name = get_required_non_empty_attr(node, "name")?;
-    assert_name_not_reserved(&name, "defs global", node.location.clone())?;
+    assert_name_not_reserved(&name, "module global", node.location.clone())?;
     let access = parse_access_attr(node, "access", default_access)?;
 
     let type_raw = get_required_non_empty_attr(node, "type")?;
@@ -261,7 +261,7 @@ fn parse_defs_global_binding_declaration(
         Some(inline.trim().to_string())
     };
 
-    Ok(ParsedDefsGlobalVarDecl {
+    Ok(ParsedModuleVarDecl {
         namespace: namespace.to_string(),
         name: name.clone(),
         qualified_name: format!("{}.{}", namespace, name),
@@ -358,20 +358,20 @@ pub(crate) fn json_symbol_regex() -> &'static Regex {
     })
 }
 
-pub(crate) fn resolve_visible_defs(
+pub(crate) fn resolve_visible_module_symbols(
     reachable: &BTreeSet<String>,
-    defs_by_path: &BTreeMap<String, DefsDeclarations>,
+    module_by_path: &BTreeMap<String, ModuleDeclarations>,
     local_module_name: Option<&str>,
-) -> Result<VisibleDefsResolution, ScriptLangError> {
+) -> Result<VisibleModuleResolution, ScriptLangError> {
     let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
     let mut local_type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut namespace_type_aliases: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
 
     for path in reachable {
-        let Some(defs) = defs_by_path.get(path) else {
+        let Some(module) = module_by_path.get(path) else {
             continue;
         };
-        for decl in &defs.type_decls {
+        for decl in &module.type_decls {
             let is_local = local_module_name.is_some_and(|module_name| {
                 decl.qualified_name.starts_with(&format!("{module_name}."))
             });
@@ -440,11 +440,11 @@ pub(crate) fn resolve_visible_defs(
     let mut function_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
     for path in reachable {
-        let Some(defs) = defs_by_path.get(path) else {
+        let Some(module) = module_by_path.get(path) else {
             continue;
         };
 
-        for decl in &defs.function_decls {
+        for decl in &module.function_decls {
             let is_local = local_module_name.is_some_and(|module_name| {
                 decl.qualified_name.starts_with(&format!("{module_name}."))
             });
@@ -529,31 +529,31 @@ pub(crate) fn resolve_visible_defs(
         }
     }
 
-    let mut defs_globals_qualified = BTreeMap::new();
-    let mut defs_global_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut module_vars_qualified = BTreeMap::new();
+    let mut module_global_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for path in reachable {
-        let Some(defs) = defs_by_path.get(path) else {
+        let Some(module) = module_by_path.get(path) else {
             continue;
         };
 
-        for decl in &defs.defs_global_var_decls {
+        for decl in &module.module_global_var_decls {
             let is_local = local_module_name == Some(decl.namespace.as_str());
             if !is_local && decl.access != AccessLevel::Public {
                 continue;
             }
-            if defs_globals_qualified.contains_key(&decl.qualified_name) {
+            if module_vars_qualified.contains_key(&decl.qualified_name) {
                 return Err(ScriptLangError::with_span(
-                    "DEFS_GLOBAL_VAR_DUPLICATE",
+                    "MODULE_GLOBAL_VAR_DUPLICATE",
                     format!(
-                        "Duplicate defs global variable declaration \"{}\".",
+                        "Duplicate module global variable declaration \"{}\".",
                         decl.qualified_name
                     ),
                     decl.location.clone(),
                 ));
             }
-            defs_globals_qualified.insert(
+            module_vars_qualified.insert(
                 decl.qualified_name.clone(),
-                DefsGlobalVarDecl {
+                ModuleVarDecl {
                     namespace: decl.namespace.clone(),
                     name: decl.name.clone(),
                     qualified_name: decl.qualified_name.clone(),
@@ -569,7 +569,7 @@ pub(crate) fn resolve_visible_defs(
                 },
             );
             if is_local {
-                defs_global_short_candidates
+                module_global_short_candidates
                     .entry(decl.name.clone())
                     .or_default()
                     .push(decl.qualified_name.clone());
@@ -577,41 +577,41 @@ pub(crate) fn resolve_visible_defs(
         }
     }
 
-    let mut defs_globals = defs_globals_qualified.clone();
-    for (alias, qualified_names) in defs_global_short_candidates {
+    let mut module_vars = module_vars_qualified.clone();
+    for (alias, qualified_names) in module_global_short_candidates {
         let qualified_name = &qualified_names[0];
-        let decl = defs_globals_qualified
+        let decl = module_vars_qualified
             .get(qualified_name)
             .cloned()
-            .expect("defs global alias target should exist");
-        defs_globals.entry(alias).or_insert(decl);
+            .expect("module global alias target should exist");
+        module_vars.entry(alias).or_insert(decl);
     }
 
-    let mut defs_consts_qualified = BTreeMap::new();
-    let mut defs_const_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut module_consts_qualified = BTreeMap::new();
+    let mut module_const_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for path in reachable {
-        let Some(defs) = defs_by_path.get(path) else {
+        let Some(module) = module_by_path.get(path) else {
             continue;
         };
 
-        for decl in &defs.defs_global_const_decls {
+        for decl in &module.module_global_const_decls {
             let is_local = local_module_name == Some(decl.namespace.as_str());
             if !is_local && decl.access != AccessLevel::Public {
                 continue;
             }
-            if defs_consts_qualified.contains_key(&decl.qualified_name) {
+            if module_consts_qualified.contains_key(&decl.qualified_name) {
                 return Err(ScriptLangError::with_span(
-                    "DEFS_GLOBAL_CONST_DUPLICATE",
+                    "MODULE_GLOBAL_CONST_DUPLICATE",
                     format!(
-                        "Duplicate defs global const declaration \"{}\".",
+                        "Duplicate module global const declaration \"{}\".",
                         decl.qualified_name
                     ),
                     decl.location.clone(),
                 ));
             }
-            defs_consts_qualified.insert(
+            module_consts_qualified.insert(
                 decl.qualified_name.clone(),
-                DefsGlobalConstDecl {
+                ModuleConstDecl {
                     namespace: decl.namespace.clone(),
                     name: decl.name.clone(),
                     qualified_name: decl.qualified_name.clone(),
@@ -627,7 +627,7 @@ pub(crate) fn resolve_visible_defs(
                 },
             );
             if is_local {
-                defs_const_short_candidates
+                module_const_short_candidates
                     .entry(decl.name.clone())
                     .or_default()
                     .push(decl.qualified_name.clone());
@@ -635,26 +635,26 @@ pub(crate) fn resolve_visible_defs(
         }
     }
 
-    let mut defs_consts = defs_consts_qualified.clone();
-    for (alias, qualified_names) in defs_const_short_candidates {
+    let mut module_consts = module_consts_qualified.clone();
+    for (alias, qualified_names) in module_const_short_candidates {
         let qualified_name = &qualified_names[0];
-        let decl = defs_consts_qualified
+        let decl = module_consts_qualified
             .get(qualified_name)
             .cloned()
-            .expect("defs const alias target should exist");
-        defs_consts.entry(alias).or_insert(decl);
+            .expect("module const alias target should exist");
+        module_consts.entry(alias).or_insert(decl);
     }
 
-    Ok((visible_types, functions, defs_globals, defs_consts))
+    Ok((visible_types, functions, module_vars, module_consts))
 }
 
 pub(crate) fn collect_functions_for_bundle(
-    defs_by_path: &BTreeMap<String, DefsDeclarations>,
+    module_by_path: &BTreeMap<String, ModuleDeclarations>,
 ) -> Result<(BTreeMap<String, FunctionDecl>, BTreeSet<String>), ScriptLangError> {
     let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
     let mut type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for defs in defs_by_path.values() {
-        for decl in &defs.type_decls {
+    for module in module_by_path.values() {
+        for decl in &module.type_decls {
             if type_decls_map.contains_key(&decl.qualified_name) {
                 return Err(ScriptLangError::with_span(
                     "TYPE_DECL_DUPLICATE",
@@ -704,8 +704,8 @@ pub(crate) fn collect_functions_for_bundle(
 
     let mut functions = BTreeMap::new();
     let mut public_functions = BTreeSet::new();
-    for defs in defs_by_path.values() {
-        for decl in &defs.function_decls {
+    for module in module_by_path.values() {
+        for decl in &module.function_decls {
             if functions.contains_key(&decl.qualified_name) {
                 return Err(ScriptLangError::with_span(
                     "FUNCTION_DECL_DUPLICATE",
@@ -767,14 +767,14 @@ pub(crate) fn collect_functions_for_bundle(
     Ok((functions, public_functions))
 }
 
-pub(crate) fn collect_defs_globals_for_bundle(
-    defs_by_path: &BTreeMap<String, DefsDeclarations>,
-) -> Result<(BTreeMap<String, DefsGlobalVarDecl>, Vec<String>), ScriptLangError> {
+pub(crate) fn collect_module_vars_for_bundle(
+    module_by_path: &BTreeMap<String, ModuleDeclarations>,
+) -> Result<(BTreeMap<String, ModuleVarDecl>, Vec<String>), ScriptLangError> {
     let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
     let mut type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
-    for defs in defs_by_path.values() {
-        for decl in &defs.type_decls {
+    for module in module_by_path.values() {
+        for decl in &module.type_decls {
             if type_decls_map.contains_key(&decl.qualified_name) {
                 return Err(ScriptLangError::with_span(
                     "TYPE_DECL_DUPLICATE",
@@ -822,23 +822,23 @@ pub(crate) fn collect_defs_globals_for_bundle(
         visible_types.insert(alias.clone(), ty);
     }
 
-    let mut defs_globals = BTreeMap::new();
+    let mut module_vars = BTreeMap::new();
     let mut init_order = Vec::new();
-    for defs in defs_by_path.values() {
-        for decl in &defs.defs_global_var_decls {
-            if defs_globals.contains_key(&decl.qualified_name) {
+    for module in module_by_path.values() {
+        for decl in &module.module_global_var_decls {
+            if module_vars.contains_key(&decl.qualified_name) {
                 return Err(ScriptLangError::with_span(
-                    "DEFS_GLOBAL_VAR_DUPLICATE",
+                    "MODULE_GLOBAL_VAR_DUPLICATE",
                     format!(
-                        "Duplicate defs global variable declaration \"{}\".",
+                        "Duplicate module global variable declaration \"{}\".",
                         decl.qualified_name
                     ),
                     decl.location.clone(),
                 ));
             }
-            defs_globals.insert(
+            module_vars.insert(
                 decl.qualified_name.clone(),
-                DefsGlobalVarDecl {
+                ModuleVarDecl {
                     namespace: decl.namespace.clone(),
                     name: decl.name.clone(),
                     qualified_name: decl.qualified_name.clone(),
@@ -852,19 +852,19 @@ pub(crate) fn collect_defs_globals_for_bundle(
         }
     }
 
-    validate_defs_global_init_order(&defs_globals, &init_order)?;
-    Ok((defs_globals, init_order))
+    validate_module_var_init_order(&module_vars, &init_order)?;
+    Ok((module_vars, init_order))
 }
 
-pub(crate) fn collect_defs_consts_for_bundle(
-    defs_by_path: &BTreeMap<String, DefsDeclarations>,
-    defs_globals: &BTreeMap<String, DefsGlobalVarDecl>,
-) -> Result<(BTreeMap<String, DefsGlobalConstDecl>, Vec<String>), ScriptLangError> {
+pub(crate) fn collect_module_consts_for_bundle(
+    module_by_path: &BTreeMap<String, ModuleDeclarations>,
+    module_vars: &BTreeMap<String, ModuleVarDecl>,
+) -> Result<(BTreeMap<String, ModuleConstDecl>, Vec<String>), ScriptLangError> {
     let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
     let mut type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
-    for defs in defs_by_path.values() {
-        for decl in &defs.type_decls {
+    for module in module_by_path.values() {
+        for decl in &module.type_decls {
             if type_decls_map.contains_key(&decl.qualified_name) {
                 return Err(ScriptLangError::with_span(
                     "TYPE_DECL_DUPLICATE",
@@ -912,23 +912,23 @@ pub(crate) fn collect_defs_consts_for_bundle(
         visible_types.insert(alias.clone(), ty);
     }
 
-    let mut defs_consts = BTreeMap::new();
+    let mut module_consts = BTreeMap::new();
     let mut init_order = Vec::new();
-    for defs in defs_by_path.values() {
-        for decl in &defs.defs_global_const_decls {
-            if defs_consts.contains_key(&decl.qualified_name) {
+    for module in module_by_path.values() {
+        for decl in &module.module_global_const_decls {
+            if module_consts.contains_key(&decl.qualified_name) {
                 return Err(ScriptLangError::with_span(
-                    "DEFS_GLOBAL_CONST_DUPLICATE",
+                    "MODULE_GLOBAL_CONST_DUPLICATE",
                     format!(
-                        "Duplicate defs global const declaration \"{}\".",
+                        "Duplicate module global const declaration \"{}\".",
                         decl.qualified_name
                     ),
                     decl.location.clone(),
                 ));
             }
-            defs_consts.insert(
+            module_consts.insert(
                 decl.qualified_name.clone(),
-                DefsGlobalConstDecl {
+                ModuleConstDecl {
                     namespace: decl.namespace.clone(),
                     name: decl.name.clone(),
                     qualified_name: decl.qualified_name.clone(),
@@ -942,16 +942,16 @@ pub(crate) fn collect_defs_consts_for_bundle(
         }
     }
 
-    validate_defs_const_init_rules(&defs_consts, &init_order, defs_globals)?;
-    Ok((defs_consts, init_order))
+    validate_module_const_init_rules(&module_consts, &init_order, module_vars)?;
+    Ok((module_consts, init_order))
 }
 
-pub(crate) fn validate_defs_global_init_order(
-    defs_globals: &BTreeMap<String, DefsGlobalVarDecl>,
+pub(crate) fn validate_module_var_init_order(
+    module_vars: &BTreeMap<String, ModuleVarDecl>,
     init_order: &[String],
 ) -> Result<(), ScriptLangError> {
     let mut name_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for (qualified, decl) in defs_globals {
+    for (qualified, decl) in module_vars {
         name_candidates
             .entry(qualified.clone())
             .or_default()
@@ -974,9 +974,9 @@ pub(crate) fn validate_defs_global_init_order(
 
     let mut initialized = BTreeSet::new();
     for qualified in init_order {
-        let decl = defs_globals
+        let decl = module_vars
             .get(qualified)
-            .expect("init order should only contain declared defs globals");
+            .expect("init order should only contain declared module globals");
         if let Some(expr) = &decl.initial_value_expr {
             let sanitized = sanitize_rhai_source(expr);
             for (name, target_qualified) in &name_to_qualified {
@@ -985,9 +985,9 @@ pub(crate) fn validate_defs_global_init_order(
                 }
                 if !initialized.contains(target_qualified) {
                     return Err(ScriptLangError::with_span(
-                        "DEFS_GLOBAL_INIT_ORDER",
+                        "MODULE_GLOBAL_INIT_ORDER",
                         format!(
-                            "Defs global \"{}\" initializer references \"{}\" before initialization.",
+                            "Module global \"{}\" initializer references \"{}\" before initialization.",
                             qualified, name
                         ),
                         decl.location.clone(),
@@ -1000,13 +1000,13 @@ pub(crate) fn validate_defs_global_init_order(
     Ok(())
 }
 
-pub(crate) fn validate_defs_const_init_rules(
-    defs_consts: &BTreeMap<String, DefsGlobalConstDecl>,
+pub(crate) fn validate_module_const_init_rules(
+    module_consts: &BTreeMap<String, ModuleConstDecl>,
     init_order: &[String],
-    defs_globals: &BTreeMap<String, DefsGlobalVarDecl>,
+    module_vars: &BTreeMap<String, ModuleVarDecl>,
 ) -> Result<(), ScriptLangError> {
     let mut const_name_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for (qualified, decl) in defs_consts {
+    for (qualified, decl) in module_consts {
         const_name_candidates
             .entry(qualified.clone())
             .or_default()
@@ -1028,7 +1028,7 @@ pub(crate) fn validate_defs_const_init_rules(
         .collect::<BTreeMap<_, _>>();
 
     let mut var_name_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for (qualified, decl) in defs_globals {
+    for (qualified, decl) in module_vars {
         var_name_candidates
             .entry(qualified.clone())
             .or_default()
@@ -1051,17 +1051,17 @@ pub(crate) fn validate_defs_const_init_rules(
 
     let mut initialized = BTreeSet::new();
     for qualified in init_order {
-        let decl = defs_consts
+        let decl = module_consts
             .get(qualified)
-            .expect("init order should only contain declared defs consts");
+            .expect("init order should only contain declared module consts");
         if let Some(expr) = &decl.initial_value_expr {
             let sanitized = sanitize_rhai_source(expr);
             for (name, target_qualified) in &var_name_to_qualified {
                 if contains_root_identifier(&sanitized, name) {
                     return Err(ScriptLangError::with_span(
-                        "DEFS_CONST_INIT_REF_NON_CONST",
+                        "MODULE_CONST_INIT_REF_NON_CONST",
                         format!(
-                            "Defs const \"{}\" initializer references mutable defs global \"{}\".",
+                            "Module const \"{}\" initializer references mutable module global \"{}\".",
                             qualified, name
                         ),
                         decl.location.clone(),
@@ -1069,9 +1069,9 @@ pub(crate) fn validate_defs_const_init_rules(
                 }
                 if contains_root_identifier(&sanitized, target_qualified) {
                     return Err(ScriptLangError::with_span(
-                        "DEFS_CONST_INIT_REF_NON_CONST",
+                        "MODULE_CONST_INIT_REF_NON_CONST",
                         format!(
-                            "Defs const \"{}\" initializer references mutable defs global \"{}\".",
+                            "Module const \"{}\" initializer references mutable module global \"{}\".",
                             qualified, target_qualified
                         ),
                         decl.location.clone(),
@@ -1084,9 +1084,9 @@ pub(crate) fn validate_defs_const_init_rules(
                 }
                 if !initialized.contains(target_qualified) {
                     return Err(ScriptLangError::with_span(
-                        "DEFS_CONST_INIT_ORDER",
+                        "MODULE_CONST_INIT_ORDER",
                         format!(
-                            "Defs const \"{}\" initializer references \"{}\" before initialization.",
+                            "Module const \"{}\" initializer references \"{}\" before initialization.",
                             qualified, name
                         ),
                         decl.location.clone(),
@@ -1101,7 +1101,7 @@ pub(crate) fn validate_defs_const_init_rules(
 }
 
 #[cfg(test)]
-mod defs_resolver_tests {
+mod module_resolver_tests {
     use super::*;
     use crate::compiler_test_support::*;
 
@@ -1115,9 +1115,9 @@ mod defs_resolver_tests {
     }
 
     #[test]
-    fn resolve_visible_defs_builds_function_signatures() {
+    fn resolve_visible_module_symbols_builds_function_signatures() {
         let span = SourceSpan::synthetic();
-        let defs = DefsDeclarations {
+        let module = ModuleDeclarations {
             type_decls: vec![ParsedTypeDecl {
                 name: "Obj".to_string(),
                 qualified_name: "shared.Obj".to_string(),
@@ -1146,28 +1146,28 @@ mod defs_resolver_tests {
                 code: "ret = #{value: seed};".to_string(),
                 location: span.clone(),
             }],
-            defs_global_var_decls: Vec::new(),
-            defs_global_const_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: Vec::new(),
         };
 
         let reachable = BTreeSet::from(["shared.xml".to_string()]);
-        let defs_by_path = BTreeMap::from([("shared.xml".to_string(), defs)]);
+        let module_by_path = BTreeMap::from([("shared.xml".to_string(), module)]);
 
-        let (types, functions, defs_globals, _defs_consts) =
-            resolve_visible_defs(&reachable, &defs_by_path, Some("shared"))
-                .expect("defs should resolve");
+        let (types, functions, module_vars, _module_consts) =
+            resolve_visible_module_symbols(&reachable, &module_by_path, Some("shared"))
+                .expect("module should resolve");
         assert!(types.contains_key("Obj"));
         let function = functions.get("make").expect("function should exist");
         assert_eq!(function.params.len(), 1);
-        assert!(defs_globals.is_empty());
+        assert!(module_vars.is_empty());
         assert_eq!(script_type_kind(&function.return_binding.r#type), "object");
     }
 
     #[test]
-    fn resolve_visible_defs_handles_namespace_collisions_and_alias_edges() {
+    fn resolve_visible_module_symbols_handles_namespace_collisions_and_alias_edges() {
         let span = SourceSpan::synthetic();
 
-        let duplicate_qualified = DefsDeclarations {
+        let duplicate_qualified = ModuleDeclarations {
             type_decls: vec![ParsedTypeDecl {
                 name: "T".to_string(),
                 qualified_name: "shared.T".to_string(),
@@ -1180,26 +1180,26 @@ mod defs_resolver_tests {
                 location: span.clone(),
             }],
             function_decls: Vec::new(),
-            defs_global_var_decls: Vec::new(),
-            defs_global_const_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: Vec::new(),
         };
-        let duplicate_defs_by_path = BTreeMap::from([
+        let duplicate_module_by_path = BTreeMap::from([
             ("a.xml".to_string(), duplicate_qualified.clone()),
             ("b.xml".to_string(), duplicate_qualified),
         ]);
         let duplicate_reachable = BTreeSet::from(["a.xml".to_string(), "b.xml".to_string()]);
-        let duplicate_error = resolve_visible_defs(
+        let duplicate_error = resolve_visible_module_symbols(
             &duplicate_reachable,
-            &duplicate_defs_by_path,
+            &duplicate_module_by_path,
             Some("shared"),
         )
         .expect_err("duplicate qualified type should fail");
         assert_eq!(duplicate_error.code, "TYPE_DECL_DUPLICATE");
 
-        let defs_by_path = BTreeMap::from([
+        let module_by_path = BTreeMap::from([
             (
                 "a.xml".to_string(),
-                DefsDeclarations {
+                ModuleDeclarations {
                     type_decls: Vec::new(),
                     function_decls: vec![ParsedFunctionDecl {
                         name: "doit".to_string(),
@@ -1214,13 +1214,13 @@ mod defs_resolver_tests {
                         code: "out = 1;".to_string(),
                         location: span.clone(),
                     }],
-                    defs_global_var_decls: Vec::new(),
-                    defs_global_const_decls: Vec::new(),
+                    module_global_var_decls: Vec::new(),
+                    module_global_const_decls: Vec::new(),
                 },
             ),
             (
                 "b.xml".to_string(),
-                DefsDeclarations {
+                ModuleDeclarations {
                     type_decls: Vec::new(),
                     function_decls: vec![ParsedFunctionDecl {
                         name: "doit".to_string(),
@@ -1235,15 +1235,15 @@ mod defs_resolver_tests {
                         code: "out = 2;".to_string(),
                         location: span.clone(),
                     }],
-                    defs_global_var_decls: Vec::new(),
-                    defs_global_const_decls: Vec::new(),
+                    module_global_var_decls: Vec::new(),
+                    module_global_const_decls: Vec::new(),
                 },
             ),
         ]);
         let reachable = BTreeSet::from(["a.xml".to_string(), "b.xml".to_string()]);
-        let (_types, functions, defs_globals, _defs_consts) =
-            resolve_visible_defs(&reachable, &defs_by_path, Some("a"))
-                .expect("defs should resolve");
+        let (_types, functions, module_vars, _module_consts) =
+            resolve_visible_module_symbols(&reachable, &module_by_path, Some("a"))
+                .expect("module should resolve");
         assert!(functions.contains_key("a.doit"));
         assert!(functions.contains_key("b.doit"));
         assert!(functions.contains_key("doit"));
@@ -1251,14 +1251,14 @@ mod defs_resolver_tests {
             functions.get("doit").expect("local short alias").name,
             "doit"
         );
-        assert!(defs_globals.is_empty());
+        assert!(module_vars.is_empty());
     }
 
     #[test]
-    fn resolve_visible_defs_rejects_duplicate_function_names() {
+    fn resolve_visible_module_symbols_rejects_duplicate_function_names() {
         let span = SourceSpan::synthetic();
         // Two files with the same function qualified name
-        let duplicate_func = DefsDeclarations {
+        let duplicate_func = ModuleDeclarations {
             type_decls: Vec::new(),
             function_decls: vec![ParsedFunctionDecl {
                 name: "foo".to_string(),
@@ -1273,24 +1273,24 @@ mod defs_resolver_tests {
                 code: "out = 1;".to_string(),
                 location: span.clone(),
             }],
-            defs_global_var_decls: Vec::new(),
-            defs_global_const_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: Vec::new(),
         };
-        let duplicate_defs_by_path = BTreeMap::from([
+        let duplicate_module_by_path = BTreeMap::from([
             ("a.xml".to_string(), duplicate_func.clone()),
             ("b.xml".to_string(), duplicate_func),
         ]);
         let reachable = BTreeSet::from(["a.xml".to_string(), "b.xml".to_string()]);
-        let error = resolve_visible_defs(&reachable, &duplicate_defs_by_path, Some("shared"))
+        let error = resolve_visible_module_symbols(&reachable, &duplicate_module_by_path, Some("shared"))
             .expect_err("duplicate function should fail");
         assert_eq!(error.code, "FUNCTION_DECL_DUPLICATE");
     }
 
     #[test]
-    fn resolve_visible_defs_rejects_unknown_param_type() {
+    fn resolve_visible_module_symbols_rejects_unknown_param_type() {
         let span = SourceSpan::synthetic();
         // Function with param type that doesn't exist
-        let unknown_param_type = DefsDeclarations {
+        let unknown_param_type = ModuleDeclarations {
             type_decls: Vec::new(),
             function_decls: vec![ParsedFunctionDecl {
                 name: "foo".to_string(),
@@ -1309,21 +1309,21 @@ mod defs_resolver_tests {
                 code: "out = 1;".to_string(),
                 location: span.clone(),
             }],
-            defs_global_var_decls: Vec::new(),
-            defs_global_const_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: Vec::new(),
         };
-        let defs_by_path = BTreeMap::from([("a.xml".to_string(), unknown_param_type)]);
+        let module_by_path = BTreeMap::from([("a.xml".to_string(), unknown_param_type)]);
         let reachable = BTreeSet::from(["a.xml".to_string()]);
-        let error = resolve_visible_defs(&reachable, &defs_by_path, Some("shared"))
+        let error = resolve_visible_module_symbols(&reachable, &module_by_path, Some("shared"))
             .expect_err("unknown param type should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
     }
 
     #[test]
-    fn resolve_visible_defs_rejects_unknown_return_type() {
+    fn resolve_visible_module_symbols_rejects_unknown_return_type() {
         let span = SourceSpan::synthetic();
         // Function with return type that doesn't exist
-        let unknown_return_type = DefsDeclarations {
+        let unknown_return_type = ModuleDeclarations {
             type_decls: Vec::new(),
             function_decls: vec![ParsedFunctionDecl {
                 name: "foo".to_string(),
@@ -1338,20 +1338,20 @@ mod defs_resolver_tests {
                 code: "out = 1;".to_string(),
                 location: span.clone(),
             }],
-            defs_global_var_decls: Vec::new(),
-            defs_global_const_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: Vec::new(),
         };
-        let defs_by_path = BTreeMap::from([("a.xml".to_string(), unknown_return_type)]);
+        let module_by_path = BTreeMap::from([("a.xml".to_string(), unknown_return_type)]);
         let reachable = BTreeSet::from(["a.xml".to_string()]);
-        let error = resolve_visible_defs(&reachable, &defs_by_path, Some("shared"))
+        let error = resolve_visible_module_symbols(&reachable, &module_by_path, Some("shared"))
             .expect_err("unknown return type should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
     }
 
     #[test]
-    fn resolve_visible_defs_applies_defs_global_short_alias_rules() {
+    fn resolve_visible_module_symbols_applies_module_global_short_alias_rules() {
         let span = SourceSpan::synthetic();
-        let make_decl = |namespace: &str, name: &str| ParsedDefsGlobalVarDecl {
+        let make_decl = |namespace: &str, name: &str| ParsedModuleVarDecl {
             namespace: namespace.to_string(),
             name: name.to_string(),
             qualified_name: format!("{}.{}", namespace, name),
@@ -1361,19 +1361,19 @@ mod defs_resolver_tests {
             location: span.clone(),
         };
 
-        let unique_defs = BTreeMap::from([(
+        let unique_modules = BTreeMap::from([(
             "a.xml".to_string(),
-            DefsDeclarations {
+            ModuleDeclarations {
                 type_decls: Vec::new(),
                 function_decls: Vec::new(),
-                defs_global_var_decls: vec![make_decl("a", "hp")],
-                defs_global_const_decls: Vec::new(),
+                module_global_var_decls: vec![make_decl("a", "hp")],
+                module_global_const_decls: Vec::new(),
             },
         )]);
         let unique_reachable = BTreeSet::from(["a.xml".to_string()]);
-        let (_types, _functions, unique_globals, _defs_consts) =
-            resolve_visible_defs(&unique_reachable, &unique_defs, Some("a"))
-                .expect("defs should resolve");
+        let (_types, _functions, unique_globals, _module_consts) =
+            resolve_visible_module_symbols(&unique_reachable, &unique_modules, Some("a"))
+                .expect("module should resolve");
         assert!(unique_globals.contains_key("a.hp"));
         assert!(unique_globals.contains_key("hp"));
         assert_eq!(
@@ -1384,30 +1384,30 @@ mod defs_resolver_tests {
             "a.hp"
         );
 
-        let collision_defs = BTreeMap::from([
+        let collision_module = BTreeMap::from([
             (
                 "a.xml".to_string(),
-                DefsDeclarations {
+                ModuleDeclarations {
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
-                    defs_global_var_decls: vec![make_decl("a", "hp")],
-                    defs_global_const_decls: Vec::new(),
+                    module_global_var_decls: vec![make_decl("a", "hp")],
+                    module_global_const_decls: Vec::new(),
                 },
             ),
             (
                 "b.xml".to_string(),
-                DefsDeclarations {
+                ModuleDeclarations {
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
-                    defs_global_var_decls: vec![make_decl("b", "hp")],
-                    defs_global_const_decls: Vec::new(),
+                    module_global_var_decls: vec![make_decl("b", "hp")],
+                    module_global_const_decls: Vec::new(),
                 },
             ),
         ]);
         let collision_reachable = BTreeSet::from(["a.xml".to_string(), "b.xml".to_string()]);
-        let (_types, _functions, collision_globals, _defs_consts) =
-            resolve_visible_defs(&collision_reachable, &collision_defs, Some("a"))
-                .expect("defs should resolve");
+        let (_types, _functions, collision_globals, _module_consts) =
+            resolve_visible_module_symbols(&collision_reachable, &collision_module, Some("a"))
+                .expect("module should resolve");
         assert!(collision_globals.contains_key("a.hp"));
         assert!(collision_globals.contains_key("b.hp"));
         assert!(collision_globals.contains_key("hp"));
@@ -1421,7 +1421,7 @@ mod defs_resolver_tests {
     }
 
     #[test]
-    fn compile_bundle_rejects_defs_global_forward_reference() {
+    fn compile_bundle_rejects_module_global_forward_reference() {
         let files = map(&[
             (
                 "shared.xml",
@@ -1445,11 +1445,11 @@ mod defs_resolver_tests {
 
         let error =
             compile_project_bundle_from_xml_map(&files).expect_err("forward reference should fail");
-        assert_eq!(error.code, "DEFS_GLOBAL_INIT_ORDER");
+        assert_eq!(error.code, "MODULE_GLOBAL_INIT_ORDER");
     }
 
     #[test]
-    fn compile_bundle_allows_defs_global_reference_to_initialized_symbol() {
+    fn compile_bundle_allows_module_global_reference_to_initialized_symbol() {
         let files = map(&[
             (
                 "shared.xml",
@@ -1473,12 +1473,12 @@ mod defs_resolver_tests {
 
         let bundle =
             compile_project_bundle_from_xml_map(&files).expect("back reference should pass");
-        assert!(bundle.defs_global_declarations.contains_key("shared.a"));
-        assert!(bundle.defs_global_declarations.contains_key("shared.b"));
+        assert!(bundle.module_var_declarations.contains_key("shared.a"));
+        assert!(bundle.module_var_declarations.contains_key("shared.b"));
     }
 
     #[test]
-    fn parse_defs_global_var_rejects_value_attr_and_child_elements() {
+    fn parse_module_global_var_rejects_value_attr_and_child_elements() {
         let files_with_value = map(&[
             (
                 "shared.xml",
@@ -1519,7 +1519,7 @@ mod defs_resolver_tests {
     }
 
     #[test]
-    fn parse_defs_global_const_rejects_missing_name_or_type() {
+    fn parse_module_global_const_rejects_missing_name_or_type() {
         // Missing name attribute
         let files_missing_name = map(&[
             (
@@ -1562,7 +1562,7 @@ mod defs_resolver_tests {
     }
 
     #[test]
-    fn parse_defs_const_rejects_invalid_type() {
+    fn parse_module_const_rejects_invalid_type() {
         let files = map(&[
             (
                 "shared.xml",
@@ -1584,15 +1584,15 @@ mod defs_resolver_tests {
     }
 
     #[test]
-    fn resolve_visible_defs_rejects_const_with_unresolved_type() {
+    fn resolve_visible_module_symbols_rejects_const_with_unresolved_type() {
         let span = SourceSpan::synthetic();
-        let defs_with_bad_const = BTreeMap::from([(
+        let module_with_bad_const = BTreeMap::from([(
             "shared.xml".to_string(),
-            DefsDeclarations {
+            ModuleDeclarations {
                 type_decls: Vec::new(),
                 function_decls: Vec::new(),
-                defs_global_var_decls: Vec::new(),
-                defs_global_const_decls: vec![ParsedDefsGlobalConstDecl {
+                module_global_var_decls: Vec::new(),
+                module_global_const_decls: vec![ParsedModuleConstDecl {
                     namespace: "shared".to_string(),
                     name: "base".to_string(),
                     qualified_name: "shared.base".to_string(),
@@ -1604,13 +1604,13 @@ mod defs_resolver_tests {
             },
         )]);
         let reachable = BTreeSet::from(["shared.xml".to_string()]);
-        let error = resolve_visible_defs(&reachable, &defs_with_bad_const, Some("shared"))
+        let error = resolve_visible_module_symbols(&reachable, &module_with_bad_const, Some("shared"))
             .expect_err("unresolved type should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
     }
 
     #[test]
-    fn defs_global_resolution_rejects_duplicates_and_allows_empty_initializer() {
+    fn module_global_resolution_rejects_duplicates_and_allows_empty_initializer() {
         let duplicate_types_bundle = map(&[
             (
                 "a.xml",
@@ -1637,8 +1637,8 @@ mod defs_resolver_tests {
         ]);
         let duplicate_globals_error =
             compile_project_bundle_from_xml_map(&duplicate_globals_bundle)
-                .expect_err("bundle duplicate defs global should fail");
-        assert_eq!(duplicate_globals_error.code, "DEFS_GLOBAL_VAR_DUPLICATE");
+                .expect_err("bundle duplicate module global should fail");
+        assert_eq!(duplicate_globals_error.code, "MODULE_GLOBAL_VAR_DUPLICATE");
 
         let empty_initializer = map(&[
             (
@@ -1657,16 +1657,16 @@ mod defs_resolver_tests {
         ]);
         let bundle = compile_project_bundle_from_xml_map(&empty_initializer).expect("compile");
         let decl = bundle
-            .defs_global_declarations
+            .module_var_declarations
             .get("shared.hp")
             .expect("decl should exist");
         assert!(decl.initial_value_expr.is_none());
     }
 
     #[test]
-    fn resolve_visible_defs_rejects_duplicate_defs_global_in_closure() {
+    fn resolve_visible_module_symbols_rejects_duplicate_module_global_in_closure() {
         let span = SourceSpan::synthetic();
-        let duplicate = ParsedDefsGlobalVarDecl {
+        let duplicate = ParsedModuleVarDecl {
             namespace: "shared".to_string(),
             name: "hp".to_string(),
             qualified_name: "shared.hp".to_string(),
@@ -1675,30 +1675,30 @@ mod defs_resolver_tests {
             initial_value_expr: Some("1".to_string()),
             location: span.clone(),
         };
-        let defs_by_path = BTreeMap::from([
+        let module_by_path = BTreeMap::from([
             (
                 "a.xml".to_string(),
-                DefsDeclarations {
+                ModuleDeclarations {
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
-                    defs_global_var_decls: vec![duplicate.clone()],
-                    defs_global_const_decls: Vec::new(),
+                    module_global_var_decls: vec![duplicate.clone()],
+                    module_global_const_decls: Vec::new(),
                 },
             ),
             (
                 "b.xml".to_string(),
-                DefsDeclarations {
+                ModuleDeclarations {
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
-                    defs_global_var_decls: vec![duplicate],
-                    defs_global_const_decls: Vec::new(),
+                    module_global_var_decls: vec![duplicate],
+                    module_global_const_decls: Vec::new(),
                 },
             ),
         ]);
         let reachable = BTreeSet::from(["a.xml".to_string(), "b.xml".to_string()]);
-        let error = resolve_visible_defs(&reachable, &defs_by_path, Some("a"))
-            .expect_err("duplicate defs global should fail");
-        assert_eq!(error.code, "DEFS_GLOBAL_VAR_DUPLICATE");
+        let error = resolve_visible_module_symbols(&reachable, &module_by_path, Some("a"))
+            .expect_err("duplicate module global should fail");
+        assert_eq!(error.code, "MODULE_GLOBAL_VAR_DUPLICATE");
     }
 
     #[test]
@@ -1715,12 +1715,12 @@ mod defs_resolver_tests {
     }
 
     #[test]
-    fn defs_and_type_resolution_helpers_cover_duplicate_and_recursive_errors() {
-        let bad_defs = BTreeMap::from([(
+    fn module_and_type_resolution_helpers_cover_duplicate_and_recursive_errors() {
+        let bad_module = BTreeMap::from([(
             "x.xml".to_string(),
             "<script name=\"x\"></script>".to_string(),
         )]);
-        let error = compile_project_bundle_from_xml_map(&bad_defs).expect_err("bad defs root");
+        let error = compile_project_bundle_from_xml_map(&bad_module).expect_err("bad module root");
         assert_eq!(error.code, "XML_ROOT_INVALID");
 
         let duplicate_types = map(&[
@@ -1768,8 +1768,8 @@ mod defs_resolver_tests {
     }
 
     #[test]
-    fn defs_function_parsing_and_resolution_is_covered() {
-        // Test defs function parsing (covers line 40)
+    fn module_function_parsing_and_resolution_is_covered() {
+        // Test module function parsing (covers line 40)
         let files = map(&[
             (
                 "shared.xml",
@@ -1797,7 +1797,7 @@ mod defs_resolver_tests {
     }
 
     #[test]
-    fn parse_defs_files_and_type_resolution_success_paths_are_covered() {
+    fn parse_module_files_and_type_resolution_success_paths_are_covered() {
         let files = map(&[(
             "shared.xml",
             r#"<module name="shared" default_access="public">
@@ -1808,16 +1808,16 @@ mod defs_resolver_tests {
 </module>"#,
         )]);
         let sources = parse_sources(&files).expect("parse sources");
-        let defs_by_path = parse_defs_files(&sources).expect("parse defs");
+        let module_by_path = parse_module_files(&sources).expect("parse module");
         let reachable = BTreeSet::from(["shared.xml".to_string()]);
-        let (types, functions, _, _defs_consts) =
-            resolve_visible_defs(&reachable, &defs_by_path, Some("shared")).expect("resolve defs");
+        let (types, functions, _, _module_consts) =
+            resolve_visible_module_symbols(&reachable, &module_by_path, Some("shared")).expect("resolve module");
         assert!(types.contains_key("shared.Obj"));
         assert!(functions.contains_key("shared.make"));
     }
 
     #[test]
-    fn parse_defs_files_attaches_file_path_for_defs_errors() {
+    fn parse_module_files_attaches_file_path_for_module_errors() {
         let files = map(&[(
             "bad.xml",
             r#"<module name="shared" default_access="public">
@@ -1825,7 +1825,7 @@ mod defs_resolver_tests {
 </module>"#,
         )]);
         let sources = parse_sources(&files).expect("parse sources");
-        let error = parse_defs_files(&sources).expect_err("defs parse should fail");
+        let error = parse_module_files(&sources).expect_err("module parse should fail");
         assert_eq!(error.code, "XML_MODULE_CHILD_INVALID");
         assert!(error.message.contains("In file \"bad.xml\":"));
     }
@@ -1844,7 +1844,7 @@ mod defs_resolver_tests {
     }
 
     #[test]
-    fn parse_defs_files_wraps_attr_reserved_and_function_parse_errors_with_file_context() {
+    fn parse_module_files_wraps_attr_reserved_and_function_parse_errors_with_file_context() {
         let missing_name_error = parse_sources(&BTreeMap::from([(
             "missing-name.xml".to_string(),
             "<module></module>".to_string(),
@@ -1861,7 +1861,7 @@ mod defs_resolver_tests {
         )]);
         let reserved_name_sources = parse_sources(&reserved_name).expect("parse sources");
         let reserved_name_error =
-            parse_defs_files(&reserved_name_sources).expect_err("reserved name should fail");
+            parse_module_files(&reserved_name_sources).expect_err("reserved name should fail");
         assert!(reserved_name_error
             .message
             .contains("In file \"reserved.xml\":"));
@@ -1876,21 +1876,21 @@ mod defs_resolver_tests {
         )]);
         let bad_function_sources = parse_sources(&bad_function).expect("parse sources");
         let bad_function_error =
-            parse_defs_files(&bad_function_sources).expect_err("bad function should fail");
+            parse_module_files(&bad_function_sources).expect_err("bad function should fail");
         assert!(bad_function_error
             .message
             .contains("In file \"bad-function.xml\":"));
     }
 
     #[test]
-    fn parse_defs_global_var_declaration_covers_success_and_error_paths() {
+    fn parse_module_var_declaration_covers_success_and_error_paths() {
         let node = xml_element(
             "var",
             &[("name", "hp"), ("type", "int")],
             vec![xml_text("1")],
         );
-        let parsed = parse_defs_global_var_declaration(&node, "shared", AccessLevel::Private)
-            .expect("parse defs var");
+        let parsed = parse_module_var_declaration(&node, "shared", AccessLevel::Private)
+            .expect("parse module var");
         assert_eq!(parsed.qualified_name, "shared.hp");
         assert_eq!(parsed.initial_value_expr.as_deref(), Some("1"));
 
@@ -1900,7 +1900,7 @@ mod defs_resolver_tests {
             vec![xml_text("1")],
         );
         let error =
-            parse_defs_global_var_declaration(&reserved_name, "shared", AccessLevel::Private)
+            parse_module_var_declaration(&reserved_name, "shared", AccessLevel::Private)
                 .expect_err("reserved name should fail");
         assert_eq!(error.code, "NAME_RESERVED_PREFIX");
 
@@ -1910,19 +1910,19 @@ mod defs_resolver_tests {
             vec![xml_text("1")],
         );
         let error =
-            parse_defs_global_var_declaration(&invalid_type, "shared", AccessLevel::Private)
+            parse_module_var_declaration(&invalid_type, "shared", AccessLevel::Private)
                 .expect_err("bad type");
         assert_eq!(error.code, "TYPE_PARSE_ERROR");
 
         let missing_name = xml_element("var", &[("type", "int")], vec![xml_text("1")]);
         let error =
-            parse_defs_global_var_declaration(&missing_name, "shared", AccessLevel::Private)
+            parse_module_var_declaration(&missing_name, "shared", AccessLevel::Private)
                 .expect_err("name should be required");
         assert_eq!(error.code, "XML_MISSING_ATTR");
 
         let missing_type = xml_element("var", &[("name", "hp")], vec![xml_text("1")]);
         let error =
-            parse_defs_global_var_declaration(&missing_type, "shared", AccessLevel::Private)
+            parse_module_var_declaration(&missing_type, "shared", AccessLevel::Private)
                 .expect_err("type should be required");
         assert_eq!(error.code, "XML_MISSING_ATTR");
 
@@ -1933,7 +1933,7 @@ mod defs_resolver_tests {
             vec![xml_text("100")],
         );
         let parsed =
-            parse_defs_global_var_declaration(&with_access, "shared", AccessLevel::Private)
+            parse_module_var_declaration(&with_access, "shared", AccessLevel::Private)
                 .expect("var with access should parse");
         assert_eq!(parsed.access, AccessLevel::Public);
 
@@ -1977,11 +1977,11 @@ mod defs_resolver_tests {
     }
 
     #[test]
-    fn resolve_visible_defs_error_propagation_and_alias_paths_are_covered() {
+    fn resolve_visible_module_symbols_error_propagation_and_alias_paths_are_covered() {
         let span = SourceSpan::synthetic();
-        let defs_with_alias = BTreeMap::from([(
+        let module_with_alias = BTreeMap::from([(
             "one.xml".to_string(),
-            DefsDeclarations {
+            ModuleDeclarations {
                 type_decls: vec![ParsedTypeDecl {
                     name: "Obj".to_string(),
                     qualified_name: "one.Obj".to_string(),
@@ -2010,7 +2010,7 @@ mod defs_resolver_tests {
                     code: "ret = #{v: x};".to_string(),
                     location: span.clone(),
                 }],
-                defs_global_var_decls: vec![ParsedDefsGlobalVarDecl {
+                module_global_var_decls: vec![ParsedModuleVarDecl {
                     namespace: "one".to_string(),
                     name: "hp".to_string(),
                     qualified_name: "one.hp".to_string(),
@@ -2019,16 +2019,16 @@ mod defs_resolver_tests {
                     initial_value_expr: None,
                     location: span.clone(),
                 }],
-                defs_global_const_decls: Vec::new(),
+                module_global_const_decls: Vec::new(),
             },
         )]);
         let reachable = BTreeSet::from(["one.xml".to_string()]);
-        let (types, functions, defs_globals, _defs_consts) =
-            resolve_visible_defs(&reachable, &defs_with_alias, Some("one"))
+        let (types, functions, module_vars, _module_consts) =
+            resolve_visible_module_symbols(&reachable, &module_with_alias, Some("one"))
                 .expect("resolve aliases");
         assert!(types.contains_key("Obj"));
         assert!(functions.contains_key("make"));
-        assert!(defs_globals.contains_key("hp"));
+        assert!(module_vars.contains_key("hp"));
         assert_eq!(
             script_type_kind(
                 types
@@ -2038,9 +2038,9 @@ mod defs_resolver_tests {
             "object"
         );
 
-        let defs_for_bundle = BTreeMap::from([(
+        let module_for_bundle = BTreeMap::from([(
             "bundle.xml".to_string(),
-            DefsDeclarations {
+            ModuleDeclarations {
                 type_decls: vec![ParsedTypeDecl {
                     name: "T".to_string(),
                     qualified_name: "bundle.T".to_string(),
@@ -2053,7 +2053,7 @@ mod defs_resolver_tests {
                     location: span.clone(),
                 }],
                 function_decls: Vec::new(),
-                defs_global_var_decls: vec![ParsedDefsGlobalVarDecl {
+                module_global_var_decls: vec![ParsedModuleVarDecl {
                     namespace: "bundle".to_string(),
                     name: "item".to_string(),
                     qualified_name: "bundle.item".to_string(),
@@ -2062,17 +2062,17 @@ mod defs_resolver_tests {
                     initial_value_expr: None,
                     location: span.clone(),
                 }],
-                defs_global_const_decls: Vec::new(),
+                module_global_const_decls: Vec::new(),
             },
         )]);
         let (bundle_globals, init_order) =
-            collect_defs_globals_for_bundle(&defs_for_bundle).expect("bundle alias should resolve");
+            collect_module_vars_for_bundle(&module_for_bundle).expect("bundle alias should resolve");
         assert!(bundle_globals.contains_key("bundle.item"));
         assert_eq!(init_order, vec!["bundle.item".to_string()]);
 
         let bad_type_decl = BTreeMap::from([(
             "bad_type.xml".to_string(),
-            DefsDeclarations {
+            ModuleDeclarations {
                 type_decls: vec![ParsedTypeDecl {
                     name: "Broken".to_string(),
                     qualified_name: "bad_type.Broken".to_string(),
@@ -2085,18 +2085,18 @@ mod defs_resolver_tests {
                     location: span.clone(),
                 }],
                 function_decls: Vec::new(),
-                defs_global_var_decls: Vec::new(),
-                defs_global_const_decls: Vec::new(),
+                module_global_var_decls: Vec::new(),
+                module_global_const_decls: Vec::new(),
             },
         )]);
         let reachable = BTreeSet::from(["bad_type.xml".to_string()]);
-        let error = resolve_visible_defs(&reachable, &bad_type_decl, Some("bad_type"))
+        let error = resolve_visible_module_symbols(&reachable, &bad_type_decl, Some("bad_type"))
             .expect_err("type resolution in visible loop should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
 
         let alias_already_exists = BTreeMap::from([(
             "alias.xml".to_string(),
-            DefsDeclarations {
+            ModuleDeclarations {
                 type_decls: Vec::new(),
                 function_decls: vec![ParsedFunctionDecl {
                     name: "make".to_string(),
@@ -2111,19 +2111,19 @@ mod defs_resolver_tests {
                     code: "ret = 1;".to_string(),
                     location: span.clone(),
                 }],
-                defs_global_var_decls: Vec::new(),
-                defs_global_const_decls: Vec::new(),
+                module_global_var_decls: Vec::new(),
+                module_global_const_decls: Vec::new(),
             },
         )]);
         let reachable = BTreeSet::from(["alias.xml".to_string()]);
-        let (_types, alias_functions, _defs_globals, _defs_consts) =
-            resolve_visible_defs(&reachable, &alias_already_exists, None)
+        let (_types, alias_functions, _module_vars, _module_consts) =
+            resolve_visible_module_symbols(&reachable, &alias_already_exists, None)
                 .expect("existing alias key should skip insertion branch");
         assert!(alias_functions.contains_key("make"));
 
         let malformed_local_names = BTreeMap::from([(
             "odd.xml".to_string(),
-            DefsDeclarations {
+            ModuleDeclarations {
                 type_decls: vec![ParsedTypeDecl {
                     name: "Obj".to_string(),
                     qualified_name: "Obj".to_string(),
@@ -2163,13 +2163,13 @@ mod defs_resolver_tests {
                         location: span.clone(),
                     },
                 ],
-                defs_global_var_decls: Vec::new(),
-                defs_global_const_decls: Vec::new(),
+                module_global_var_decls: Vec::new(),
+                module_global_const_decls: Vec::new(),
             },
         )]);
         let reachable = BTreeSet::from(["odd.xml".to_string()]);
-        let (malformed_types, malformed_functions, _defs_globals, _defs_consts) =
-            resolve_visible_defs(&reachable, &malformed_local_names, Some("odd"))
+        let (malformed_types, malformed_functions, _module_vars, _module_consts) =
+            resolve_visible_module_symbols(&reachable, &malformed_local_names, Some("odd"))
                 .expect("malformed aliases should still resolve without duplicate insert");
         assert!(malformed_types.contains_key("Obj"));
         assert_eq!(
@@ -2182,7 +2182,7 @@ mod defs_resolver_tests {
 
         let bad_param = BTreeMap::from([(
             "bad.xml".to_string(),
-            DefsDeclarations {
+            ModuleDeclarations {
                 type_decls: Vec::new(),
                 function_decls: vec![ParsedFunctionDecl {
                     name: "f".to_string(),
@@ -2201,18 +2201,18 @@ mod defs_resolver_tests {
                     code: "ret = 1;".to_string(),
                     location: span.clone(),
                 }],
-                defs_global_var_decls: Vec::new(),
-                defs_global_const_decls: Vec::new(),
+                module_global_var_decls: Vec::new(),
+                module_global_const_decls: Vec::new(),
             },
         )]);
         let reachable = BTreeSet::from(["bad.xml".to_string()]);
-        let error = resolve_visible_defs(&reachable, &bad_param, Some("bad"))
+        let error = resolve_visible_module_symbols(&reachable, &bad_param, Some("bad"))
             .expect_err("function param type should resolve");
         assert_eq!(error.code, "TYPE_UNKNOWN");
 
         let bad_return = BTreeMap::from([(
             "bad.xml".to_string(),
-            DefsDeclarations {
+            ModuleDeclarations {
                 type_decls: Vec::new(),
                 function_decls: vec![ParsedFunctionDecl {
                     name: "f".to_string(),
@@ -2227,21 +2227,21 @@ mod defs_resolver_tests {
                     code: "ret = 1;".to_string(),
                     location: span.clone(),
                 }],
-                defs_global_var_decls: Vec::new(),
-                defs_global_const_decls: Vec::new(),
+                module_global_var_decls: Vec::new(),
+                module_global_const_decls: Vec::new(),
             },
         )]);
         let reachable = BTreeSet::from(["bad.xml".to_string()]);
-        let error = resolve_visible_defs(&reachable, &bad_return, Some("bad"))
+        let error = resolve_visible_module_symbols(&reachable, &bad_return, Some("bad"))
             .expect_err("function return type should resolve");
         assert_eq!(error.code, "TYPE_UNKNOWN");
 
         let bad_global_type = BTreeMap::from([(
             "bad.xml".to_string(),
-            DefsDeclarations {
+            ModuleDeclarations {
                 type_decls: Vec::new(),
                 function_decls: Vec::new(),
-                defs_global_var_decls: vec![ParsedDefsGlobalVarDecl {
+                module_global_var_decls: vec![ParsedModuleVarDecl {
                     namespace: "bad".to_string(),
                     name: "hp".to_string(),
                     qualified_name: "bad.hp".to_string(),
@@ -2250,16 +2250,16 @@ mod defs_resolver_tests {
                     initial_value_expr: None,
                     location: span.clone(),
                 }],
-                defs_global_const_decls: Vec::new(),
+                module_global_const_decls: Vec::new(),
             },
         )]);
         let reachable = BTreeSet::from(["bad.xml".to_string()]);
-        let error = resolve_visible_defs(&reachable, &bad_global_type, Some("bad"))
-            .expect_err("defs global type should resolve");
+        let error = resolve_visible_module_symbols(&reachable, &bad_global_type, Some("bad"))
+            .expect_err("module global type should resolve");
         assert_eq!(error.code, "TYPE_UNKNOWN");
 
-        let bundle_error = collect_defs_globals_for_bundle(&bad_global_type)
-            .expect_err("bundle defs global type should resolve");
+        let bundle_error = collect_module_vars_for_bundle(&bad_global_type)
+            .expect_err("bundle module global type should resolve");
         assert_eq!(bundle_error.code, "TYPE_UNKNOWN");
 
         assert_eq!(
@@ -2297,13 +2297,13 @@ mod defs_resolver_tests {
 
         let module_scripts = parse_module_scripts(&sources).expect("module scripts should parse");
         assert_eq!(module_scripts["battle.xml"].len(), 1);
-        assert!(parse_defs_files(&sources).is_ok());
+        assert!(parse_module_files(&sources).is_ok());
 
         let bad_root = SourceFile {
             kind: SourceKind::ModuleXml,
             imports: Vec::new(),
             xml_root: Some(compiler_test_support::xml_element(
-                "defs",
+                "script",
                 &[("name", "x")],
                 Vec::new(),
             )),
@@ -2382,7 +2382,7 @@ mod defs_resolver_tests {
     }
 
     #[test]
-    fn defs_resolution_helpers_cover_json_and_missing_path_branches() {
+    fn module_resolution_helpers_cover_json_and_missing_path_branches() {
         let json_source = SourceFile {
             kind: SourceKind::Json,
             imports: Vec::new(),
@@ -2403,7 +2403,7 @@ mod defs_resolver_tests {
             ("main.xml".to_string(), module_source),
             ("shared.json".to_string(), json_source.clone()),
         ]);
-        assert!(parse_defs_files(&sources).is_ok());
+        assert!(parse_module_files(&sources).is_ok());
         assert!(parse_module_scripts(&sources).is_ok());
 
         let duplicate_json = collect_global_json(&BTreeMap::from([
@@ -2465,9 +2465,9 @@ mod defs_resolver_tests {
         assert_eq!(visible, vec!["game".to_string()]);
 
         let span = SourceSpan::synthetic();
-        let defs_by_path = BTreeMap::from([(
+        let module_by_path = BTreeMap::from([(
             "main.xml".to_string(),
-            DefsDeclarations {
+            ModuleDeclarations {
                 type_decls: vec![ParsedTypeDecl {
                     name: "Player".to_string(),
                     qualified_name: "main.Player".to_string(),
@@ -2492,7 +2492,7 @@ mod defs_resolver_tests {
                     code: "out = 1;".to_string(),
                     location: span.clone(),
                 }],
-                defs_global_var_decls: vec![ParsedDefsGlobalVarDecl {
+                module_global_var_decls: vec![ParsedModuleVarDecl {
                     namespace: "main".to_string(),
                     name: "hp".to_string(),
                     qualified_name: "main.hp".to_string(),
@@ -2501,20 +2501,20 @@ mod defs_resolver_tests {
                     initial_value_expr: None,
                     location: span,
                 }],
-                defs_global_const_decls: Vec::new(),
+                module_global_const_decls: Vec::new(),
             },
         )]);
         let reachable = BTreeSet::from(["main.xml".to_string(), "missing.xml".to_string()]);
-        let (types, functions, defs_globals, _defs_consts) =
-            resolve_visible_defs(&reachable, &defs_by_path, Some("main"))
+        let (types, functions, module_vars, _module_consts) =
+            resolve_visible_module_symbols(&reachable, &module_by_path, Some("main"))
                 .expect("missing paths in reachable closure should be skipped");
         assert!(types.contains_key("Player"));
         assert!(functions.contains_key("boost"));
-        assert!(defs_globals.contains_key("hp"));
+        assert!(module_vars.contains_key("hp"));
     }
 
     #[test]
-    fn parse_defs_global_var_rejects_invalid_access() {
+    fn parse_module_global_var_rejects_invalid_access() {
         let files = map(&[
             (
                 "shared.xml",
@@ -2546,10 +2546,10 @@ mod defs_resolver_tests {
         )]);
         let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
         assert!(bundle
-            .defs_global_const_declarations
+            .module_const_declarations
             .contains_key("main.base"));
         assert_eq!(
-            bundle.defs_global_const_init_order,
+            bundle.module_const_init_order,
             vec!["main.base".to_string()]
         );
     }
@@ -2566,7 +2566,7 @@ mod defs_resolver_tests {
         )]);
         let error = compile_project_bundle_from_xml_map(&files)
             .expect_err("const initializer referencing var should fail");
-        assert_eq!(error.code, "DEFS_CONST_INIT_REF_NON_CONST");
+        assert_eq!(error.code, "MODULE_CONST_INIT_REF_NON_CONST");
 
         let files_qualified = map(&[(
             "main.xml",
@@ -2578,13 +2578,13 @@ mod defs_resolver_tests {
         )]);
         let qualified_error = compile_project_bundle_from_xml_map(&files_qualified)
             .expect_err("const initializer referencing qualified var should fail");
-        assert_eq!(qualified_error.code, "DEFS_CONST_INIT_REF_NON_CONST");
+        assert_eq!(qualified_error.code, "MODULE_CONST_INIT_REF_NON_CONST");
     }
 
     #[test]
-    fn resolve_visible_defs_skips_private_types_from_non_local_module() {
+    fn resolve_visible_module_symbols_skips_private_types_from_non_local_module() {
         let span = SourceSpan::synthetic();
-        let defs = DefsDeclarations {
+        let module = ModuleDeclarations {
             type_decls: vec![ParsedTypeDecl {
                 name: "Secret".to_string(),
                 qualified_name: "other.Secret".to_string(),
@@ -2597,28 +2597,28 @@ mod defs_resolver_tests {
                 location: span.clone(),
             }],
             function_decls: Vec::new(),
-            defs_global_var_decls: Vec::new(),
-            defs_global_const_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: Vec::new(),
         };
 
         let reachable = BTreeSet::from(["other.xml".to_string()]);
-        let defs_by_path = BTreeMap::from([("other.xml".to_string(), defs)]);
+        let module_by_path = BTreeMap::from([("other.xml".to_string(), module)]);
 
         // Query from module "main" should NOT see "other.Secret" because it's private
-        let (types, functions, defs_globals, _defs_consts) =
-            resolve_visible_defs(&reachable, &defs_by_path, Some("main")).expect("should resolve");
+        let (types, functions, module_vars, _module_consts) =
+            resolve_visible_module_symbols(&reachable, &module_by_path, Some("main")).expect("should resolve");
         assert!(
             !types.contains_key("Secret"),
             "private type from non-local should be hidden"
         );
         assert!(functions.is_empty());
-        assert!(defs_globals.is_empty());
+        assert!(module_vars.is_empty());
     }
 
     #[test]
-    fn resolve_visible_defs_skips_private_functions_from_non_local_module() {
+    fn resolve_visible_module_symbols_skips_private_functions_from_non_local_module() {
         let span = SourceSpan::synthetic();
-        let defs = DefsDeclarations {
+        let module = ModuleDeclarations {
             type_decls: Vec::new(),
             function_decls: vec![ParsedFunctionDecl {
                 name: "hidden".to_string(),
@@ -2633,32 +2633,32 @@ mod defs_resolver_tests {
                 code: "out = 1;".to_string(),
                 location: span.clone(),
             }],
-            defs_global_var_decls: Vec::new(),
-            defs_global_const_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: Vec::new(),
         };
 
         let reachable = BTreeSet::from(["other.xml".to_string()]);
-        let defs_by_path = BTreeMap::from([("other.xml".to_string(), defs)]);
+        let module_by_path = BTreeMap::from([("other.xml".to_string(), module)]);
 
         // Query from module "main" should NOT see "other.hidden" because it's private
-        let (types, functions, defs_globals, _defs_consts) =
-            resolve_visible_defs(&reachable, &defs_by_path, Some("main")).expect("should resolve");
+        let (types, functions, module_vars, _module_consts) =
+            resolve_visible_module_symbols(&reachable, &module_by_path, Some("main")).expect("should resolve");
         assert!(types.is_empty());
         assert!(
             !functions.contains_key("hidden"),
             "private function from non-local should be hidden"
         );
-        assert!(defs_globals.is_empty());
+        assert!(module_vars.is_empty());
     }
 
     #[test]
-    fn parse_defs_global_const_declaration_validates_shape() {
+    fn parse_module_const_declaration_validates_shape() {
         let node = xml_element(
             "const",
             &[("name", "base"), ("type", "int")],
             vec![xml_text("7")],
         );
-        let parsed = parse_defs_global_const_declaration(&node, "main", AccessLevel::Private)
+        let parsed = parse_module_const_declaration(&node, "main", AccessLevel::Private)
             .expect("const should parse");
         assert_eq!(parsed.qualified_name, "main.base");
 
@@ -2668,7 +2668,7 @@ mod defs_resolver_tests {
             vec![],
         );
         let value_error =
-            parse_defs_global_const_declaration(&with_value, "main", AccessLevel::Private)
+            parse_module_const_declaration(&with_value, "main", AccessLevel::Private)
                 .expect_err("value attr should fail");
         assert_eq!(value_error.code, "XML_ATTR_NOT_ALLOWED");
 
@@ -2682,23 +2682,23 @@ mod defs_resolver_tests {
             ))],
         );
         let child_error =
-            parse_defs_global_const_declaration(&with_child, "main", AccessLevel::Private)
+            parse_module_const_declaration(&with_child, "main", AccessLevel::Private)
                 .expect_err("child should fail");
         assert_eq!(child_error.code, "XML_VAR_CHILD_INVALID");
     }
 
     #[test]
-    fn resolve_visible_defs_includes_public_consts_and_local_private_consts() {
+    fn resolve_visible_module_symbols_includes_public_consts_and_local_private_consts() {
         let span = SourceSpan::synthetic();
-        let defs_by_path = BTreeMap::from([
+        let module_by_path = BTreeMap::from([
             (
                 "main.xml".to_string(),
-                DefsDeclarations {
+                ModuleDeclarations {
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
-                    defs_global_var_decls: Vec::new(),
-                    defs_global_const_decls: vec![
-                        ParsedDefsGlobalConstDecl {
+                    module_global_var_decls: Vec::new(),
+                    module_global_const_decls: vec![
+                        ParsedModuleConstDecl {
                             namespace: "main".to_string(),
                             name: "localConst".to_string(),
                             qualified_name: "main.localConst".to_string(),
@@ -2707,7 +2707,7 @@ mod defs_resolver_tests {
                             initial_value_expr: Some("1".to_string()),
                             location: span.clone(),
                         },
-                        ParsedDefsGlobalConstDecl {
+                        ParsedModuleConstDecl {
                             namespace: "main".to_string(),
                             name: "sharedConst".to_string(),
                             qualified_name: "main.sharedConst".to_string(),
@@ -2721,11 +2721,11 @@ mod defs_resolver_tests {
             ),
             (
                 "other.xml".to_string(),
-                DefsDeclarations {
+                ModuleDeclarations {
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
-                    defs_global_var_decls: Vec::new(),
-                    defs_global_const_decls: vec![ParsedDefsGlobalConstDecl {
+                    module_global_var_decls: Vec::new(),
+                    module_global_const_decls: vec![ParsedModuleConstDecl {
                         namespace: "other".to_string(),
                         name: "hidden".to_string(),
                         qualified_name: "other.hidden".to_string(),
@@ -2738,19 +2738,19 @@ mod defs_resolver_tests {
             ),
         ]);
         let reachable = BTreeSet::from(["main.xml".to_string(), "other.xml".to_string()]);
-        let (_types, _functions, _defs_globals, defs_consts) =
-            resolve_visible_defs(&reachable, &defs_by_path, Some("main")).expect("resolve");
-        assert!(defs_consts.contains_key("main.localConst"));
-        assert!(defs_consts.contains_key("sharedConst"));
-        assert!(!defs_consts.contains_key("other.hidden"));
+        let (_types, _functions, _module_vars, module_consts) =
+            resolve_visible_module_symbols(&reachable, &module_by_path, Some("main")).expect("resolve");
+        assert!(module_consts.contains_key("main.localConst"));
+        assert!(module_consts.contains_key("sharedConst"));
+        assert!(!module_consts.contains_key("other.hidden"));
     }
 
     #[test]
-    fn collect_defs_consts_for_bundle_rejects_duplicate_and_forward_reference() {
+    fn collect_module_consts_for_bundle_rejects_duplicate_and_forward_reference() {
         let span = SourceSpan::synthetic();
-        let defs_globals = BTreeMap::from([(
+        let module_vars = BTreeMap::from([(
             "main.hp".to_string(),
-            DefsGlobalVarDecl {
+            ModuleVarDecl {
                 namespace: "main".to_string(),
                 name: "hp".to_string(),
                 qualified_name: "main.hp".to_string(),
@@ -2765,11 +2765,11 @@ mod defs_resolver_tests {
         let duplicate = BTreeMap::from([
             (
                 "a.xml".to_string(),
-                DefsDeclarations {
+                ModuleDeclarations {
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
-                    defs_global_var_decls: Vec::new(),
-                    defs_global_const_decls: vec![ParsedDefsGlobalConstDecl {
+                    module_global_var_decls: Vec::new(),
+                    module_global_const_decls: vec![ParsedModuleConstDecl {
                         namespace: "main".to_string(),
                         name: "base".to_string(),
                         qualified_name: "main.base".to_string(),
@@ -2782,11 +2782,11 @@ mod defs_resolver_tests {
             ),
             (
                 "b.xml".to_string(),
-                DefsDeclarations {
+                ModuleDeclarations {
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
-                    defs_global_var_decls: Vec::new(),
-                    defs_global_const_decls: vec![ParsedDefsGlobalConstDecl {
+                    module_global_var_decls: Vec::new(),
+                    module_global_const_decls: vec![ParsedModuleConstDecl {
                         namespace: "main".to_string(),
                         name: "base".to_string(),
                         qualified_name: "main.base".to_string(),
@@ -2798,18 +2798,18 @@ mod defs_resolver_tests {
                 },
             ),
         ]);
-        let duplicate_error = collect_defs_consts_for_bundle(&duplicate, &defs_globals)
+        let duplicate_error = collect_module_consts_for_bundle(&duplicate, &module_vars)
             .expect_err("duplicate const should fail");
-        assert_eq!(duplicate_error.code, "DEFS_GLOBAL_CONST_DUPLICATE");
+        assert_eq!(duplicate_error.code, "MODULE_GLOBAL_CONST_DUPLICATE");
 
         let bad_order = BTreeMap::from([(
             "main.xml".to_string(),
-            DefsDeclarations {
+            ModuleDeclarations {
                 type_decls: Vec::new(),
                 function_decls: Vec::new(),
-                defs_global_var_decls: Vec::new(),
-                defs_global_const_decls: vec![
-                    ParsedDefsGlobalConstDecl {
+                module_global_var_decls: Vec::new(),
+                module_global_const_decls: vec![
+                    ParsedModuleConstDecl {
                         namespace: "main".to_string(),
                         name: "a".to_string(),
                         qualified_name: "main.a".to_string(),
@@ -2818,7 +2818,7 @@ mod defs_resolver_tests {
                         initial_value_expr: Some("b + 1".to_string()),
                         location: SourceSpan::synthetic(),
                     },
-                    ParsedDefsGlobalConstDecl {
+                    ParsedModuleConstDecl {
                         namespace: "main".to_string(),
                         name: "b".to_string(),
                         qualified_name: "main.b".to_string(),
@@ -2830,15 +2830,15 @@ mod defs_resolver_tests {
                 ],
             },
         )]);
-        let order_error = collect_defs_consts_for_bundle(&bad_order, &defs_globals)
+        let order_error = collect_module_consts_for_bundle(&bad_order, &module_vars)
             .expect_err("forward const reference should fail");
-        assert_eq!(order_error.code, "DEFS_CONST_INIT_ORDER");
+        assert_eq!(order_error.code, "MODULE_CONST_INIT_ORDER");
     }
 
     #[test]
-    fn resolve_visible_defs_rejects_duplicate_defs_const_in_closure() {
+    fn resolve_visible_module_symbols_rejects_duplicate_module_const_in_closure() {
         let span = SourceSpan::synthetic();
-        let duplicate = ParsedDefsGlobalConstDecl {
+        let duplicate = ParsedModuleConstDecl {
             namespace: "shared".to_string(),
             name: "base".to_string(),
             qualified_name: "shared.base".to_string(),
@@ -2847,34 +2847,34 @@ mod defs_resolver_tests {
             initial_value_expr: Some("1".to_string()),
             location: span.clone(),
         };
-        let defs_by_path = BTreeMap::from([
+        let module_by_path = BTreeMap::from([
             (
                 "a.xml".to_string(),
-                DefsDeclarations {
+                ModuleDeclarations {
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
-                    defs_global_var_decls: Vec::new(),
-                    defs_global_const_decls: vec![duplicate.clone()],
+                    module_global_var_decls: Vec::new(),
+                    module_global_const_decls: vec![duplicate.clone()],
                 },
             ),
             (
                 "b.xml".to_string(),
-                DefsDeclarations {
+                ModuleDeclarations {
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
-                    defs_global_var_decls: Vec::new(),
-                    defs_global_const_decls: vec![duplicate],
+                    module_global_var_decls: Vec::new(),
+                    module_global_const_decls: vec![duplicate],
                 },
             ),
         ]);
         let reachable = BTreeSet::from(["a.xml".to_string(), "b.xml".to_string()]);
-        let error = resolve_visible_defs(&reachable, &defs_by_path, Some("a"))
-            .expect_err("duplicate defs const should fail");
-        assert_eq!(error.code, "DEFS_GLOBAL_CONST_DUPLICATE");
+        let error = resolve_visible_module_symbols(&reachable, &module_by_path, Some("a"))
+            .expect_err("duplicate module const should fail");
+        assert_eq!(error.code, "MODULE_GLOBAL_CONST_DUPLICATE");
     }
 
     #[test]
-    fn collect_defs_consts_rejects_duplicate_type_in_bundle() {
+    fn collect_module_consts_rejects_duplicate_type_in_bundle() {
         let span = SourceSpan::synthetic();
         let duplicate_type = ParsedTypeDecl {
             name: "T".to_string(),
@@ -2883,40 +2883,40 @@ mod defs_resolver_tests {
             fields: vec![],
             location: span.clone(),
         };
-        let defs_by_path = BTreeMap::from([
+        let module_by_path = BTreeMap::from([
             (
                 "a.xml".to_string(),
-                DefsDeclarations {
+                ModuleDeclarations {
                     type_decls: vec![duplicate_type.clone()],
                     function_decls: Vec::new(),
-                    defs_global_var_decls: Vec::new(),
-                    defs_global_const_decls: Vec::new(),
+                    module_global_var_decls: Vec::new(),
+                    module_global_const_decls: Vec::new(),
                 },
             ),
             (
                 "b.xml".to_string(),
-                DefsDeclarations {
+                ModuleDeclarations {
                     type_decls: vec![duplicate_type],
                     function_decls: Vec::new(),
-                    defs_global_var_decls: Vec::new(),
-                    defs_global_const_decls: Vec::new(),
+                    module_global_var_decls: Vec::new(),
+                    module_global_const_decls: Vec::new(),
                 },
             ),
         ]);
-        let defs_globals = BTreeMap::new();
-        let error = collect_defs_consts_for_bundle(&defs_by_path, &defs_globals)
+        let module_vars = BTreeMap::new();
+        let error = collect_module_consts_for_bundle(&module_by_path, &module_vars)
             .expect_err("duplicate type should fail");
         assert_eq!(error.code, "TYPE_DECL_DUPLICATE");
     }
 
     #[test]
-    fn validate_defs_const_init_rules_handles_ambiguous_short_name() {
-        // Test when multiple defs_const have the same short name (candidates.len() > 1)
+    fn validate_module_const_init_rules_handles_ambiguous_short_name() {
+        // Test when multiple module_const have the same short name (candidates.len() > 1)
         let span = SourceSpan::synthetic();
-        let defs_consts = BTreeMap::from([
+        let module_consts = BTreeMap::from([
             (
                 "main.base".to_string(),
-                DefsGlobalConstDecl {
+                ModuleConstDecl {
                     namespace: "main".to_string(),
                     name: "base".to_string(),
                     qualified_name: "main.base".to_string(),
@@ -2930,7 +2930,7 @@ mod defs_resolver_tests {
             ),
             (
                 "other.base".to_string(),
-                DefsGlobalConstDecl {
+                ModuleConstDecl {
                     namespace: "other".to_string(),
                     name: "base".to_string(),
                     qualified_name: "other.base".to_string(),
@@ -2943,10 +2943,10 @@ mod defs_resolver_tests {
                 },
             ),
         ]);
-        let defs_globals = BTreeMap::new();
+        let module_vars = BTreeMap::new();
         let init_order = vec!["main.base".to_string(), "other.base".to_string()];
         // This should NOT error because we just validate the init order
-        let result = validate_defs_const_init_rules(&defs_consts, &init_order, &defs_globals);
+        let result = validate_module_const_init_rules(&module_consts, &init_order, &module_vars);
         assert!(
             result.is_ok(),
             "ambiguous short name should be filtered out in mapping"
@@ -2954,13 +2954,13 @@ mod defs_resolver_tests {
     }
 
     #[test]
-    fn validate_defs_const_init_rules_rejects_forward_reference() {
-        // Test when a defs_const references another const that hasn't been initialized yet
+    fn validate_module_const_init_rules_rejects_forward_reference() {
+        // Test when a module_const references another const that hasn't been initialized yet
         let span = SourceSpan::synthetic();
-        let defs_consts = BTreeMap::from([
+        let module_consts = BTreeMap::from([
             (
                 "main.first".to_string(),
-                DefsGlobalConstDecl {
+                ModuleConstDecl {
                     namespace: "main".to_string(),
                     name: "first".to_string(),
                     qualified_name: "main.first".to_string(),
@@ -2974,7 +2974,7 @@ mod defs_resolver_tests {
             ),
             (
                 "main.second".to_string(),
-                DefsGlobalConstDecl {
+                ModuleConstDecl {
                     namespace: "main".to_string(),
                     name: "second".to_string(),
                     qualified_name: "main.second".to_string(),
@@ -2987,20 +2987,20 @@ mod defs_resolver_tests {
                 },
             ),
         ]);
-        let defs_globals = BTreeMap::new();
+        let module_vars = BTreeMap::new();
         // Initialize first before second - this should fail
         let init_order = vec!["main.first".to_string(), "main.second".to_string()];
-        let error = validate_defs_const_init_rules(&defs_consts, &init_order, &defs_globals)
+        let error = validate_module_const_init_rules(&module_consts, &init_order, &module_vars)
             .expect_err("forward reference should fail");
-        assert_eq!(error.code, "DEFS_CONST_INIT_ORDER");
+        assert_eq!(error.code, "MODULE_CONST_INIT_ORDER");
     }
 
     #[test]
-    fn resolve_visible_defs_reports_type_resolution_error() {
+    fn resolve_visible_module_symbols_reports_type_resolution_error() {
         // Test that type resolution errors propagate through line 784
         // This creates a type with a field referencing a non-existent type
         let span = SourceSpan::synthetic();
-        let defs = DefsDeclarations {
+        let module = ModuleDeclarations {
             type_decls: vec![ParsedTypeDecl {
                 name: "MyType".to_string(),
                 qualified_name: "shared.MyType".to_string(),
@@ -3013,23 +3013,23 @@ mod defs_resolver_tests {
                 location: span.clone(),
             }],
             function_decls: Vec::new(),
-            defs_global_var_decls: Vec::new(),
-            defs_global_const_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: Vec::new(),
         };
 
         let reachable = BTreeSet::from(["shared.xml".to_string()]);
-        let defs_by_path = BTreeMap::from([("shared.xml".to_string(), defs)]);
+        let module_by_path = BTreeMap::from([("shared.xml".to_string(), module)]);
 
-        let error = resolve_visible_defs(&reachable, &defs_by_path, None)
+        let error = resolve_visible_module_symbols(&reachable, &module_by_path, None)
             .expect_err("type resolution should fail for non-existent type");
         assert_eq!(error.code, "TYPE_UNKNOWN");
     }
 
     #[test]
-    fn resolve_visible_defs_reports_duplicate_field_error() {
+    fn resolve_visible_module_symbols_reports_duplicate_field_error() {
         // Test that duplicate field errors propagate through line 784
         let span = SourceSpan::synthetic();
-        let defs = DefsDeclarations {
+        let module = ModuleDeclarations {
             type_decls: vec![ParsedTypeDecl {
                 name: "MyType".to_string(),
                 qualified_name: "shared.MyType".to_string(),
@@ -3049,14 +3049,14 @@ mod defs_resolver_tests {
                 location: span.clone(),
             }],
             function_decls: Vec::new(),
-            defs_global_var_decls: Vec::new(),
-            defs_global_const_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: Vec::new(),
         };
 
         let reachable = BTreeSet::from(["shared.xml".to_string()]);
-        let defs_by_path = BTreeMap::from([("shared.xml".to_string(), defs)]);
+        let module_by_path = BTreeMap::from([("shared.xml".to_string(), module)]);
 
-        let error = resolve_visible_defs(&reachable, &defs_by_path, None)
+        let error = resolve_visible_module_symbols(&reachable, &module_by_path, None)
             .expect_err("duplicate field should fail");
         assert_eq!(error.code, "TYPE_FIELD_DUPLICATE");
     }
@@ -3065,7 +3065,7 @@ mod defs_resolver_tests {
     fn collect_functions_for_bundle_rejects_unknown_param_type() {
         let span = SourceSpan::synthetic();
         // Function with param type that doesn't exist
-        let defs = DefsDeclarations {
+        let module = ModuleDeclarations {
             type_decls: Vec::new(),
             function_decls: vec![ParsedFunctionDecl {
                 name: "foo".to_string(),
@@ -3084,11 +3084,11 @@ mod defs_resolver_tests {
                 code: "out = 1;".to_string(),
                 location: span.clone(),
             }],
-            defs_global_var_decls: Vec::new(),
-            defs_global_const_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: Vec::new(),
         };
-        let defs_by_path = BTreeMap::from([("a.xml".to_string(), defs)]);
-        let error = collect_functions_for_bundle(&defs_by_path)
+        let module_by_path = BTreeMap::from([("a.xml".to_string(), module)]);
+        let error = collect_functions_for_bundle(&module_by_path)
             .expect_err("unknown param type should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
     }
@@ -3097,7 +3097,7 @@ mod defs_resolver_tests {
     fn collect_functions_for_bundle_rejects_unknown_return_type() {
         let span = SourceSpan::synthetic();
         // Function with return type that doesn't exist
-        let defs = DefsDeclarations {
+        let module = ModuleDeclarations {
             type_decls: Vec::new(),
             function_decls: vec![ParsedFunctionDecl {
                 name: "foo".to_string(),
@@ -3112,19 +3112,19 @@ mod defs_resolver_tests {
                 code: "out = 1;".to_string(),
                 location: span.clone(),
             }],
-            defs_global_var_decls: Vec::new(),
-            defs_global_const_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: Vec::new(),
         };
-        let defs_by_path = BTreeMap::from([("a.xml".to_string(), defs)]);
-        let error = collect_functions_for_bundle(&defs_by_path)
+        let module_by_path = BTreeMap::from([("a.xml".to_string(), module)]);
+        let error = collect_functions_for_bundle(&module_by_path)
             .expect_err("unknown return type should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
     }
 
     #[test]
-    fn collect_defs_globals_for_bundle_rejects_duplicate_type() {
+    fn collect_module_vars_for_bundle_rejects_duplicate_type() {
         let span = SourceSpan::synthetic();
-        // Two defs files with the same type
+        // Two module files with the same type
         let type_decl = ParsedTypeDecl {
             name: "Obj".to_string(),
             qualified_name: "shared.Obj".to_string(),
@@ -3132,27 +3132,27 @@ mod defs_resolver_tests {
             fields: vec![],
             location: span.clone(),
         };
-        let defs1 = DefsDeclarations {
+        let module1 = ModuleDeclarations {
             type_decls: vec![type_decl.clone()],
             function_decls: Vec::new(),
-            defs_global_var_decls: Vec::new(),
-            defs_global_const_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: Vec::new(),
         };
-        let defs2 = DefsDeclarations {
+        let module2 = ModuleDeclarations {
             type_decls: vec![type_decl],
             function_decls: Vec::new(),
-            defs_global_var_decls: Vec::new(),
-            defs_global_const_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: Vec::new(),
         };
-        let defs_by_path =
-            BTreeMap::from([("a.xml".to_string(), defs1), ("b.xml".to_string(), defs2)]);
+        let module_by_path =
+            BTreeMap::from([("a.xml".to_string(), module1), ("b.xml".to_string(), module2)]);
         let error =
-            collect_defs_globals_for_bundle(&defs_by_path).expect_err("duplicate type should fail");
+            collect_module_vars_for_bundle(&module_by_path).expect_err("duplicate type should fail");
         assert_eq!(error.code, "TYPE_DECL_DUPLICATE");
     }
 
     #[test]
-    fn collect_defs_globals_for_bundle_rejects_recursive_type() {
+    fn collect_module_vars_for_bundle_rejects_recursive_type() {
         let span = SourceSpan::synthetic();
         // Type that references a non-existent type
         let invalid_type = ParsedTypeDecl {
@@ -3166,20 +3166,20 @@ mod defs_resolver_tests {
             }],
             location: span.clone(),
         };
-        let defs = DefsDeclarations {
+        let module = ModuleDeclarations {
             type_decls: vec![invalid_type],
             function_decls: Vec::new(),
-            defs_global_var_decls: Vec::new(),
-            defs_global_const_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: Vec::new(),
         };
-        let defs_by_path = BTreeMap::from([("a.xml".to_string(), defs)]);
+        let module_by_path = BTreeMap::from([("a.xml".to_string(), module)]);
         let error =
-            collect_defs_globals_for_bundle(&defs_by_path).expect_err("invalid type should fail");
+            collect_module_vars_for_bundle(&module_by_path).expect_err("invalid type should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
     }
 
     #[test]
-    fn collect_defs_consts_for_bundle_rejects_recursive_type() {
+    fn collect_module_consts_for_bundle_rejects_recursive_type() {
         let span = SourceSpan::synthetic();
         // Type that references a non-existent type
         let invalid_type = ParsedTypeDecl {
@@ -3193,14 +3193,14 @@ mod defs_resolver_tests {
             }],
             location: span.clone(),
         };
-        let defs = DefsDeclarations {
+        let module = ModuleDeclarations {
             type_decls: vec![invalid_type],
             function_decls: Vec::new(),
-            defs_global_var_decls: Vec::new(),
-            defs_global_const_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: Vec::new(),
         };
-        let defs_by_path = BTreeMap::from([("a.xml".to_string(), defs)]);
-        let error = collect_defs_consts_for_bundle(&defs_by_path, &BTreeMap::new())
+        let module_by_path = BTreeMap::from([("a.xml".to_string(), module)]);
+        let error = collect_module_consts_for_bundle(&module_by_path, &BTreeMap::new())
             .expect_err("invalid type should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
     }

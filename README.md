@@ -13,11 +13,14 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 - `README.md` and `docs/`: user-facing behavior, integration usage, commands, and examples.
 - `KNOWLEDGE.md`: agent-facing long-term engineering constraints and reusable pitfalls (file/module guardrails, failure modes).
 - Do not put “this feature was implemented by steps A/B/C” or “how this specific commit was done” into `KNOWLEDGE.md`.
+- Prefer positive capability statements over migration/history notes in user docs:
+  - Say what is supported (whitelist), not what used to exist.
+  - Mention deprecated/legacy formats only when a user-visible migration task explicitly needs it.
 
 ## Workspace Crates
 - `crates/sl-core`: shared types, values, errors, snapshot/player schemas.
 - `crates/sl-parser`: XML parser + import directive extraction.
-- `crates/sl-compiler`: import graph validation + defs/module/json/script compilation to compiled artifact.
+- `crates/sl-compiler`: import graph validation + module/script compilation to compiled artifact.
 - `crates/sl-runtime`: execution engine (`next/choose/submit_input/snapshot/resume`).
 - `crates/sl-api`: high-level create/compile/resume API.
 - `crates/sl-cli`: host-side CLI (`agent` and `tui` modes).
@@ -43,7 +46,7 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
   helpers are in `helpers/value_path.rs` and `helpers/rhai_bridge.rs`.
 - `crates/sl-compiler/src`:
   compile pipeline is split into `artifact.rs`, `context.rs`, `pipeline.rs`, `source_parse.rs`,
-  `import_graph.rs`, `defs_resolver.rs`, `error_context.rs`, `type_expr.rs`,
+  `import_graph.rs`, `module_resolver.rs`, `error_context.rs`, `type_expr.rs`,
   `sanitize.rs`, `script_compile.rs`, `xml_utils.rs`, `macro_expand.rs`, `defaults.rs`.
 
 This split keeps crate boundaries unchanged and enforces one-way internal dependencies.
@@ -60,7 +63,7 @@ All code must be written with testability in mind:
 
 ## Runtime/Compiler Performance Notes
 - `sl-runtime` reuses a single internal `rhai::Engine` instance and keeps `random` builtin state in shared runtime storage, avoiding per-eval engine re-construction.
-- defs prelude generation is cached per script in runtime, so repeated expression/code evaluation does not rebuild identical prelude text.
+- module prelude generation is cached per script in runtime, so repeated expression/code evaluation does not rebuild identical prelude text.
 - parser/compiler/runtime regex usage for stable patterns is lazily initialized once via static caches.
 - `sl-compiler` memoizes per-script reachable import closures during project compilation to avoid repeated DFS work.
 - XML dependencies use explicit import comments like `<!-- import shared from shared.xml -->` and `<!-- import {battle, shared} from shared/ -->`.
@@ -70,7 +73,7 @@ All code must be written with testability in mind:
 - `<module>` may contain `<type>`, `<function>`, `<var>`, `<const>`, and multiple `<script>` nodes.
 - `<module default_access="public|private">` controls default visibility for module children; default is `private`.
 - `<type>/<function>/<var>/<const>/<script>` support `access="public|private"`; default follows `default_access`.
-- Legacy `*.script.xml`, `*.defs.xml`, and `*.module.xml` inputs are rejected; migrate them to `<module>` in `name.xml`.
+- Only `*.xml` module sources are supported.
 - Module scripts compile to qualified names like `battle.main`; host entry/call/return targets should use that qualified form.
 - Host entry script must be `public`; private scripts cannot be used as host entry.
 - Inside the same module, scripts may reference sibling scripts with short names (`<call script="next"/>`), which resolves to the qualified module target.

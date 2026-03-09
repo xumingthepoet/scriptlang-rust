@@ -12,10 +12,10 @@ pub fn compile_artifact_from_xml_map(
     let CompileProjectBundleResult {
         scripts,
         global_json,
-        defs_global_declarations,
-        defs_global_init_order,
-        defs_global_const_declarations,
-        defs_global_const_init_order,
+        module_var_declarations,
+        module_var_init_order,
+        module_const_declarations,
+        module_const_init_order,
     } = compile_project_bundle_from_xml_map(xml_by_path)?;
 
     let entry_script = resolve_entry_script(&scripts, entry_script)?;
@@ -26,10 +26,10 @@ pub fn compile_artifact_from_xml_map(
         entry_script,
         scripts,
         global_json,
-        defs_global_declarations,
-        defs_global_init_order,
-        defs_global_const_declarations,
-        defs_global_const_init_order,
+        module_var_declarations,
+        module_var_init_order,
+        module_const_declarations,
+        module_const_init_order,
     })
 }
 
@@ -288,8 +288,8 @@ mod artifact_tests {
   "entryScript": "main",
   "scripts": {},
   "globalJson": {},
-  "defsGlobalDeclarations": {},
-  "defsGlobalInitOrder": []
+  "moduleVarDeclarations": {},
+  "moduleVarInitOrder": []
 }"#,
         )
         .expect("write bad schema artifact");

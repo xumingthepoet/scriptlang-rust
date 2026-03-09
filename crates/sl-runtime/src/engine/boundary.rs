@@ -431,7 +431,7 @@ mod boundary_tests {
     }
 
     #[test]
-    pub(super) fn submit_input_rejects_defs_const_target() {
+    pub(super) fn submit_input_rejects_module_const_target() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
             r#"<module name="main" default_access="public">

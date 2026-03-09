@@ -1043,11 +1043,11 @@ mod callstack_tests {
         assert_eq!(error.code, "ENGINE_SCRIPT_NOT_FOUND");
         assert_eq!(
             globals
-                .build_defs_prelude("missing-script", &BTreeMap::new())
+                .build_module_prelude("missing-script", &BTreeMap::new())
                 .expect("missing script prelude should be empty"),
             ""
         );
-        let mut defs_engine = engine_from_sources(map(&[
+        let mut module_engine = engine_from_sources(map(&[
             (
                 "main.script.xml",
                 r#"
@@ -1056,15 +1056,15 @@ mod callstack_tests {
     "#,
             ),
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><function name="make" return="int:out">out = 1;</function></defs>"#,
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><function name="make" return="int:out">out = 1;</function></module>"#,
             ),
         ]));
-        defs_engine.invoke_function_symbols.clear();
-        let error = defs_engine
-            .build_defs_prelude("main", &BTreeMap::new())
+        module_engine.invoke_function_symbols.clear();
+        let error = module_engine
+            .build_module_prelude("main", &BTreeMap::new())
             .expect_err("missing symbol mapping should fail");
-        assert_eq!(error.code, "ENGINE_DEFS_FUNCTION_SYMBOL_MISSING");
+        assert_eq!(error.code, "ENGINE_MODULE_FUNCTION_SYMBOL_MISSING");
 
         let registry = TestRegistry {
             names: vec!["f".to_string()],
@@ -1074,16 +1074,16 @@ mod callstack_tests {
     }
 
     #[test]
-    pub(super) fn defs_function_call_execution_is_covered() {
-        // Test actual defs function call to cover rhai_bridge.rs rewrite code
+    pub(super) fn module_function_call_execution_is_covered() {
+        // Test actual module function call to cover rhai_bridge.rs rewrite code
         let mut engine = engine_from_sources(map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared">
+                "shared.xml",
+                r#"<module name="shared" default_access="public">
   <function name="add" args="int:a,int:b" return="int:result">
     result = a + b;
   </function>
-</defs>"#,
+</module>"#,
             ),
             (
                 "main.script.xml",
@@ -1501,7 +1501,7 @@ mod callstack_tests {
             "main.xml",
             r#"<module name="main" default_access="private">
 <script name="main" access="public"><call script="hidden"/></script>
-<script name="hidden"><text>ok</text></script>
+<script name="hidden" access="private"><text>ok</text></script>
 </module>"#,
         )]));
         same_module.start("main.main", None).expect("start");
@@ -1513,7 +1513,7 @@ mod callstack_tests {
         let mut cross_module = engine_from_sources(map(&[
             (
                 "shared.xml",
-                r#"<module name="shared"><script name="hidden"><text>hidden</text></script></module>"#,
+                r#"<module name="shared" default_access="public"><script name="hidden" access="private"><text>hidden</text></script></module>"#,
             ),
             (
                 "main.xml",
@@ -1534,7 +1534,7 @@ mod callstack_tests {
         let mut dynamic_cross_module = engine_from_sources(map(&[
             (
                 "shared.xml",
-                r#"<module name="shared"><script name="hidden"><text>hidden</text></script></module>"#,
+                r#"<module name="shared" default_access="public"><script name="hidden" access="private"><text>hidden</text></script></module>"#,
             ),
             (
                 "main.xml",
@@ -1680,8 +1680,8 @@ mod callstack_tests {
             root_group_id: "g1".to_string(),
             groups: Default::default(),
             visible_functions: Default::default(),
-            visible_defs_globals: Default::default(),
-            visible_defs_consts: Default::default(),
+            visible_module_vars: Default::default(),
+            visible_module_consts: Default::default(),
             visible_json_globals: vec![],
             invoke_all_functions: Default::default(),
             invoke_public_functions: Default::default(),
@@ -1743,8 +1743,8 @@ mod callstack_tests {
             root_group_id: "g2".to_string(),
             groups: Default::default(),
             visible_functions: Default::default(),
-            visible_defs_globals: Default::default(),
-            visible_defs_consts: Default::default(),
+            visible_module_vars: Default::default(),
+            visible_module_consts: Default::default(),
             visible_json_globals: vec![],
             invoke_all_functions: Default::default(),
             invoke_public_functions: Default::default(),

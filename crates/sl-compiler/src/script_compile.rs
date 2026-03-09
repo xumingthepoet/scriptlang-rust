@@ -28,8 +28,8 @@ pub(crate) fn compile_script(
         module_name,
         visible_types,
         visible_functions,
-        visible_defs_globals,
-        visible_defs_consts,
+        visible_module_vars,
+        visible_module_consts,
         invoke_all_functions,
         invoke_public_functions,
     } = options;
@@ -89,8 +89,8 @@ pub(crate) fn compile_script(
         groups: builder.groups,
         visible_json_globals: Vec::new(),
         visible_functions: visible_functions.clone(),
-        visible_defs_globals: visible_defs_globals.clone(),
-        visible_defs_consts: visible_defs_consts.clone(),
+        visible_module_vars: visible_module_vars.clone(),
+        visible_module_consts: visible_module_consts.clone(),
         invoke_all_functions: invoke_all_functions.clone(),
         invoke_public_functions: invoke_public_functions.clone(),
     })
@@ -1636,11 +1636,11 @@ mod script_compile_tests {
     fn compiler_error_matrix_covers_more_validation_paths() {
         let cases: Vec<(&str, BTreeMap<String, String>, &str)> = vec![
                 (
-                    "defs child invalid",
+                    "module child invalid",
                     map(&[
                         (
                             "x.xml",
-                            "<defs name=\"x\"><unknown/></defs>",
+                            "<module name=\"x\"><unknown/></module>",
                         ),
                         (
                             "main.xml",
@@ -1659,7 +1659,7 @@ mod script_compile_tests {
                     map(&[
                         (
                             "x.xml",
-                            "<defs name=\"x\"><type name=\"A\"><bad/></type></defs>",
+                            "<module name=\"x\"><type name=\"A\"><bad/></type></module>",
                         ),
                         (
                             "main.xml",
@@ -1678,7 +1678,7 @@ mod script_compile_tests {
                     map(&[
                         (
                             "x.xml",
-                            "<defs name=\"x\"><type name=\"A\"><field name=\"v\" type=\"int\"/><field name=\"v\" type=\"int\"/></type></defs>",
+                            "<module name=\"x\"><type name=\"A\"><field name=\"v\" type=\"int\"/><field name=\"v\" type=\"int\"/></type></module>",
                         ),
                         (
                             "main.xml",
@@ -1697,7 +1697,7 @@ mod script_compile_tests {
                     map(&[
                         (
                             "x.xml",
-                            "<defs name=\"x\"><function name=\"f\" return=\"int:r\">r=1;</function><function name=\"f\" return=\"int:r\">r=2;</function></defs>",
+                            "<module name=\"x\"><function name=\"f\" return=\"int:r\">r=1;</function><function name=\"f\" return=\"int:r\">r=2;</function></module>",
                         ),
                         (
                             "main.xml",
@@ -2157,7 +2157,7 @@ mod script_compile_tests {
         .expect("map should resolve");
         assert_eq!(script_type_kind(&map_resolved), "map");
 
-        let non_script_root = xml_element("defs", &[("name", "x")], Vec::new());
+        let non_script_root = xml_element("module", &[("name", "x")], Vec::new());
         let compile_root_error = compile_script(CompileScriptOptions {
             script_path: "x.xml",
             root: &non_script_root,
@@ -2166,8 +2166,8 @@ mod script_compile_tests {
             module_name: None,
             visible_types: &BTreeMap::new(),
             visible_functions: &BTreeMap::new(),
-            visible_defs_globals: &BTreeMap::new(),
-            visible_defs_consts: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
             invoke_public_functions: &BTreeSet::new(),
         })
@@ -2183,8 +2183,8 @@ mod script_compile_tests {
             module_name: None,
             visible_types: &BTreeMap::new(),
             visible_functions: &BTreeMap::new(),
-            visible_defs_globals: &BTreeMap::new(),
-            visible_defs_consts: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
             invoke_public_functions: &BTreeSet::new(),
         })
@@ -2200,8 +2200,8 @@ mod script_compile_tests {
             module_name: None,
             visible_types: &BTreeMap::new(),
             visible_functions: &BTreeMap::new(),
-            visible_defs_globals: &BTreeMap::new(),
-            visible_defs_consts: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
             invoke_public_functions: &BTreeSet::new(),
         })
@@ -2225,8 +2225,8 @@ mod script_compile_tests {
             module_name: Some("x"),
             visible_types: &BTreeMap::new(),
             visible_functions: &BTreeMap::new(),
-            visible_defs_globals: &BTreeMap::new(),
-            visible_defs_consts: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
             invoke_public_functions: &BTreeSet::new(),
         })
@@ -2245,8 +2245,8 @@ mod script_compile_tests {
             module_name: None,
             visible_types: &BTreeMap::new(),
             visible_functions: &BTreeMap::new(),
-            visible_defs_globals: &BTreeMap::new(),
-            visible_defs_consts: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
             invoke_public_functions: &BTreeSet::new(),
         })
@@ -2294,7 +2294,7 @@ mod script_compile_tests {
         assert_eq!(while_count, 1);
         assert_eq!(if_count, 1);
 
-        let defs_resolution = map(&[
+        let module_resolution = map(&[
             (
                 "shared.xml",
                 r##"
@@ -2320,8 +2320,8 @@ mod script_compile_tests {
 	    "#,
             ),
         ]);
-        let _ = compile_project_bundle_from_xml_map(&defs_resolution)
-            .expect("defs return/field type resolution should pass");
+        let _ = compile_project_bundle_from_xml_map(&module_resolution)
+            .expect("module return/field type resolution should pass");
 
         let mut builder_ok = GroupBuilder::new("manual.xml");
         let root_ok = builder_ok.next_group_id();

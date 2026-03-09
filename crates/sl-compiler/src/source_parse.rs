@@ -83,27 +83,6 @@ fn with_file_context(error: ScriptLangError, file_path: &str) -> ScriptLangError
 }
 
 pub(crate) fn detect_source_kind(path: &str) -> Result<SourceKind, ScriptLangError> {
-    if path.ends_with(".script.xml") || path.ends_with(".defs.xml") || path.ends_with(".module.xml")
-    {
-        return Err(ScriptLangError::new(
-            "SOURCE_KIND_LEGACY_XML_UNSUPPORTED",
-            format!(
-                "Legacy XML source \"{}\" is no longer supported. Migrate to a <module> root in a plain *.xml file.",
-                path
-            ),
-        ));
-    }
-
-    if path.ends_with(".json") {
-        return Err(ScriptLangError::new(
-            "SOURCE_KIND_JSON_UNSUPPORTED",
-            format!(
-                "JSON source \"{}\" is no longer supported. Use only module *.xml sources.",
-                path
-            ),
-        ));
-    }
-
     if path.ends_with(".xml") {
         Ok(SourceKind::ModuleXml)
     } else {
@@ -337,25 +316,7 @@ mod source_parse_tests {
             detect_source_kind("a.json")
                 .expect_err("json should fail")
                 .code,
-            "SOURCE_KIND_JSON_UNSUPPORTED"
-        );
-        assert_eq!(
-            detect_source_kind("a.script.xml")
-                .expect_err("legacy script should fail")
-                .code,
-            "SOURCE_KIND_LEGACY_XML_UNSUPPORTED"
-        );
-        assert_eq!(
-            detect_source_kind("a.defs.xml")
-                .expect_err("legacy defs should fail")
-                .code,
-            "SOURCE_KIND_LEGACY_XML_UNSUPPORTED"
-        );
-        assert_eq!(
-            detect_source_kind("a.module.xml")
-                .expect_err("legacy module should fail")
-                .code,
-            "SOURCE_KIND_LEGACY_XML_UNSUPPORTED"
+            "SOURCE_KIND_UNSUPPORTED"
         );
         assert_eq!(
             detect_source_kind("a.txt")
@@ -451,7 +412,7 @@ mod source_parse_tests {
     }
 
     #[test]
-    fn parse_sources_rejects_unsupported_dependency_directive_json_and_bad_import_targets() {
+    fn parse_sources_rejects_unsupported_dependency_directive_and_bad_import_targets() {
         let unsupported = BTreeMap::from([(
             "main.xml".to_string(),
             r#"
@@ -470,7 +431,7 @@ mod source_parse_tests {
         let json = BTreeMap::from([("data.json".to_string(), "{}".to_string())]);
         assert_eq!(
             parse_sources(&json).expect_err("json should fail").code,
-            "SOURCE_KIND_JSON_UNSUPPORTED"
+            "SOURCE_KIND_UNSUPPORTED"
         );
 
         let mismatch = BTreeMap::from([

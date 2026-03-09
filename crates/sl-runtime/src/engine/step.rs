@@ -708,14 +708,14 @@ mod step_tests {
     }
 
     #[test]
-    pub(super) fn defs_global_shadowing_example_behaves_as_expected() {
+    pub(super) fn module_global_shadowing_example_behaves_as_expected() {
         let files = map(&[
             (
-                "shared.defs.xml",
+                "shared.xml",
                 r#"
-<defs name="shared">
+<module name="shared" default_access="public">
   <var name="hp" type="int">100</var>
-</defs>
+</module>
 "#,
             ),
             (

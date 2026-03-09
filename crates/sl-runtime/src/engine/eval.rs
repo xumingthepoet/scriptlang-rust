@@ -128,7 +128,7 @@ impl ScriptLangEngine {
         self.execute_rhai_with_mode(expr, true, context, RhaiInputMode::CodeBlock)
     }
 
-    pub(super) fn eval_defs_global_initializer(
+    pub(super) fn eval_module_global_initializer(
         &mut self,
         expr: &str,
         module_name: &str,
@@ -142,7 +142,7 @@ impl ScriptLangEngine {
 
         let mut namespace_values: BTreeMap<String, BTreeMap<String, SlValue>> = BTreeMap::new();
         let mut qualified_rewrite_map = BTreeMap::new();
-        for (qualified_name, value) in &self.defs_globals_value {
+        for (qualified_name, value) in &self.module_vars_value {
             let Some((namespace, name)) = qualified_name.split_once('.') else {
                 continue;
             };
@@ -152,10 +152,10 @@ impl ScriptLangEngine {
                 .insert(name.to_string(), value.clone());
             qualified_rewrite_map.insert(
                 qualified_name.clone(),
-                format!("{}.{}", defs_namespace_symbol(namespace), name),
+                format!("{}.{}", module_namespace_symbol(namespace), name),
             );
         }
-        for (qualified_name, value) in &self.defs_consts_value {
+        for (qualified_name, value) in &self.module_consts_value {
             let Some((namespace, name)) = qualified_name.split_once('.') else {
                 continue;
             };
@@ -165,25 +165,25 @@ impl ScriptLangEngine {
                 .insert(name.to_string(), value.clone());
             qualified_rewrite_map.insert(
                 qualified_name.clone(),
-                format!("{}.{}", defs_namespace_symbol(namespace), name),
+                format!("{}.{}", module_namespace_symbol(namespace), name),
             );
         }
 
         let mut scope = Scope::new();
         for (namespace, values) in &namespace_values {
             scope.push_dynamic(
-                defs_namespace_symbol(namespace),
+                module_namespace_symbol(namespace),
                 slvalue_to_dynamic(&SlValue::Map(values.clone())),
             );
         }
 
-        for (alias, qualified_name) in self.collect_bundle_defs_short_aliases(module_name) {
-            if let Some(value) = self.defs_globals_value.get(&qualified_name) {
+        for (alias, qualified_name) in self.collect_bundle_module_short_aliases(module_name) {
+            if let Some(value) = self.module_vars_value.get(&qualified_name) {
                 scope.push_dynamic(alias, slvalue_to_dynamic(value));
             }
         }
-        for (alias, qualified_name) in self.collect_bundle_defs_const_short_aliases(module_name) {
-            if let Some(value) = self.defs_consts_value.get(&qualified_name) {
+        for (alias, qualified_name) in self.collect_bundle_module_const_short_aliases(module_name) {
+            if let Some(value) = self.module_consts_value.get(&qualified_name) {
                 scope.push_dynamic(alias, slvalue_to_dynamic(value));
             }
         }
@@ -196,14 +196,14 @@ impl ScriptLangEngine {
 
         let preprocessed =
             preprocess_scriptlang_rhai_input(expr, "initializer", RhaiInputMode::CodeBlock)?;
-        let rewritten = rewrite_defs_global_qualified_access(&preprocessed, &qualified_rewrite_map);
+        let rewritten = rewrite_module_global_qualified_access(&preprocessed, &qualified_rewrite_map);
         let result = self
             .rhai_engine
             .eval_with_scope::<Dynamic>(&mut scope, &format!("({})", rewritten))
             .map_err(|error| {
                 ScriptLangError::new(
                     "ENGINE_EVAL_ERROR",
-                    format!("Defs global initializer eval failed: {}", error),
+                    format!("Module global initializer eval failed: {}", error),
                 )
             })
             .and_then(dynamic_to_slvalue);
@@ -226,7 +226,7 @@ impl ScriptLangEngine {
         result
     }
 
-    pub(super) fn eval_defs_const_initializer(
+    pub(super) fn eval_module_const_initializer(
         &mut self,
         expr: &str,
         module_name: &str,
@@ -240,7 +240,7 @@ impl ScriptLangEngine {
 
         let mut namespace_values: BTreeMap<String, BTreeMap<String, SlValue>> = BTreeMap::new();
         let mut qualified_rewrite_map = BTreeMap::new();
-        for (qualified_name, value) in &self.defs_consts_value {
+        for (qualified_name, value) in &self.module_consts_value {
             let Some((namespace, name)) = qualified_name.split_once('.') else {
                 continue;
             };
@@ -250,20 +250,20 @@ impl ScriptLangEngine {
                 .insert(name.to_string(), value.clone());
             qualified_rewrite_map.insert(
                 qualified_name.clone(),
-                format!("{}.{}", defs_namespace_symbol(namespace), name),
+                format!("{}.{}", module_namespace_symbol(namespace), name),
             );
         }
 
         let mut scope = Scope::new();
         for (namespace, values) in &namespace_values {
             scope.push_dynamic(
-                defs_namespace_symbol(namespace),
+                module_namespace_symbol(namespace),
                 slvalue_to_dynamic(&SlValue::Map(values.clone())),
             );
         }
 
-        for (alias, qualified_name) in self.collect_bundle_defs_const_short_aliases(module_name) {
-            if let Some(value) = self.defs_consts_value.get(&qualified_name) {
+        for (alias, qualified_name) in self.collect_bundle_module_const_short_aliases(module_name) {
+            if let Some(value) = self.module_consts_value.get(&qualified_name) {
                 scope.push_dynamic(alias, slvalue_to_dynamic(value));
             }
         }
@@ -276,14 +276,14 @@ impl ScriptLangEngine {
 
         let preprocessed =
             preprocess_scriptlang_rhai_input(expr, "initializer", RhaiInputMode::CodeBlock)?;
-        let rewritten = rewrite_defs_global_qualified_access(&preprocessed, &qualified_rewrite_map);
+        let rewritten = rewrite_module_global_qualified_access(&preprocessed, &qualified_rewrite_map);
         let result = self
             .rhai_engine
             .eval_with_scope::<Dynamic>(&mut scope, &format!("({})", rewritten))
             .map_err(|error| {
                 ScriptLangError::new(
                     "ENGINE_EVAL_ERROR",
-                    format!("Defs const initializer eval failed: {}", error),
+                    format!("Module const initializer eval failed: {}", error),
                 )
             })
             .and_then(dynamic_to_slvalue);
@@ -334,8 +334,8 @@ impl ScriptLangEngine {
             .get(&script_name)
             .cloned()
             .unwrap_or_default();
-        let mut visible_defs = self
-            .visible_defs_by_script
+        let mut visible_module = self
+            .visible_module_by_script
             .get(&script_name)
             .cloned()
             .unwrap_or_default();
@@ -377,33 +377,33 @@ impl ScriptLangEngine {
             };
             required_function_namespaces.insert(namespace.to_string());
         }
-        for decl in self.defs_global_declarations.values() {
+        for decl in self.module_var_declarations.values() {
             required_function_namespaces.insert(decl.namespace.clone());
         }
-        for decl in self.defs_const_declarations.values() {
+        for decl in self.module_const_declarations.values() {
             required_function_namespaces.insert(decl.namespace.clone());
         }
-        for decl in self.defs_global_declarations.values() {
+        for decl in self.module_var_declarations.values() {
             if required_function_namespaces.contains(&decl.namespace) {
-                visible_defs.insert(decl.qualified_name.clone());
+                visible_module.insert(decl.qualified_name.clone());
             }
         }
-        for decl in self.defs_const_declarations.values() {
+        for decl in self.module_const_declarations.values() {
             if required_function_namespaces.contains(&decl.namespace) {
                 visible_consts.insert(decl.qualified_name.clone());
             }
         }
-        let defs_alias_map = self
-            .defs_global_alias_by_script
+        let module_alias_map = self
+            .module_global_alias_by_script
             .get(&script_name)
             .cloned()
             .unwrap_or_default();
         let const_alias_map = self
-            .defs_const_alias_by_script
+            .module_const_alias_by_script
             .get(&script_name)
             .cloned()
             .unwrap_or_default();
-        let qualified_rewrite_map = self.build_defs_global_qualified_rewrite_map(&script_name);
+        let qualified_rewrite_map = self.build_module_global_qualified_rewrite_map(&script_name);
 
         if !self.host_functions.names().is_empty() {
             return Err(ScriptLangError::new(
@@ -430,22 +430,22 @@ impl ScriptLangEngine {
             );
         }
 
-        let mut defs_namespace_snapshot = BTreeMap::new();
-        for qualified_name in &visible_defs {
+        let mut module_namespace_snapshot = BTreeMap::new();
+        for qualified_name in &visible_module {
             let Some((namespace, name)) = qualified_name.split_once('.') else {
                 continue;
             };
             let value = self
-                .defs_globals_value
+                .module_vars_value
                 .get(qualified_name)
                 .cloned()
                 .ok_or_else(|| {
                     ScriptLangError::new(
-                        "ENGINE_DEFS_GLOBAL_MISSING",
-                        format!("Defs global \"{}\" is not initialized.", qualified_name),
+                        "ENGINE_MODULE_GLOBAL_MISSING",
+                        format!("Module global \"{}\" is not initialized.", qualified_name),
                     )
                 })?;
-            defs_namespace_snapshot
+            module_namespace_snapshot
                 .entry(namespace.to_string())
                 .or_insert_with(BTreeMap::new)
                 .insert(name.to_string(), value);
@@ -455,60 +455,60 @@ impl ScriptLangEngine {
                 continue;
             };
             let value = self
-                .defs_consts_value
+                .module_consts_value
                 .get(qualified_name)
                 .cloned()
                 .ok_or_else(|| {
                     ScriptLangError::new(
-                        "ENGINE_DEFS_CONST_MISSING",
-                        format!("Defs const \"{}\" is not initialized.", qualified_name),
+                        "ENGINE_MODULE_CONST_MISSING",
+                        format!("Module const \"{}\" is not initialized.", qualified_name),
                     )
                 })?;
-            defs_namespace_snapshot
+            module_namespace_snapshot
                 .entry(namespace.to_string())
                 .or_insert_with(BTreeMap::new)
                 .insert(name.to_string(), value);
         }
 
-        let mut defs_namespace_symbols = BTreeMap::new();
-        for (namespace, values) in &defs_namespace_snapshot {
-            let symbol = defs_namespace_symbol(namespace);
-            defs_namespace_symbols.insert(namespace.clone(), symbol.clone());
+        let mut module_namespace_symbols = BTreeMap::new();
+        for (namespace, values) in &module_namespace_snapshot {
+            let symbol = module_namespace_symbol(namespace);
+            module_namespace_symbols.insert(namespace.clone(), symbol.clone());
             scope.push_dynamic(symbol, slvalue_to_dynamic(&SlValue::Map(values.clone())));
         }
 
-        let mut short_defs_aliases = BTreeMap::new();
-        for (alias, qualified_name) in defs_alias_map {
+        let mut short_module_aliases = BTreeMap::new();
+        for (alias, qualified_name) in module_alias_map {
             if alias.contains('.') || mutable_bindings.contains_key(&alias) {
                 continue;
             }
-            if !visible_defs.contains(&qualified_name) {
+            if !visible_module.contains(&qualified_name) {
                 continue;
             }
 
             let value = self
-                .defs_globals_value
+                .module_vars_value
                 .get(&qualified_name)
                 .cloned()
                 .ok_or_else(|| {
                     ScriptLangError::new(
-                        "ENGINE_DEFS_GLOBAL_MISSING",
-                        format!("Defs global \"{}\" is not initialized.", qualified_name),
+                        "ENGINE_MODULE_GLOBAL_MISSING",
+                        format!("Module global \"{}\" is not initialized.", qualified_name),
                     )
                 })?;
-            let declared_type = self.defs_globals_type.get(&qualified_name);
+            let declared_type = self.module_vars_type.get(&qualified_name);
             scope.push_dynamic(
                 alias.clone(),
                 slvalue_to_dynamic_with_type(&value, declared_type),
             );
-            short_defs_aliases.insert(alias, (qualified_name, value));
+            short_module_aliases.insert(alias, (qualified_name, value));
         }
 
         let mut short_const_aliases = BTreeMap::new();
         for (alias, qualified_name) in const_alias_map {
             if alias.contains('.')
                 || mutable_bindings.contains_key(&alias)
-                || short_defs_aliases.contains_key(&alias)
+                || short_module_aliases.contains_key(&alias)
             {
                 continue;
             }
@@ -517,16 +517,16 @@ impl ScriptLangEngine {
             }
 
             let value = self
-                .defs_consts_value
+                .module_consts_value
                 .get(&qualified_name)
                 .cloned()
                 .ok_or_else(|| {
                     ScriptLangError::new(
-                        "ENGINE_DEFS_CONST_MISSING",
-                        format!("Defs const \"{}\" is not initialized.", qualified_name),
+                        "ENGINE_MODULE_CONST_MISSING",
+                        format!("Module const \"{}\" is not initialized.", qualified_name),
                     )
                 })?;
-            let declared_type = self.defs_consts_type.get(&qualified_name);
+            let declared_type = self.module_consts_type.get(&qualified_name);
             scope.push_dynamic(
                 alias.clone(),
                 slvalue_to_dynamic_with_type(&value, declared_type),
@@ -537,7 +537,7 @@ impl ScriptLangEngine {
         let mut global_snapshot = BTreeMap::new();
         for name in visible_globals {
             if mutable_bindings.contains_key(&name)
-                || short_defs_aliases.contains_key(&name)
+                || short_module_aliases.contains_key(&name)
                 || short_const_aliases.contains_key(&name)
             {
                 continue;
@@ -551,13 +551,13 @@ impl ScriptLangEngine {
         }
 
         let source = {
-            let prelude = self.get_or_build_defs_prelude(&script_name, &function_symbol_map)?;
+            let prelude = self.get_or_build_module_prelude(&script_name, &function_symbol_map)?;
             let preprocessed = preprocess_scriptlang_rhai_input(script, context, mode)?;
             let mut call_rewrite_map = function_symbol_map.clone();
             call_rewrite_map.insert("invoke".to_string(), "invoke".to_string());
             let rewritten_script = rewrite_function_calls(&preprocessed, &call_rewrite_map);
             let rewritten_script =
-                rewrite_defs_global_qualified_access(&rewritten_script, &qualified_rewrite_map);
+                rewrite_module_global_qualified_access(&rewritten_script, &qualified_rewrite_map);
             if is_expression {
                 if prelude.is_empty() {
                     format!("({})", rewritten_script)
@@ -619,16 +619,16 @@ impl ScriptLangEngine {
             self.write_variable(&name, after)?;
         }
 
-        for (namespace, symbol) in defs_namespace_symbols {
+        for (namespace, symbol) in module_namespace_symbols {
             let after_dynamic = scope
                 .get_value::<Dynamic>(&symbol)
-                .expect("scope should still contain defs global namespace symbols");
+                .expect("scope should still contain module global namespace symbols");
             let after = dynamic_to_slvalue(after_dynamic)?;
             let SlValue::Map(entries) = after else {
                 return Err(ScriptLangError::new(
-                    "ENGINE_DEFS_GLOBAL_NAMESPACE_TYPE",
+                    "ENGINE_MODULE_GLOBAL_NAMESPACE_TYPE",
                     format!(
-                        "Defs global namespace \"{}\" is not a map value.",
+                        "Module global namespace \"{}\" is not a map value.",
                         namespace
                     ),
                 ));
@@ -636,17 +636,17 @@ impl ScriptLangEngine {
 
             for (name, value) in entries {
                 let qualified_name = format!("{}.{}", namespace, name);
-                if !visible_defs.contains(&qualified_name) {
+                if !visible_module.contains(&qualified_name) {
                     if visible_consts.contains(&qualified_name) {
                         let before = self
-                            .defs_consts_value
+                            .module_consts_value
                             .get(&qualified_name)
                             .cloned()
                             .ok_or_else(|| {
                                 ScriptLangError::new(
-                                    "ENGINE_DEFS_CONST_DECL_MISSING",
+                                    "ENGINE_MODULE_CONST_DECL_MISSING",
                                     format!(
-                                        "Defs const \"{}\" is visible but declaration is missing.",
+                                        "Module const \"{}\" is visible but declaration is missing.",
                                         qualified_name
                                     ),
                                 )
@@ -655,7 +655,7 @@ impl ScriptLangEngine {
                             return Err(ScriptLangError::new(
                                 "ENGINE_CONST_READONLY",
                                 format!(
-                                    "Defs const \"{}\" is readonly and cannot be mutated.",
+                                    "Module const \"{}\" is readonly and cannot be mutated.",
                                     qualified_name
                                 ),
                             ));
@@ -664,11 +664,11 @@ impl ScriptLangEngine {
                     continue;
                 }
                 let declared_type =
-                    self.defs_globals_type.get(&qualified_name).ok_or_else(|| {
+                    self.module_vars_type.get(&qualified_name).ok_or_else(|| {
                         ScriptLangError::new(
-                            "ENGINE_DEFS_GLOBAL_DECL_MISSING",
+                            "ENGINE_MODULE_GLOBAL_DECL_MISSING",
                             format!(
-                                "Defs global \"{}\" is visible but declaration is missing.",
+                                "Module global \"{}\" is visible but declaration is missing.",
                                 qualified_name
                             ),
                         )
@@ -677,28 +677,28 @@ impl ScriptLangEngine {
                     return Err(ScriptLangError::new(
                         "ENGINE_TYPE_MISMATCH",
                         format!(
-                            "Defs global \"{}\" does not match declared type.",
+                            "Module global \"{}\" does not match declared type.",
                             qualified_name
                         ),
                     ));
                 }
-                self.defs_globals_value.insert(qualified_name, value);
+                self.module_vars_value.insert(qualified_name, value);
             }
         }
 
-        for (alias, (qualified_name, before_value)) in short_defs_aliases {
+        for (alias, (qualified_name, before_value)) in short_module_aliases {
             let after_dynamic = scope
                 .get_value::<Dynamic>(&alias)
-                .expect("scope should still contain short defs alias");
+                .expect("scope should still contain short module alias");
             let after = dynamic_to_slvalue(after_dynamic)?;
             if after == before_value {
                 continue;
             }
-            let declared_type = self.defs_globals_type.get(&qualified_name).ok_or_else(|| {
+            let declared_type = self.module_vars_type.get(&qualified_name).ok_or_else(|| {
                 ScriptLangError::new(
-                    "ENGINE_DEFS_GLOBAL_DECL_MISSING",
+                    "ENGINE_MODULE_GLOBAL_DECL_MISSING",
                     format!(
-                        "Defs global \"{}\" is visible but declaration is missing.",
+                        "Module global \"{}\" is visible but declaration is missing.",
                         qualified_name
                     ),
                 )
@@ -707,24 +707,24 @@ impl ScriptLangEngine {
                 return Err(ScriptLangError::new(
                     "ENGINE_TYPE_MISMATCH",
                     format!(
-                        "Defs global \"{}\" does not match declared type.",
+                        "Module global \"{}\" does not match declared type.",
                         qualified_name
                     ),
                 ));
             }
-            self.defs_globals_value.insert(qualified_name, after);
+            self.module_vars_value.insert(qualified_name, after);
         }
 
         for (alias, (qualified_name, before_value)) in short_const_aliases {
             let after_dynamic = scope
                 .get_value::<Dynamic>(&alias)
-                .expect("scope should still contain short defs const alias");
+                .expect("scope should still contain short module const alias");
             let after = dynamic_to_slvalue(after_dynamic)?;
             if after != before_value {
                 return Err(ScriptLangError::new(
                     "ENGINE_CONST_READONLY",
                     format!(
-                        "Defs const \"{}\" is readonly and cannot be mutated.",
+                        "Module const \"{}\" is readonly and cannot be mutated.",
                         qualified_name
                     ),
                 ));
@@ -734,24 +734,24 @@ impl ScriptLangEngine {
         run_result
     }
 
-    pub(super) fn get_or_build_defs_prelude(
+    pub(super) fn get_or_build_module_prelude(
         &mut self,
         script_name: &str,
         function_symbol_map: &BTreeMap<String, String>,
     ) -> Result<&str, ScriptLangError> {
-        if !self.defs_prelude_by_script.contains_key(script_name) {
-            let prelude = self.build_defs_prelude(script_name, function_symbol_map)?;
-            self.defs_prelude_by_script
+        if !self.module_prelude_by_script.contains_key(script_name) {
+            let prelude = self.build_module_prelude(script_name, function_symbol_map)?;
+            self.module_prelude_by_script
                 .insert(script_name.to_string(), prelude);
         }
         Ok(self
-            .defs_prelude_by_script
+            .module_prelude_by_script
             .get(script_name)
             .map(String::as_str)
-            .expect("defs prelude should be cached"))
+            .expect("module prelude should be cached"))
     }
 
-    pub(super) fn build_defs_prelude(
+    pub(super) fn build_module_prelude(
         &self,
         script_name: &str,
         function_symbol_map: &BTreeMap<String, String>,
@@ -778,7 +778,7 @@ impl ScriptLangEngine {
                 .cloned()
                 .ok_or_else(|| {
                     ScriptLangError::new(
-                        "ENGINE_DEFS_FUNCTION_SYMBOL_MISSING",
+                        "ENGINE_MODULE_FUNCTION_SYMBOL_MISSING",
                         format!(
                             "Missing Rhai function symbol mapping for \"{}\".",
                             qualified_name
@@ -807,7 +807,7 @@ impl ScriptLangEngine {
                 .cloned()
                 .ok_or_else(|| {
                     ScriptLangError::new(
-                        "ENGINE_DEFS_FUNCTION_SYMBOL_MISSING",
+                        "ENGINE_MODULE_FUNCTION_SYMBOL_MISSING",
                         format!(
                             "Missing Rhai function symbol mapping for \"{}\".",
                             qualified_name
@@ -850,10 +850,10 @@ impl ScriptLangEngine {
             let mut call_rewrite_map = body_symbol_map;
             call_rewrite_map.insert("invoke".to_string(), "invoke".to_string());
             let rewritten = rewrite_function_calls(&preprocessed, &call_rewrite_map);
-            let mut function_rewrite_map = self.build_defs_global_rewrite_map_all();
+            let mut function_rewrite_map = self.build_module_global_rewrite_map_all();
             if let Some((function_namespace, _)) = qualified_name.split_once('.') {
                 for (alias, local_qualified) in
-                    self.collect_bundle_defs_short_aliases(function_namespace)
+                    self.collect_bundle_module_short_aliases(function_namespace)
                 {
                     if decl.params.iter().any(|param| param.name == alias)
                         || alias == decl.return_binding.name
@@ -865,11 +865,11 @@ impl ScriptLangEngine {
                     };
                     function_rewrite_map.insert(
                         alias,
-                        format!("{}.{}", defs_namespace_symbol(namespace), field),
+                        format!("{}.{}", module_namespace_symbol(namespace), field),
                     );
                 }
                 for (alias, local_qualified) in
-                    self.collect_bundle_defs_const_short_aliases(function_namespace)
+                    self.collect_bundle_module_const_short_aliases(function_namespace)
                 {
                     if decl.params.iter().any(|param| param.name == alias)
                         || alias == decl.return_binding.name
@@ -881,11 +881,11 @@ impl ScriptLangEngine {
                     };
                     function_rewrite_map.insert(
                         alias,
-                        format!("{}.{}", defs_namespace_symbol(namespace), field),
+                        format!("{}.{}", module_namespace_symbol(namespace), field),
                     );
                 }
             }
-            let rewritten = rewrite_defs_global_qualified_access(&rewritten, &function_rewrite_map);
+            let rewritten = rewrite_module_global_qualified_access(&rewritten, &function_rewrite_map);
             out.push_str(&rewritten);
             out.push('\n');
             out.push_str(&decl.return_binding.name);
@@ -1014,32 +1014,32 @@ impl ScriptLangEngine {
         map
     }
 
-    fn build_defs_global_rewrite_map_all(&self) -> BTreeMap<String, String> {
+    fn build_module_global_rewrite_map_all(&self) -> BTreeMap<String, String> {
         let mut out = BTreeMap::new();
         for qualified_name in self
-            .defs_global_declarations
+            .module_var_declarations
             .keys()
             .cloned()
-            .chain(self.defs_const_declarations.keys().cloned())
+            .chain(self.module_const_declarations.keys().cloned())
         {
             let Some((namespace, name)) = qualified_name.split_once('.') else {
                 continue;
             };
             out.insert(
                 qualified_name.clone(),
-                format!("{}.{}", defs_namespace_symbol(namespace), name),
+                format!("{}.{}", module_namespace_symbol(namespace), name),
             );
         }
         out
     }
 
-    pub(super) fn build_defs_global_qualified_rewrite_map(
+    pub(super) fn build_module_global_qualified_rewrite_map(
         &self,
         script_name: &str,
     ) -> BTreeMap<String, String> {
         let mut out = BTreeMap::new();
-        let visible_defs = self
-            .visible_defs_by_script
+        let visible_module = self
+            .visible_module_by_script
             .get(script_name)
             .cloned()
             .unwrap_or_default();
@@ -1048,25 +1048,25 @@ impl ScriptLangEngine {
             .get(script_name)
             .cloned()
             .unwrap_or_default();
-        for qualified_name in visible_defs.iter().chain(visible_consts.iter()) {
+        for qualified_name in visible_module.iter().chain(visible_consts.iter()) {
             let Some((namespace, name)) = qualified_name.split_once('.') else {
                 continue;
             };
             out.insert(
                 qualified_name.clone(),
-                format!("{}.{}", defs_namespace_symbol(namespace), name),
+                format!("{}.{}", module_namespace_symbol(namespace), name),
             );
         }
 
         out
     }
 
-    pub(super) fn collect_bundle_defs_short_aliases(
+    pub(super) fn collect_bundle_module_short_aliases(
         &self,
         module_name: &str,
     ) -> BTreeMap<String, String> {
         let mut candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        for decl in self.defs_global_declarations.values() {
+        for decl in self.module_var_declarations.values() {
             if decl.namespace != module_name {
                 continue;
             }
@@ -1082,12 +1082,12 @@ impl ScriptLangEngine {
             .collect()
     }
 
-    pub(super) fn collect_bundle_defs_const_short_aliases(
+    pub(super) fn collect_bundle_module_const_short_aliases(
         &self,
         module_name: &str,
     ) -> BTreeMap<String, String> {
         let mut candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        for decl in self.defs_const_declarations.values() {
+        for decl in self.module_const_declarations.values() {
             if decl.namespace != module_name {
                 continue;
             }
@@ -1169,7 +1169,7 @@ mod eval_tests {
     }
 
     #[test]
-    pub(super) fn defs_const_is_readonly_during_code_execution() {
+    pub(super) fn module_const_is_readonly_during_code_execution() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
             r#"<module name="main" default_access="public">
@@ -1187,7 +1187,7 @@ mod eval_tests {
     }
 
     #[test]
-    pub(super) fn defs_const_qualified_name_is_readonly_during_code_execution() {
+    pub(super) fn module_const_qualified_name_is_readonly_during_code_execution() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
             r#"<module name="main" default_access="public">
@@ -1205,7 +1205,7 @@ mod eval_tests {
     }
 
     #[test]
-    pub(super) fn defs_global_initializer_can_read_defs_consts() {
+    pub(super) fn module_global_initializer_can_read_module_consts() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
             r#"<module name="main" default_access="public">
@@ -1216,13 +1216,13 @@ mod eval_tests {
         )]));
         engine.start("main.main", None).expect("start");
         let value = engine
-            .eval_defs_global_initializer("base + main.base + hp", "main")
+            .eval_module_global_initializer("base + main.base + hp", "main")
             .expect("initializer should evaluate");
         assert_eq!(value, SlValue::Number(15.0));
     }
 
     #[test]
-    pub(super) fn defs_const_initializer_rejects_global_json_mutation() {
+    pub(super) fn module_const_initializer_rejects_global_json_mutation() {
         let mut engine = engine_from_sources_with_global_json(
             map(&[(
                 "main.xml",
@@ -1236,7 +1236,7 @@ mod eval_tests {
         );
         engine.start("main.main", None).expect("start");
         let error = engine
-            .eval_defs_const_initializer("{ game = 2; base }", "main")
+            .eval_module_const_initializer("{ game = 2; base }", "main")
             .expect_err("global json mutation should fail");
         assert_eq!(error.code, "ENGINE_GLOBAL_READONLY");
     }
@@ -1379,10 +1379,10 @@ mod eval_tests {
         let mut host_unsupported = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
             global_json: compiled.global_json,
-            defs_global_declarations: compiled.defs_global_declarations,
-            defs_global_init_order: compiled.defs_global_init_order,
-            defs_global_const_declarations: compiled.defs_global_const_declarations,
-            defs_global_const_init_order: compiled.defs_global_const_init_order,
+            module_var_declarations: compiled.module_var_declarations,
+            module_var_init_order: compiled.module_var_init_order,
+            module_const_declarations: compiled.module_const_declarations,
+            module_const_init_order: compiled.module_const_init_order,
             host_functions: Some(Arc::new(TestRegistry {
                 names: vec!["ext_fn".to_string()],
             })),
@@ -1454,8 +1454,8 @@ mod eval_tests {
     ) {
         let bad_initializer = map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int">1 &lt;= 1</var></defs>"#,
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><var name="hp" type="int">1 &lt;= 1</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1471,8 +1471,8 @@ mod eval_tests {
 
         let bad_function = map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><function name="bad" return="string:out">out = 'bad';</function></defs>"#,
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><function name="bad" return="string:out">out = 'bad';</function></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1492,18 +1492,18 @@ mod eval_tests {
             .cloned()
             .expect("function symbols");
         let error = bad_function_engine
-            .build_defs_prelude("main.main", &function_symbol_map)
+            .build_module_prelude("main.main", &function_symbol_map)
             .expect_err("legacy function body syntax should fail");
         assert_eq!(error.code, "RHAI_PREPROCESS_FORBIDDEN_SINGLE_QUOTE");
         assert!(error.message.contains("function body"));
     }
 
     #[test]
-    pub(super) fn defs_global_eval_and_internal_error_paths_are_covered() {
+    pub(super) fn module_global_eval_and_internal_error_paths_are_covered() {
         let host_blocked_files = map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int">1</var></defs>"#,
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><var name="hp" type="int">1</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1517,10 +1517,10 @@ mod eval_tests {
         let mut host_blocked = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: host_blocked_compiled.scripts,
             global_json: host_blocked_compiled.global_json,
-            defs_global_declarations: host_blocked_compiled.defs_global_declarations,
-            defs_global_init_order: host_blocked_compiled.defs_global_init_order,
-            defs_global_const_declarations: host_blocked_compiled.defs_global_const_declarations,
-            defs_global_const_init_order: host_blocked_compiled.defs_global_const_init_order,
+            module_var_declarations: host_blocked_compiled.module_var_declarations,
+            module_var_init_order: host_blocked_compiled.module_var_init_order,
+            module_const_declarations: host_blocked_compiled.module_const_declarations,
+            module_const_init_order: host_blocked_compiled.module_const_init_order,
             host_functions: Some(Arc::new(TestRegistry {
                 names: vec!["ext_fn".to_string()],
             })),
@@ -1538,12 +1538,12 @@ mod eval_tests {
         let mut initializer_engine = engine_from_sources_with_global_json(
             map(&[
                 (
-                    "shared.defs.xml",
+                    "shared.xml",
                     r#"
-<defs name="shared">
+<module name="shared" default_access="public">
   <var name="a" type="int">1</var>
   <var name="b" type="int">a + game.hp</var>
-</defs>
+</module>
 "#,
                 ),
                 (
@@ -1562,14 +1562,14 @@ mod eval_tests {
         );
         initializer_engine.start("main.main", None).expect("start");
         assert_eq!(
-            initializer_engine.defs_globals_value.get("shared.b"),
+            initializer_engine.module_vars_value.get("shared.b"),
             Some(&SlValue::Number(6.0))
         );
 
         let bad_initializer = map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int">unknown +</var></defs>"#,
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><var name="hp" type="int">unknown +</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1588,8 +1588,8 @@ mod eval_tests {
         let mut readonly_initializer_engine = engine_from_sources_with_global_json(
             map(&[
                 (
-                    "shared.defs.xml",
-                    r#"<defs name="shared"><var name="hp" type="int">{ game = 1; 1 }</var></defs>"#,
+                    "shared.xml",
+                    r#"<module name="shared" default_access="public"><var name="hp" type="int">{ game = 1; 1 }</var></module>"#,
                 ),
                 (
                     "main.script.xml",
@@ -1610,10 +1610,10 @@ mod eval_tests {
             .expect_err("json mutation in initializer should fail");
         assert_eq!(error.code, "ENGINE_GLOBAL_READONLY");
 
-        let defs_files = map(&[
+        let module_files = map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int">7</var></defs>"#,
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><var name="hp" type="int">7</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1626,30 +1626,30 @@ mod eval_tests {
 "#,
             ),
         ]);
-        let mut defs_engine = engine_from_sources(defs_files.clone());
-        defs_engine.start("main.main", None).expect("start");
-        defs_engine.defs_globals_value.clear();
-        let error = defs_engine
+        let mut module_engine = engine_from_sources(module_files.clone());
+        module_engine.start("main.main", None).expect("start");
+        module_engine.module_vars_value.clear();
+        let error = module_engine
             .eval_expression("shared.hp")
-            .expect_err("missing defs global should fail");
-        assert_eq!(error.code, "ENGINE_DEFS_GLOBAL_MISSING");
+            .expect_err("missing module global should fail");
+        assert_eq!(error.code, "ENGINE_MODULE_GLOBAL_MISSING");
 
-        let mut invalid_visible_defs = engine_from_sources(defs_files.clone());
-        invalid_visible_defs
+        let mut invalid_visible_module = engine_from_sources(module_files.clone());
+        invalid_visible_module
             .start("main.main", None)
             .expect("start");
-        invalid_visible_defs
-            .visible_defs_by_script
+        invalid_visible_module
+            .visible_module_by_script
             .insert("main.main".to_string(), BTreeSet::from(["bad".to_string()]));
-        invalid_visible_defs.defs_global_alias_by_script.insert(
+        invalid_visible_module.module_global_alias_by_script.insert(
             "main.main".to_string(),
             BTreeMap::from([("hp".to_string(), "bad".to_string())]),
         );
-        invalid_visible_defs.defs_globals_value.clear();
-        let error = invalid_visible_defs
+        invalid_visible_module.module_vars_value.clear();
+        let error = invalid_visible_module
             .eval_expression("1")
             .expect_err("invalid alias target should fail");
-        assert_eq!(error.code, "ENGINE_DEFS_GLOBAL_MISSING");
+        assert_eq!(error.code, "ENGINE_MODULE_GLOBAL_MISSING");
 
         let json_shadow = map(&[(
             "main.script.xml",
@@ -1668,15 +1668,15 @@ mod eval_tests {
 
         let namespace_type_error = map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int">7</var></defs>"#,
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><var name="hp" type="int">7</var></module>"#,
             ),
             (
                 "main.script.xml",
                 r#"
 <!-- import shared from shared.xml -->
 <script name="main">
-  <code>__sl_defs_ns_shared = 1;</code>
+  <code>__sl_module_ns_shared = 1;</code>
 </script>
 "#,
             ),
@@ -1688,19 +1688,19 @@ mod eval_tests {
         let error = namespace_type_error_engine
             .next_output()
             .expect_err("namespace type should fail");
-        assert_eq!(error.code, "ENGINE_DEFS_GLOBAL_NAMESPACE_TYPE");
+        assert_eq!(error.code, "ENGINE_MODULE_GLOBAL_NAMESPACE_TYPE");
 
         let namespace_extra_field = map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int">7</var></defs>"#,
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><var name="hp" type="int">7</var></module>"#,
             ),
             (
                 "main.script.xml",
                 r#"
 <!-- import shared from shared.xml -->
 <script name="main">
-  <code>__sl_defs_ns_shared.extra = 1;</code>
+  <code>__sl_module_ns_shared.extra = 1;</code>
   <text>${shared.hp}</text>
 </script>
 "#,
@@ -1713,18 +1713,18 @@ mod eval_tests {
         let text = namespace_extra_engine.next_output().expect("text");
         assert!(matches!(text, EngineOutput::Text { text, .. } if text == "7"));
 
-        let mut missing_decl_engine = engine_from_sources(defs_files.clone());
+        let mut missing_decl_engine = engine_from_sources(module_files.clone());
         missing_decl_engine.start("main.main", None).expect("start");
-        missing_decl_engine.defs_globals_type.clear();
+        missing_decl_engine.module_vars_type.clear();
         let error = missing_decl_engine
             .next_output()
             .expect_err("missing type declaration should fail");
-        assert_eq!(error.code, "ENGINE_DEFS_GLOBAL_DECL_MISSING");
+        assert_eq!(error.code, "ENGINE_MODULE_GLOBAL_DECL_MISSING");
 
         let full_alias_type_mismatch = map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int">7</var></defs>"#,
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><var name="hp" type="int">7</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1747,8 +1747,8 @@ mod eval_tests {
 
         let short_alias_files = map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int">7</var></defs>"#,
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><var name="hp" type="int">7</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1765,16 +1765,16 @@ mod eval_tests {
         missing_short_decl_engine
             .start("main.main", None)
             .expect("start");
-        missing_short_decl_engine.defs_globals_type.clear();
+        missing_short_decl_engine.module_vars_type.clear();
         let error = missing_short_decl_engine
             .next_output()
             .expect_err("missing short alias decl should fail");
-        assert_eq!(error.code, "ENGINE_DEFS_GLOBAL_DECL_MISSING");
+        assert_eq!(error.code, "ENGINE_MODULE_GLOBAL_DECL_MISSING");
 
         let short_alias_type_mismatch = map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int">7</var></defs>"#,
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><var name="hp" type="int">7</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1795,20 +1795,20 @@ mod eval_tests {
             .expect_err("short alias type mismatch should fail");
         assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
 
-        let mut map_helpers_engine = engine_from_sources(defs_files);
+        let mut map_helpers_engine = engine_from_sources(module_files);
         map_helpers_engine.start("main.main", None).expect("start");
         assert!(map_helpers_engine
-            .build_defs_global_qualified_rewrite_map("missing")
+            .build_module_global_qualified_rewrite_map("missing")
             .is_empty());
         map_helpers_engine
-            .visible_defs_by_script
+            .visible_module_by_script
             .insert("main.main".to_string(), BTreeSet::from(["bad".to_string()]));
-        let rewritten = map_helpers_engine.build_defs_global_qualified_rewrite_map("main.main");
+        let rewritten = map_helpers_engine.build_module_global_qualified_rewrite_map("main.main");
         assert!(rewritten.is_empty());
 
-        map_helpers_engine.defs_global_declarations.insert(
+        map_helpers_engine.module_var_declarations.insert(
             "other.hp".to_string(),
-            sl_core::DefsGlobalVarDecl {
+            sl_core::ModuleVarDecl {
                 namespace: "other".to_string(),
                 name: "hp".to_string(),
                 qualified_name: "other.hp".to_string(),
@@ -1820,17 +1820,17 @@ mod eval_tests {
                 location: sl_core::SourceSpan::synthetic(),
             },
         );
-        let aliases = map_helpers_engine.collect_bundle_defs_short_aliases("shared");
+        let aliases = map_helpers_engine.collect_bundle_module_short_aliases("shared");
         assert_eq!(aliases.get("hp").map(String::as_str), Some("shared.hp"));
 
         let mut invalid_initializer_engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><text>ok</text></script>"#,
         )]));
-        invalid_initializer_engine.defs_global_declarations = BTreeMap::from([
+        invalid_initializer_engine.module_var_declarations = BTreeMap::from([
             (
                 "bad".to_string(),
-                sl_core::DefsGlobalVarDecl {
+                sl_core::ModuleVarDecl {
                     namespace: "shared".to_string(),
                     name: "bad".to_string(),
                     qualified_name: "bad".to_string(),
@@ -1844,7 +1844,7 @@ mod eval_tests {
             ),
             (
                 "shared.ok".to_string(),
-                sl_core::DefsGlobalVarDecl {
+                sl_core::ModuleVarDecl {
                     namespace: "shared".to_string(),
                     name: "ok".to_string(),
                     qualified_name: "shared.ok".to_string(),
@@ -1857,7 +1857,7 @@ mod eval_tests {
                 },
             ),
         ]);
-        invalid_initializer_engine.defs_global_init_order =
+        invalid_initializer_engine.module_var_init_order =
             vec!["bad".to_string(), "shared.ok".to_string()];
         invalid_initializer_engine
             .start("main.main", None)
@@ -1865,8 +1865,8 @@ mod eval_tests {
 
         let mut alias_visibility_engine = engine_from_sources(map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int">1</var></defs>"#,
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><var name="hp" type="int">1</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1879,7 +1879,7 @@ mod eval_tests {
         alias_visibility_engine
             .start("main.main", None)
             .expect("start");
-        alias_visibility_engine.defs_global_alias_by_script.insert(
+        alias_visibility_engine.module_global_alias_by_script.insert(
             "main.main".to_string(),
             BTreeMap::from([
                 ("ghost".to_string(), "ghost.hp".to_string()),
@@ -1898,25 +1898,25 @@ mod eval_tests {
             .start("main.main", None)
             .expect("start");
         short_decl_missing_engine
-            .visible_defs_by_script
+            .visible_module_by_script
             .insert("main.main".to_string(), BTreeSet::from(["bad".to_string()]));
         short_decl_missing_engine
-            .defs_global_alias_by_script
+            .module_global_alias_by_script
             .insert(
                 "main.main".to_string(),
                 BTreeMap::from([("hp".to_string(), "bad".to_string())]),
             );
         short_decl_missing_engine
-            .defs_globals_value
+            .module_vars_value
             .insert("bad".to_string(), SlValue::Number(1.0));
         let error = short_decl_missing_engine
             .execute_rhai("hp = hp + 1;", false, "code")
             .expect_err("short alias missing decl should fail");
-        assert_eq!(error.code, "ENGINE_DEFS_GLOBAL_DECL_MISSING");
+        assert_eq!(error.code, "ENGINE_MODULE_GLOBAL_DECL_MISSING");
     }
 
     #[test]
-    pub(super) fn module_local_defs_short_aliases_write_back_and_type_check() {
+    pub(super) fn module_local_module_short_aliases_write_back_and_type_check() {
         let files = map(&[(
             "main.xml",
             r#"
@@ -1934,7 +1934,7 @@ mod eval_tests {
         let output = engine.next_output().expect("text");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "8"));
         assert_eq!(
-            engine.defs_globals_value.get("main.hp"),
+            engine.module_vars_value.get("main.hp"),
             Some(&SlValue::Number(8.0))
         );
 
@@ -2099,17 +2099,17 @@ mod eval_tests {
     }
 
     #[test]
-    pub(super) fn code_eval_with_defs_prelude_and_visible_json_is_covered() {
+    pub(super) fn code_eval_with_module_prelude_and_visible_json_is_covered() {
         let mut engine = engine_from_sources_with_global_json(
             map(&[
                 (
-                    "shared.defs.xml",
+                    "shared.xml",
                     r#"
-<defs name="shared">
+<module name="shared" default_access="public">
   <function name="add_bonus" args="int:x" return="int:out">
     out = x + game.bonus;
   </function>
-</defs>
+</module>
 "#,
                 ),
                 (
@@ -2156,7 +2156,7 @@ mod eval_tests {
         );
         initializer_unit.start("main", None).expect("start");
         let error = initializer_unit
-            .eval_defs_global_initializer("{ game = (); 1 }", "shared")
+            .eval_module_global_initializer("{ game = (); 1 }", "shared")
             .expect_err("initializer should reject unsupported global value type");
         assert_eq!(error.code, "ENGINE_VALUE_UNSUPPORTED");
 
@@ -2201,14 +2201,14 @@ mod eval_tests {
 
         let mut ns_unit = engine_from_sources(map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int">7</var></defs>"#,
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><var name="hp" type="int">7</var></module>"#,
             ),
             (
                 "main.script.xml",
                 r#"
     <!-- import shared from shared.xml -->
-    <script name="main"><code>__sl_defs_ns_shared = ();</code></script>
+    <script name="main"><code>__sl_module_ns_shared = ();</code></script>
     "#,
             ),
         ]));
@@ -2220,8 +2220,8 @@ mod eval_tests {
 
         let mut alias_unit = engine_from_sources(map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><var name="hp" type="int">7</var></defs>"#,
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><var name="hp" type="int">7</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -2239,8 +2239,8 @@ mod eval_tests {
 
         let mut missing_symbol = engine_from_sources(map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><function name="add" return="int:out">out = 1;</function></defs>"#,
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><function name="add" return="int:out">out = 1;</function></module>"#,
             ),
             (
                 "main.script.xml",
@@ -2251,17 +2251,17 @@ mod eval_tests {
             ),
         ]));
         missing_symbol.start("main.main", None).expect("start");
-        missing_symbol.defs_prelude_by_script.clear();
+        missing_symbol.module_prelude_by_script.clear();
         missing_symbol.invoke_function_symbols.clear();
         let error = missing_symbol
             .eval_expression("1")
-            .expect_err("missing defs symbol map should fail");
-        assert_eq!(error.code, "ENGINE_DEFS_FUNCTION_SYMBOL_MISSING");
+            .expect_err("missing module symbol map should fail");
+        assert_eq!(error.code, "ENGINE_MODULE_FUNCTION_SYMBOL_MISSING");
 
         let mut prelude_missing_global = engine_from_sources(map(&[
             (
-                "shared.defs.xml",
-                r#"<defs name="shared"><function name="add" return="int:out">out = 1;</function></defs>"#,
+                "shared.xml",
+                r#"<module name="shared" default_access="public"><function name="add" return="int:out">out = 1;</function></module>"#,
             ),
             (
                 "main.script.xml",
@@ -2280,7 +2280,7 @@ mod eval_tests {
             .or_default()
             .insert("ghost".to_string());
         let prelude = prelude_missing_global
-            .build_defs_prelude(
+            .build_module_prelude(
                 "main.main",
                 prelude_missing_global
                     .visible_function_symbols_by_script
@@ -2315,7 +2315,7 @@ mod eval_tests {
     }
 
     #[test]
-    pub(super) fn defs_const_initializer_runtime_error_is_handled() {
+    pub(super) fn module_const_initializer_runtime_error_is_handled() {
         // Test for line 256: Runtime error in eval_with_scope
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
@@ -2326,13 +2326,13 @@ mod eval_tests {
         )]));
         // Trigger runtime error in const initializer by dividing by zero
         let error = engine
-            .eval_defs_const_initializer("1 / 0", "main")
+            .eval_module_const_initializer("1 / 0", "main")
             .expect_err("division by zero should fail");
         assert_eq!(error.code, "ENGINE_EVAL_ERROR");
     }
 
     #[test]
-    pub(super) fn defs_const_initializer_type_mismatch_is_handled() {
+    pub(super) fn module_const_initializer_type_mismatch_is_handled() {
         // Test for line 268: Type conversion error
         // Return a type that can't be converted to the declared type
         let mut engine = engine_from_sources(map(&[(
@@ -2346,13 +2346,13 @@ mod eval_tests {
         // Actually, rhai is dynamic so let's try something that produces an error
         // Let's try to access a non-existent variable which produces an error
         let error = engine
-            .eval_defs_const_initializer("nonexistent_var", "main")
+            .eval_module_const_initializer("nonexistent_var", "main")
             .expect_err("undefined variable should fail");
         assert_eq!(error.code, "ENGINE_EVAL_ERROR");
     }
 
     #[test]
-    pub(super) fn defs_const_qualified_rewrite_handles_invalid_names() {
+    pub(super) fn module_const_qualified_rewrite_handles_invalid_names() {
         // Test for line 133: continue when qualified_name doesn't have '.'
         // This is tested indirectly via const initialization with qualified names
         let mut engine = engine_from_sources(map(&[(
@@ -2368,7 +2368,7 @@ mod eval_tests {
     }
 
     #[test]
-    pub(super) fn eval_defs_const_initializer_rejects_host_functions() {
+    pub(super) fn eval_module_const_initializer_rejects_host_functions() {
         // Test line 208: when host_functions is not empty, return error
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
@@ -2382,13 +2382,13 @@ mod eval_tests {
             names: vec!["test_func".to_string()],
         });
         let error = engine
-            .eval_defs_const_initializer("base + 1", "main")
+            .eval_module_const_initializer("base + 1", "main")
             .expect_err("host functions should cause error");
         assert_eq!(error.code, "ENGINE_HOST_FUNCTION_UNSUPPORTED");
     }
 
     #[test]
-    pub(super) fn collect_bundle_defs_const_short_aliases_skips_other_namespace() {
+    pub(super) fn collect_bundle_module_const_short_aliases_skips_other_namespace() {
         // Test line 798: when namespace != module_name, skip the entry
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
@@ -2398,9 +2398,9 @@ mod eval_tests {
 </module>"#,
         )]));
         // Add a const from a different namespace to the declarations
-        engine.defs_const_declarations.insert(
+        engine.module_const_declarations.insert(
             "other.value".to_string(),
-            DefsGlobalConstDecl {
+            ModuleConstDecl {
                 namespace: "other".to_string(),
                 name: "value".to_string(),
                 qualified_name: "other.value".to_string(),
@@ -2413,14 +2413,14 @@ mod eval_tests {
             },
         );
         // Query with "main" namespace - should only get "main.local", not "other.value"
-        let aliases = engine.collect_bundle_defs_const_short_aliases("main");
+        let aliases = engine.collect_bundle_module_const_short_aliases("main");
         assert!(aliases.contains_key("local"));
         assert!(!aliases.contains_key("value"));
     }
 
     #[test]
-    pub(super) fn eval_defs_const_initializer_handles_non_dotted_qualified_name() {
-        // Test line 218: when qualified_name in defs_consts_value doesn't contain '.', skip it
+    pub(super) fn eval_module_const_initializer_handles_non_dotted_qualified_name() {
+        // Test line 218: when qualified_name in module_consts_value doesn't contain '.', skip it
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
             r#"<module name="main" default_access="public">
@@ -2431,19 +2431,19 @@ mod eval_tests {
         // Need to start the engine first to initialize consts
         engine.start("main.main", None).expect("start");
         // Verify the base const works without our modification
-        let result_before = engine.eval_defs_const_initializer("base + 1", "main");
+        let result_before = engine.eval_module_const_initializer("base + 1", "main");
         assert!(
             result_before.is_ok(),
             "base test should work before modification"
         );
         assert_eq!(result_before.unwrap(), SlValue::Number(8.0));
 
-        // Manually inject a non-dotted key into defs_consts_value to trigger continue branch
+        // Manually inject a non-dotted key into module_consts_value to trigger continue branch
         engine
-            .defs_consts_value
+            .module_consts_value
             .insert("invalid_no_dot".to_string(), SlValue::Number(42.0));
         // This should still work because the valid const should be processed
-        let result = engine.eval_defs_const_initializer("base + 1", "main");
+        let result = engine.eval_module_const_initializer("base + 1", "main");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), SlValue::Number(8.0));
     }
@@ -2471,8 +2471,8 @@ mod eval_tests {
     }
 
     #[test]
-    pub(super) fn eval_defs_global_initializer_handles_non_dotted_qualified_name() {
-        // Test line 133: when qualified_name in defs_globals_value doesn't contain '.', skip it
+    pub(super) fn eval_module_global_initializer_handles_non_dotted_qualified_name() {
+        // Test line 133: when qualified_name in module_vars_value doesn't contain '.', skip it
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
             r#"<module name="main" default_access="public">
@@ -2483,16 +2483,16 @@ mod eval_tests {
         // Need to start first to initialize globals
         engine.start("main.main", None).expect("start");
         // Verify it works before modification
-        let result_before = engine.eval_defs_global_initializer("score + 1", "main");
+        let result_before = engine.eval_module_global_initializer("score + 1", "main");
         assert!(result_before.is_ok());
         assert_eq!(result_before.unwrap(), SlValue::Number(11.0));
 
-        // Inject a non-dotted key into defs_globals_value to trigger continue branch
+        // Inject a non-dotted key into module_vars_value to trigger continue branch
         engine
-            .defs_globals_value
+            .module_vars_value
             .insert("invalid_no_dot".to_string(), SlValue::Number(42.0));
         // Should still work because valid globals should be processed
-        let result = engine.eval_defs_global_initializer("score + 1", "main");
+        let result = engine.eval_module_global_initializer("score + 1", "main");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), SlValue::Number(11.0));
     }

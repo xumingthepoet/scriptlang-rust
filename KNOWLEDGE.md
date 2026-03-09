@@ -38,3 +38,8 @@
 - 发现：当 `module` 默认可见性是 `private` 且 host entry 要求 `public` 时，旧样例/测试会在 entry 解析阶段集中失败。
 - 细节：迁移时优先给“预期可对外运行”的 module 显式加 `default_access="public"`，并只把需要收敛的符号改成元素级 `access="private"`；否则会在 `compile_artifact/create_engine/start` 三层同时触发 private-entry 错误。
 - 证据：本次新增访问控制后，未声明可见性的 `main.main` 在 artifact/api/runtime 各层都被拒绝，补齐 `default_access="public"` 后恢复。
+
+### 2026-03-09 — 规范 — 文档与校验优先“白名单正向表述”
+- 发现：面向新用户的文档若强调“历史废弃/旧格式报错”，会增加无关认知负担；同类实现里黑名单分支也容易长期残留无效概念。
+- 细节：对输入/语法约束优先采用白名单模型（如“仅支持 `*.xml` + `<module>`”）；文档默认只写当前支持能力。只有当需求明确是迁移/兼容排障时，才补充历史格式说明。错误码设计也优先统一“非白名单即 unsupported”。
+- 证据：`source_parse` 从 `legacy_*` 黑名单改为纯白名单后，测试与文档仍可完整表达行为且维护成本更低。
