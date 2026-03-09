@@ -306,6 +306,7 @@ mod type_expr_tests {
 
     #[test]
     fn type_resolution_helpers_cover_nested_array_and_map_paths() {
+        assert_eq!(script_type_kind(&ScriptType::Script), "script");
         let span = SourceSpan::synthetic();
         let mut resolved = BTreeMap::new();
         let mut visiting = HashSet::new();
@@ -343,6 +344,16 @@ mod type_expr_tests {
         )
         .expect("map custom type should resolve");
         assert_eq!(script_type_kind(&map), "map");
+
+        let script = resolve_type_expr_with_lookup(
+            &ParsedTypeExpr::Script,
+            &type_map,
+            &mut resolved,
+            &mut visiting,
+            &span,
+        )
+        .expect("script type should resolve");
+        assert_eq!(script_type_kind(&script), "script");
 
         let array_err = resolve_type_expr_with_lookup(
             &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Custom("Missing".to_string()))),

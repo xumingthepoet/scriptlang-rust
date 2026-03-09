@@ -142,7 +142,7 @@ pub(super) mod runtime_test_support {
         let compiled = compile_project_from_sources(files);
         ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
-            global_json: compiled.global_json,
+            global_data: compiled.global_data,
             module_var_declarations: compiled.module_var_declarations,
             module_var_init_order: compiled.module_var_init_order,
             module_const_declarations: compiled.module_const_declarations,
@@ -156,22 +156,22 @@ pub(super) mod runtime_test_support {
         .expect("engine should build")
     }
 
-    pub(super) fn engine_from_sources_with_global_json(
+    pub(super) fn engine_from_sources_with_global_data(
         files: BTreeMap<String, String>,
-        global_json: BTreeMap<String, SlValue>,
-        visible_json_symbols: &[&str],
+        global_data: BTreeMap<String, SlValue>,
+        visible_global_symbols: &[&str],
     ) -> ScriptLangEngine {
         let mut compiled = compile_project_from_sources(files);
-        let visible_json_globals = visible_json_symbols
+        let visible_globals = visible_global_symbols
             .iter()
             .map(|value| (*value).to_string())
             .collect::<Vec<_>>();
         for script in compiled.scripts.values_mut() {
-            script.visible_json_globals = visible_json_globals.clone();
+            script.visible_globals = visible_globals.clone();
         }
         ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
-            global_json,
+            global_data,
             module_var_declarations: compiled.module_var_declarations,
             module_var_init_order: compiled.module_var_init_order,
             module_const_declarations: compiled.module_const_declarations,
@@ -215,7 +215,7 @@ pub(super) mod runtime_test_support {
         sl_core::CompileProjectResult {
             scripts,
             entry_script: "main.main".to_string(),
-            global_json: bundle.global_json,
+            global_data: bundle.global_data,
             module_var_declarations: bundle.module_var_declarations,
             module_var_init_order: bundle.module_var_init_order,
             module_const_declarations: bundle.module_const_declarations,

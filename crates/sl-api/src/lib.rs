@@ -69,7 +69,7 @@ pub fn compile_project_from_xml_map(
 ) -> Result<CompileProjectResult, ScriptLangError> {
     let CompileProjectBundleResult {
         scripts,
-        global_json,
+        global_data,
         module_var_declarations,
         module_var_init_order,
         module_const_declarations,
@@ -81,7 +81,7 @@ pub fn compile_project_from_xml_map(
     Ok(CompileProjectResult {
         scripts,
         entry_script,
-        global_json,
+        global_data,
         module_var_declarations,
         module_var_init_order,
         module_const_declarations,
@@ -120,7 +120,7 @@ pub fn create_engine_from_artifact(
 
     let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
         scripts: options.artifact.scripts,
-        global_json: options.artifact.global_json,
+        global_data: options.artifact.global_data,
         module_var_declarations: options.artifact.module_var_declarations,
         module_var_init_order: options.artifact.module_var_init_order,
         module_const_declarations: options.artifact.module_const_declarations,
@@ -145,7 +145,7 @@ pub fn resume_engine_from_artifact(
 
     let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
         scripts: options.artifact.scripts,
-        global_json: options.artifact.global_json,
+        global_data: options.artifact.global_data,
         module_var_declarations: options.artifact.module_var_declarations,
         module_var_init_order: options.artifact.module_var_init_order,
         module_const_declarations: options.artifact.module_const_declarations,
@@ -186,7 +186,7 @@ pub fn resume_engine_from_xml(
             compiler_version: sl_compiler::DEFAULT_COMPILER_VERSION.to_string(),
             entry_script: "main.main".to_string(),
             scripts: compiled.scripts,
-            global_json: compiled.global_json,
+            global_data: compiled.global_data,
             module_var_declarations: compiled.module_var_declarations,
             module_var_init_order: compiled.module_var_init_order,
             module_const_declarations: compiled.module_const_declarations,
@@ -427,7 +427,7 @@ mod tests {
     }
 
     #[test]
-    fn compile_artifact_from_xml_map_builds_v1_artifact() {
+    fn compile_artifact_from_xml_map_builds_artifact() {
         let scripts = map(&[(
             "main.xml",
             r#"<module name="main" default_access="public"><script name="main"><text>Main</text></script></module>"#,
@@ -468,7 +468,7 @@ mod tests {
             compiler_version: "player".to_string(),
             entry_script: "missing".to_string(),
             scripts: BTreeMap::new(),
-            global_json: BTreeMap::new(),
+            global_data: BTreeMap::new(),
             module_var_declarations: BTreeMap::new(),
             module_var_init_order: Vec::new(),
             module_const_declarations: BTreeMap::new(),
@@ -501,7 +501,7 @@ mod tests {
                 compiler_version: sl_compiler::DEFAULT_COMPILER_VERSION.to_string(),
                 entry_script: "main.main".to_string(),
                 scripts: bundle.scripts,
-                global_json: bundle.global_json,
+                global_data: bundle.global_data,
                 module_var_declarations: bundle.module_var_declarations,
                 module_var_init_order: bundle.module_var_init_order,
                 module_const_declarations: bundle.module_const_declarations,

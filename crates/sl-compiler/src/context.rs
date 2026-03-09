@@ -6,7 +6,7 @@ pub(crate) const LOOP_TEMP_VAR_PREFIX: &str = "__sl_loop_";
 #[derive(Debug, Clone)]
 pub struct CompileProjectBundleResult {
     pub scripts: BTreeMap<String, ScriptIr>,
-    pub global_json: BTreeMap<String, SlValue>,
+    pub global_data: BTreeMap<String, SlValue>,
     pub module_var_declarations: BTreeMap<String, ModuleVarDecl>,
     pub module_var_init_order: Vec<String>,
     pub module_const_declarations: BTreeMap<String, ModuleConstDecl>,

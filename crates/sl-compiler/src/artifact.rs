@@ -11,7 +11,7 @@ pub fn compile_artifact_from_xml_map(
 ) -> Result<CompiledProjectArtifact, ScriptLangError> {
     let CompileProjectBundleResult {
         scripts,
-        global_json,
+        global_data,
         module_var_declarations,
         module_var_init_order,
         module_const_declarations,
@@ -25,7 +25,7 @@ pub fn compile_artifact_from_xml_map(
         compiler_version: DEFAULT_COMPILER_VERSION.to_string(),
         entry_script,
         scripts,
-        global_json,
+        global_data,
         module_var_declarations,
         module_var_init_order,
         module_const_declarations,
@@ -130,7 +130,7 @@ mod artifact_tests {
     }
 
     #[test]
-    fn compile_artifact_from_xml_map_builds_v1_artifact() {
+    fn compile_artifact_from_xml_map_builds_artifact() {
         let files = compiler_test_support::map(&[(
             "main.xml",
             r#"<module name="main" default_access="public">

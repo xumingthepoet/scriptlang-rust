@@ -269,7 +269,8 @@ pub struct ScriptIr {
     pub params: Vec<ScriptParam>,
     pub root_group_id: String,
     pub groups: BTreeMap<String, ImplicitGroup>,
-    pub visible_json_globals: Vec<String>,
+    #[serde(alias = "visible_json_globals")]
+    pub visible_globals: Vec<String>,
     pub visible_functions: BTreeMap<String, FunctionDecl>,
     pub visible_module_vars: BTreeMap<String, ModuleVarDecl>,
     #[serde(default)]
@@ -388,7 +389,8 @@ pub enum EngineOutput {
 pub struct CompileProjectResult {
     pub scripts: BTreeMap<String, ScriptIr>,
     pub entry_script: String,
-    pub global_json: BTreeMap<String, SlValue>,
+    #[serde(alias = "global_json")]
+    pub global_data: BTreeMap<String, SlValue>,
     pub module_var_declarations: BTreeMap<String, ModuleVarDecl>,
     pub module_var_init_order: Vec<String>,
     #[serde(default)]
@@ -404,7 +406,8 @@ pub struct CompiledProjectArtifact {
     pub compiler_version: String,
     pub entry_script: String,
     pub scripts: BTreeMap<String, ScriptIr>,
-    pub global_json: BTreeMap<String, SlValue>,
+    #[serde(alias = "globalJson")]
+    pub global_data: BTreeMap<String, SlValue>,
     pub module_var_declarations: BTreeMap<String, ModuleVarDecl>,
     pub module_var_init_order: Vec<String>,
     #[serde(default)]
@@ -427,7 +430,7 @@ mod tests {
     }
 
     #[test]
-    fn compiled_project_schema_constant_matches_v1() {
+    fn compiled_project_schema_constant_matches() {
         assert_eq!(COMPILED_PROJECT_SCHEMA, "compiled-project");
     }
 
@@ -438,7 +441,7 @@ mod tests {
             compiler_version: "player".to_string(),
             entry_script: "main".to_string(),
             scripts: BTreeMap::new(),
-            global_json: BTreeMap::new(),
+            global_data: BTreeMap::new(),
             module_var_declarations: BTreeMap::new(),
             module_var_init_order: Vec::new(),
             module_const_declarations: BTreeMap::new(),

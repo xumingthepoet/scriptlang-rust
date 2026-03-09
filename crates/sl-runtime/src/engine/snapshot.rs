@@ -264,7 +264,7 @@ impl ScriptLangEngine {
         });
 
         // Force visibility map access path to validate script existence.
-        let _ = self.visible_json_by_script.get(&script_name);
+        let _ = self.visible_globals_by_script.get(&script_name);
 
         Ok(())
     }
@@ -921,7 +921,7 @@ mod snapshot_tests {
         let compiled = compile_project_from_sources(sources);
         let mut source = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts.clone(),
-            global_json: compiled.global_json.clone(),
+            global_data: compiled.global_data.clone(),
             module_var_declarations: compiled.module_var_declarations.clone(),
             module_var_init_order: compiled.module_var_init_order.clone(),
             module_const_declarations: compiled.module_const_declarations.clone(),
@@ -942,7 +942,7 @@ mod snapshot_tests {
 
         let mut target = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
-            global_json: compiled.global_json,
+            global_data: compiled.global_data,
             module_var_declarations: compiled.module_var_declarations,
             module_var_init_order: compiled.module_var_init_order,
             module_const_declarations: compiled.module_const_declarations,

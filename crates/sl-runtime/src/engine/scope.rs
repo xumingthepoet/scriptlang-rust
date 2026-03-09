@@ -8,14 +8,14 @@ impl ScriptLangEngine {
             .map(|entry| entry.script_name.clone())
     }
 
-    pub(super) fn is_visible_json_global(&self, script_name: Option<&str>, name: &str) -> bool {
+    pub(super) fn is_visible_global_data(&self, script_name: Option<&str>, name: &str) -> bool {
         let Some(script_name) = script_name else {
             return false;
         };
-        let Some(visible) = self.visible_json_by_script.get(script_name) else {
+        let Some(visible) = self.visible_globals_by_script.get(script_name) else {
             return false;
         };
-        visible.contains(name) && self.global_json.contains_key(name)
+        visible.contains(name) && self.global_data.contains_key(name)
     }
 
     pub(super) fn resolve_module_global_alias(
@@ -76,9 +76,9 @@ impl ScriptLangEngine {
                     )
                 });
         }
-        if self.is_visible_json_global(script_name.as_deref(), name) {
+        if self.is_visible_global_data(script_name.as_deref(), name) {
             let value = self
-                .global_json
+                .global_data
                 .get(name)
                 .expect("visible global lookup should be present");
             return Ok(value.clone());
@@ -136,11 +136,11 @@ impl ScriptLangEngine {
                 ),
             ));
         }
-        if self.is_visible_json_global(script_name.as_deref(), name) {
+        if self.is_visible_global_data(script_name.as_deref(), name) {
             return Err(ScriptLangError::new(
                 "ENGINE_GLOBAL_READONLY",
                 format!(
-                    "Global JSON \"{}\" is readonly and cannot be mutated.",
+                    "global data \"{}\" is readonly and cannot be mutated.",
                     name
                 ),
             ));
@@ -312,10 +312,10 @@ mod scope_tests {
         engine.start("main", None).expect("start");
 
         engine
-            .global_json
+            .global_data
             .insert("g".to_string(), SlValue::Number(1.0));
         engine
-            .visible_json_by_script
+            .visible_globals_by_script
             .entry("main.main".to_string())
             .or_default()
             .insert("g".to_string());
@@ -327,7 +327,7 @@ mod scope_tests {
 
         let err = engine
             .write_variable("g", SlValue::Number(2.0))
-            .expect_err("visible json is readonly");
+            .expect_err("visible global data is readonly");
         assert_eq!(err.code, "ENGINE_GLOBAL_READONLY");
 
         let err = engine

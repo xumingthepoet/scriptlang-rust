@@ -42,7 +42,7 @@ impl HostFunctionRegistry for EmptyHostFunctionRegistry {
 #[derive(Clone)]
 pub struct ScriptLangEngineOptions {
     pub scripts: BTreeMap<String, ScriptIr>,
-    pub global_json: BTreeMap<String, SlValue>,
+    pub global_data: BTreeMap<String, SlValue>,
     pub module_var_declarations: BTreeMap<String, ModuleVarDecl>,
     pub module_var_init_order: Vec<String>,
     pub module_const_declarations: BTreeMap<String, ModuleConstDecl>,
@@ -109,7 +109,7 @@ pub struct ScriptLangEngine {
     pub(super) host_functions: Arc<dyn HostFunctionRegistry>,
     pub(super) compiler_version: String,
     pub(super) group_lookup: HashMap<String, GroupLookup>,
-    pub(super) global_json: BTreeMap<String, SlValue>,
+    pub(super) global_data: BTreeMap<String, SlValue>,
     pub(super) module_var_declarations: BTreeMap<String, ModuleVarDecl>,
     pub(super) module_var_init_order: Vec<String>,
     pub(super) module_const_declarations: BTreeMap<String, ModuleConstDecl>,
@@ -118,7 +118,7 @@ pub struct ScriptLangEngine {
     pub(super) module_vars_type: BTreeMap<String, ScriptType>,
     pub(super) module_consts_value: BTreeMap<String, SlValue>,
     pub(super) module_consts_type: BTreeMap<String, ScriptType>,
-    pub(super) visible_json_by_script: HashMap<String, BTreeSet<String>>,
+    pub(super) visible_globals_by_script: HashMap<String, BTreeSet<String>>,
     pub(super) visible_module_by_script: HashMap<String, BTreeSet<String>>,
     pub(super) module_global_alias_by_script: HashMap<String, BTreeMap<String, String>>,
     pub(super) visible_consts_by_script: HashMap<String, BTreeSet<String>>,
@@ -160,7 +160,7 @@ impl ScriptLangEngine {
         }
 
         let mut group_lookup: HashMap<String, GroupLookup> = HashMap::new();
-        let mut visible_json_by_script = HashMap::new();
+        let mut visible_globals_by_script = HashMap::new();
         let mut visible_module_by_script = HashMap::new();
         let mut module_global_alias_by_script = HashMap::new();
         let mut visible_consts_by_script = HashMap::new();
@@ -198,9 +198,9 @@ impl ScriptLangEngine {
                     );
                 }
             }
-            visible_json_by_script.insert(
+            visible_globals_by_script.insert(
                 script_name.clone(),
-                script.visible_json_globals.iter().cloned().collect(),
+                script.visible_globals.iter().cloned().collect(),
             );
             let mut module_aliases = BTreeMap::new();
             let mut visible_module = BTreeSet::new();
@@ -323,7 +323,7 @@ impl ScriptLangEngine {
                 .compiler_version
                 .unwrap_or_else(|| DEFAULT_COMPILER_VERSION.to_string()),
             group_lookup,
-            global_json: options.global_json,
+            global_data: options.global_data,
             module_var_declarations: options.module_var_declarations,
             module_var_init_order: options.module_var_init_order,
             module_const_declarations: options.module_const_declarations,
@@ -332,7 +332,7 @@ impl ScriptLangEngine {
             module_vars_type,
             module_consts_value: BTreeMap::new(),
             module_consts_type,
-            visible_json_by_script,
+            visible_globals_by_script,
             visible_module_by_script,
             module_global_alias_by_script,
             visible_consts_by_script,
@@ -535,7 +535,7 @@ mod lifecycle_tests {
         let compiled = compile_project_from_sources(files);
         let result = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
-            global_json: compiled.global_json,
+            global_data: compiled.global_data,
             module_var_declarations: compiled.module_var_declarations,
             module_var_init_order: compiled.module_var_init_order,
             module_const_declarations: compiled.module_const_declarations,
@@ -562,7 +562,7 @@ mod lifecycle_tests {
         let compiled = compile_project_from_sources(files);
         let result = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
-            global_json: compiled.global_json,
+            global_data: compiled.global_data,
             module_var_declarations: compiled.module_var_declarations,
             module_var_init_order: compiled.module_var_init_order,
             module_const_declarations: compiled.module_const_declarations,
@@ -604,7 +604,7 @@ mod lifecycle_tests {
         let compiled = compile_project_from_sources(files);
         let result = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
-            global_json: compiled.global_json,
+            global_data: compiled.global_data,
             module_var_declarations: compiled.module_var_declarations,
             module_var_init_order: compiled.module_var_init_order,
             module_const_declarations: compiled.module_const_declarations,
@@ -638,7 +638,7 @@ mod lifecycle_tests {
         let compiled = compile_project_from_sources(files);
         let result = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
-            global_json: compiled.global_json,
+            global_data: compiled.global_data,
             module_var_declarations: compiled.module_var_declarations,
             module_var_init_order: compiled.module_var_init_order,
             module_const_declarations: compiled.module_const_declarations,
@@ -674,7 +674,7 @@ mod lifecycle_tests {
         let compiled = compile_project_from_sources(files);
         let result = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
-            global_json: compiled.global_json,
+            global_data: compiled.global_data,
             module_var_declarations: compiled.module_var_declarations,
             module_var_init_order: compiled.module_var_init_order,
             module_const_declarations: compiled.module_const_declarations,
@@ -732,7 +732,7 @@ mod lifecycle_tests {
         let compiled = compile_project_from_sources(files);
         let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
-            global_json: compiled.global_json,
+            global_data: compiled.global_data,
             module_var_declarations: compiled.module_var_declarations,
             module_var_init_order: compiled.module_var_init_order,
             module_const_declarations: compiled.module_const_declarations,
@@ -789,7 +789,7 @@ mod lifecycle_tests {
         let compiled = compile_project_from_sources(files);
         let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
-            global_json: compiled.global_json,
+            global_data: compiled.global_data,
             module_var_declarations: compiled.module_var_declarations,
             module_var_init_order: compiled.module_var_init_order,
             module_const_declarations: compiled.module_const_declarations,
@@ -851,7 +851,7 @@ mod lifecycle_tests {
         let compiled = compile_project_from_sources(files);
         let mut sequence = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
-            global_json: compiled.global_json,
+            global_data: compiled.global_data,
             module_var_declarations: compiled.module_var_declarations,
             module_var_init_order: compiled.module_var_init_order,
             module_const_declarations: compiled.module_const_declarations,
@@ -901,7 +901,7 @@ mod lifecycle_tests {
         let compiled = compile_project_from_sources(files);
         let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
-            global_json: compiled.global_json,
+            global_data: compiled.global_data,
             module_var_declarations: compiled.module_var_declarations,
             module_var_init_order: compiled.module_var_init_order,
             module_const_declarations: compiled.module_const_declarations,

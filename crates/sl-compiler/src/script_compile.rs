@@ -251,7 +251,7 @@ pub(crate) fn compile_script(
         params,
         root_group_id,
         groups: builder.groups,
-        visible_json_globals: Vec::new(),
+        visible_globals: Vec::new(),
         visible_functions: visible_functions.clone(),
         visible_module_vars: visible_module_vars.clone(),
         visible_module_consts: visible_module_consts.clone(),
@@ -2343,7 +2343,7 @@ mod script_compile_tests {
         let reachable = collect_reachable_imports("missing.xml", &BTreeMap::new());
         assert!(reachable.contains("missing.xml"));
 
-        let visible_empty = collect_visible_json_symbols(
+        let visible_empty = collect_visible_global_symbols(
             &BTreeSet::from(["missing.json".to_string()]),
             &BTreeMap::new(),
         )
@@ -2369,15 +2369,15 @@ mod script_compile_tests {
                 json_value: Some(SlValue::Number(2.0)),
             },
         );
-        let duplicate_visible = collect_visible_json_symbols(
+        let duplicate_visible = collect_visible_global_symbols(
             &BTreeSet::from(["a/x.json".to_string(), "b/x.json".to_string()]),
             &sources,
         )
-        .expect_err("duplicate visible json symbol should fail");
-        assert_eq!(duplicate_visible.code, "JSON_SYMBOL_DUPLICATE");
+        .expect_err("duplicate visible global data symbol should fail");
+        assert_eq!(duplicate_visible.code, "GLOBAL_DATA_SYMBOL_DUPLICATE");
 
-        let invalid_file_name = parse_json_global_symbol("/").expect_err("invalid file name");
-        assert_eq!(invalid_file_name.code, "JSON_SYMBOL_INVALID");
+        let invalid_file_name = parse_global_data_symbol("/").expect_err("invalid file name");
+        assert_eq!(invalid_file_name.code, "GLOBAL_DATA_SYMBOL_INVALID");
 
         let span = SourceSpan::synthetic();
         let field = ParsedTypeFieldDecl {
@@ -3017,6 +3017,10 @@ mod script_compile_tests {
             Some("main"),
         )
         .expect("script literals in expression should validate");
+        let short_literal_error =
+            validate_script_literals_in_expression("dst = @next;", &span, &access_map, None)
+                .expect_err("short literal without module should fail in expressions");
+        assert_eq!(short_literal_error.code, "XML_SCRIPT_TARGET_INVALID");
 
         let node = xml_element("call", &[("script", "@main.next")], Vec::new());
         let literal_target = parse_script_target_attr(
@@ -3033,6 +3037,17 @@ mod script_compile_tests {
             literal_target,
             ScriptTarget::Literal { script_name } if script_name == "battle-loop.main"
         ));
+        let short_literal_target_error = parse_script_target_attr(
+            "@next",
+            &node,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &access_map,
+            None,
+        )
+        .expect_err("short literal target without module should fail");
+        assert_eq!(short_literal_target_error.code, "XML_SCRIPT_TARGET_INVALID");
 
         let template_error = parse_script_target_attr(
             "${next}",

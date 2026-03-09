@@ -21,7 +21,7 @@ pub fn compile_project_bundle_from_xml_map(
     }
     let module_by_path = parse_module_files(&sources)
         .expect("module parsing should match previously validated module parsing");
-    let global_json = BTreeMap::new();
+    let global_data = BTreeMap::new();
     let (invoke_all_functions, invoke_public_functions) =
         collect_functions_for_bundle(&module_by_path)?;
     let (module_var_declarations, module_var_init_order) =
@@ -74,7 +74,7 @@ pub fn compile_project_bundle_from_xml_map(
 
     Ok(CompileProjectBundleResult {
         scripts,
-        global_json,
+        global_data,
         module_var_declarations,
         module_var_init_order,
         module_const_declarations,
@@ -192,7 +192,7 @@ mod pipeline_tests {
         let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
         assert!(bundle.scripts.contains_key("main.main"));
         assert!(bundle.scripts.contains_key("battle.battle"));
-        assert!(bundle.global_json.is_empty());
+        assert!(bundle.global_data.is_empty());
     }
 
     #[test]
@@ -354,7 +354,7 @@ mod pipeline_tests {
         let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
         assert!(bundle.scripts.contains_key("main.main"));
         assert!(bundle.scripts.contains_key("battle.battle"));
-        assert!(bundle.global_json.is_empty());
+        assert!(bundle.global_data.is_empty());
     }
 
     #[test]
@@ -502,10 +502,10 @@ mod pipeline_tests {
         let collected = collect_source_scripts(&json_source, "shared.json", &BTreeMap::new());
         assert!(collected.is_empty());
 
-        let global_json =
-            collect_global_json(&BTreeMap::from([("shared.json".to_string(), json_source)]))
+        let global_data =
+            collect_global_data(&BTreeMap::from([("shared.json".to_string(), json_source)]))
                 .expect("internal json helper should still collect manual sources");
-        assert_eq!(global_json.get("shared"), Some(&SlValue::Bool(true)));
+        assert_eq!(global_data.get("shared"), Some(&SlValue::Bool(true)));
 
         let bad_module = map(&[(
             "bad.xml",
@@ -532,6 +532,20 @@ mod pipeline_tests {
         let compile_error = compile_project_bundle_from_xml_map(&compile_error_case)
             .expect_err("break outside while should fail");
         assert!(compile_error.message.contains("broken.xml"));
+    }
+
+    #[test]
+    fn compile_bundle_wraps_visible_symbol_resolution_errors_with_file_context() {
+        let files = map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public">
+<function name="broken" args="Missing:x" return="int:ret">ret = 1;</function>
+<script name="main"><text>Main</text></script>
+</module>"#,
+        )]);
+        let error = compile_project_bundle_from_xml_map(&files)
+            .expect_err("unknown visible type should fail");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
     }
 
     #[test]

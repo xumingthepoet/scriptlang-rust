@@ -273,7 +273,7 @@ fn parse_module_binding_declaration(
 }
 
 #[allow(dead_code)]
-pub(crate) fn collect_global_json(
+pub(crate) fn collect_global_data(
     sources: &BTreeMap<String, SourceFile>,
 ) -> Result<BTreeMap<String, SlValue>, ScriptLangError> {
     let mut out = BTreeMap::new();
@@ -282,16 +282,16 @@ pub(crate) fn collect_global_json(
         if !matches!(source.kind, SourceKind::Json) {
             continue;
         }
-        let symbol = parse_json_global_symbol(file_path)?;
+        let symbol = parse_global_data_symbol(file_path)?;
         if out.contains_key(&symbol) {
             return Err(ScriptLangError::new(
-                "JSON_SYMBOL_DUPLICATE",
-                format!("Duplicate JSON symbol \"{}\".", symbol),
+                "GLOBAL_DATA_SYMBOL_DUPLICATE",
+                format!("Duplicate global data symbol \"{}\".", symbol),
             ));
         }
         let value = source.json_value.clone().ok_or(ScriptLangError::new(
-            "JSON_MISSING_VALUE",
-            "Missing JSON value.",
+            "GLOBAL_DATA_MISSING_VALUE",
+            "Missing global data value.",
         ))?;
         out.insert(symbol, value);
     }
@@ -300,7 +300,7 @@ pub(crate) fn collect_global_json(
 }
 
 #[allow(dead_code)]
-pub(crate) fn collect_visible_json_symbols(
+pub(crate) fn collect_visible_global_symbols(
     reachable: &BTreeSet<String>,
     sources: &BTreeMap<String, SourceFile>,
 ) -> Result<Vec<String>, ScriptLangError> {
@@ -315,11 +315,14 @@ pub(crate) fn collect_visible_json_symbols(
             continue;
         }
 
-        let symbol = parse_json_global_symbol(file_path)?;
+        let symbol = parse_global_data_symbol(file_path)?;
         if !seen.insert(symbol.clone()) {
             return Err(ScriptLangError::new(
-                "JSON_SYMBOL_DUPLICATE",
-                format!("Duplicate JSON symbol \"{}\" in visible closure.", symbol),
+                "GLOBAL_DATA_SYMBOL_DUPLICATE",
+                format!(
+                    "Duplicate global data symbol \"{}\" in visible closure.",
+                    symbol
+                ),
             ));
         }
         symbols.push(symbol);
@@ -330,31 +333,34 @@ pub(crate) fn collect_visible_json_symbols(
 }
 
 #[allow(dead_code)]
-pub(crate) fn parse_json_global_symbol(file_path: &str) -> Result<String, ScriptLangError> {
+pub(crate) fn parse_global_data_symbol(file_path: &str) -> Result<String, ScriptLangError> {
     let path = Path::new(file_path);
     let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
         return Err(ScriptLangError::new(
-            "JSON_SYMBOL_INVALID",
-            format!("Invalid JSON file name: {}", file_path),
+            "GLOBAL_DATA_SYMBOL_INVALID",
+            format!("Invalid global data file name: {}", file_path),
         ));
     };
 
-    if !json_symbol_regex().is_match(stem) {
+    if !global_data_symbol_regex().is_match(stem) {
         return Err(ScriptLangError::new(
-            "JSON_SYMBOL_INVALID",
-            format!("JSON basename \"{}\" is not a valid identifier.", stem),
+            "GLOBAL_DATA_SYMBOL_INVALID",
+            format!(
+                "global data basename \"{}\" is not a valid identifier.",
+                stem
+            ),
         ));
     }
 
-    assert_name_not_reserved(stem, "json symbol", SourceSpan::synthetic())?;
+    assert_name_not_reserved(stem, "global data symbol", SourceSpan::synthetic())?;
     Ok(stem.to_string())
 }
 
 #[allow(dead_code)]
-pub(crate) fn json_symbol_regex() -> &'static Regex {
+pub(crate) fn global_data_symbol_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
-        Regex::new(r"^[$A-Za-z_][$0-9A-Za-z_]*$").expect("json symbol regex must compile")
+        Regex::new(r"^[$A-Za-z_][$0-9A-Za-z_]*$").expect("global data symbol regex must compile")
     })
 }
 
@@ -1117,6 +1123,7 @@ mod module_resolver_tests {
 
     #[test]
     fn resolve_visible_module_symbols_builds_function_signatures() {
+        assert_eq!(script_type_kind(&ScriptType::Script), "script");
         let span = SourceSpan::synthetic();
         let module = ModuleDeclarations {
             type_decls: vec![ParsedTypeDecl {
@@ -1946,19 +1953,20 @@ mod module_resolver_tests {
                 json_value: Some(SlValue::Number(1.0)),
             },
         );
-        let error = collect_global_json(&invalid_sources).expect_err("invalid json symbol path");
-        assert_eq!(error.code, "JSON_SYMBOL_INVALID");
+        let error =
+            collect_global_data(&invalid_sources).expect_err("invalid global data symbol path");
+        assert_eq!(error.code, "GLOBAL_DATA_SYMBOL_INVALID");
 
         let reachable = BTreeSet::from(["/".to_string()]);
-        let error = collect_visible_json_symbols(&reachable, &invalid_sources)
-            .expect_err("invalid visible json symbol path");
-        assert_eq!(error.code, "JSON_SYMBOL_INVALID");
+        let error = collect_visible_global_symbols(&reachable, &invalid_sources)
+            .expect_err("invalid visible global data symbol path");
+        assert_eq!(error.code, "GLOBAL_DATA_SYMBOL_INVALID");
 
         let invalid_basename =
-            parse_json_global_symbol("bad-name.json").expect_err("invalid json basename");
-        assert_eq!(invalid_basename.code, "JSON_SYMBOL_INVALID");
+            parse_global_data_symbol("bad-name.json").expect_err("invalid json basename");
+        assert_eq!(invalid_basename.code, "GLOBAL_DATA_SYMBOL_INVALID");
 
-        let missing_value = collect_global_json(&BTreeMap::from([(
+        let missing_value = collect_global_data(&BTreeMap::from([(
             "game.json".to_string(),
             SourceFile {
                 kind: SourceKind::Json,
@@ -1968,11 +1976,11 @@ mod module_resolver_tests {
             },
         )]))
         .expect_err("json value should be required");
-        assert_eq!(missing_value.code, "JSON_MISSING_VALUE");
+        assert_eq!(missing_value.code, "GLOBAL_DATA_MISSING_VALUE");
 
-        let reserved_json_symbol =
-            parse_json_global_symbol("__hidden.json").expect_err("reserved json symbol");
-        assert_eq!(reserved_json_symbol.code, "NAME_RESERVED_PREFIX");
+        let reserved_global_symbol =
+            parse_global_data_symbol("__hidden.json").expect_err("reserved global data symbol");
+        assert_eq!(reserved_global_symbol.code, "NAME_RESERVED_PREFIX");
     }
 
     #[test]
@@ -2405,14 +2413,14 @@ mod module_resolver_tests {
         assert!(parse_module_files(&sources).is_ok());
         assert!(parse_module_scripts(&sources).is_ok());
 
-        let duplicate_json = collect_global_json(&BTreeMap::from([
+        let duplicate_json = collect_global_data(&BTreeMap::from([
             ("a/game.json".to_string(), json_source.clone()),
             ("b/game.json".to_string(), json_source.clone()),
         ]))
-        .expect_err("duplicate json symbol should fail");
-        assert_eq!(duplicate_json.code, "JSON_SYMBOL_DUPLICATE");
+        .expect_err("duplicate global data symbol should fail");
+        assert_eq!(duplicate_json.code, "GLOBAL_DATA_SYMBOL_DUPLICATE");
 
-        let collected = collect_global_json(&BTreeMap::from([
+        let collected = collect_global_data(&BTreeMap::from([
             (
                 "main.xml".to_string(),
                 SourceFile {
@@ -2431,17 +2439,17 @@ mod module_resolver_tests {
         .expect("non-json sources should be skipped");
         assert_eq!(collected.get("game"), Some(&SlValue::Bool(true)));
 
-        let duplicate_visible = collect_visible_json_symbols(
+        let duplicate_visible = collect_visible_global_symbols(
             &BTreeSet::from(["a/game.json".to_string(), "b/game.json".to_string()]),
             &BTreeMap::from([
                 ("a/game.json".to_string(), json_source.clone()),
                 ("b/game.json".to_string(), json_source.clone()),
             ]),
         )
-        .expect_err("duplicate visible json symbol should fail");
-        assert_eq!(duplicate_visible.code, "JSON_SYMBOL_DUPLICATE");
+        .expect_err("duplicate visible global data symbol should fail");
+        assert_eq!(duplicate_visible.code, "GLOBAL_DATA_SYMBOL_DUPLICATE");
 
-        let visible = collect_visible_json_symbols(
+        let visible = collect_visible_global_symbols(
             &BTreeSet::from(["main.xml".to_string(), "game.json".to_string()]),
             &BTreeMap::from([
                 (

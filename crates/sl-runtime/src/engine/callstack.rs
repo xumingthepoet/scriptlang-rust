@@ -1131,7 +1131,7 @@ mod callstack_tests {
             .expect("tail call optimization path should pass");
         assert_eq!(tail_ok.frames.len(), 1);
 
-        let mut globals = engine_from_sources_with_global_json(
+        let mut globals = engine_from_sources_with_global_data(
             map(&[(
                 "main.script.xml",
                 r#"
@@ -1154,13 +1154,13 @@ mod callstack_tests {
         globals.start("main", None).expect("start");
         let output = globals.next_output().expect("next");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "11"));
-        assert!(!globals.is_visible_json_global(None, "game"));
-        assert!(!globals.is_visible_json_global(Some("missing"), "game"));
-        assert!(globals.is_visible_json_global(Some("main"), "game"));
+        assert!(!globals.is_visible_global_data(None, "game"));
+        assert!(!globals.is_visible_global_data(Some("missing"), "game"));
+        assert!(globals.is_visible_global_data(Some("main"), "game"));
 
         let value = globals
             .read_variable("game")
-            .expect("visible json global should be readable");
+            .expect("visible global data global should be readable");
         assert_eq!(
             value,
             SlValue::Map(BTreeMap::from([(
@@ -1946,7 +1946,7 @@ mod callstack_tests {
             visible_functions: Default::default(),
             visible_module_vars: Default::default(),
             visible_module_consts: Default::default(),
-            visible_json_globals: vec![],
+            visible_globals: vec![],
             invoke_all_functions: Default::default(),
             invoke_public_functions: Default::default(),
         };
@@ -2009,7 +2009,7 @@ mod callstack_tests {
             visible_functions: Default::default(),
             visible_module_vars: Default::default(),
             visible_module_consts: Default::default(),
-            visible_json_globals: vec![],
+            visible_globals: vec![],
             invoke_all_functions: Default::default(),
             invoke_public_functions: Default::default(),
         };

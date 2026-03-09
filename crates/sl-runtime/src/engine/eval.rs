@@ -241,7 +241,7 @@ impl ScriptLangEngine {
         }
 
         let mut global_snapshot = BTreeMap::new();
-        for (name, value) in &self.global_json {
+        for (name, value) in &self.global_data {
             global_snapshot.insert(name.clone(), value.clone());
             scope.push_dynamic(name.clone(), slvalue_to_dynamic(value));
         }
@@ -269,7 +269,7 @@ impl ScriptLangEngine {
                 return Err(ScriptLangError::new(
                     "ENGINE_GLOBAL_READONLY",
                     format!(
-                        "Global JSON \"{}\" is readonly and cannot be mutated.",
+                        "global data \"{}\" is readonly and cannot be mutated.",
                         name
                     ),
                 ));
@@ -322,7 +322,7 @@ impl ScriptLangEngine {
         }
 
         let mut global_snapshot = BTreeMap::new();
-        for (name, value) in &self.global_json {
+        for (name, value) in &self.global_data {
             global_snapshot.insert(name.clone(), value.clone());
             scope.push_dynamic(name.clone(), slvalue_to_dynamic(value));
         }
@@ -351,7 +351,7 @@ impl ScriptLangEngine {
                 return Err(ScriptLangError::new(
                     "ENGINE_GLOBAL_READONLY",
                     format!(
-                        "Global JSON \"{}\" is readonly and cannot be mutated.",
+                        "global data \"{}\" is readonly and cannot be mutated.",
                         name
                     ),
                 ));
@@ -468,7 +468,7 @@ impl ScriptLangEngine {
 
         let (mutable_bindings, mutable_order) = self.collect_mutable_bindings();
         let visible_globals = self
-            .visible_json_by_script
+            .visible_globals_by_script
             .get(&script_name)
             .cloned()
             .unwrap_or_default();
@@ -597,9 +597,9 @@ impl ScriptLangEngine {
                 continue;
             }
             let value = self
-                .global_json
+                .global_data
                 .get(&name)
-                .expect("visible globals should exist in global json map");
+                .expect("visible globals should exist in global data map");
             global_snapshot.insert(name.clone(), value.clone());
             scope.push_dynamic(name, slvalue_to_dynamic(value));
         }
@@ -659,7 +659,7 @@ impl ScriptLangEngine {
                 return Err(ScriptLangError::new(
                     "ENGINE_GLOBAL_READONLY",
                     format!(
-                        "Global JSON \"{}\" is readonly and cannot be mutated.",
+                        "global data \"{}\" is readonly and cannot be mutated.",
                         name
                     ),
                 ));
@@ -814,8 +814,8 @@ impl ScriptLangEngine {
         let Some(script) = self.scripts.get(script_name) else {
             return Ok(String::new());
         };
-        let visible_json = self
-            .visible_json_by_script
+        let visible_globals = self
+            .visible_globals_by_script
             .get(script_name)
             .expect("script visibility should exist for registered script");
         let current_module = script.module_name.as_deref();
@@ -880,11 +880,11 @@ impl ScriptLangEngine {
             out.push_str(&params);
             out.push_str("| {\n");
 
-            for json_symbol in visible_json {
-                if let Some(value) = self.global_json.get(json_symbol) {
+            for global_symbol in visible_globals {
+                if let Some(value) = self.global_data.get(global_symbol) {
                     out.push_str(&format!(
                         "let {} = {};\n",
-                        json_symbol,
+                        global_symbol,
                         slvalue_to_rhai_literal(value)
                     ));
                 }
@@ -1201,8 +1201,8 @@ mod eval_tests {
     }
 
     #[test]
-    pub(super) fn global_json_is_readonly_during_code_execution() {
-        let mut engine = engine_from_sources_with_global_json(
+    pub(super) fn global_data_is_readonly_during_code_execution() {
+        let mut engine = engine_from_sources_with_global_data(
             map(&[(
                 "main.script.xml",
                 r#"
@@ -1281,8 +1281,8 @@ mod eval_tests {
     }
 
     #[test]
-    pub(super) fn module_const_initializer_rejects_global_json_mutation() {
-        let mut engine = engine_from_sources_with_global_json(
+    pub(super) fn module_const_initializer_rejects_global_data_mutation() {
+        let mut engine = engine_from_sources_with_global_data(
             map(&[(
                 "main.xml",
                 r#"<module name="main" default_access="public">
@@ -1296,7 +1296,7 @@ mod eval_tests {
         engine.start("main.main", None).expect("start");
         let error = engine
             .eval_module_const_initializer("{ game = 2; base }", "main")
-            .expect_err("global json mutation should fail");
+            .expect_err("global data mutation should fail");
         assert_eq!(error.code, "ENGINE_GLOBAL_READONLY");
     }
 
@@ -1437,7 +1437,7 @@ mod eval_tests {
         let compiled = compile_project_from_sources(files);
         let mut host_unsupported = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
-            global_json: compiled.global_json,
+            global_data: compiled.global_data,
             module_var_declarations: compiled.module_var_declarations,
             module_var_init_order: compiled.module_var_init_order,
             module_const_declarations: compiled.module_const_declarations,
@@ -1575,7 +1575,7 @@ mod eval_tests {
         let host_blocked_compiled = compile_project_from_sources(host_blocked_files);
         let mut host_blocked = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: host_blocked_compiled.scripts,
-            global_json: host_blocked_compiled.global_json,
+            global_data: host_blocked_compiled.global_data,
             module_var_declarations: host_blocked_compiled.module_var_declarations,
             module_var_init_order: host_blocked_compiled.module_var_init_order,
             module_const_declarations: host_blocked_compiled.module_const_declarations,
@@ -1594,7 +1594,7 @@ mod eval_tests {
             .expect_err("initializer should reject host function mode");
         assert_eq!(error.code, "ENGINE_HOST_FUNCTION_UNSUPPORTED");
 
-        let mut initializer_engine = engine_from_sources_with_global_json(
+        let mut initializer_engine = engine_from_sources_with_global_data(
             map(&[
                 (
                     "shared.xml",
@@ -1644,7 +1644,7 @@ mod eval_tests {
             .expect_err("bad initializer should fail");
         assert_eq!(error.code, "ENGINE_EVAL_ERROR");
 
-        let mut readonly_initializer_engine = engine_from_sources_with_global_json(
+        let mut readonly_initializer_engine = engine_from_sources_with_global_data(
             map(&[
                 (
                     "shared.xml",
@@ -1666,7 +1666,7 @@ mod eval_tests {
         );
         let error = readonly_initializer_engine
             .start("main.main", None)
-            .expect_err("json mutation in initializer should fail");
+            .expect_err("global data mutation in initializer should fail");
         assert_eq!(error.code, "ENGINE_GLOBAL_READONLY");
 
         let module_files = map(&[
@@ -2160,8 +2160,8 @@ mod eval_tests {
     }
 
     #[test]
-    pub(super) fn code_eval_with_module_prelude_and_visible_json_is_covered() {
-        let mut engine = engine_from_sources_with_global_json(
+    pub(super) fn code_eval_with_module_prelude_and_visible_globals_is_covered() {
+        let mut engine = engine_from_sources_with_global_data(
             map(&[
                 (
                     "shared.xml",
@@ -2202,7 +2202,7 @@ mod eval_tests {
 
     #[test]
     pub(super) fn eval_conversion_and_prelude_error_branches_are_covered() {
-        let mut initializer_unit = engine_from_sources_with_global_json(
+        let mut initializer_unit = engine_from_sources_with_global_data(
             map(&[(
                 "main.script.xml",
                 r#"
@@ -2221,7 +2221,7 @@ mod eval_tests {
             .expect_err("initializer should reject unsupported global value type");
         assert_eq!(error.code, "ENGINE_VALUE_UNSUPPORTED");
 
-        let mut readonly_unit = engine_from_sources_with_global_json(
+        let mut readonly_unit = engine_from_sources_with_global_data(
             map(&[(
                 "main.script.xml",
                 r#"
@@ -2336,7 +2336,7 @@ mod eval_tests {
             .start("main.main", None)
             .expect("start");
         prelude_missing_global
-            .visible_json_by_script
+            .visible_globals_by_script
             .entry("main.main".to_string())
             .or_default()
             .insert("ghost".to_string());
@@ -2354,7 +2354,7 @@ mod eval_tests {
 
     #[test]
     pub(super) fn visible_global_snapshot_skips_shadowed_mutable_binding() {
-        let mut engine = engine_from_sources_with_global_json(
+        let mut engine = engine_from_sources_with_global_data(
             map(&[(
                 "main.xml",
                 r#"

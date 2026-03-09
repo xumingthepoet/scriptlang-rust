@@ -1274,7 +1274,7 @@ mod step_tests {
         assert!(found.is_some());
         assert_eq!(choice_ctx.find_frame_index(9999), None);
 
-        let mut expr_engine = engine_from_sources_with_global_json(
+        let mut expr_engine = engine_from_sources_with_global_data(
             map(&[(
                 "main.script.xml",
                 r#"
@@ -1297,11 +1297,11 @@ mod step_tests {
         let output = expr_engine.next_output().expect("next");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "6"));
         let global = expr_engine
-            .global_json
+            .global_data
             .get("game")
             .expect("global present")
             .clone();
-        assert!(expr_engine.global_json.contains_key("game"));
+        assert!(expr_engine.global_data.contains_key("game"));
         expr_engine
             .write_variable("x", SlValue::Number(2.0))
             .expect("write variable should pass");
@@ -1384,7 +1384,7 @@ mod step_tests {
         );
         assert_eq!(finisher.frames[0].node_index, 5);
 
-        let mut globals = engine_from_sources_with_global_json(
+        let mut globals = engine_from_sources_with_global_data(
             map(&[(
                 "main.script.xml",
                 r##"
