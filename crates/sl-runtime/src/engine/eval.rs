@@ -2503,6 +2503,33 @@ mod eval_tests {
     }
 
     #[test]
+    pub(super) fn eval_module_global_initializer_handles_non_dotted_const_qualified_name() {
+        // Test line 160: when qualified_name in module_consts_value doesn't contain '.', skip it
+        let mut engine = engine_from_sources(map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public">
+  <const name="BASE" type="int">10</const>
+  <script name="main"><text>ok</text></script>
+</module>"#,
+        )]));
+        // Need to start first to initialize consts
+        engine.start("main.main", None).expect("start");
+        // Verify it works before modification
+        let result_before = engine.eval_module_global_initializer("BASE + 1", "main");
+        assert!(result_before.is_ok());
+        assert_eq!(result_before.unwrap(), SlValue::Number(11.0));
+
+        // Inject a non-dotted key into module_consts_value to trigger continue branch
+        engine
+            .module_consts_value
+            .insert("invalid_no_dot".to_string(), SlValue::Number(99.0));
+        // Should still work because valid consts should be processed
+        let result = engine.eval_module_global_initializer("BASE + 1", "main");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), SlValue::Number(11.0));
+    }
+
+    #[test]
     pub(super) fn invoke_calls_public_function_without_import_and_supports_local_function_refs() {
         let files = map(&[
             (

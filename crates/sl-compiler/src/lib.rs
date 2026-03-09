@@ -128,14 +128,7 @@ pub(crate) mod compiler_test_support {
             Regex::new(&format!(r"{closing}\s*\z")).expect("closing regex should compile");
         Some(
             end_regex
-                .replace(
-                    replaced_open.as_ref(),
-                    if root_name == "module" {
-                        "</module>".to_string()
-                    } else {
-                        format!("{closing}\n</module>")
-                    },
-                )
+                .replace(replaced_open.as_ref(), format!("{closing}\n</module>"))
                 .into_owned(),
         )
     }
