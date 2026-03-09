@@ -257,6 +257,13 @@ key 固定是 string。
 <code>hp = hp - 1;</code>
 ```
 
+`script` 类型也可在 `<code>` 中赋值（值必须是 `@...` 脚本字面量）：
+
+```xml
+<temp name="nextScene" type="script">@main.start</temp>
+<code>nextScene = @main.result;</code>
+```
+
 ## 6.4 `<if>`
 
 用途：条件分支。  
@@ -534,6 +541,19 @@ module 相关规则与 `<call>` 相同：
 <module name="shared" default_access="public">
   <function name="add" args="int:a,int:b" return="int:out">
     out = a + b;
+  </function>
+</module>
+```
+
+`script` 类型也可用于 `<function>` 参数和返回值：
+
+```xml
+<module name="router" default_access="public">
+  <function name="pick" args="script:current" return="script:next">
+    next = @router.fallback;
+    if current == @router.main {
+      next = @router.alt;
+    }
   </function>
 </module>
 ```
