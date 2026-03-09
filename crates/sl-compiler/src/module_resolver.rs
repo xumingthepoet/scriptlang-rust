@@ -2993,6 +2993,74 @@ mod module_resolver_tests {
     }
 
     #[test]
+    fn validate_module_const_init_rules_handles_name_not_in_mapping() {
+        // Test when const references a name that is NOT in const_name_to_qualified
+        // This covers lines 1082-1084: continue when name not in mapping
+        let span = SourceSpan::synthetic();
+        // Create a const that references a variable name (not a const name)
+        let module_consts = BTreeMap::from([
+            (
+                "main.base".to_string(),
+                ModuleConstDecl {
+                    namespace: "main".to_string(),
+                    name: "base".to_string(),
+                    qualified_name: "main.base".to_string(),
+                    access: AccessLevel::Public,
+                    r#type: ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                    // References "score" which is not a const name (no entry in const_name_to_qualified)
+                    initial_value_expr: Some("score + 1".to_string()),
+                    location: span.clone(),
+                },
+            ),
+            (
+                "main.value".to_string(),
+                ModuleConstDecl {
+                    namespace: "main".to_string(),
+                    name: "value".to_string(),
+                    qualified_name: "main.value".to_string(),
+                    access: AccessLevel::Public,
+                    r#type: ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                    // References "base" which IS in const_name_to_qualified
+                    initial_value_expr: Some("base + 10".to_string()),
+                    location: span.clone(),
+                },
+            ),
+            // Create a const without initial_value_expr to cover line 1096 (if block with Some)
+            (
+                "main.no_init".to_string(),
+                ModuleConstDecl {
+                    namespace: "main".to_string(),
+                    name: "no_init".to_string(),
+                    qualified_name: "main.no_init".to_string(),
+                    access: AccessLevel::Public,
+                    r#type: ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                    // No initial value expression - triggers None branch at line 1057
+                    initial_value_expr: None,
+                    location: span.clone(),
+                },
+            ),
+        ]);
+        let module_vars = BTreeMap::new();
+        // Initialize base first, then value, then no_init
+        let init_order = vec![
+            "main.base".to_string(),
+            "main.value".to_string(),
+            "main.no_init".to_string(),
+        ];
+        let result = validate_module_const_init_rules(&module_consts, &init_order, &module_vars);
+        assert!(
+            result.is_ok(),
+            "referencing initialized const should be allowed"
+        );
+    }
+
+    #[test]
     fn resolve_visible_module_symbols_reports_type_resolution_error() {
         // Test that type resolution errors propagate through line 784
         // This creates a type with a field referencing a non-existent type
