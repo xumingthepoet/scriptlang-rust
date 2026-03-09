@@ -361,5 +361,14 @@ mod tests {
             &object_type
         ));
         assert!(!is_type_compatible(&SlValue::Bool(true), &object_type));
+
+        // Test enum type with non-string value (covers line 83)
+        assert!(!is_type_compatible(&SlValue::Number(1.0), &enum_type));
+        assert!(!is_type_compatible(&SlValue::Bool(true), &enum_type));
+        assert!(!is_type_compatible(&SlValue::Array(Vec::new()), &enum_type));
+        assert!(!is_type_compatible(
+            &SlValue::Map(BTreeMap::new()),
+            &enum_type
+        ));
     }
 }

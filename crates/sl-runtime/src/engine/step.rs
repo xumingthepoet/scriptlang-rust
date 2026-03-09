@@ -1128,6 +1128,33 @@ mod step_tests {
             .expect_err("execute var without frame should fail");
         assert_eq!(error.code, "ENGINE_VAR_FRAME");
 
+        // Test enum variable declaration without initializer (covers callstack.rs line 122)
+        let mut enum_engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>x</text></script>"#,
+        )]));
+        // Setup a frame using push_root_frame
+        enum_engine.push_root_frame("main", BTreeMap::new(), None, BTreeMap::new());
+        let _frame = enum_engine
+            .frames
+            .last_mut()
+            .expect("engine should have frame");
+
+        // Declare enum variable without initializer - should fail
+        let enum_decl = sl_core::VarDeclaration {
+            name: "state".to_string(),
+            r#type: ScriptType::Enum {
+                type_name: "Status".to_string(),
+                members: vec!["Pending".to_string(), "Done".to_string()],
+            },
+            initial_value_expr: None,
+            location: sl_core::SourceSpan::synthetic(),
+        };
+        let error = enum_engine
+            .execute_var_declaration(&enum_decl)
+            .expect_err("enum var without initializer should fail");
+        assert_eq!(error.code, "ENGINE_ENUM_INIT_REQUIRED");
+
         let mut return_engine = engine_from_sources(map(&[
             (
                 "main.script.xml",

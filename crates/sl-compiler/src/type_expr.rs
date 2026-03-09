@@ -643,4 +643,206 @@ mod type_expr_tests {
         .expect_err("invalid access should fail");
         assert_eq!(function_invalid_access.code, "XML_ACCESS_INVALID");
     }
+
+    #[test]
+    fn parse_enum_declaration_covers_various_error_paths() {
+        // Test invalid child element under enum
+        let enum_invalid_child = parse_enum_declaration_node_with_namespace(
+            &xml_element(
+                "enum",
+                &[("name", "Color")],
+                vec![XmlNode::Element(xml_element("not_member", &[], Vec::new()))],
+            ),
+            "module",
+            AccessLevel::Private,
+        )
+        .expect_err("invalid child should fail");
+        assert_eq!(enum_invalid_child.code, "XML_ENUM_CHILD_INVALID");
+
+        // Test duplicate enum member
+        let enum_duplicate_member = parse_enum_declaration_node_with_namespace(
+            &xml_element(
+                "enum",
+                &[("name", "Color")],
+                vec![
+                    XmlNode::Element(xml_element("member", &[("name", "Red")], Vec::new())),
+                    XmlNode::Element(xml_element("member", &[("name", "Red")], Vec::new())),
+                ],
+            ),
+            "module",
+            AccessLevel::Private,
+        )
+        .expect_err("duplicate member should fail");
+        assert_eq!(enum_duplicate_member.code, "ENUM_MEMBER_DUPLICATE");
+
+        // Test enum member with content (forbidden)
+        let enum_member_with_content = parse_enum_declaration_node_with_namespace(
+            &xml_element(
+                "enum",
+                &[("name", "Color")],
+                vec![XmlNode::Element(xml_element(
+                    "member",
+                    &[("name", "Red")],
+                    vec![xml_text("some content")],
+                ))],
+            ),
+            "module",
+            AccessLevel::Private,
+        )
+        .expect_err("member with content should fail");
+        assert_eq!(
+            enum_member_with_content.code,
+            "XML_ENUM_MEMBER_CONTENT_FORBIDDEN"
+        );
+
+        // Test empty enum (no members)
+        let enum_empty = parse_enum_declaration_node_with_namespace(
+            &xml_element("enum", &[("name", "Empty")], Vec::new()),
+            "module",
+            AccessLevel::Private,
+        )
+        .expect_err("empty enum should fail");
+        assert_eq!(enum_empty.code, "ENUM_DECL_EMPTY");
+
+        // Test valid enum declaration
+        let enum_valid = parse_enum_declaration_node_with_namespace(
+            &xml_element(
+                "enum",
+                &[("name", "Color")],
+                vec![
+                    XmlNode::Element(xml_element("member", &[("name", "Red")], Vec::new())),
+                    XmlNode::Element(xml_element("member", &[("name", "Green")], Vec::new())),
+                    XmlNode::Element(xml_element("member", &[("name", "Blue")], Vec::new())),
+                ],
+            ),
+            "module",
+            AccessLevel::Private,
+        )
+        .expect("valid enum should parse");
+        assert_eq!(enum_valid.name, "Color");
+        assert_eq!(enum_valid.enum_members.len(), 3);
+
+        // Test enum with reserved member name
+        let enum_reserved_name = parse_enum_declaration_node_with_namespace(
+            &xml_element(
+                "enum",
+                &[("name", "Status")],
+                vec![XmlNode::Element(xml_element(
+                    "member",
+                    &[("name", "__sl_bad")],
+                    Vec::new(),
+                ))],
+            ),
+            "module",
+            AccessLevel::Private,
+        )
+        .expect_err("reserved member name should fail");
+        assert_eq!(enum_reserved_name.code, "NAME_RESERVED_PREFIX");
+
+        // Test enum with reserved type name
+        let enum_reserved_type = parse_enum_declaration_node_with_namespace(
+            &xml_element(
+                "enum",
+                &[("name", "__sl_bad")],
+                vec![XmlNode::Element(xml_element(
+                    "member",
+                    &[("name", "Value")],
+                    Vec::new(),
+                ))],
+            ),
+            "module",
+            AccessLevel::Private,
+        )
+        .expect_err("reserved type name should fail");
+        assert_eq!(enum_reserved_type.code, "NAME_RESERVED_PREFIX");
+
+        // Test enum with namespace (qualified name)
+        let enum_with_ns = parse_enum_declaration_node_with_namespace(
+            &xml_element(
+                "enum",
+                &[("name", "Color")],
+                vec![XmlNode::Element(xml_element(
+                    "member",
+                    &[("name", "Red")],
+                    Vec::new(),
+                ))],
+            ),
+            "my.namespace",
+            AccessLevel::Public,
+        )
+        .expect("enum with namespace should parse");
+        assert_eq!(enum_with_ns.qualified_name, "my.namespace.Color");
+        assert_eq!(enum_with_ns.access, AccessLevel::Public);
+
+        // Test enum missing name attribute
+        let enum_missing_name = parse_enum_declaration_node_with_namespace(
+            &xml_element("enum", &[], Vec::new()),
+            "module",
+            AccessLevel::Private,
+        )
+        .expect_err("missing name should fail");
+        assert_eq!(enum_missing_name.code, "XML_MISSING_ATTR");
+
+        // Test enum with invalid access
+        let enum_invalid_access = parse_enum_declaration_node_with_namespace(
+            &xml_element(
+                "enum",
+                &[("name", "Color"), ("access", "bad")],
+                vec![XmlNode::Element(xml_element(
+                    "member",
+                    &[("name", "Red")],
+                    Vec::new(),
+                ))],
+            ),
+            "module",
+            AccessLevel::Private,
+        )
+        .expect_err("invalid access should fail");
+        assert_eq!(enum_invalid_access.code, "XML_ACCESS_INVALID");
+    }
+
+    #[test]
+    fn resolve_enum_type_covers_enum_branch() {
+        // Test that resolving a type with enum_members creates ScriptType::Enum
+        // This covers lines 51-56 in resolve_type_expr_with_lookup_with_aliases
+        let span = SourceSpan::synthetic();
+        let mut resolved = BTreeMap::new();
+        let mut visiting = HashSet::new();
+
+        // Create a type declaration with enum_members
+        let type_map = BTreeMap::from([(
+            "Status".to_string(),
+            ParsedTypeDecl {
+                name: "Status".to_string(),
+                qualified_name: "Status".to_string(),
+                access: AccessLevel::Private,
+                fields: Vec::new(),
+                enum_members: vec!["Pending".to_string(), "Done".to_string()],
+                location: span.clone(),
+            },
+        )]);
+
+        let result = resolve_type_expr_with_lookup(
+            &ParsedTypeExpr::Custom("Status".to_string()),
+            &type_map,
+            &mut resolved,
+            &mut visiting,
+            &span,
+        )
+        .expect("enum type should resolve");
+        assert_eq!(script_type_kind(&result), "enum");
+
+        // Also test with visited set tracking (visiting.remove branch)
+        let mut visiting2 = HashSet::new();
+        visiting2.insert("Status".to_string());
+        let result2 = resolve_type_expr_with_lookup(
+            &ParsedTypeExpr::Custom("Status".to_string()),
+            &type_map,
+            &mut resolved,
+            &mut visiting2,
+            &span,
+        )
+        .expect("enum type should resolve even when in visiting set");
+        assert_eq!(script_type_kind(&result2), "enum");
+    }
 }

@@ -114,6 +114,17 @@ fn normalize_expression_literals(
     rewrite_and_validate_enum_literals_in_expression(expr, visible_types, span)
 }
 
+fn normalize_attribute_expression_literals(
+    expr: &str,
+    span: &SourceSpan,
+    all_script_access: &BTreeMap<String, AccessLevel>,
+    module_name: Option<&str>,
+    visible_types: &BTreeMap<String, ScriptType>,
+) -> Result<String, ScriptLangError> {
+    validate_script_literals_in_expression(expr, span, all_script_access, module_name)?;
+    rewrite_and_validate_enum_literals_in_attr_expression(expr, visible_types, span)
+}
+
 fn normalize_template_literals(
     template: &str,
     span: &SourceSpan,
@@ -589,7 +600,7 @@ pub(crate) fn compile_group_nodes(
                 ScriptNode::If {
                     id: builder.next_node_id("if"),
                     when_expr: {
-                        normalize_expression_literals(
+                        normalize_attribute_expression_literals(
                             &get_required_non_empty_attr(child, "when")?,
                             &child.location,
                             all_script_access,
@@ -622,7 +633,7 @@ pub(crate) fn compile_group_nodes(
                 ScriptNode::While {
                     id: builder.next_node_id("while"),
                     when_expr: {
-                        normalize_expression_literals(
+                        normalize_attribute_expression_literals(
                             &get_required_non_empty_attr(child, "when")?,
                             &child.location,
                             all_script_access,
@@ -653,7 +664,7 @@ pub(crate) fn compile_group_nodes(
                             let fall_over = parse_bool_attr(choice_child, "fall_over", false)?;
                             let when_expr = get_optional_attr(choice_child, "when")
                                 .map(|expr| {
-                                    normalize_expression_literals(
+                                    normalize_attribute_expression_literals(
                                         &expr,
                                         &choice_child.location,
                                         all_script_access,
@@ -795,7 +806,8 @@ pub(crate) fn compile_group_nodes(
                                             let when_expr =
                                                 get_optional_attr(template_option, "when");
                                             if let Some(expr) = when_expr.as_deref() {
-                                                let rewritten = normalize_expression_literals(
+                                                let rewritten =
+                                                    normalize_attribute_expression_literals(
                                                     expr,
                                                     &template_option.location,
                                                     all_script_access,
@@ -922,7 +934,7 @@ pub(crate) fn compile_group_nodes(
                     parse_args(get_optional_attr(child, "args"))?
                         .into_iter()
                         .map(|mut arg| {
-                            arg.value_expr = normalize_expression_literals(
+                            arg.value_expr = normalize_attribute_expression_literals(
                                 &arg.value_expr,
                                 &child.location,
                                 all_script_access,
@@ -939,7 +951,7 @@ pub(crate) fn compile_group_nodes(
                 let args = parse_args(get_optional_attr(child, "args"))?
                     .into_iter()
                     .map(|mut arg| {
-                        arg.value_expr = normalize_expression_literals(
+                        arg.value_expr = normalize_attribute_expression_literals(
                             &arg.value_expr,
                             &child.location,
                             all_script_access,
@@ -3265,6 +3277,69 @@ mod script_compile_tests {
             .get(&compiled.root_group_id)
             .expect("root group");
         assert!(!root_group.nodes.is_empty());
+    }
+
+    #[test]
+    fn enum_literals_in_attribute_expressions_are_rewritten_with_single_quotes() {
+        let root = parse_xml_document(
+            r#"
+<script name="main">
+  <if when="ids.LocationId.A == 'A'"><text>x</text></if>
+  <call script="@main.next" args="ids.LocationId.A"/>
+  <return script="@main.next" args="ids.LocationId.A"/>
+</script>
+"#,
+        )
+        .expect("xml")
+        .root;
+        let all_scripts = BTreeMap::from([("main.next".to_string(), AccessLevel::Public)]);
+        let visible_types = BTreeMap::from([(
+            "ids.LocationId".to_string(),
+            ScriptType::Enum {
+                type_name: "LocationId".to_string(),
+                members: vec!["A".to_string(), "B".to_string()],
+            },
+        )]);
+        let compiled = compile_script(CompileScriptOptions {
+            script_path: "main.xml",
+            root: &root,
+            script_access: AccessLevel::Public,
+            qualified_script_name: Some("main.main"),
+            module_name: Some("main"),
+            visible_types: &visible_types,
+            visible_functions: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+            all_script_access: &all_scripts,
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
+        })
+        .expect("compile should pass");
+        let root_group = compiled
+            .groups
+            .get(&compiled.root_group_id)
+            .expect("root group");
+        assert!(
+            root_group.nodes.iter().any(|node| matches!(
+                node,
+                ScriptNode::If { when_expr, .. } if when_expr == "'A' == 'A'"
+            )),
+            "if when expression should rewrite enum literal using single quotes"
+        );
+        assert!(
+            root_group.nodes.iter().any(|node| matches!(
+                node,
+                ScriptNode::Call { args, .. } if args.first().map(|arg| arg.value_expr.as_str()) == Some("'A'")
+            )),
+            "call arg should rewrite enum literal using single quotes"
+        );
+        assert!(
+            root_group.nodes.iter().any(|node| matches!(
+                node,
+                ScriptNode::Return { args, .. } if args.first().map(|arg| arg.value_expr.as_str()) == Some("'A'")
+            )),
+            "return arg should rewrite enum literal using single quotes"
+        );
     }
 
     #[test]

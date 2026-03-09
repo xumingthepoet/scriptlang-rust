@@ -310,6 +310,23 @@ pub(crate) fn rewrite_and_validate_enum_literals_in_expression(
     visible_types: &BTreeMap<String, ScriptType>,
     span: &SourceSpan,
 ) -> Result<String, ScriptLangError> {
+    rewrite_and_validate_enum_literals_with_quote(expr, visible_types, span, '"')
+}
+
+pub(crate) fn rewrite_and_validate_enum_literals_in_attr_expression(
+    expr: &str,
+    visible_types: &BTreeMap<String, ScriptType>,
+    span: &SourceSpan,
+) -> Result<String, ScriptLangError> {
+    rewrite_and_validate_enum_literals_with_quote(expr, visible_types, span, '\'')
+}
+
+fn rewrite_and_validate_enum_literals_with_quote(
+    expr: &str,
+    visible_types: &BTreeMap<String, ScriptType>,
+    span: &SourceSpan,
+    quote: char,
+) -> Result<String, ScriptLangError> {
     let enum_lookup = visible_types
         .iter()
         .filter_map(|(name, ty)| match ty {
@@ -370,9 +387,9 @@ pub(crate) fn rewrite_and_validate_enum_literals_in_expression(
                             span.clone(),
                         ));
                     }
-                    out.push('"');
+                    out.push(quote);
                     out.push_str(member_name);
-                    out.push('"');
+                    out.push(quote);
                     continue;
                 }
             }
@@ -602,5 +619,381 @@ mod xml_utils_tests {
 
         let false_node = xml_element("text", &[("once", "false")], vec![xml_text("x")]);
         assert!(!parse_bool_attr(&false_node, "once", true).expect("false attr"));
+    }
+
+    #[test]
+    fn rewrite_enum_literals_covers_empty_visible_types() {
+        // Test when visible_types is empty (enum_lookup.is_empty() branch)
+        let span = SourceSpan::synthetic();
+        let empty_types: BTreeMap<String, ScriptType> = BTreeMap::new();
+        let result =
+            rewrite_and_validate_enum_literals_in_expression("Color.Red", &empty_types, &span)
+                .expect("should succeed with empty types");
+        assert_eq!(result, "Color.Red");
+    }
+
+    #[test]
+    fn rewrite_enum_literals_covers_non_enum_types() {
+        // Test when visible_types contains non-enum types (the _ => None branch)
+        let span = SourceSpan::synthetic();
+        let mut types = BTreeMap::new();
+        types.insert(
+            "MyInt".to_string(),
+            ScriptType::Primitive {
+                name: "int".to_string(),
+            },
+        );
+        let result = rewrite_and_validate_enum_literals_in_expression("Color.Red", &types, &span)
+            .expect("should succeed with primitive types");
+        assert_eq!(result, "Color.Red");
+    }
+
+    #[test]
+    fn rewrite_enum_literals_covers_valid_enum_member() {
+        // Test valid enum member access (Color.Red -> "Red")
+        let span = SourceSpan::synthetic();
+        let mut types = BTreeMap::new();
+        types.insert(
+            "Color".to_string(),
+            ScriptType::Enum {
+                type_name: "Color".to_string(),
+                members: vec!["Red".to_string(), "Green".to_string(), "Blue".to_string()],
+            },
+        );
+        let result = rewrite_and_validate_enum_literals_in_expression("Color.Red", &types, &span)
+            .expect("should succeed with valid enum member");
+        assert_eq!(result, "\"Red\"");
+    }
+
+    #[test]
+    fn rewrite_enum_literals_in_attr_expression_uses_single_quote() {
+        let span = SourceSpan::synthetic();
+        let mut types = BTreeMap::new();
+        types.insert(
+            "Color".to_string(),
+            ScriptType::Enum {
+                type_name: "Color".to_string(),
+                members: vec!["Red".to_string()],
+            },
+        );
+        let result = rewrite_and_validate_enum_literals_in_attr_expression(
+            "Color.Red == 'Red'",
+            &types,
+            &span,
+        )
+        .expect("attr expression rewrite should pass");
+        assert_eq!(result, "'Red' == 'Red'");
+    }
+
+    #[test]
+    fn rewrite_enum_literals_covers_invalid_enum_member() {
+        // Test invalid enum member access (error case)
+        let span = SourceSpan::synthetic();
+        let mut types = BTreeMap::new();
+        types.insert(
+            "Color".to_string(),
+            ScriptType::Enum {
+                type_name: "Color".to_string(),
+                members: vec!["Red".to_string(), "Green".to_string()],
+            },
+        );
+        let err = rewrite_and_validate_enum_literals_in_expression("Color.Invalid", &types, &span)
+            .expect_err("should fail with invalid enum member");
+        assert_eq!(err.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
+    }
+
+    #[test]
+    fn rewrite_enum_literals_covers_string_literals() {
+        // Test string literal handling (single and double quotes)
+        let span = SourceSpan::synthetic();
+        let mut types = BTreeMap::new();
+        types.insert(
+            "Color".to_string(),
+            ScriptType::Enum {
+                type_name: "Color".to_string(),
+                members: vec!["Red".to_string()],
+            },
+        );
+        // String literal should not be rewritten
+        let result =
+            rewrite_and_validate_enum_literals_in_expression("\"Color.Red\"", &types, &span)
+                .expect("should preserve string literal");
+        assert_eq!(result, "\"Color.Red\"");
+
+        // Single quote string
+        let result = rewrite_and_validate_enum_literals_in_expression("'Color.Red'", &types, &span)
+            .expect("should preserve single quoted string");
+        assert_eq!(result, "'Color.Red'");
+    }
+
+    #[test]
+    fn rewrite_enum_literals_covers_escape_characters() {
+        // Test escape character handling in strings
+        let span = SourceSpan::synthetic();
+        let mut types = BTreeMap::new();
+        types.insert(
+            "Status".to_string(),
+            ScriptType::Enum {
+                type_name: "Status".to_string(),
+                members: vec!["OK".to_string()],
+            },
+        );
+        // String with escape sequence
+        let result =
+            rewrite_and_validate_enum_literals_in_expression("\"hello\\\"world\"", &types, &span)
+                .expect("should handle escaped quotes");
+        assert_eq!(result, "\"hello\\\"world\"");
+
+        // String with backslash
+        let result =
+            rewrite_and_validate_enum_literals_in_expression("a + \"test\\\\path\"", &types, &span)
+                .expect("should handle backslash in string");
+        assert_eq!(result, "a + \"test\\\\path\"");
+    }
+
+    #[test]
+    fn rewrite_enum_literals_covers_mixed_content() {
+        // Test mixed content: string + enum reference
+        let span = SourceSpan::synthetic();
+        let mut types = BTreeMap::new();
+        types.insert(
+            "Color".to_string(),
+            ScriptType::Enum {
+                type_name: "Color".to_string(),
+                members: vec!["Red".to_string(), "Blue".to_string()],
+            },
+        );
+        // Expression with both string and enum
+        let result = rewrite_and_validate_enum_literals_in_expression(
+            "x + \"prefix\" + Color.Red + \"suffix\"",
+            &types,
+            &span,
+        )
+        .expect("should handle mixed content");
+        assert_eq!(result, "x + \"prefix\" + \"Red\" + \"suffix\"");
+    }
+
+    #[test]
+    fn rewrite_enum_literals_covers_identifier_with_underscore() {
+        // Test identifier with underscore
+        let span = SourceSpan::synthetic();
+        let mut types = BTreeMap::new();
+        types.insert(
+            "MyEnum".to_string(),
+            ScriptType::Enum {
+                type_name: "MyEnum".to_string(),
+                members: vec!["Member_One".to_string()],
+            },
+        );
+        let result =
+            rewrite_and_validate_enum_literals_in_expression("MyEnum.Member_One", &types, &span)
+                .expect("should handle underscore in identifiers");
+        assert_eq!(result, "\"Member_One\"");
+    }
+
+    #[test]
+    fn rewrite_enum_literals_template_covers_basic_usage() {
+        // Test rewrite_and_validate_enum_literals_in_template
+        let span = SourceSpan::synthetic();
+        let mut types = BTreeMap::new();
+        types.insert(
+            "Color".to_string(),
+            ScriptType::Enum {
+                type_name: "Color".to_string(),
+                members: vec!["Red".to_string(), "Blue".to_string()],
+            },
+        );
+        let result = rewrite_and_validate_enum_literals_in_template(
+            "The color is ${Color.Red} and ${Color.Blue}",
+            &types,
+            &span,
+        )
+        .expect("should handle template with enum literals");
+        assert_eq!(result, "The color is ${\"Red\"} and ${\"Blue\"}");
+    }
+
+    #[test]
+    fn rewrite_enum_literals_template_covers_no_enum_in_template() {
+        // Test template without enum references
+        let span = SourceSpan::synthetic();
+        let mut types = BTreeMap::new();
+        types.insert(
+            "Color".to_string(),
+            ScriptType::Enum {
+                type_name: "Color".to_string(),
+                members: vec!["Red".to_string()],
+            },
+        );
+        let result =
+            rewrite_and_validate_enum_literals_in_template("Just a regular string", &types, &span)
+                .expect("should handle template without enum");
+        assert_eq!(result, "Just a regular string");
+    }
+
+    #[test]
+    fn rewrite_enum_literals_template_covers_multiple_captures() {
+        // Test template with multiple enum references
+        let span = SourceSpan::synthetic();
+        let mut types = BTreeMap::new();
+        types.insert(
+            "Status".to_string(),
+            ScriptType::Enum {
+                type_name: "Status".to_string(),
+                members: vec!["Pending".to_string(), "Done".to_string()],
+            },
+        );
+        let result = rewrite_and_validate_enum_literals_in_template(
+            "${Status.Pending} -> ${Status.Done}",
+            &types,
+            &span,
+        )
+        .expect("should handle multiple enum refs");
+        assert_eq!(result, "${\"Pending\"} -> ${\"Done\"}");
+    }
+
+    #[test]
+    fn parse_enum_literal_covers_string_literal_error() {
+        // Test error when initializer is a string literal instead of Type.Member
+        let span = SourceSpan::synthetic();
+        let members = vec!["Red".to_string(), "Green".to_string()];
+        let types = BTreeMap::new();
+
+        // Double-quoted string
+        let err = parse_enum_literal_initializer("\"Red\"", "Color", &members, &types, &span)
+            .expect_err("should fail with string literal");
+        assert_eq!(err.code, "ENUM_LITERAL_REQUIRED");
+        assert!(err.message.contains("not string literal"));
+
+        // Single-quoted string
+        let err = parse_enum_literal_initializer("'Red'", "Color", &members, &types, &span)
+            .expect_err("should fail with single-quoted string");
+        assert_eq!(err.code, "ENUM_LITERAL_REQUIRED");
+    }
+
+    #[test]
+    fn parse_enum_literal_covers_missing_dot_error() {
+        // Test error when initializer doesn't have a dot (Type.Member)
+        let span = SourceSpan::synthetic();
+        let members = vec!["Red".to_string()];
+        let types = BTreeMap::new();
+
+        let err = parse_enum_literal_initializer("Red", "Color", &members, &types, &span)
+            .expect_err("should fail without dot");
+        assert_eq!(err.code, "ENUM_LITERAL_REQUIRED");
+        assert!(err.message.contains("Type.Member"));
+    }
+
+    #[test]
+    fn parse_enum_literal_covers_unknown_member_error() {
+        // Test error when member name is not in the enum
+        let span = SourceSpan::synthetic();
+        let members = vec!["Red".to_string(), "Green".to_string()];
+        let types = BTreeMap::new();
+
+        let err = parse_enum_literal_initializer("Color.Invalid", "Color", &members, &types, &span)
+            .expect_err("should fail with unknown member");
+        assert_eq!(err.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
+        assert!(err.message.contains("Invalid"));
+    }
+
+    #[test]
+    fn parse_enum_literal_covers_type_mismatch_error() {
+        // Test error when type name doesn't match the enum type
+        // The code checks:
+        // 1. Not a string literal
+        // 2. Has dot separator
+        // 3. Member exists in enum_members
+        // 4. Type name matches the declared enum_type_name
+        let span = SourceSpan::synthetic();
+        let members = vec!["Red".to_string()];
+        let mut types = BTreeMap::new();
+        // Add a different enum type with the same member name
+        types.insert(
+            "OtherColor".to_string(),
+            ScriptType::Enum {
+                type_name: "OtherColor".to_string(),
+                members: vec!["Red".to_string()],
+            },
+        );
+
+        // This should fail at step 4 (type_matches) because:
+        // - "OtherColor.Red" has dot separator
+        // - "Red" is in our members list
+        // - But "OtherColor" != "Color" (enum_type_name)
+        let err = parse_enum_literal_initializer(
+            "OtherColor.Red",
+            "Color",  // Different type name than "OtherColor"
+            &members, // "Red" is in this list
+            &types,
+            &span,
+        )
+        .expect_err("should fail with type mismatch");
+        assert_eq!(err.code, "ENUM_LITERAL_REQUIRED");
+        assert!(err.message.contains("same enum type"));
+    }
+
+    #[test]
+    fn parse_enum_literal_covers_valid_initializer() {
+        // Test valid enum literal initializer
+        let span = SourceSpan::synthetic();
+        let members = vec!["Red".to_string(), "Green".to_string()];
+        let mut types = BTreeMap::new();
+        types.insert(
+            "Color".to_string(),
+            ScriptType::Enum {
+                type_name: "Color".to_string(),
+                members: members.clone(),
+            },
+        );
+
+        let result = parse_enum_literal_initializer("Color.Red", "Color", &members, &types, &span)
+            .expect("should succeed with valid initializer");
+        assert_eq!(result, "Red");
+    }
+
+    #[test]
+    fn rewrite_enum_literals_covers_type_not_in_lookup() {
+        // Test when token has '.' but type_name is not in enum_lookup
+        // This covers line 377 (the else branch of if let Some(members))
+        let span = SourceSpan::synthetic();
+        let mut types = BTreeMap::new();
+        types.insert(
+            "Color".to_string(),
+            ScriptType::Enum {
+                type_name: "Color".to_string(),
+                members: vec!["Red".to_string()],
+            },
+        );
+        // Expression with a type that's NOT in the enum_lookup
+        let result = rewrite_and_validate_enum_literals_in_expression(
+            "UnknownType.Member + Color.Red",
+            &types,
+            &span,
+        )
+        .expect("should succeed - UnknownType is passed through");
+        // UnknownType.Member should pass through unchanged
+        assert_eq!(result, "UnknownType.Member + \"Red\"");
+    }
+
+    #[test]
+    fn rewrite_enum_template_covers_error_propagation() {
+        // Test when template expression causes an error (covers line 406 ? operator)
+        let span = SourceSpan::synthetic();
+        let mut types = BTreeMap::new();
+        types.insert(
+            "Color".to_string(),
+            ScriptType::Enum {
+                type_name: "Color".to_string(),
+                members: vec!["Red".to_string()], // Only Red is valid
+            },
+        );
+        // Template with invalid enum member should propagate error
+        let err = rewrite_and_validate_enum_literals_in_template(
+            "Color is ${Color.Invalid}",
+            &types,
+            &span,
+        )
+        .expect_err("should fail with invalid enum member in template");
+        assert_eq!(err.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
     }
 }
