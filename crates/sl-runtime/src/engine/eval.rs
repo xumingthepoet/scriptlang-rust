@@ -91,7 +91,7 @@ impl ScriptLangEngine {
     pub(super) fn create_script_root_scope(
         &self,
         script_name: &str,
-        arg_values: BTreeMap<String, SlValue>,
+        mut arg_values: BTreeMap<String, SlValue>,
     ) -> Result<ScopeInit, ScriptLangError> {
         let script = self.scripts.get(script_name).ok_or_else(|| {
             ScriptLangError::new(
@@ -104,31 +104,44 @@ impl ScriptLangEngine {
         let mut var_types = BTreeMap::new();
 
         for param in &script.params {
-            let value = default_value_from_type(&param.r#type);
-            scope.insert(param.name.clone(), value);
             var_types.insert(param.name.clone(), param.r#type.clone());
-        }
-
-        for (name, value) in arg_values {
-            if !scope.contains_key(&name) {
+            let value = if let Some(value) = arg_values.remove(&param.name) {
+                value
+            } else if matches!(param.r#type, ScriptType::Enum { .. }) {
                 return Err(ScriptLangError::new(
-                    "ENGINE_CALL_ARG_UNKNOWN",
+                    "ENGINE_CALL_ARG_MISSING",
                     format!(
-                        "Call argument \"{}\" is not declared in target script.",
-                        name
+                        "Call argument \"{}\" is required for enum parameter.",
+                        param.name
                     ),
                 ));
-            }
+            } else {
+                default_value_from_type(&param.r#type)
+            };
+
             let expected_type = var_types
-                .get(&name)
+                .get(&param.name)
                 .expect("script scope types should contain all declared params");
             if !is_type_compatible(&value, expected_type) {
                 return Err(ScriptLangError::new(
                     "ENGINE_TYPE_MISMATCH",
-                    format!("Call argument \"{}\" does not match declared type.", name),
+                    format!(
+                        "Call argument \"{}\" does not match declared type.",
+                        param.name
+                    ),
                 ));
             }
-            scope.insert(name, value);
+            scope.insert(param.name.clone(), value);
+        }
+
+        if let Some((name, _)) = arg_values.into_iter().next() {
+            return Err(ScriptLangError::new(
+                "ENGINE_CALL_ARG_UNKNOWN",
+                format!(
+                    "Call argument \"{}\" is not declared in target script.",
+                    name
+                ),
+            ));
         }
 
         Ok((scope, var_types))

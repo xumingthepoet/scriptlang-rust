@@ -428,6 +428,14 @@ impl ScriptLangEngine {
             let mut value = default_value_from_type(&decl.r#type);
             if let Some(expr) = &decl.initial_value_expr {
                 value = self.eval_module_global_initializer(expr, &decl.namespace)?;
+            } else if matches!(decl.r#type, ScriptType::Enum { .. }) {
+                return Err(ScriptLangError::new(
+                    "ENGINE_ENUM_INIT_REQUIRED",
+                    format!(
+                        "Module global \"{}\" with enum type requires explicit Type.Member initializer.",
+                        qualified_name
+                    ),
+                ));
             }
             if !is_type_compatible(&value, &decl.r#type) {
                 return Err(ScriptLangError::new(
@@ -471,6 +479,14 @@ impl ScriptLangEngine {
             let mut value = default_value_from_type(&decl.r#type);
             if let Some(expr) = &decl.initial_value_expr {
                 value = self.eval_module_const_initializer(expr, &decl.namespace)?;
+            } else if matches!(decl.r#type, ScriptType::Enum { .. }) {
+                return Err(ScriptLangError::new(
+                    "ENGINE_ENUM_INIT_REQUIRED",
+                    format!(
+                        "Module const \"{}\" with enum type requires explicit Type.Member initializer.",
+                        qualified_name
+                    ),
+                ));
             }
             if !is_type_compatible(&value, &decl.r#type) {
                 return Err(ScriptLangError::new(
@@ -1181,6 +1197,62 @@ mod lifecycle_tests {
             .get("main.count")
             .expect("should exist");
         assert_eq!(*value, SlValue::Number(0.0));
+    }
+
+    #[test]
+    pub(super) fn initialize_module_consts_requires_enum_initializer() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public"><script name="main"><text>ok</text></script></module>"#,
+        )]));
+        engine.module_const_declarations.insert(
+            "main.state".to_string(),
+            ModuleConstDecl {
+                namespace: "main".to_string(),
+                name: "state".to_string(),
+                qualified_name: "main.state".to_string(),
+                r#type: ScriptType::Enum {
+                    type_name: "State".to_string(),
+                    members: vec!["Idle".to_string(), "Run".to_string()],
+                },
+                initial_value_expr: None,
+                access: AccessLevel::Public,
+                location: SourceSpan::synthetic(),
+            },
+        );
+        engine.module_const_init_order = vec!["main.state".to_string()];
+        let error = engine
+            .initialize_module_consts()
+            .expect_err("enum const without initializer should fail");
+        assert_eq!(error.code, "ENGINE_ENUM_INIT_REQUIRED");
+    }
+
+    #[test]
+    pub(super) fn initialize_module_vars_requires_enum_initializer() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public"><script name="main"><text>ok</text></script></module>"#,
+        )]));
+        engine.module_var_declarations.insert(
+            "main.state".to_string(),
+            ModuleVarDecl {
+                namespace: "main".to_string(),
+                name: "state".to_string(),
+                qualified_name: "main.state".to_string(),
+                r#type: ScriptType::Enum {
+                    type_name: "State".to_string(),
+                    members: vec!["Idle".to_string(), "Run".to_string()],
+                },
+                initial_value_expr: None,
+                access: AccessLevel::Public,
+                location: SourceSpan::synthetic(),
+            },
+        );
+        engine.module_var_init_order = vec!["main.state".to_string()];
+        let error = engine
+            .initialize_module_vars()
+            .expect_err("enum global without initializer should fail");
+        assert_eq!(error.code, "ENGINE_ENUM_INIT_REQUIRED");
     }
 
     #[test]

@@ -53,6 +53,9 @@ pub fn default_value_from_type(ty: &ScriptType) -> SlValue {
             "boolean" => SlValue::Bool(false),
             _ => SlValue::String(String::new()),
         },
+        ScriptType::Enum { members, .. } => {
+            SlValue::String(members.first().cloned().unwrap_or_default())
+        }
         ScriptType::Script => SlValue::String(String::new()),
         ScriptType::Array { .. } => SlValue::Array(Vec::new()),
         ScriptType::Map { .. } => SlValue::Map(BTreeMap::new()),
@@ -73,6 +76,10 @@ pub fn is_type_compatible(value: &SlValue, ty: &ScriptType) -> bool {
             ("float", SlValue::Number(v)) => v.is_finite(),
             ("string", SlValue::String(_)) => true,
             ("boolean", SlValue::Bool(_)) => true,
+            _ => false,
+        },
+        ScriptType::Enum { members, .. } => match value {
+            SlValue::String(value) => members.iter().any(|member| member == value),
             _ => false,
         },
         ScriptType::Script => match value {
@@ -141,6 +148,10 @@ mod tests {
         let unknown = ScriptType::Primitive {
             name: "unknown".to_string(),
         };
+        let enum_type = ScriptType::Enum {
+            type_name: "State".to_string(),
+            members: vec!["Idle".to_string(), "Run".to_string()],
+        };
         assert_eq!(
             default_value_from_type(&ScriptType::Primitive {
                 name: "int".to_string()
@@ -168,6 +179,10 @@ mod tests {
         assert_eq!(
             default_value_from_type(&unknown),
             SlValue::String(String::new())
+        );
+        assert_eq!(
+            default_value_from_type(&enum_type),
+            SlValue::String("Idle".to_string())
         );
 
         let array_type = ScriptType::Array {
@@ -225,6 +240,10 @@ mod tests {
             name: "float".to_string(),
         };
         let script_type = ScriptType::Script;
+        let enum_type = ScriptType::Enum {
+            type_name: "State".to_string(),
+            members: vec!["Idle".to_string(), "Run".to_string()],
+        };
         assert!(is_type_compatible(&SlValue::Number(1.0), &int_type));
         assert!(!is_type_compatible(&SlValue::Number(1.25), &int_type));
         assert!(is_type_compatible(&SlValue::Number(1.25), &float_type));
@@ -241,6 +260,14 @@ mod tests {
             &script_type
         ));
         assert!(!is_type_compatible(&SlValue::Number(1.0), &script_type));
+        assert!(is_type_compatible(
+            &SlValue::String("Idle".to_string()),
+            &enum_type
+        ));
+        assert!(!is_type_compatible(
+            &SlValue::String("Unknown".to_string()),
+            &enum_type
+        ));
 
         let array_type = ScriptType::Array {
             element_type: Box::new(ScriptType::Primitive {

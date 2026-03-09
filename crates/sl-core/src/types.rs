@@ -41,6 +41,10 @@ pub enum ScriptType {
     Primitive {
         name: String,
     },
+    Enum {
+        type_name: String,
+        members: Vec<String>,
+    },
     Script,
     Array {
         element_type: Box<ScriptType>,

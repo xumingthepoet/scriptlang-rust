@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "sl-tool-case",
+  "entryScript": "main.main",
+  "actions": [
+    { "kind": "choose", "index": 0 }
+  ],
+  "expectedEvents": [
+    { "kind": "text", "text": "start=Idle" },
+    { "kind": "choices", "promptText": "Go?", "choices": ["Yes"] },
+    { "kind": "text", "text": "tail=Run" },
+    { "kind": "text", "text": "done" },
+    { "kind": "end" }
+  ]
+}

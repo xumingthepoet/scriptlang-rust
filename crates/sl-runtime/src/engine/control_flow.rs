@@ -156,7 +156,12 @@ mod control_flow_tests {
         let mut return_arg_unknown = engine_from_sources(map(&[
             (
                 "main.script.xml",
-                r#"<script name="main"><return script="@next.next" args="1,2"/></script>"#,
+                r#"
+<script name="main">
+  <temp name="nextScript" type="script">@next.next</temp>
+  <return script="nextScript" args="1,2"/>
+</script>
+"#,
             ),
             (
                 "next.script.xml",

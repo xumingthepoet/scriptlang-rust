@@ -103,6 +103,29 @@ fn validate_script_literals_in_expression(
     Ok(())
 }
 
+fn normalize_expression_literals(
+    expr: &str,
+    span: &SourceSpan,
+    all_script_access: &BTreeMap<String, AccessLevel>,
+    module_name: Option<&str>,
+    visible_types: &BTreeMap<String, ScriptType>,
+) -> Result<String, ScriptLangError> {
+    validate_script_literals_in_expression(expr, span, all_script_access, module_name)?;
+    rewrite_and_validate_enum_literals_in_expression(expr, visible_types, span)
+}
+
+fn normalize_template_literals(
+    template: &str,
+    span: &SourceSpan,
+    all_script_access: &BTreeMap<String, AccessLevel>,
+    module_name: Option<&str>,
+    visible_types: &BTreeMap<String, ScriptType>,
+) -> Result<String, ScriptLangError> {
+    let rewritten = rewrite_and_validate_enum_literals_in_template(template, visible_types, span)?;
+    validate_script_literals_in_expression(&rewritten, span, all_script_access, module_name)?;
+    Ok(rewritten)
+}
+
 fn parse_script_target_attr(
     raw_target: &str,
     node: &XmlElementNode,
@@ -424,13 +447,14 @@ pub(crate) fn compile_group_nodes(
                 }
             }
             "temp" => {
-                let declaration = parse_var_declaration(child, visible_types)?;
-                if let Some(expr) = declaration.initial_value_expr.as_deref() {
-                    validate_script_literals_in_expression(
+                let mut declaration = parse_var_declaration(child, visible_types)?;
+                if let Some(expr) = declaration.initial_value_expr.as_mut() {
+                    *expr = normalize_expression_literals(
                         expr,
                         &child.location,
                         all_script_access,
                         module_name,
+                        visible_types,
                     )?;
                     if matches!(declaration.r#type, ScriptType::Script)
                         && (expr.trim_start().starts_with('"')
@@ -452,7 +476,13 @@ pub(crate) fn compile_group_nodes(
             }
             "text" => ScriptNode::Text {
                 id: builder.next_node_id("text"),
-                value: parse_inline_required(child)?,
+                value: normalize_template_literals(
+                    &parse_inline_required(child)?,
+                    &child.location,
+                    all_script_access,
+                    module_name,
+                    visible_types,
+                )?,
                 tag: get_optional_attr(child, "tag")
                     .map(|value| value.trim().to_string())
                     .filter(|value| !value.is_empty()),
@@ -469,17 +499,23 @@ pub(crate) fn compile_group_nodes(
                 }
                 ScriptNode::Debug {
                     id: builder.next_node_id("debug"),
-                    value: parse_inline_required(child)?,
+                    value: normalize_template_literals(
+                        &parse_inline_required(child)?,
+                        &child.location,
+                        all_script_access,
+                        module_name,
+                        visible_types,
+                    )?,
                     location: child.location.clone(),
                 }
             }
             "code" => {
-                let code = parse_inline_required(child)?;
-                validate_script_literals_in_expression(
-                    &code,
+                let code = normalize_expression_literals(
+                    &parse_inline_required(child)?,
                     &child.location,
                     all_script_access,
                     module_name,
+                    visible_types,
                 )?;
                 ScriptNode::Code {
                     id: builder.next_node_id("code"),
@@ -553,14 +589,13 @@ pub(crate) fn compile_group_nodes(
                 ScriptNode::If {
                     id: builder.next_node_id("if"),
                     when_expr: {
-                        let when_expr = get_required_non_empty_attr(child, "when")?;
-                        validate_script_literals_in_expression(
-                            &when_expr,
+                        normalize_expression_literals(
+                            &get_required_non_empty_attr(child, "when")?,
                             &child.location,
                             all_script_access,
                             module_name,
-                        )?;
-                        when_expr
+                            visible_types,
+                        )?
                     },
                     then_group_id,
                     else_group_id: Some(else_group_id),
@@ -587,21 +622,26 @@ pub(crate) fn compile_group_nodes(
                 ScriptNode::While {
                     id: builder.next_node_id("while"),
                     when_expr: {
-                        let when_expr = get_required_non_empty_attr(child, "when")?;
-                        validate_script_literals_in_expression(
-                            &when_expr,
+                        normalize_expression_literals(
+                            &get_required_non_empty_attr(child, "when")?,
                             &child.location,
                             all_script_access,
                             module_name,
-                        )?;
-                        when_expr
+                            visible_types,
+                        )?
                     },
                     body_group_id,
                     location: child.location.clone(),
                 }
             }
             "choice" => {
-                let prompt_text = get_required_non_empty_attr(child, "text")?;
+                let prompt_text = normalize_template_literals(
+                    &get_required_non_empty_attr(child, "text")?,
+                    &child.location,
+                    all_script_access,
+                    module_name,
+                    visible_types,
+                )?;
                 let mut entries = Vec::new();
                 let mut fall_over_seen = 0usize;
                 let mut fall_over_entry_index = None;
@@ -611,15 +651,17 @@ pub(crate) fn compile_group_nodes(
                         "option" => {
                             let once = parse_bool_attr(choice_child, "once", false)?;
                             let fall_over = parse_bool_attr(choice_child, "fall_over", false)?;
-                            let when_expr = get_optional_attr(choice_child, "when");
-                            if let Some(expr) = when_expr.as_deref() {
-                                validate_script_literals_in_expression(
-                                    expr,
-                                    &choice_child.location,
-                                    all_script_access,
-                                    module_name,
-                                )?;
-                            }
+                            let when_expr = get_optional_attr(choice_child, "when")
+                                .map(|expr| {
+                                    normalize_expression_literals(
+                                        &expr,
+                                        &choice_child.location,
+                                        all_script_access,
+                                        module_name,
+                                        visible_types,
+                                    )
+                                })
+                                .transpose()?;
                             if fall_over {
                                 fall_over_seen += 1;
                                 fall_over_entry_index = Some(entries.len());
@@ -652,7 +694,13 @@ pub(crate) fn compile_group_nodes(
                             entries.push(ChoiceEntry::Static {
                                 option: ChoiceOption {
                                     id: builder.next_choice_id(),
-                                    text: get_required_non_empty_attr(choice_child, "text")?,
+                                    text: normalize_template_literals(
+                                        &get_required_non_empty_attr(choice_child, "text")?,
+                                        &choice_child.location,
+                                        all_script_access,
+                                        module_name,
+                                        visible_types,
+                                    )?,
                                     when_expr,
                                     once,
                                     fall_over,
@@ -736,19 +784,28 @@ pub(crate) fn compile_group_nodes(
                                     item_name,
                                     index_name,
                                     template: DynamicChoiceTemplate {
-                                        text: get_required_non_empty_attr(template_option, "text")?,
+                                        text: normalize_template_literals(
+                                            &get_required_non_empty_attr(template_option, "text")?,
+                                            &template_option.location,
+                                            all_script_access,
+                                            module_name,
+                                            visible_types,
+                                        )?,
                                         when_expr: {
                                             let when_expr =
                                                 get_optional_attr(template_option, "when");
                                             if let Some(expr) = when_expr.as_deref() {
-                                                validate_script_literals_in_expression(
+                                                let rewritten = normalize_expression_literals(
                                                     expr,
                                                     &template_option.location,
                                                     all_script_access,
                                                     module_name,
+                                                    visible_types,
                                                 )?;
+                                                Some(rewritten)
+                                            } else {
+                                                None
                                             }
-                                            when_expr
                                         },
                                         group_id: option_group_id,
                                         location: template_option.location.clone(),
@@ -862,29 +919,36 @@ pub(crate) fn compile_group_nodes(
                     module_name,
                 )?,
                 args: {
-                    let args = parse_args(get_optional_attr(child, "args"))?;
-                    for arg in &args {
-                        validate_script_literals_in_expression(
-                            &arg.value_expr,
-                            &child.location,
-                            all_script_access,
-                            module_name,
-                        )?;
-                    }
-                    args
+                    parse_args(get_optional_attr(child, "args"))?
+                        .into_iter()
+                        .map(|mut arg| {
+                            arg.value_expr = normalize_expression_literals(
+                                &arg.value_expr,
+                                &child.location,
+                                all_script_access,
+                                module_name,
+                                visible_types,
+                            )?;
+                            Ok::<_, ScriptLangError>(arg)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?
                 },
                 location: child.location.clone(),
             },
             "return" => {
-                let args = parse_args(get_optional_attr(child, "args"))?;
-                for arg in &args {
-                    validate_script_literals_in_expression(
-                        &arg.value_expr,
-                        &child.location,
-                        all_script_access,
-                        module_name,
-                    )?;
-                }
+                let args = parse_args(get_optional_attr(child, "args"))?
+                    .into_iter()
+                    .map(|mut arg| {
+                        arg.value_expr = normalize_expression_literals(
+                            &arg.value_expr,
+                            &child.location,
+                            all_script_access,
+                            module_name,
+                            visible_types,
+                        )?;
+                        Ok::<_, ScriptLangError>(arg)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
                 if args.iter().any(|arg| arg.is_ref) {
                     return Err(ScriptLangError::with_span(
                         "XML_RETURN_REF_UNSUPPORTED",
@@ -1005,9 +1069,30 @@ pub(crate) fn parse_var_declaration(
 
     let inline = inline_text_content(node);
     let initial_value_expr = if inline.trim().is_empty() {
+        if matches!(ty, ScriptType::Enum { .. }) {
+            return Err(ScriptLangError::with_span(
+                "ENUM_INIT_REQUIRED",
+                format!(
+                    "<temp name=\"{}\"> with enum type requires explicit Type.Member initializer.",
+                    name
+                ),
+                node.location.clone(),
+            ));
+        }
         None
     } else {
-        Some(inline.trim().to_string())
+        let mut expr = inline.trim().to_string();
+        if let ScriptType::Enum { type_name, members } = &ty {
+            let member = parse_enum_literal_initializer(
+                &expr,
+                type_name,
+                members,
+                visible_types,
+                &node.location,
+            )?;
+            expr = format!("\"{}\"", member.replace('"', "\\\""));
+        }
+        Some(expr)
     };
 
     Ok(VarDeclaration {
@@ -1181,6 +1266,7 @@ mod script_compile_tests {
     fn script_type_kind(ty: &ScriptType) -> &'static str {
         match ty {
             ScriptType::Primitive { .. } => "primitive",
+            ScriptType::Enum { .. } => "enum",
             ScriptType::Script => "script",
             ScriptType::Array { .. } => "array",
             ScriptType::Map { .. } => "map",
@@ -2392,6 +2478,7 @@ mod script_compile_tests {
                 qualified_name: "A".to_string(),
                 access: AccessLevel::Private,
                 fields: vec![field.clone()],
+                enum_members: Vec::new(),
                 location: span.clone(),
             },
         )]);
@@ -2417,6 +2504,7 @@ mod script_compile_tests {
                 qualified_name: "Dup".to_string(),
                 access: AccessLevel::Private,
                 fields: vec![field.clone(), field],
+                enum_members: Vec::new(),
                 location: span.clone(),
             },
         );

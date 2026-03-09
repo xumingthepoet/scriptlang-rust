@@ -48,32 +48,39 @@ pub(crate) fn resolve_named_type_with_aliases(
         ));
     };
 
-    let mut fields = BTreeMap::new();
-    for field in &decl.fields {
-        if fields.contains_key(&field.name) {
-            visiting.remove(&lookup_name);
-            return Err(ScriptLangError::with_span(
-                "TYPE_FIELD_DUPLICATE",
-                format!("Duplicate field \"{}\" in type \"{}\".", field.name, name),
-                field.location.clone(),
-            ));
+    let resolved_type = if !decl.enum_members.is_empty() {
+        visiting.remove(&lookup_name);
+        ScriptType::Enum {
+            type_name: lookup_name.clone(),
+            members: decl.enum_members.clone(),
         }
-        let field_type = resolve_type_expr_with_lookup_with_aliases(
-            &field.type_expr,
-            type_decls_map,
-            type_aliases,
-            resolved,
-            visiting,
-            &field.location,
-        )?;
-        fields.insert(field.name.clone(), field_type);
-    }
+    } else {
+        let mut fields = BTreeMap::new();
+        for field in &decl.fields {
+            if fields.contains_key(&field.name) {
+                visiting.remove(&lookup_name);
+                return Err(ScriptLangError::with_span(
+                    "TYPE_FIELD_DUPLICATE",
+                    format!("Duplicate field \"{}\" in type \"{}\".", field.name, name),
+                    field.location.clone(),
+                ));
+            }
+            let field_type = resolve_type_expr_with_lookup_with_aliases(
+                &field.type_expr,
+                type_decls_map,
+                type_aliases,
+                resolved,
+                visiting,
+                &field.location,
+            )?;
+            fields.insert(field.name.clone(), field_type);
+        }
 
-    visiting.remove(&lookup_name);
-
-    let resolved_type = ScriptType::Object {
-        type_name: lookup_name.clone(),
-        fields,
+        visiting.remove(&lookup_name);
+        ScriptType::Object {
+            type_name: lookup_name.clone(),
+            fields,
+        }
     };
     resolved.insert(lookup_name, resolved_type.clone());
     Ok(resolved_type)
@@ -253,6 +260,66 @@ pub(crate) fn parse_type_declaration_node_with_namespace(
         qualified_name,
         access,
         fields,
+        enum_members: Vec::new(),
+        location: node.location.clone(),
+    })
+}
+
+pub(crate) fn parse_enum_declaration_node_with_namespace(
+    node: &XmlElementNode,
+    namespace: &str,
+    default_access: AccessLevel,
+) -> Result<ParsedTypeDecl, ScriptLangError> {
+    let name = get_required_non_empty_attr(node, "name")?;
+    assert_name_not_reserved(&name, "enum", node.location.clone())?;
+    let access = parse_access_attr(node, "access", default_access)?;
+
+    let mut members = Vec::new();
+    let mut seen = HashSet::new();
+    for child in element_children(node) {
+        if child.name != "member" {
+            return Err(ScriptLangError::with_span(
+                "XML_ENUM_CHILD_INVALID",
+                format!("Unsupported child <{}> under <enum>.", child.name),
+                child.location.clone(),
+            ));
+        }
+        let member_name = get_required_non_empty_attr(child, "name")?;
+        assert_name_not_reserved(&member_name, "enum member", child.location.clone())?;
+        if !seen.insert(member_name.clone()) {
+            return Err(ScriptLangError::with_span(
+                "ENUM_MEMBER_DUPLICATE",
+                format!(
+                    "Duplicate enum member \"{}\" in enum \"{}\".",
+                    member_name, name
+                ),
+                child.location.clone(),
+            ));
+        }
+        if has_any_child_content(child) {
+            return Err(ScriptLangError::with_span(
+                "XML_ENUM_MEMBER_CONTENT_FORBIDDEN",
+                "<member> cannot contain child nodes or inline text.",
+                child.location.clone(),
+            ));
+        }
+        members.push(member_name);
+    }
+    if members.is_empty() {
+        return Err(ScriptLangError::with_span(
+            "ENUM_DECL_EMPTY",
+            format!("Enum \"{}\" must declare at least one <member>.", name),
+            node.location.clone(),
+        ));
+    }
+
+    let qualified_name = format!("{}.{}", namespace, name);
+    Ok(ParsedTypeDecl {
+        name,
+        qualified_name,
+        access,
+        fields: Vec::new(),
+        enum_members: members,
         location: node.location.clone(),
     })
 }
@@ -297,6 +364,7 @@ mod type_expr_tests {
     fn script_type_kind(ty: &ScriptType) -> &'static str {
         match ty {
             ScriptType::Primitive { .. } => "primitive",
+            ScriptType::Enum { .. } => "enum",
             ScriptType::Script => "script",
             ScriptType::Array { .. } => "array",
             ScriptType::Map { .. } => "map",
@@ -321,6 +389,7 @@ mod type_expr_tests {
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                     location: span.clone(),
                 }],
+                enum_members: Vec::new(),
                 location: span.clone(),
             },
         )]);

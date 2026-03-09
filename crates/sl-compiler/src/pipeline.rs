@@ -71,6 +71,7 @@ pub fn compile_project_bundle_from_xml_map(
             scripts.insert(ir.script_name.clone(), ir);
         }
     }
+    validate_static_script_call_arg_counts(&scripts)?;
 
     Ok(CompileProjectBundleResult {
         scripts,
@@ -118,6 +119,76 @@ fn collect_source_scripts(
             .collect(),
         _ => Vec::new(),
     }
+}
+
+fn validate_static_script_call_arg_counts(
+    scripts: &BTreeMap<String, ScriptIr>,
+) -> Result<(), ScriptLangError> {
+    for script in scripts.values() {
+        for group in script.groups.values() {
+            for node in &group.nodes {
+                match node {
+                    ScriptNode::Call {
+                        target_script: ScriptTarget::Literal { script_name },
+                        args,
+                        location,
+                        ..
+                    } => {
+                        validate_single_literal_call_arg_count(
+                            scripts,
+                            script_name,
+                            args.len(),
+                            location,
+                            "SCRIPT_CALL_ARGS_COUNT_MISMATCH",
+                            "call",
+                        )?;
+                    }
+                    ScriptNode::Return {
+                        target_script: Some(ScriptTarget::Literal { script_name }),
+                        args,
+                        location,
+                        ..
+                    } => {
+                        validate_single_literal_call_arg_count(
+                            scripts,
+                            script_name,
+                            args.len(),
+                            location,
+                            "SCRIPT_RETURN_ARGS_COUNT_MISMATCH",
+                            "return",
+                        )?;
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_single_literal_call_arg_count(
+    scripts: &BTreeMap<String, ScriptIr>,
+    target_script_name: &str,
+    arg_count: usize,
+    location: &SourceSpan,
+    error_code: &str,
+    label: &str,
+) -> Result<(), ScriptLangError> {
+    let Some(target) = scripts.get(target_script_name) else {
+        return Ok(());
+    };
+    let expected = target.params.len();
+    if arg_count != expected {
+        return Err(ScriptLangError::with_span(
+            error_code,
+            format!(
+                "{} target script \"{}\" expects {} args, got {}.",
+                label, target_script_name, expected, arg_count
+            ),
+            location.clone(),
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn with_file_context(error: ScriptLangError, file_path: &str) -> ScriptLangError {
@@ -240,6 +311,42 @@ mod pipeline_tests {
         );
         assert!(main.visible_functions.contains_key("boost"));
         assert!(main.visible_module_vars.contains_key("baseHp"));
+    }
+
+    #[test]
+    fn compile_bundle_rejects_literal_call_when_arg_count_mismatch() {
+        let files = map(&[
+            (
+                "callee.xml",
+                r#"<module name="callee" default_access="public"><script name="callee" args="int:x"><return/></script></module>"#,
+            ),
+            (
+                "main.xml",
+                r#"<module name="main" default_access="public"><script name="main"><call script="@callee.callee"/></script></module>"#,
+            ),
+        ]);
+
+        let error =
+            compile_project_bundle_from_xml_map(&files).expect_err("missing arg should fail");
+        assert_eq!(error.code, "SCRIPT_CALL_ARGS_COUNT_MISMATCH");
+    }
+
+    #[test]
+    fn compile_bundle_rejects_literal_return_when_arg_count_mismatch() {
+        let files = map(&[
+            (
+                "next.xml",
+                r#"<module name="next" default_access="public"><script name="next" args="int:x"><text>${x}</text></script></module>"#,
+            ),
+            (
+                "main.xml",
+                r#"<module name="main" default_access="public"><script name="main"><return script="@next.next"/></script></module>"#,
+            ),
+        ]);
+
+        let error = compile_project_bundle_from_xml_map(&files)
+            .expect_err("return missing arg should fail");
+        assert_eq!(error.code, "SCRIPT_RETURN_ARGS_COUNT_MISMATCH");
     }
 
     #[test]

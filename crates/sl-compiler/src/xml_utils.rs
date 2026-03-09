@@ -300,6 +300,184 @@ pub(crate) fn has_attr(node: &XmlElementNode, name: &str) -> bool {
     node.attributes.contains_key(name)
 }
 
+fn enum_template_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r"\$\{([^{}]+)\}").expect("enum template regex must compile"))
+}
+
+pub(crate) fn rewrite_and_validate_enum_literals_in_expression(
+    expr: &str,
+    visible_types: &BTreeMap<String, ScriptType>,
+    span: &SourceSpan,
+) -> Result<String, ScriptLangError> {
+    let enum_lookup = visible_types
+        .iter()
+        .filter_map(|(name, ty)| match ty {
+            ScriptType::Enum { members, .. } => Some((name.as_str(), members)),
+            _ => None,
+        })
+        .collect::<BTreeMap<_, _>>();
+    if enum_lookup.is_empty() {
+        return Ok(expr.to_string());
+    }
+
+    let chars = expr.chars().collect::<Vec<_>>();
+    let mut out = String::with_capacity(expr.len());
+    let mut index = 0usize;
+
+    while index < chars.len() {
+        let ch = chars[index];
+        if ch == '"' || ch == '\'' {
+            out.push(ch);
+            index += 1;
+            while index < chars.len() {
+                let inner = chars[index];
+                out.push(inner);
+                index += 1;
+                if inner == '\\' && index < chars.len() {
+                    out.push(chars[index]);
+                    index += 1;
+                    continue;
+                }
+                if inner == ch {
+                    break;
+                }
+            }
+            continue;
+        }
+
+        if ch.is_ascii_alphabetic() || ch == '_' {
+            let start = index;
+            index += 1;
+            while index < chars.len() {
+                let c = chars[index];
+                if c.is_ascii_alphanumeric() || c == '_' || c == '.' {
+                    index += 1;
+                } else {
+                    break;
+                }
+            }
+            let token = chars[start..index].iter().collect::<String>();
+            if let Some((type_name, member_name)) = token.rsplit_once('.') {
+                if let Some(members) = enum_lookup.get(type_name) {
+                    if !members.iter().any(|member| member == member_name) {
+                        return Err(ScriptLangError::with_span(
+                            "ENUM_LITERAL_MEMBER_UNKNOWN",
+                            format!(
+                                "Unknown enum member \"{}\" for type \"{}\".",
+                                member_name, type_name
+                            ),
+                            span.clone(),
+                        ));
+                    }
+                    out.push('"');
+                    out.push_str(member_name);
+                    out.push('"');
+                    continue;
+                }
+            }
+            out.push_str(&token);
+            continue;
+        }
+
+        out.push(ch);
+        index += 1;
+    }
+
+    Ok(out)
+}
+
+pub(crate) fn rewrite_and_validate_enum_literals_in_template(
+    template: &str,
+    visible_types: &BTreeMap<String, ScriptType>,
+    span: &SourceSpan,
+) -> Result<String, ScriptLangError> {
+    let mut out = String::new();
+    let mut last_index = 0usize;
+    for captures in enum_template_regex().captures_iter(template) {
+        let full = captures
+            .get(0)
+            .expect("capture group 0 must exist for each template capture");
+        let expr = captures
+            .get(1)
+            .expect("capture group 1 must exist for each template capture");
+        out.push_str(&template[last_index..full.start()]);
+        let rewritten =
+            rewrite_and_validate_enum_literals_in_expression(expr.as_str(), visible_types, span)?;
+        out.push_str("${");
+        out.push_str(&rewritten);
+        out.push('}');
+        last_index = full.end();
+    }
+    out.push_str(&template[last_index..]);
+    Ok(out)
+}
+
+pub(crate) fn parse_enum_literal_initializer(
+    expr: &str,
+    enum_type_name: &str,
+    enum_members: &[String],
+    visible_types: &BTreeMap<String, ScriptType>,
+    span: &SourceSpan,
+) -> Result<String, ScriptLangError> {
+    let trimmed = expr.trim();
+    if trimmed.starts_with('"') || trimmed.starts_with('\'') {
+        return Err(ScriptLangError::with_span(
+            "ENUM_LITERAL_REQUIRED",
+            format!(
+                "Enum \"{}\" initializer must use Type.Member literal, not string literal.",
+                enum_type_name
+            ),
+            span.clone(),
+        ));
+    }
+
+    let Some((type_name, member_name)) = trimmed.rsplit_once('.') else {
+        return Err(ScriptLangError::with_span(
+            "ENUM_LITERAL_REQUIRED",
+            format!(
+                "Enum \"{}\" initializer must use Type.Member literal.",
+                enum_type_name
+            ),
+            span.clone(),
+        ));
+    };
+
+    if !enum_members.iter().any(|member| member == member_name) {
+        return Err(ScriptLangError::with_span(
+            "ENUM_LITERAL_MEMBER_UNKNOWN",
+            format!(
+                "Unknown enum member \"{}\" for type \"{}\".",
+                member_name, type_name
+            ),
+            span.clone(),
+        ));
+    }
+
+    let type_matches = visible_types.iter().any(|(name, ty)| {
+        name == type_name
+            && matches!(
+                ty,
+                ScriptType::Enum {
+                    type_name: declared_type_name,
+                    members,
+                } if declared_type_name == enum_type_name && members == enum_members
+            )
+    });
+    if !type_matches {
+        return Err(ScriptLangError::with_span(
+            "ENUM_LITERAL_REQUIRED",
+            format!(
+                "Enum \"{}\" initializer must use Type.Member literal of the same enum type.",
+                enum_type_name
+            ),
+            span.clone(),
+        ));
+    }
+
+    Ok(member_name.to_string())
+}
+
 #[cfg(test)]
 mod xml_utils_tests {
     use super::*;

@@ -51,7 +51,15 @@
   - 也包含 const 声明与初始化顺序：
     - `moduleConstDeclarations`
     - `moduleConstInitOrder`
+  - enum 类型会进入 `ScriptType::Enum { type_name, members }`，运行时值仍是字符串（member 名）。
   - 可作为“离线编译后运行”的稳定输入
+
+### 2.6 enum 运行约束（V1）
+
+- enum 在结构化声明位点必须显式给 `Type.Member`（如 `<temp>/<var>/<const>`）。
+- `Type.Member` 在编译期会重写为对应 member 名字符串。
+- 对可静态定位目标脚本的 `call/return`，参数个数在编译期校验。
+- 动态目标调用仍保留运行时校验。
 
 ## 3. `sl-api` 高层 API
 

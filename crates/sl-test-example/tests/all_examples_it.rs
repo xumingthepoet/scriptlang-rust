@@ -133,3 +133,8 @@ fn example_24_invoke_dynamic_matches_testcase() {
 fn example_25_function_invoke_matches_testcase() {
     assert_example("25-function-invoke");
 }
+
+#[test]
+fn example_26_enum_flow_matches_testcase() {
+    assert_example("26-enum-flow");
+}

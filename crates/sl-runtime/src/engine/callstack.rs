@@ -118,6 +118,14 @@ impl ScriptLangEngine {
         let mut value = default_value_from_type(&decl.r#type);
         if let Some(expr) = &decl.initial_value_expr {
             value = self.eval_initializer_expression(expr, "initializer")?;
+        } else if matches!(decl.r#type, ScriptType::Enum { .. }) {
+            return Err(ScriptLangError::new(
+                "ENGINE_ENUM_INIT_REQUIRED",
+                format!(
+                    "Variable \"{}\" with enum type requires explicit initializer.",
+                    decl.name
+                ),
+            ));
         }
 
         if !is_type_compatible(&value, &decl.r#type) {

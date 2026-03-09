@@ -35,6 +35,7 @@ pub(crate) struct ParsedTypeDecl {
     pub(crate) qualified_name: String,
     pub(crate) access: AccessLevel,
     pub(crate) fields: Vec<ParsedTypeFieldDecl>,
+    pub(crate) enum_members: Vec<String>,
     pub(crate) location: SourceSpan,
 }
 

@@ -456,7 +456,8 @@ mod scope_tests {
                 r#"
     <!-- import callee from callee.xml -->
     <script name="main">
-      <call script="@callee.callee" args="1"/>
+      <temp name="calleeScript" type="script">@callee.callee</temp>
+      <call script="calleeScript" args="1"/>
     </script>
     "#,
             ),

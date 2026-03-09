@@ -146,6 +146,9 @@ fn parse_module_child(
         "type" => parse_type_declaration_node_with_namespace(child, namespace, default_access)
             .map(ParsedModuleChild::Type)
             .map_err(|error| with_file_context(error, file_path)),
+        "enum" => parse_enum_declaration_node_with_namespace(child, namespace, default_access)
+            .map(ParsedModuleChild::Type)
+            .map_err(|error| with_file_context(error, file_path)),
         "function" => {
             parse_function_declaration_node_with_namespace(child, namespace, default_access)
                 .map(ParsedModuleChild::Function)
@@ -183,6 +186,35 @@ fn parse_module_child(
 
 fn with_file_context(error: ScriptLangError, file_path: &str) -> ScriptLangError {
     with_file_context_shared(error, file_path)
+}
+
+fn normalize_module_initializer(
+    expr: &Option<String>,
+    resolved_type: &ScriptType,
+    visible_types: &BTreeMap<String, ScriptType>,
+    span: &SourceSpan,
+) -> Result<Option<String>, ScriptLangError> {
+    let Some(expr) = expr.as_ref() else {
+        if matches!(resolved_type, ScriptType::Enum { .. }) {
+            return Err(ScriptLangError::with_span(
+                "ENUM_INIT_REQUIRED",
+                "Enum declaration requires explicit Type.Member initializer.",
+                span.clone(),
+            ));
+        }
+        return Ok(None);
+    };
+
+    if let ScriptType::Enum { type_name, members } = resolved_type {
+        let member = parse_enum_literal_initializer(expr, type_name, members, visible_types, span)?;
+        return Ok(Some(format!("\"{}\"", member.replace('"', "\\\""))));
+    }
+
+    Ok(Some(rewrite_and_validate_enum_literals_in_expression(
+        expr,
+        visible_types,
+        span,
+    )?))
 }
 
 pub(crate) fn parse_module_var_declaration(
@@ -494,6 +526,11 @@ pub(crate) fn resolve_visible_module_symbols(
                 function_namespace,
                 &rb.location,
             )?;
+            let normalized_code = rewrite_and_validate_enum_literals_in_expression(
+                &decl.code,
+                &visible_types,
+                &decl.location,
+            )?;
 
             functions.insert(
                 decl.qualified_name.clone(),
@@ -505,7 +542,7 @@ pub(crate) fn resolve_visible_module_symbols(
                         r#type: return_type,
                         location: decl.return_binding.location.clone(),
                     },
-                    code: decl.code.clone(),
+                    code: normalized_code,
                     location: decl.location.clone(),
                 },
             );
@@ -557,23 +594,29 @@ pub(crate) fn resolve_visible_module_symbols(
                     decl.location.clone(),
                 ));
             }
-            module_vars_qualified.insert(
-                decl.qualified_name.clone(),
+            module_vars_qualified.insert(decl.qualified_name.clone(), {
+                let resolved_type = resolve_type_expr_in_namespace(
+                    &decl.type_expr,
+                    &visible_types,
+                    &decl.namespace,
+                    &decl.location,
+                )?;
+                let initial_value_expr = normalize_module_initializer(
+                    &decl.initial_value_expr,
+                    &resolved_type,
+                    &visible_types,
+                    &decl.location,
+                )?;
                 ModuleVarDecl {
                     namespace: decl.namespace.clone(),
                     name: decl.name.clone(),
                     qualified_name: decl.qualified_name.clone(),
                     access: decl.access,
-                    r#type: resolve_type_expr_in_namespace(
-                        &decl.type_expr,
-                        &visible_types,
-                        &decl.namespace,
-                        &decl.location,
-                    )?,
-                    initial_value_expr: decl.initial_value_expr.clone(),
+                    r#type: resolved_type,
+                    initial_value_expr,
                     location: decl.location.clone(),
-                },
-            );
+                }
+            });
             if is_local {
                 module_global_short_candidates
                     .entry(decl.name.clone())
@@ -615,23 +658,29 @@ pub(crate) fn resolve_visible_module_symbols(
                     decl.location.clone(),
                 ));
             }
-            module_consts_qualified.insert(
-                decl.qualified_name.clone(),
+            module_consts_qualified.insert(decl.qualified_name.clone(), {
+                let resolved_type = resolve_type_expr_in_namespace(
+                    &decl.type_expr,
+                    &visible_types,
+                    &decl.namespace,
+                    &decl.location,
+                )?;
+                let initial_value_expr = normalize_module_initializer(
+                    &decl.initial_value_expr,
+                    &resolved_type,
+                    &visible_types,
+                    &decl.location,
+                )?;
                 ModuleConstDecl {
                     namespace: decl.namespace.clone(),
                     name: decl.name.clone(),
                     qualified_name: decl.qualified_name.clone(),
                     access: decl.access,
-                    r#type: resolve_type_expr_in_namespace(
-                        &decl.type_expr,
-                        &visible_types,
-                        &decl.namespace,
-                        &decl.location,
-                    )?,
-                    initial_value_expr: decl.initial_value_expr.clone(),
+                    r#type: resolved_type,
+                    initial_value_expr,
                     location: decl.location.clone(),
-                },
-            );
+                }
+            });
             if is_local {
                 module_const_short_candidates
                     .entry(decl.name.clone())
@@ -749,6 +798,11 @@ pub(crate) fn collect_functions_for_bundle(
                 function_namespace,
                 &decl.return_binding.location,
             )?;
+            let normalized_code = rewrite_and_validate_enum_literals_in_expression(
+                &decl.code,
+                &visible_types,
+                &decl.location,
+            )?;
 
             functions.insert(
                 decl.qualified_name.clone(),
@@ -760,7 +814,7 @@ pub(crate) fn collect_functions_for_bundle(
                         r#type: return_type,
                         location: decl.return_binding.location.clone(),
                     },
-                    code: decl.code.clone(),
+                    code: normalized_code,
                     location: decl.location.clone(),
                 },
             );
@@ -842,18 +896,25 @@ pub(crate) fn collect_module_vars_for_bundle(
                     decl.location.clone(),
                 ));
             }
-            module_vars.insert(
-                decl.qualified_name.clone(),
+            module_vars.insert(decl.qualified_name.clone(), {
+                let resolved_type =
+                    resolve_type_expr(&decl.type_expr, &visible_types, &decl.location)?;
+                let initial_value_expr = normalize_module_initializer(
+                    &decl.initial_value_expr,
+                    &resolved_type,
+                    &visible_types,
+                    &decl.location,
+                )?;
                 ModuleVarDecl {
                     namespace: decl.namespace.clone(),
                     name: decl.name.clone(),
                     qualified_name: decl.qualified_name.clone(),
                     access: decl.access,
-                    r#type: resolve_type_expr(&decl.type_expr, &visible_types, &decl.location)?,
-                    initial_value_expr: decl.initial_value_expr.clone(),
+                    r#type: resolved_type,
+                    initial_value_expr,
                     location: decl.location.clone(),
-                },
-            );
+                }
+            });
             init_order.push(decl.qualified_name.clone());
         }
     }
@@ -932,18 +993,25 @@ pub(crate) fn collect_module_consts_for_bundle(
                     decl.location.clone(),
                 ));
             }
-            module_consts.insert(
-                decl.qualified_name.clone(),
+            module_consts.insert(decl.qualified_name.clone(), {
+                let resolved_type =
+                    resolve_type_expr(&decl.type_expr, &visible_types, &decl.location)?;
+                let initial_value_expr = normalize_module_initializer(
+                    &decl.initial_value_expr,
+                    &resolved_type,
+                    &visible_types,
+                    &decl.location,
+                )?;
                 ModuleConstDecl {
                     namespace: decl.namespace.clone(),
                     name: decl.name.clone(),
                     qualified_name: decl.qualified_name.clone(),
                     access: decl.access,
-                    r#type: resolve_type_expr(&decl.type_expr, &visible_types, &decl.location)?,
-                    initial_value_expr: decl.initial_value_expr.clone(),
+                    r#type: resolved_type,
+                    initial_value_expr,
                     location: decl.location.clone(),
-                },
-            );
+                }
+            });
             init_order.push(decl.qualified_name.clone());
         }
     }
@@ -1114,6 +1182,7 @@ mod module_resolver_tests {
     fn script_type_kind(ty: &ScriptType) -> &'static str {
         match ty {
             ScriptType::Primitive { .. } => "primitive",
+            ScriptType::Enum { .. } => "enum",
             ScriptType::Script => "script",
             ScriptType::Array { .. } => "array",
             ScriptType::Map { .. } => "map",
@@ -1135,6 +1204,7 @@ mod module_resolver_tests {
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                     location: span.clone(),
                 }],
+                enum_members: Vec::new(),
                 location: span.clone(),
             }],
             function_decls: vec![ParsedFunctionDecl {
@@ -1185,6 +1255,7 @@ mod module_resolver_tests {
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                     location: span.clone(),
                 }],
+                enum_members: Vec::new(),
                 location: span.clone(),
             }],
             function_decls: Vec::new(),
@@ -1998,6 +2069,7 @@ mod module_resolver_tests {
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                         location: span.clone(),
                     }],
+                    enum_members: Vec::new(),
                     location: span.clone(),
                 }],
                 function_decls: vec![ParsedFunctionDecl {
@@ -2057,6 +2129,7 @@ mod module_resolver_tests {
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                         location: span.clone(),
                     }],
+                    enum_members: Vec::new(),
                     location: span.clone(),
                 }],
                 function_decls: Vec::new(),
@@ -2089,6 +2162,7 @@ mod module_resolver_tests {
                         type_expr: ParsedTypeExpr::Custom("Missing".to_string()),
                         location: span.clone(),
                     }],
+                    enum_members: Vec::new(),
                     location: span.clone(),
                 }],
                 function_decls: Vec::new(),
@@ -2140,6 +2214,7 @@ mod module_resolver_tests {
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                         location: span.clone(),
                     }],
+                    enum_members: Vec::new(),
                     location: span.clone(),
                 }],
                 function_decls: vec![
@@ -2484,6 +2559,7 @@ mod module_resolver_tests {
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                         location: span.clone(),
                     }],
+                    enum_members: Vec::new(),
                     location: span.clone(),
                 }],
                 function_decls: vec![ParsedFunctionDecl {
@@ -2599,6 +2675,7 @@ mod module_resolver_tests {
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                     location: span.clone(),
                 }],
+                enum_members: Vec::new(),
                 location: span.clone(),
             }],
             function_decls: Vec::new(),
@@ -2887,6 +2964,7 @@ mod module_resolver_tests {
             qualified_name: "main.T".to_string(),
             access: AccessLevel::Public,
             fields: vec![],
+            enum_members: Vec::new(),
             location: span.clone(),
         };
         let module_by_path = BTreeMap::from([
@@ -3084,6 +3162,7 @@ mod module_resolver_tests {
                     type_expr: ParsedTypeExpr::Custom("NonExistentType".to_string()),
                     location: span.clone(),
                 }],
+                enum_members: Vec::new(),
                 location: span.clone(),
             }],
             function_decls: Vec::new(),
@@ -3120,6 +3199,7 @@ mod module_resolver_tests {
                         location: span.clone(),
                     },
                 ],
+                enum_members: Vec::new(),
                 location: span.clone(),
             }],
             function_decls: Vec::new(),
@@ -3204,6 +3284,7 @@ mod module_resolver_tests {
             qualified_name: "shared.Obj".to_string(),
             access: AccessLevel::Public,
             fields: vec![],
+            enum_members: Vec::new(),
             location: span.clone(),
         };
         let module1 = ModuleDeclarations {
@@ -3240,6 +3321,7 @@ mod module_resolver_tests {
                 type_expr: ParsedTypeExpr::Custom("NonExistent".to_string()), // doesn't exist
                 location: span.clone(),
             }],
+            enum_members: Vec::new(),
             location: span.clone(),
         };
         let module = ModuleDeclarations {
@@ -3267,6 +3349,7 @@ mod module_resolver_tests {
                 type_expr: ParsedTypeExpr::Custom("DoesNotExist".to_string()), // doesn't exist
                 location: span.clone(),
             }],
+            enum_members: Vec::new(),
             location: span.clone(),
         };
         let module = ModuleDeclarations {

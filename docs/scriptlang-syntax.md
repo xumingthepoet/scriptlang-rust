@@ -13,6 +13,10 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
   <type name="Combatant">
     <field name="hp" type="int"/>
   </type>
+  <enum name="State">
+    <member name="Idle"/>
+    <member name="Run"/>
+  </enum>
   <function name="boost" args="int:x" return="int:out">
     out = x + 1;
   </function>
@@ -29,13 +33,13 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 
 规则：
 - 一个 `*.xml` 模块文件内可以有多个 `<script>`。
-- `<module>` 下允许的直接子节点只有：`<type>`、`<function>`、`<var>`、`<const>`、`<script>`。
+- `<module>` 下允许的直接子节点只有：`<type>`、`<enum>`、`<function>`、`<var>`、`<const>`、`<script>`。
 - module 名只取自 `<module name="...">`，不从文件名推导。
 - `<module default_access="public|private">` 可设置 module 内默认可见性，默认是 `private`。
 - `<type>/<function>/<var>/<const>/<script>` 可单独声明 `access="public|private"`；未声明时继承 `default_access`。
 - 仅支持 `*.xml` 模块文件，且根节点必须是 `<module>`。
 - module 内脚本对外注册名是 `moduleName.scriptName`，例如 `battle.main`。
-- module 内 `type/function/var/const` 仍属于同一命名空间，例如 `battle.Combatant`、`battle.boost`、`battle.baseHp`。
+- module 内 `type/enum/function/var/const` 仍属于同一命名空间，例如 `battle.Combatant`、`battle.State`、`battle.boost`、`battle.baseHp`。
 - 同一个 module 内部，脚本可以直接用短名访问本 module 的 `type/function/var/const`，也可以用短名调用 sibling script。
 - 跨 module 访问任何元素时，都必须使用限定名，例如 `shared.boost`、`shared.hp`、`shared.Hero`、`battle.main`。
 - 跨 module import 只能访问对方 `public` 元素；`private` 仅在本 module 内可见。
@@ -213,11 +217,12 @@ key 固定是 string。
 
 用途：声明变量。  
 属性：`name`、`type`（必填）。  
-初值：使用节点内联表达式；为空则用类型默认值。  
+初值：使用节点内联表达式；非 enum 为空时使用类型默认值，enum 必须显式写 `Type.Member`。  
 
 ```xml
 <temp name="hp" type="int">3</temp>
 <temp name="title" type="string">"Knight"</temp>
+<temp name="state" type="State">State.Run</temp>
 ```
 
 ## 6.2 `<text>`
@@ -506,7 +511,28 @@ module 相关规则与 `<call>` 相同：
 </module>
 ```
 
-## 7.2 `<field>`
+## 7.2 `<enum>`
+
+用途：声明枚举类型。  
+属性：`name`（必填）。  
+子节点：`<member name="..."/>`（至少 1 个，且名称唯一）。  
+可出现位置：`<module>` 直接子节点。  
+
+```xml
+<module name="shared" default_access="public">
+  <enum name="State">
+    <member name="Idle"/>
+    <member name="Run"/>
+  </enum>
+</module>
+```
+
+规则：
+- enum 的值语义为 member 名字符串：`State.Run` 在运行时等价于 `"Run"`。
+- enum 结构化声明位点（如 `<temp>/<var>/<const>` 初值）必须写 `Type.Member`，不能直接写字符串字面量。
+- `enum` 与 `type` 共享命名空间，重名会编译失败。
+
+## 7.3 `<field>`
 
 用途：定义类型字段。  
 属性：`name`、`type`（必填）。  
@@ -515,7 +541,7 @@ module 相关规则与 `<call>` 相同：
 <field name="hp" type="int"/>
 ```
 
-## 7.3 `<function>`
+## 7.4 `<function>`
 
 用途：声明命名空间函数。  
 属性：
@@ -549,7 +575,7 @@ module 相关规则与 `<call>` 相同：
 </module>
 ```
 
-## 7.4 `<module><script>`
+## 7.5 `<module><script>`
 
 用途：在 module 内声明可执行脚本。  
 可出现位置：仅 `<module>` 直接子节点。  
@@ -587,11 +613,19 @@ module 相关规则与 `<call>` 相同：
 <call script="@battle.main" args="hp + 1, ref:score"/>
 ```
 
+规则：
+- 对 `script="@module.name"` 这类编译期可静态定位目标脚本的调用，参数个数必须与目标脚本声明完全一致，否则编译报错。
+- 对动态目标（`script` 类型变量）保持运行时检查。
+
 ## 9.3 `<return args="...">`
 
 ```xml
 <return script="@next" args="hp, title"/>
 ```
+
+规则：
+- 对 `return script="@module.name"` 这类静态目标转移，参数个数必须与目标脚本声明完全一致，否则编译报错。
+- 对动态目标（`script` 类型变量）保持运行时检查。
 
 ## 10. 命名与约束语法点
 
