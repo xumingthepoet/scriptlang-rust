@@ -3,19 +3,28 @@
 Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded script engine.
 
 ## Documentation
-- [SL Engine API usage](docs/sl-engine-api.md)
-- [SL CLI usage](docs/sl-cli-usage.md)
-- [ScriptLang syntax rules](docs/scriptlang-syntax.md)
-- [Example testing with sl-test-example runner](docs/testing-examples.md)
-- [Rust testability playbook for high coverage](docs/rust-testability-playbook.md)
+- [SL Engine API usage](docs/sl-engine-api.md): host-side Rust API and runtime integration.
+- [SL CLI usage](docs/sl-cli-usage.md): `agent`/`tui` commands, machine output, replay workflow.
+- [ScriptLang syntax rules](docs/scriptlang-syntax.md): XML grammar and language semantics.
+- [Example testing with sl-test-example runner](docs/testing-examples.md): example-case contract and runner usage.
+- [Rust testability playbook for high coverage](docs/rust-testability-playbook.md): testing patterns and coverage tactics.
 
-## Doc Boundary
-- `README.md` and `docs/`: user-facing behavior, integration usage, commands, and examples.
-- `KNOWLEDGE.md`: agent-facing long-term engineering constraints and reusable pitfalls (file/module guardrails, failure modes).
-- Do not put “this feature was implemented by steps A/B/C” or “how this specific commit was done” into `KNOWLEDGE.md`.
-- Prefer positive capability statements over migration/history notes in user docs:
-  - Say what is supported (whitelist), not what used to exist.
-  - Mention deprecated/legacy formats only when a user-visible migration task explicitly needs it.
+## Documentation Contract
+- Source-of-truth policy is defined in `AGENTS.md` (“主要文档” and “开发流程 #7”).
+- This README is intentionally concise and acts as a navigation/index page.
+- Detailed behavior must live in exactly one owner doc; other docs should link instead of restating rules.
+- User-facing docs should prefer whitelist-style statements (“what is supported”).
+
+## Doc Ownership
+- Language syntax and semantics: [docs/scriptlang-syntax.md](docs/scriptlang-syntax.md)
+- Host Rust API / artifact / snapshot contract: [docs/sl-engine-api.md](docs/sl-engine-api.md)
+- CLI command flags and output protocol: [docs/sl-cli-usage.md](docs/sl-cli-usage.md)
+- Test example contract and runner: [docs/testing-examples.md](docs/testing-examples.md)
+- Engineering testability tactics: [docs/rust-testability-playbook.md](docs/rust-testability-playbook.md)
+
+Change rule:
+- If behavior changes, update the owner doc first.
+- In non-owner docs, replace duplicated prose with links.
 
 ## Workspace Crates
 - `crates/sl-core`: shared types, values, errors, snapshot/player schemas.
@@ -61,61 +70,6 @@ All code must be written with testability in mind:
 - **Test support helpers**: Use the `*_test_support` modules provided by each crate for common test utilities.
 - **Host-facing paths should fail gracefully**: For CLI/artifact/state IO paths, prefer returning typed errors instead of panicking assertions.
 
-## Runtime/Compiler Performance Notes
-- `sl-runtime` reuses a single internal `rhai::Engine` instance and keeps `random` builtin state in shared runtime storage, avoiding per-eval engine re-construction.
-- module prelude generation is cached per script in runtime, so repeated expression/code evaluation does not rebuild identical prelude text.
-- parser/compiler/runtime regex usage for stable patterns is lazily initialized once via static caches.
-- `sl-compiler` memoizes per-script reachable import closures during project compilation to avoid repeated DFS work.
-- XML dependencies use explicit import comments like `<!-- import shared from shared.xml -->` and `<!-- import {battle, shared} from shared/ -->`.
-
-## Module Sources
-- XML source files now use plain `*.xml` names and must have a `<module name="...">` root.
-- `<module>` may contain `<type>`, `<function>`, `<var>`, `<const>`, and multiple `<script>` nodes.
-- `<module default_access="public|private">` controls default visibility for module children; default is `private`.
-- `<type>/<function>/<var>/<const>/<script>` support `access="public|private"`; default follows `default_access`.
-- Only `*.xml` module sources are supported.
-- Module scripts compile to qualified names like `battle.main`; host entry/call/return targets should use that qualified form.
-- Host entry script must be `public`; private scripts cannot be used as host entry.
-- Inside the same module, scripts may reference sibling scripts with short names (`<call script="next"/>`), which resolves to the qualified module target.
-- Script-local variables now use `<temp ...>...</temp>` (legacy `<script><var>` is removed).
-- Import visibility is public-only across modules; private members remain accessible inside their own module.
-- Module `<var>` defines writable globals (snapshotted), while `<const>` defines readonly globals (not snapshotted).
-
-## Module Globals (`<module><var>`)
-- `<module><var name="..." type="...">expr</var>` defines writable module globals.
-- globals initialize on `engine.start`, support short name and `ns.var` access, and follow import-closure visibility.
-- when short names conflict across namespaces, only fully-qualified `ns.var` remains available.
-- `<function>` bodies can read/write module `<var>` through qualified names (for example `event_system.listeners`), including cross-module calls.
-
-## Module Constants (`<module><const>`)
-- `<module><const name="..." type="...">expr</const>` defines readonly module globals.
-- consts follow the same import-closure visibility and short-name rules as `<var>`.
-- const writes fail at runtime with readonly errors, and const values are not persisted in snapshot/save.
-- const initializers may reference consts, but not mutable module `<var>` globals.
-
-## Choice Dynamic Options
-- `<choice>` supports mixed static `<option>` and `<dynamic-options>` blocks.
-- `<dynamic-options array=\"...\" item=\"...\" index=\"...\">` must contain exactly one template `<option>`.
-- Template `<option>` supports `text` and `when`; `once` and `fall_over` are rejected.
-- Expanded dynamic items keep source order with neighboring static options.
-
-## Text Tag Passthrough
-- `<text>` supports optional `tag` attribute as host metadata.
-- Runtime and API expose it via `EngineOutput::Text { text, tag }`.
-- CLI machine output keeps `TEXT_JSON` and emits optional `TEXT_TAG_JSON`.
-
-## Debug Node
-- `<debug>...</debug>` supports `${expr}` interpolation and emits `EngineOutput::Debug { text }`.
-- `<debug>` does not support attributes (`once/tag` etc. are rejected at compile time).
-- CLI hides debug events by default; pass `--show-debug` to emit `DEBUG_JSON` / `DEBUG: ...`.
-
-## Dynamic Call/Return Targets
-- `<call script="...">` and `<return script="...">` accept `${expr}` interpolation in `script`.
-- Existing static names like `script="battle"` remain unchanged.
-- Module-qualified static names such as `script="battle.main"` are first-class, and module-local short names resolve against the current module when possible.
-- Target resolution happens at runtime and must resolve to a non-empty compiled script name.
-- `<function>` bodies also support `invoke("module.func", [args])` for dynamic public function dispatch.
-
 ## Commands
 - `make check`: `cargo check --workspace --all-targets --all-features`
 - `make fmt`: `cargo fmt --all -- --check`
@@ -146,37 +100,22 @@ If you need artifact file persistence, use `sl-compiler` helpers:
 
 `create_engine_from_xml` is still available as a compatibility convenience path, but it internally does `compile -> artifact -> run`.
 
-## CLI Usage
-
-详细 CLI 文档见 [docs/sl-cli-usage.md](docs/sl-cli-usage.md)。
-
-### Quick Start
+## CLI Quick Start
 
 ```bash
 cargo run -p sl-cli -- --help
 cargo run -p sl-cli -- agent --help
 cargo run -p sl-cli -- tui --help
-cargo run -p sl-cli -- agent start --scripts-dir crates/sl-test-example/examples/06-snapshot-flow --state-out /tmp/sl-state.json
-cargo run -p sl-cli -- agent start --scripts-dir crates/sl-test-example/examples/06-snapshot-flow --state-out /tmp/sl-state.json --rand "12,3,1,4"
-cargo run -p sl-cli -- agent choose --state-in /tmp/sl-state.json --choice 0 --state-out /tmp/sl-next.json
-cargo run -p sl-cli -- agent input --state-in /tmp/sl-next.json --text "Rin" --state-out /tmp/sl-next2.json
-cargo run -p sl-cli -- agent replay --scripts-dir crates/sl-test-example/examples/16-input-name --step input:Rin
-cargo run -p sl-cli -- agent replay --scripts-dir crates/sl-test-example/examples/16-input-name --step input:Rin --rand "12,3,1,4"
-cargo run -p sl-cli -- agent replay --scripts-dir crates/sl-test-example/examples/16-input-name --step input:Rin --step choose:0
-cargo run -p sl-cli -- agent compile --scripts-dir crates/sl-test-example/examples/01-text-code --dry-run
-cargo run -p sl-cli -- agent compile --scripts-dir crates/sl-test-example/examples/01-text-code -o /tmp/artifact.json
-cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/06-snapshot-flow
 ```
 
-更多参数、输出协议、回放语法和完整流程说明，请查看 [docs/sl-cli-usage.md](docs/sl-cli-usage.md)。
+For command details, machine output schema, and replay examples, use:
+[docs/sl-cli-usage.md](docs/sl-cli-usage.md).
 
 ## Examples
 Rhai-authored smoke scenarios live in `crates/sl-test-example/examples`.
 Each example directory also carries a `testcase.json` consumed by `sl-test-example`.
 
-## User Pitfalls And Guardrails
-- ScriptLang expr syntax uses `LT`, `LTE`, and `AND` instead of `<`, `<=`, and `&&`.
-- Type visibility is per import-closure: each module must import the other `*.xml` sources it depends on, directly or through directory imports.
-- In XML attributes, ScriptLang expr strings use single quotes like `'Rin'`; in `<code>`, `<function>`, `<var>...</var>`, and `<temp>...</temp>` bodies, use double quotes like `"Rin"`.
-- `Data type incorrect: f64 (expecting i64)` in array indexing is treated as a runtime type-stability bug; prioritize runtime fix/upgrade over user-side workarounds.
-- Validation should be `compile --dry-run` + `replay --rand "<fixed-seq>"` together; compile-only is not enough for runtime-path safety.
+## Guardrails
+- Keep runtime/compiler behavior docs in their dedicated files above.
+- Keep `README.md` as an index; avoid duplicating syntax/API/CLI details here.
+- Keep reusable engineering constraints in `KNOWLEDGE.md`, not feature changelogs.

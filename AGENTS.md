@@ -11,8 +11,19 @@
 - `Makefile`: 统一质量门禁入口（`make gate`）。
 
 ## 主要文档
-- `README.md`: 当前主文档，包含项目简介、crate 说明、常用命令与 CLI 示例。
-- `KNOWLEDGE.md`: 帮助后续开发的长期知识记忆。
+- [README.md](README.md): 当前主文档，包含项目简介、crate 说明、常用命令与 CLI 示例。
+- [KNOWLEDGE.md](KNOWLEDGE.md): 帮助后续开发的长期知识记忆。
+
+### 文档正交原则（必须保持）
+- `README.md` 只做导航与分工说明，不承载语法/API/CLI 细节规则。
+- 语法细节只放在 `docs/scriptlang-syntax.md`。
+- Rust API / artifact / snapshot 契约只放在 `docs/sl-engine-api.md`。
+- CLI 参数与输出协议只放在 `docs/sl-cli-usage.md`。
+- 同一规则只能有一个“主文档”；其他文档只允许链接，不做重复定义。
+- 写文档时优先使用白名单表述（明确“支持什么”），避免面向历史格式的黑名单叙述。
+- 文档链接结构必须是有向无环图（DAG），默认主干为：
+  - `AGENTS.md -> README.md -> docs/*`
+  - 子文档禁止回链到上游文档（不回指 `README.md`/`AGENTS.md`）。
 
 ### Workspace Crates
 - `crates/sl-core`: 通用类型、值模型、错误、快照数据结构。
