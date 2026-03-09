@@ -35,6 +35,58 @@ fn map_rhai_error(
     ScriptLangError::new(default_code, default_message)
 }
 
+fn rewrite_function_calls_if_needed(
+    source: &str,
+    function_symbol_map: &BTreeMap<String, String>,
+) -> String {
+    if function_symbol_map.is_empty() || !source.contains('(') {
+        return source.to_string();
+    }
+    let mut filtered = BTreeMap::new();
+    for token in collect_called_tokens(source) {
+        if let Some(symbol) = function_symbol_map.get(&token) {
+            filtered.insert(token, symbol.clone());
+        }
+    }
+    if filtered.is_empty() {
+        return source.to_string();
+    }
+    rewrite_function_calls(source, &filtered)
+}
+
+fn collect_called_tokens(source: &str) -> BTreeSet<String> {
+    fn is_ident_start(ch: char) -> bool {
+        ch.is_ascii_alphabetic() || ch == '_'
+    }
+    fn is_ident_char(ch: char) -> bool {
+        ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' || ch == '-'
+    }
+
+    let chars = source.chars().collect::<Vec<_>>();
+    let mut index = 0usize;
+    let mut out = BTreeSet::new();
+    while index < chars.len() {
+        if !is_ident_start(chars[index]) {
+            index += 1;
+            continue;
+        }
+        let start = index;
+        index += 1;
+        while index < chars.len() && is_ident_char(chars[index]) {
+            index += 1;
+        }
+        let token = chars[start..index].iter().collect::<String>();
+        let mut lookahead = index;
+        while lookahead < chars.len() && chars[lookahead].is_whitespace() {
+            lookahead += 1;
+        }
+        if lookahead < chars.len() && chars[lookahead] == '(' {
+            out.insert(token);
+        }
+    }
+    out
+}
+
 impl ScriptLangEngine {
     pub(super) fn create_script_root_scope(
         &self,
@@ -557,7 +609,8 @@ impl ScriptLangEngine {
             let preprocessed = preprocess_scriptlang_rhai_input(script, context, mode)?;
             let mut call_rewrite_map = function_symbol_map.clone();
             call_rewrite_map.insert("invoke".to_string(), "invoke".to_string());
-            let rewritten_script = rewrite_function_calls(&preprocessed, &call_rewrite_map);
+            let rewritten_script =
+                rewrite_function_calls_if_needed(&preprocessed, &call_rewrite_map);
             let rewritten_script =
                 rewrite_module_global_qualified_access(&rewritten_script, &qualified_rewrite_map);
             if is_expression {
@@ -816,7 +869,6 @@ impl ScriptLangEngine {
                         ),
                     )
                 })?;
-            let body_symbol_map = self.invoke_body_symbol_map(qualified_name);
             let params = decl
                 .params
                 .iter()
@@ -849,9 +901,13 @@ impl ScriptLangEngine {
                 "function body",
                 RhaiInputMode::CodeBlock,
             )?;
-            let mut call_rewrite_map = body_symbol_map;
-            call_rewrite_map.insert("invoke".to_string(), "invoke".to_string());
-            let rewritten = rewrite_function_calls(&preprocessed, &call_rewrite_map);
+            let rewritten = if preprocessed.contains('(') {
+                let mut call_rewrite_map = self.invoke_body_symbol_map(qualified_name);
+                call_rewrite_map.insert("invoke".to_string(), "invoke".to_string());
+                rewrite_function_calls_if_needed(&preprocessed, &call_rewrite_map)
+            } else {
+                preprocessed
+            };
             let mut function_rewrite_map = self.build_module_global_rewrite_map_all();
             if let Some((function_namespace, _)) = qualified_name.split_once('.') {
                 for (alias, local_qualified) in
