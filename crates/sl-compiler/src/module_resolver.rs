@@ -1193,6 +1193,13 @@ mod module_resolver_tests {
     #[test]
     fn resolve_visible_module_symbols_builds_function_signatures() {
         assert_eq!(script_type_kind(&ScriptType::Script), "script");
+        assert_eq!(
+            script_type_kind(&ScriptType::Enum {
+                type_name: "Status".to_string(),
+                members: vec![],
+            }),
+            "enum"
+        );
         let span = SourceSpan::synthetic();
         let module = ModuleDeclarations {
             type_decls: vec![ParsedTypeDecl {
@@ -1239,6 +1246,114 @@ mod module_resolver_tests {
         assert_eq!(function.params.len(), 1);
         assert!(module_vars.is_empty());
         assert_eq!(script_type_kind(&function.return_binding.r#type), "object");
+    }
+
+    #[test]
+    fn resolve_visible_module_symbols_validates_enum_literals_in_function_code() {
+        // Test line 529: rewrite_and_validate_enum_literals_in_expression in function code
+        let span = SourceSpan::synthetic();
+        let module = ModuleDeclarations {
+            type_decls: vec![ParsedTypeDecl {
+                name: "Status".to_string(),
+                qualified_name: "main.Status".to_string(),
+                access: AccessLevel::Public,
+                fields: Vec::new(),
+                enum_members: vec!["Active".to_string(), "Inactive".to_string()],
+                location: span.clone(),
+            }],
+            function_decls: vec![ParsedFunctionDecl {
+                name: "test".to_string(),
+                qualified_name: "main.test".to_string(),
+                access: AccessLevel::Public,
+                params: vec![],
+                return_binding: ParsedFunctionParamDecl {
+                    name: "ret".to_string(),
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    location: span.clone(),
+                },
+                code: "ret = Status.Unknown;".to_string(),
+                location: span.clone(),
+            }],
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: Vec::new(),
+        };
+        let reachable = BTreeSet::from(["main.xml".to_string()]);
+        let module_by_path = BTreeMap::from([("main.xml".to_string(), module)]);
+
+        // This should return error because Status.Unknown is not a valid enum member
+        let error = resolve_visible_module_symbols(&reachable, &module_by_path, Some("main"))
+            .expect_err("function with invalid enum literal should fail");
+        assert_eq!(error.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
+    }
+
+    #[test]
+    fn resolve_visible_module_symbols_validates_enum_in_module_vars() {
+        // Test lines 902, 999: normalize_module_initializer in resolve_visible_module_symbols
+        // for module variables and constants with invalid enum literal initializers
+        let span = SourceSpan::synthetic();
+        let module = ModuleDeclarations {
+            type_decls: vec![ParsedTypeDecl {
+                name: "Status".to_string(),
+                qualified_name: "main.Status".to_string(),
+                access: AccessLevel::Public,
+                fields: Vec::new(),
+                enum_members: vec!["Active".to_string(), "Inactive".to_string()],
+                location: span.clone(),
+            }],
+            function_decls: Vec::new(),
+            module_global_var_decls: vec![ParsedModuleVarDecl {
+                name: "status".to_string(),
+                qualified_name: "main.status".to_string(),
+                namespace: "main".to_string(),
+                access: AccessLevel::Public,
+                type_expr: ParsedTypeExpr::Custom("Status".to_string()),
+                initial_value_expr: Some("Status.Unknown".to_string()),
+                location: span.clone(),
+            }],
+            module_global_const_decls: Vec::new(),
+        };
+        let reachable = BTreeSet::from(["main.xml".to_string()]);
+        let module_by_path = BTreeMap::from([("main.xml".to_string(), module)]);
+
+        // This should return error because Status.Unknown is not a valid enum member
+        let error = resolve_visible_module_symbols(&reachable, &module_by_path, Some("main"))
+            .expect_err("module var with invalid enum literal should fail");
+        assert_eq!(error.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
+    }
+
+    #[test]
+    fn resolve_visible_module_symbols_validates_enum_in_module_consts() {
+        // Test lines 902, 999: normalize_module_initializer in resolve_visible_module_symbols
+        // for module constants with invalid enum literal initializers
+        let span = SourceSpan::synthetic();
+        let module = ModuleDeclarations {
+            type_decls: vec![ParsedTypeDecl {
+                name: "Status".to_string(),
+                qualified_name: "main.Status".to_string(),
+                access: AccessLevel::Public,
+                fields: Vec::new(),
+                enum_members: vec!["Active".to_string(), "Inactive".to_string()],
+                location: span.clone(),
+            }],
+            function_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: vec![ParsedModuleConstDecl {
+                name: "status".to_string(),
+                qualified_name: "main.status".to_string(),
+                namespace: "main".to_string(),
+                access: AccessLevel::Public,
+                type_expr: ParsedTypeExpr::Custom("Status".to_string()),
+                initial_value_expr: Some("Status.Unknown".to_string()),
+                location: span.clone(),
+            }],
+        };
+        let reachable = BTreeSet::from(["main.xml".to_string()]);
+        let module_by_path = BTreeMap::from([("main.xml".to_string(), module)]);
+
+        // This should return error because Status.Unknown is not a valid enum member
+        let error = resolve_visible_module_symbols(&reachable, &module_by_path, Some("main"))
+            .expect_err("module const with invalid enum literal should fail");
+        assert_eq!(error.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
     }
 
     #[test]
@@ -1965,6 +2080,25 @@ mod module_resolver_tests {
     }
 
     #[test]
+    fn parse_module_files_wraps_enum_parse_errors_with_file_context() {
+        // Test line 151: enum parse error is wrapped with file context
+        let duplicate_enum_member = BTreeMap::from([(
+            "bad-enum.xml".to_string(),
+            r#"<module name="bad" default_access="public">
+<enum name="Status">
+  <member name="Active"/>
+  <member name="Active"/>
+</enum>
+</module>"#
+                .to_string(),
+        )]);
+        let sources = parse_sources(&duplicate_enum_member).expect("parse sources");
+        let error = parse_module_files(&sources).expect_err("duplicate enum member should fail");
+        assert_eq!(error.code, "ENUM_MEMBER_DUPLICATE");
+        assert!(error.message.contains("In file \"bad-enum.xml\":"));
+    }
+
+    #[test]
     fn parse_module_var_declaration_covers_success_and_error_paths() {
         let node = xml_element(
             "var",
@@ -2380,6 +2514,22 @@ mod module_resolver_tests {
         let module_scripts = parse_module_scripts(&sources).expect("module scripts should parse");
         assert_eq!(module_scripts["battle.xml"].len(), 1);
         assert!(parse_module_files(&sources).is_ok());
+
+        // Test parsing module with enum declaration (covers line 149-151)
+        let enum_sources = parse_sources(&compiler_test_support::map(&[(
+            "status.xml",
+            r#"<module name="status" default_access="public">
+<enum name="Status"><member name="Active"/><member name="Inactive"/></enum>
+<script name="main"><text>ok</text></script>
+</module>"#,
+        )]))
+        .expect("sources with enum should parse");
+        let module_by_path =
+            parse_module_files(&enum_sources).expect("module with enum should parse");
+        let status_module = module_by_path
+            .get("status.xml")
+            .expect("should have status.xml");
+        assert!(!status_module.type_decls.is_empty());
 
         let bad_root = SourceFile {
             kind: SourceKind::ModuleXml,
@@ -3362,5 +3512,163 @@ mod module_resolver_tests {
         let error = collect_module_consts_for_bundle(&module_by_path, &BTreeMap::new())
             .expect_err("invalid type should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
+
+    #[test]
+    fn normalize_module_initializer_rejects_enum_without_init() {
+        // Test line 199: enum type var without initializer returns ENUM_INIT_REQUIRED error
+        let span = SourceSpan::synthetic();
+        let enum_type = ScriptType::Enum {
+            type_name: "Status".to_string(),
+            members: vec!["Active".to_string(), "Inactive".to_string()],
+        };
+
+        // None expr with enum type should return error
+        let result = normalize_module_initializer(&None, &enum_type, &BTreeMap::new(), &span);
+        let error = result.expect_err("enum without init should fail");
+        assert_eq!(error.code, "ENUM_INIT_REQUIRED");
+    }
+
+    #[test]
+    fn normalize_module_initializer_handles_enum_with_init() {
+        // Test line 208-210: enum type var with initializer
+        let span = SourceSpan::synthetic();
+        let enum_type = ScriptType::Enum {
+            type_name: "Status".to_string(),
+            members: vec!["Active".to_string(), "Inactive".to_string()],
+        };
+        let visible_types = BTreeMap::from([("Status".to_string(), enum_type.clone())]);
+
+        // Some expr with enum type should succeed
+        let result = normalize_module_initializer(
+            &Some("Status.Active".to_string()),
+            &enum_type,
+            &visible_types,
+            &span,
+        );
+        let value = result
+            .expect("enum with init should succeed")
+            .expect("should have value");
+        assert!(value.contains("Active"));
+    }
+
+    #[test]
+    fn normalize_module_initializer_rejects_invalid_enum_member() {
+        // Test line 209: parse_enum_literal_initializer returns error for unknown member
+        let span = SourceSpan::synthetic();
+        let enum_type = ScriptType::Enum {
+            type_name: "Status".to_string(),
+            members: vec!["Active".to_string(), "Inactive".to_string()],
+        };
+        let visible_types = BTreeMap::from([("Status".to_string(), enum_type.clone())]);
+
+        // Invalid member name should return error
+        let result = normalize_module_initializer(
+            &Some("Status.Unknown".to_string()),
+            &enum_type,
+            &visible_types,
+            &span,
+        );
+        let error = result.expect_err("invalid enum member should fail");
+        assert_eq!(error.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
+    }
+
+    #[test]
+    fn normalize_module_initializer_rejects_string_literal_for_enum() {
+        // Test line 209: parse_enum_literal_initializer returns error for string literal
+        let span = SourceSpan::synthetic();
+        let enum_type = ScriptType::Enum {
+            type_name: "Status".to_string(),
+            members: vec!["Active".to_string(), "Inactive".to_string()],
+        };
+        let visible_types = BTreeMap::from([("Status".to_string(), enum_type.clone())]);
+
+        // String literal instead of Type.Member should return error
+        let result = normalize_module_initializer(
+            &Some("\"Active\"".to_string()),
+            &enum_type,
+            &visible_types,
+            &span,
+        );
+        let error = result.expect_err("string literal for enum should fail");
+        assert_eq!(error.code, "ENUM_LITERAL_REQUIRED");
+    }
+
+    #[test]
+    fn normalize_module_initializer_rejects_invalid_enum_in_non_enum_type() {
+        // Test line 217: rewrite_and_validate_enum_literals_in_expression returns error
+        // when non-enum type variable has invalid enum literal in expression
+        let span = SourceSpan::synthetic();
+        let int_type = ScriptType::Primitive {
+            name: "int".to_string(),
+        };
+        let enum_type = ScriptType::Enum {
+            type_name: "Status".to_string(),
+            members: vec!["Active".to_string(), "Inactive".to_string()],
+        };
+        let visible_types = BTreeMap::from([("Status".to_string(), enum_type)]);
+
+        // Non-enum type with invalid enum literal should return error
+        let result = normalize_module_initializer(
+            &Some("${Status.Unknown}".to_string()),
+            &int_type,
+            &visible_types,
+            &span,
+        );
+        let error = result.expect_err("invalid enum literal in non-enum type should fail");
+        assert_eq!(error.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
+    }
+
+    #[test]
+    fn resolve_visible_module_symbols_rejects_module_var_with_invalid_enum_initializer() {
+        // Test lines 604, 668, 902, 1004: normalize_module_initializer error propagation
+        // for module variables and constants with invalid enum literal initializers
+        use crate::compiler_test_support::*;
+
+        // Test module var with invalid enum literal (triggers lines 604/902)
+        let files = map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public">
+<enum name="Status"><member name="Active"/><member name="Inactive"/></enum>
+<var name="status" type="Status">Status.Unknown</var>
+<script name="main"><text>test</text></script>
+</module>"#,
+        )]);
+        let error = crate::compile_project_bundle_from_xml_map(&files)
+            .expect_err("module var with invalid enum member should fail");
+        assert_eq!(error.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
+
+        // Test module const with invalid enum literal (triggers lines 668/1004)
+        let files_const = map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public">
+<enum name="Status"><member name="Active"/><member name="Inactive"/></enum>
+<const name="status" type="Status">Status.Unknown</const>
+<script name="main"><text>test</text></script>
+</module>"#,
+        )]);
+        let error_const = crate::compile_project_bundle_from_xml_map(&files_const)
+            .expect_err("module const with invalid enum member should fail");
+        assert_eq!(error_const.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
+    }
+
+    #[test]
+    fn resolve_visible_module_symbols_rejects_function_with_invalid_enum_in_code() {
+        // Test lines 533, 805: rewrite_and_validate_enum_literals_in_expression error propagation
+        // for function code containing invalid enum literal
+        use crate::compiler_test_support::*;
+
+        // Test function with invalid enum literal in code body
+        let files = map(&[(
+            "main.xml",
+            r#"<module name="main" default_access="public">
+<enum name="Status"><member name="Active"/><member name="Inactive"/></enum>
+<function name="test" args="" return="int:ret">ret = Status.Unknown;</function>
+<script name="main"><text>test</text></script>
+</module>"#,
+        )]);
+        let error = crate::compile_project_bundle_from_xml_map(&files)
+            .expect_err("function with invalid enum literal should fail");
+        assert_eq!(error.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
     }
 }

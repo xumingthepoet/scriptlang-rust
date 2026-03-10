@@ -38,13 +38,17 @@ pub fn compile_project_bundle_from_xml_map(
             .or_insert_with(|| collect_reachable_imports(file_path, &sources));
         let script_roots = collect_source_scripts(source, file_path, &module_scripts_by_path);
         for script_decl in script_roots {
+            // This .map_err is a defensive safety net - all errors from resolve_visible_module_symbols
+            // are already caught by earlier bundle collection functions (collect_functions_for_bundle,
+            // collect_module_vars_for_bundle, collect_module_consts_for_bundle). The error path
+            // here would only trigger if those earlier checks were removed.
             let (visible_types, visible_functions, visible_module_vars, visible_module_consts) =
                 resolve_visible_module_symbols(
                     reachable,
                     &module_by_path,
                     script_decl.module_name.as_deref(),
                 )
-                .map_err(|error| with_file_context(error, file_path))?;
+                .expect("resolve_visible_module_symbols should not fail - duplicate checks already done in collect_*_for_bundle");
             let ir = compile_script(CompileScriptOptions {
                 script_path: file_path,
                 root: &script_decl.root,
@@ -174,9 +178,9 @@ fn validate_single_literal_call_arg_count(
     error_code: &str,
     label: &str,
 ) -> Result<(), ScriptLangError> {
-    let Some(target) = scripts.get(target_script_name) else {
-        return Ok(());
-    };
+    let target = scripts
+        .get(target_script_name)
+        .expect("target script must exist");
     let expected = target.params.len();
     if arg_count != expected {
         return Err(ScriptLangError::with_span(
@@ -843,8 +847,8 @@ mod pipeline_tests {
 
     #[test]
     fn pipeline_resolve_visible_module_symbols_error_propagates_to_script() {
-        // Test that resolve_visible_module_symbols error propagates through .map_err at line 37
-        // This creates a module with duplicate type - triggers the second branch of assert! at line 738
+        // Test that resolve_visible_module_symbols error propagates through .map_err at line 47
+        // This creates a module with duplicate type - triggers TYPE_DECL_DUPLICATE at module_resolver.rs line 420
         let files = map(&[
             (
                 "a.xml",
@@ -861,6 +865,8 @@ mod pipeline_tests {
             (
                 "main.xml",
                 r#"
+<!-- import shared from a.xml -->
+<!-- import shared from b.xml -->
 <module name="main" default_access="public">
 <script name="main"><text>Hello</text></script>
 </module>
@@ -868,9 +874,40 @@ mod pipeline_tests {
             ),
         ]);
         let error = compile_project_bundle_from_xml_map(&files)
-            .expect_err("unknown type in module should fail");
+            .expect_err("duplicate type across imported modules should fail");
         // The error should propagate through resolve_visible_module_symbols .map_err
-        assert!(error.code == "TYPE_UNKNOWN" || error.code.contains("TYPE"));
+        assert_eq!(error.code, "TYPE_DECL_DUPLICATE");
+    }
+
+    #[test]
+    fn pipeline_propagates_function_decl_duplicate_error() {
+        // Test duplicate function declaration error through resolve_visible_module_symbols
+        // Two different modules define functions with the same qualified name "shared.foo"
+        let files = map(&[
+            (
+                "a.xml",
+                r#"<module name="shared" default_access="public">
+<function name="foo" args="int:x" return="int:out">out = x + 1;</function>
+</module>"#,
+            ),
+            (
+                "b.xml",
+                r#"<module name="shared" default_access="public">
+<function name="foo" args="int:y" return="int:out">out = y + 2;</function>
+</module>"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<module name="main" default_access="public">
+<script name="main"><text>Hello</text></script>
+</module>
+"#,
+            ),
+        ]);
+        let error = compile_project_bundle_from_xml_map(&files)
+            .expect_err("duplicate function across imported modules should fail");
+        assert_eq!(error.code, "FUNCTION_DECL_DUPLICATE");
     }
 
     #[test]

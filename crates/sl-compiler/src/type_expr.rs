@@ -799,6 +799,36 @@ mod type_expr_tests {
         )
         .expect_err("invalid access should fail");
         assert_eq!(enum_invalid_access.code, "XML_ACCESS_INVALID");
+
+        // Test enum member missing name attribute (line 287 error branch)
+        let enum_member_missing_name = parse_enum_declaration_node_with_namespace(
+            &xml_element(
+                "enum",
+                &[("name", "Color")],
+                vec![XmlNode::Element(xml_element("member", &[], Vec::new()))],
+            ),
+            "module",
+            AccessLevel::Private,
+        )
+        .expect_err("member missing name should fail");
+        assert_eq!(enum_member_missing_name.code, "XML_MISSING_ATTR");
+
+        // Test enum member with empty name attribute (line 287 error branch)
+        let enum_member_empty_name = parse_enum_declaration_node_with_namespace(
+            &xml_element(
+                "enum",
+                &[("name", "Color")],
+                vec![XmlNode::Element(xml_element(
+                    "member",
+                    &[("name", "")],
+                    Vec::new(),
+                ))],
+            ),
+            "module",
+            AccessLevel::Private,
+        )
+        .expect_err("member with empty name should fail");
+        assert_eq!(enum_member_empty_name.code, "XML_EMPTY_ATTR");
     }
 
     #[test]

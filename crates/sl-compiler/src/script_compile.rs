@@ -808,12 +808,12 @@ pub(crate) fn compile_group_nodes(
                                             if let Some(expr) = when_expr.as_deref() {
                                                 let rewritten =
                                                     normalize_attribute_expression_literals(
-                                                    expr,
-                                                    &template_option.location,
-                                                    all_script_access,
-                                                    module_name,
-                                                    visible_types,
-                                                )?;
+                                                        expr,
+                                                        &template_option.location,
+                                                        all_script_access,
+                                                        module_name,
+                                                        visible_types,
+                                                    )?;
                                                 Some(rewritten)
                                             } else {
                                                 None
@@ -1289,6 +1289,13 @@ mod script_compile_tests {
     #[test]
     fn parse_var_declaration_rejects_value_attr_and_child_elements() {
         assert_eq!(script_type_kind(&ScriptType::Script), "script");
+        assert_eq!(
+            script_type_kind(&ScriptType::Enum {
+                type_name: "Status".to_string(),
+                members: vec![]
+            }),
+            "enum"
+        );
         let visible_types = BTreeMap::new();
         let with_value = xml_element(
             "var",
@@ -3080,6 +3087,111 @@ mod script_compile_tests {
     }
 
     #[test]
+    fn normalize_template_literals_error_paths_are_covered() {
+        // Test lines 135-136: normalize_template_literals error propagation
+        use sl_core::ScriptType;
+
+        // Test 1: <text> node with invalid enum member in template (line 496)
+        let compile_error = |xml: &str, expected_code: &str| {
+            let root = parse_xml_document(xml).expect("xml").root;
+            let known_scripts = BTreeMap::new();
+            let enum_type = ScriptType::Enum {
+                type_name: "Status".to_string(),
+                members: vec!["Active".to_string(), "Inactive".to_string()],
+            };
+            let mut visible_types = BTreeMap::new();
+            visible_types.insert("Status".to_string(), enum_type);
+
+            let error = compile_script(CompileScriptOptions {
+                script_path: "main.xml",
+                root: &root,
+                script_access: AccessLevel::Public,
+                qualified_script_name: Some("main.main"),
+                module_name: Some("main"),
+                visible_types: &visible_types,
+                visible_functions: &BTreeMap::new(),
+                visible_module_vars: &BTreeMap::new(),
+                visible_module_consts: &BTreeMap::new(),
+                all_script_access: &known_scripts,
+                invoke_all_functions: &BTreeMap::new(),
+                invoke_public_functions: &BTreeSet::new(),
+            })
+            .expect_err("compile should fail");
+            assert_eq!(error.code, expected_code);
+        };
+
+        // <text> with invalid enum member - triggers line 496 error path
+        compile_error(
+            r#"<script name="main"><text>Value: ${Status.Invalid}</text></script>"#,
+            "ENUM_LITERAL_MEMBER_UNKNOWN",
+        );
+
+        // <debug> with invalid enum member - triggers line 519 error path
+        compile_error(
+            r#"<script name="main"><debug>Status: ${Status.Invalid}</debug></script>"#,
+            "ENUM_LITERAL_MEMBER_UNKNOWN",
+        );
+
+        // <choice text="..."> with invalid enum member - triggers line 655 error path
+        compile_error(
+            r#"<script name="main"><choice text="${Status.Invalid}"><option text="a"/></choice></script>"#,
+            "ENUM_LITERAL_MEMBER_UNKNOWN",
+        );
+
+        // <option text="..."> with invalid enum member - triggers line 714 error path
+        compile_error(
+            r#"<script name="main"><choice text="Pick"><option text="${Status.Invalid}"/></choice></script>"#,
+            "ENUM_LITERAL_MEMBER_UNKNOWN",
+        );
+
+        // Test 2: <text> node with invalid script literal - triggers line 496 error path
+        let all_scripts = BTreeMap::new();
+        let compile_error_for_literal = |xml: &str, expected_code: &str| {
+            let root = parse_xml_document(xml).expect("xml").root;
+            let error = compile_script(CompileScriptOptions {
+                script_path: "main.xml",
+                root: &root,
+                script_access: AccessLevel::Public,
+                qualified_script_name: Some("main.main"),
+                module_name: Some("main"),
+                visible_types: &BTreeMap::new(),
+                visible_functions: &BTreeMap::new(),
+                visible_module_vars: &BTreeMap::new(),
+                visible_module_consts: &BTreeMap::new(),
+                all_script_access: &all_scripts,
+                invoke_all_functions: &BTreeMap::new(),
+                invoke_public_functions: &BTreeSet::new(),
+            })
+            .expect_err("compile should fail");
+            assert_eq!(error.code, expected_code);
+        };
+
+        // <text> with invalid script literal (short form without module) - triggers line 496
+        compile_error_for_literal(
+            r#"<script name="main"><text>@missing</text></script>"#,
+            "XML_SCRIPT_TARGET_NOT_FOUND",
+        );
+
+        // <debug> with invalid script literal - triggers line 519
+        compile_error_for_literal(
+            r#"<script name="main"><debug>@missing</debug></script>"#,
+            "XML_SCRIPT_TARGET_NOT_FOUND",
+        );
+
+        // <choice text="..."> with invalid script literal - triggers line 655
+        compile_error_for_literal(
+            r#"<script name="main"><choice text="@missing"><option text="a"/></choice></script>"#,
+            "XML_SCRIPT_TARGET_NOT_FOUND",
+        );
+
+        // <dynamic-options><option text="..."> with invalid enum member - triggers line 804
+        compile_error(
+            r#"<script name="main"><choice text="Pick"><dynamic-options array="arr" item="it"><option text="${Status.Invalid}"/></dynamic-options></choice></script>"#,
+            "ENUM_LITERAL_MEMBER_UNKNOWN",
+        );
+    }
+
+    #[test]
     fn script_target_validation_helpers_cover_literal_and_variable_paths() {
         let span = SourceSpan::synthetic();
         assert_eq!(
@@ -3408,6 +3520,84 @@ mod script_compile_tests {
         compile_error(
             r#"<script name="main"><return script="@missing.next"/></script>"#,
             "XML_SCRIPT_TARGET_NOT_FOUND",
+        );
+    }
+
+    #[test]
+    fn temp_var_enum_type_requires_init_or_valid_member() {
+        // Test lines 1085-1105: enum type temp variable validation
+        use sl_core::ScriptType;
+
+        let compile_error_with_enum = |xml: &str, expected_code: &str| {
+            let root = parse_xml_document(xml).expect("xml").root;
+            let known_scripts = BTreeMap::new();
+            let enum_type = ScriptType::Enum {
+                type_name: "Status".to_string(),
+                members: vec!["Active".to_string(), "Inactive".to_string()],
+            };
+            let mut visible_types = BTreeMap::new();
+            visible_types.insert("Status".to_string(), enum_type);
+
+            let error = compile_script(CompileScriptOptions {
+                script_path: "main.xml",
+                root: &root,
+                script_access: AccessLevel::Public,
+                qualified_script_name: Some("main.main"),
+                module_name: Some("main"),
+                visible_types: &visible_types,
+                visible_functions: &BTreeMap::new(),
+                visible_module_vars: &BTreeMap::new(),
+                visible_module_consts: &BTreeMap::new(),
+                all_script_access: &known_scripts,
+                invoke_all_functions: &BTreeMap::new(),
+                invoke_public_functions: &BTreeSet::new(),
+            })
+            .expect_err("compile should fail");
+            assert_eq!(error.code, expected_code);
+        };
+
+        let compile_ok_with_enum = |xml: &str| {
+            let root = parse_xml_document(xml).expect("xml").root;
+            let known_scripts = BTreeMap::new();
+            let enum_type = ScriptType::Enum {
+                type_name: "Status".to_string(),
+                members: vec!["Active".to_string(), "Inactive".to_string()],
+            };
+            let mut visible_types = BTreeMap::new();
+            visible_types.insert("Status".to_string(), enum_type);
+
+            compile_script(CompileScriptOptions {
+                script_path: "main.xml",
+                root: &root,
+                script_access: AccessLevel::Public,
+                qualified_script_name: Some("main.main"),
+                module_name: Some("main"),
+                visible_types: &visible_types,
+                visible_functions: &BTreeMap::new(),
+                visible_module_vars: &BTreeMap::new(),
+                visible_module_consts: &BTreeMap::new(),
+                all_script_access: &known_scripts,
+                invoke_all_functions: &BTreeMap::new(),
+                invoke_public_functions: &BTreeSet::new(),
+            })
+            .expect("compile should succeed");
+        };
+
+        // Test temp enum without initializer (line 1085)
+        compile_error_with_enum(
+            r#"<script name="main"><temp name="s" type="Status"/></script>"#,
+            "ENUM_INIT_REQUIRED",
+        );
+
+        // Test temp enum with invalid member (line 1098)
+        compile_error_with_enum(
+            r#"<script name="main"><temp name="s" type="Status">Status.Unknown</temp></script>"#,
+            "ENUM_LITERAL_MEMBER_UNKNOWN",
+        );
+
+        // Test temp enum with valid member - success path (lines 1097-1105)
+        compile_ok_with_enum(
+            r#"<script name="main"><temp name="s" type="Status">Status.Active</temp></script>"#,
         );
     }
 }
