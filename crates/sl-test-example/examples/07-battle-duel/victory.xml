@@ -1,8 +1,6 @@
 <module name="victory" default_access="public">
-<script name="victory">
-  <text>Ending: Victory</text>
-  <text>
-You chose enough pressure and won the duel.
-  </text>
-</script>
+  <script name="victory">
+    <text>Ending: Victory</text>
+    <text>You chose enough pressure and won the duel.</text>
+  </script>
 </module>

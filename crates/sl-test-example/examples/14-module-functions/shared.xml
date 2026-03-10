@@ -3,11 +3,11 @@
     <field name="value" type="int"/>
   </type>
 
-  <function name="add" args="int:a1,shared.CustomType:a2" return="int:b2">
-    b2 = a1 + a2.value;
+  <function name="add" args="int:base,shared.CustomType:item" return="int:out">
+    out = base + item.value;
   </function>
 
-  <function name="addWithGameBonus" args="int:a1,shared.CustomType:a2" return="int:b2">
-    b2 = a1 + a2.value + 10;
+  <function name="addWithGameBonus" args="int:base,shared.CustomType:item" return="int:out">
+    out = add(base, item) + 10;
   </function>
 </module>

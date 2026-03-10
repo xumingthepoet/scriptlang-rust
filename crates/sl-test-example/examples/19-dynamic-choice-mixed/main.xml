@@ -1,12 +1,21 @@
 <module name="main" default_access="public">
-<script name="main">
-  <temp name="arr" type="int[]">[2, 3]</temp>
-  <choice text="Pick">
-    <option text="Static"><text>S</text></option>
-    <dynamic-options array="arr" item="it" index="i">
-      <option text="D-${it}-${i}" when="it > 2"><text>D ${it}/${i}</text></option>
-    </dynamic-options>
-    <option text="Tail"><text>T</text></option>
-  </choice>
-</script>
+  <script name="main">
+    <temp name="candidates" type="int[]">[2, 3]</temp>
+
+    <choice text="Pick">
+      <option text="Static">
+        <text>S</text>
+      </option>
+
+      <dynamic-options array="candidates" item="candidate" index="slot">
+        <option text="D-${candidate}-${slot}" when="candidate > 2">
+          <text>D ${candidate}/${slot}</text>
+        </option>
+      </dynamic-options>
+
+      <option text="Tail">
+        <text>T</text>
+      </option>
+    </choice>
+  </script>
 </module>

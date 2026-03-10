@@ -1,9 +1,10 @@
 <!-- import shared from shared.xml -->
 <module name="main" default_access="public">
-<script name="main">
-  <temp name="base" type="int">2</temp>
-  <temp name="obj" type="shared.CustomType">#{value: 5}</temp>
-  <code>base = shared.addWithGameBonus(base, obj);</code>
-  <text>Result ${shared.addWithGameBonus(base, obj)}</text>
-</script>
+  <script name="main">
+    <temp name="base" type="int">2</temp>
+    <temp name="item" type="shared.CustomType">#{value: 5}</temp>
+
+    <code>base = shared.addWithGameBonus(base, item);</code>
+    <text>Result ${shared.addWithGameBonus(base, item)}</text>
+  </script>
 </module>

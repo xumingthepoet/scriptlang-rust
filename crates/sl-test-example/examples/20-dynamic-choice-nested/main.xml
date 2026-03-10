@@ -1,20 +1,21 @@
 <module name="main" default_access="public">
-<script name="main">
-  <temp name="arr1" type="int[]">[1]</temp>
-  <temp name="arr2" type="int[]">[10]</temp>
-  <choice text="Outer">
-    <dynamic-options array="arr1" item="it" index="i">
-      <option text="${it}-${i}">
-        <choice text="Inner">
-          <dynamic-options array="arr2" item="it" index="i">
-            <option text="${it}-${i}">
-              <text>inner ${it}-${i}</text>
-            </option>
-          </dynamic-options>
-        </choice>
-        <text>outer ${it}-${i}</text>
-      </option>
-    </dynamic-options>
-  </choice>
-</script>
+  <script name="main">
+    <temp name="outerCandidates" type="int[]">[1]</temp>
+    <temp name="innerCandidates" type="int[]">[10]</temp>
+
+    <choice text="Outer">
+      <dynamic-options array="outerCandidates" item="outerItem" index="outerIndex">
+        <option text="${outerItem}-${outerIndex}">
+          <choice text="Inner">
+            <dynamic-options array="innerCandidates" item="innerItem" index="innerIndex">
+              <option text="${innerItem}-${innerIndex}">
+                <text>inner ${innerItem}-${innerIndex}</text>
+              </option>
+            </dynamic-options>
+          </choice>
+          <text>outer ${outerItem}-${outerIndex}</text>
+        </option>
+      </dynamic-options>
+    </choice>
+  </script>
 </module>

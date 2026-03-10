@@ -1,8 +1,6 @@
 <module name="defeat" default_access="public">
-<script name="defeat">
-  <text>Ending: Defeat</text>
-  <text>
-Too many weak turns let the enemy out-trade you.
-  </text>
-</script>
+  <script name="defeat">
+    <text>Ending: Defeat</text>
+    <text>Too many weak turns let the enemy out-trade you.</text>
+  </script>
 </module>

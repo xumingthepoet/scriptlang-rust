@@ -3,25 +3,22 @@
 <!-- import victory from victory.xml -->
 <!-- import defeat from defeat.xml -->
 <module name="main" default_access="public">
-<script name="main">
-  <temp name="player" type="actors.Combatant">#{name: "Hero", hp: 12}</temp>
-  <temp name="enemy" type="actors.Combatant">#{name: "Bandit", hp: 12}</temp>
+  <script name="main">
+    <temp name="player" type="actors.Combatant">#{name: "Hero", hp: 12}</temp>
+    <temp name="enemy" type="actors.Combatant">#{name: "Bandit", hp: 12}</temp>
 
-  <text>Battle start: ${player.name}(${player.hp}) vs ${enemy.name}(${enemy.hp})</text>
-  <text>Tip: if you keep using weak attacks, you will lose.</text>
+    <text>Battle start: ${player.name}(${player.hp}) vs ${enemy.name}(${enemy.hp})</text>
+    <text>Tip: if you keep using weak attacks, you will lose.</text>
 
-  <call
-    script="@battle-loop.battle-loop"
-    args="ref:player,ref:enemy"
-  />
+    <call script="@battle-loop.battle-loop" args="ref:player,ref:enemy"/>
 
-  <if when="player.hp > 0  AND  enemy.hp  LTE  0">
-    <text>Result: ${player.name} wins. hp=${player.hp}</text>
-    <return script="@victory.victory"/>
-    <else>
-      <text>Result: ${enemy.name} wins. hp=${enemy.hp}</text>
-      <return script="@defeat.defeat"/>
-    </else>
-  </if>
-</script>
+    <if when="player.hp > 0 AND enemy.hp LTE 0">
+      <text>Result: ${player.name} wins. hp=${player.hp}</text>
+      <return script="@victory.victory"/>
+      <else>
+        <text>Result: ${enemy.name} wins. hp=${enemy.hp}</text>
+        <return script="@defeat.defeat"/>
+      </else>
+    </if>
+  </script>
 </module>
