@@ -1,0 +1,25 @@
+[package]
+name = "sl-lint"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "sl-lint"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+regex.workspace = true
+rhai.workspace = true
+walkdir.workspace = true
+sl-core = { path = "../sl-core" }
+sl-parser = { path = "../sl-parser" }
+sl-compiler = { path = "../sl-compiler" }
+
+[dev-dependencies]
+sl-test-example = { path = "../sl-test-example" }

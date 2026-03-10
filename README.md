@@ -5,6 +5,7 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 ## Documentation
 - [SL Engine API usage](docs/sl-engine-api.md): host-side Rust API and runtime integration.
 - [SL CLI usage](docs/sl-cli-usage.md): `agent`/`tui` commands, machine output, replay workflow.
+- [SL Lint usage](docs/sl-lint-usage.md): standalone lint checks and output contract.
 - [ScriptLang syntax rules](docs/scriptlang-syntax.md): XML grammar and language semantics.
 - [Example testing with sl-test-example runner](docs/testing-examples.md): example-case contract and runner usage.
 - [Rust testability playbook for high coverage](docs/rust-testability-playbook.md): testing patterns and coverage tactics.
@@ -16,12 +17,14 @@ Rust workspace implementation of ScriptLang (Phase 1), with Rhai as the embedded
 - `crates/sl-runtime`: execution engine (`next/choose/submit_input/snapshot/resume`).
 - `crates/sl-api`: high-level create/compile/resume API.
 - `crates/sl-cli`: host-side CLI (`agent` and `tui` modes).
+- `crates/sl-lint`: standalone ScriptLang lint CLI for source quality checks.
 - `crates/sl-test-example`: example integration tests + in-crate testcase runner/assertion.
 
 ## Public Surface
 - Stable/recommended user-facing entry points:
   - `sl-api` (Rust host integration)
   - `sl-cli` (command-line host tooling)
+  - `sl-lint` (standalone lint tooling)
 - Other crates (`sl-core/sl-parser/sl-compiler/sl-runtime/sl-test-example`) are internal building blocks and not recommended as direct integration entry points.
 
 ## Internal Module Layout
@@ -61,6 +64,7 @@ All code must be written with testability in mind:
 - `cargo test -p sl-cli --bin sl-cli`: run `sl-cli` binary target unit tests (`src/main.rs`).
 - `cargo test -p sl-test-example --all-targets --all-features`: run example cases from `crates/sl-test-example/examples/*/testcase.json`
 - `make coverage`: runs `scripts/coverage.sh` (uses `cargo llvm-cov --workspace --exclude sl-cli --exclude sl-test-example  --all-features --all-targets --show-missing-lines` inside) and prints:
+- `make coverage`: runs `scripts/coverage.sh` (uses `cargo llvm-cov --workspace --exclude sl-cli --exclude sl-lint --exclude sl-test-example  --all-features --all-targets --show-missing-lines` inside) and prints:
   - total line coverage percent
   - uncovered line count + merged ranges per file (for example `1-2,7-9`)
 - `make gate`: runs `check + fmt + lint + test + coverage`.

@@ -777,6 +777,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-lint"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "regex",
+ "rhai",
+ "sl-compiler",
+ "sl-core",
+ "sl-parser",
+ "sl-test-example",
+ "walkdir",
+]
+
+[[package]]
 name = "sl-parser"
 version = "0.1.0"
 dependencies = [

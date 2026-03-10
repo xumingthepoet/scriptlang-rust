@@ -24,6 +24,7 @@ fi
 if ! cargo llvm-cov \
   --workspace \
   --exclude sl-cli \
+  --exclude sl-lint \
   --exclude sl-test-example \
   --all-features \
   --all-targets \
