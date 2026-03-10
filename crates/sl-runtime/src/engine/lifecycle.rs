@@ -144,6 +144,8 @@ pub struct ScriptLangEngine {
 
 impl ScriptLangEngine {
     pub fn new(options: ScriptLangEngineOptions) -> Result<Self, ScriptLangError> {
+        const RESERVED_HOST_BUILTINS: [&str; 4] =
+            ["random", "invoke", "enum_to_string", "all_enum_members"];
         let host_functions: Arc<dyn HostFunctionRegistry> = options
             .host_functions
             .unwrap_or_else(|| Arc::new(EmptyHostFunctionRegistry::default()));
@@ -151,11 +153,11 @@ impl ScriptLangEngine {
         if host_functions
             .names()
             .iter()
-            .any(|name| name == "random" || name == "invoke")
+            .any(|name| RESERVED_HOST_BUILTINS.contains(&name.as_str()))
         {
             return Err(ScriptLangError::new(
                 "ENGINE_HOST_FUNCTION_RESERVED",
-                "hostFunctions cannot register reserved builtin names \"random\" or \"invoke\".",
+                "hostFunctions cannot register reserved builtin names.",
             ));
         }
 
@@ -303,6 +305,93 @@ impl ScriptLangEngine {
                     }
                 };
                 Ok(value as INT)
+            },
+        );
+        rhai_engine.register_fn(
+            "enum_to_string",
+            |value: ImmutableString| -> ImmutableString { value },
+        );
+        fn collect_enum_members_from_type(
+            ty: &ScriptType,
+            out: &mut BTreeMap<String, Vec<String>>,
+        ) {
+            match ty {
+                ScriptType::Enum { type_name, members } => {
+                    out.entry(type_name.clone())
+                        .or_insert_with(|| members.clone());
+                    if let Some((_, short)) = type_name.rsplit_once('.') {
+                        out.entry(short.to_string())
+                            .or_insert_with(|| members.clone());
+                    }
+                }
+                ScriptType::Array { element_type } => {
+                    collect_enum_members_from_type(element_type, out);
+                }
+                ScriptType::Map { value_type, .. } => {
+                    collect_enum_members_from_type(value_type, out);
+                }
+                ScriptType::Object { fields, .. } => {
+                    for field_type in fields.values() {
+                        collect_enum_members_from_type(field_type, out);
+                    }
+                }
+                ScriptType::Primitive { .. } | ScriptType::Script | ScriptType::Function => {}
+            }
+        }
+
+        let mut enum_members_by_name: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for script in options.scripts.values() {
+            for param in &script.params {
+                collect_enum_members_from_type(&param.r#type, &mut enum_members_by_name);
+            }
+            for group in script.groups.values() {
+                for node in &group.nodes {
+                    if let ScriptNode::Var { declaration, .. } = node {
+                        collect_enum_members_from_type(
+                            &declaration.r#type,
+                            &mut enum_members_by_name,
+                        );
+                    }
+                }
+            }
+            for function in script.visible_functions.values() {
+                for param in &function.params {
+                    collect_enum_members_from_type(&param.r#type, &mut enum_members_by_name);
+                }
+                collect_enum_members_from_type(
+                    &function.return_binding.r#type,
+                    &mut enum_members_by_name,
+                );
+            }
+            for decl in script.visible_module_vars.values() {
+                collect_enum_members_from_type(&decl.r#type, &mut enum_members_by_name);
+            }
+            for decl in script.visible_module_consts.values() {
+                collect_enum_members_from_type(&decl.r#type, &mut enum_members_by_name);
+            }
+        }
+        for decl in options.module_var_declarations.values() {
+            collect_enum_members_from_type(&decl.r#type, &mut enum_members_by_name);
+        }
+        for decl in options.module_const_declarations.values() {
+            collect_enum_members_from_type(&decl.r#type, &mut enum_members_by_name);
+        }
+        rhai_engine.register_fn(
+            "all_enum_members",
+            move |enum_name: ImmutableString| -> Result<Array, Box<EvalAltResult>> {
+                let Some(members) = enum_members_by_name.get(enum_name.as_str()) else {
+                    return Err(Box::new(EvalAltResult::ErrorRuntime(
+                        Dynamic::from(format!(
+                            "all_enum_members(enumName) unknown enum type \"{}\".",
+                            enum_name
+                        )),
+                        Position::NONE,
+                    )));
+                };
+                Ok(members
+                    .iter()
+                    .map(|member| Dynamic::from(member.clone()))
+                    .collect())
             },
         );
 
@@ -597,6 +686,64 @@ mod lifecycle_tests {
     }
 
     #[test]
+    pub(super) fn new_rejects_reserved_host_function_name_enum_to_string() {
+        let files = map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]);
+        let compiled = compile_project_from_sources(files);
+        let result = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_data: compiled.global_data,
+            module_var_declarations: compiled.module_var_declarations,
+            module_var_init_order: compiled.module_var_init_order,
+            module_const_declarations: compiled.module_const_declarations,
+            module_const_init_order: compiled.module_const_init_order,
+            host_functions: Some(Arc::new(TestRegistry {
+                names: vec!["enum_to_string".to_string()],
+            })),
+            random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        });
+        assert!(result.is_err());
+        let error = result
+            .err()
+            .expect("reserved enum_to_string name should fail");
+        assert_eq!(error.code, "ENGINE_HOST_FUNCTION_RESERVED");
+    }
+
+    #[test]
+    pub(super) fn new_rejects_reserved_host_function_name_all_enum_members() {
+        let files = map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]);
+        let compiled = compile_project_from_sources(files);
+        let result = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_data: compiled.global_data,
+            module_var_declarations: compiled.module_var_declarations,
+            module_var_init_order: compiled.module_var_init_order,
+            module_const_declarations: compiled.module_const_declarations,
+            module_const_init_order: compiled.module_const_init_order,
+            host_functions: Some(Arc::new(TestRegistry {
+                names: vec!["all_enum_members".to_string()],
+            })),
+            random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        });
+        assert!(result.is_err());
+        let error = result
+            .err()
+            .expect("reserved all_enum_members name should fail");
+        assert_eq!(error.code, "ENGINE_HOST_FUNCTION_RESERVED");
+    }
+
+    #[test]
     pub(super) fn new_rejects_host_function_conflicting_with_module_function() {
         let files = map(&[
             (
@@ -728,6 +875,34 @@ mod lifecycle_tests {
         };
         let value = registry.call("ok", &[]).expect("call should succeed");
         assert_eq!(value, SlValue::Bool(true));
+    }
+
+    #[test]
+    pub(super) fn enum_builtin_functions_are_available() {
+        let files = map(&[(
+            "main.xml",
+            r#"
+    <module name="main" default_access="public">
+      <enum name="State">
+        <member name="Idle"/>
+        <member name="Run"/>
+      </enum>
+      <script name="main">
+        <temp name="state" type="State">State.Run</temp>
+        <temp name="label" type="string">enum_to_string(state)</temp>
+        <temp name="members" type="string[]">all_enum_members("State")</temp>
+        <text>${label}:${members[0]},${members[1]}</text>
+      </script>
+    </module>
+    "#,
+        )]);
+        let mut engine = engine_from_sources(files);
+        engine.start("main.main", None).expect("start");
+        let output = engine.next_output().expect("next");
+        match output {
+            EngineOutput::Text { text, .. } => assert_eq!(text, "Run:Idle,Run"),
+            other => panic!("expected text output, got {}", output_kind(&other)),
+        }
     }
 
     #[test]
