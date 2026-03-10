@@ -4,8 +4,15 @@ This workspace uses `sl-test-example` to validate all examples under `crates/sl-
 
 ## Layout
 - Case file path: `crates/sl-test-example/examples/<example>/testcase.json`
+- Example catalog: `crates/sl-test-example/examples/README.md` (coverage matrix and curation rules)
 - Runner API: `sl_test_example::run_case(...)` and `sl_test_example::assert_case(...)`
 - Integration tests: `crates/sl-test-example/tests/all_examples_it.rs` (single test binary to reduce per-process startup overhead)
+
+## Curation Baseline
+- Keep numbering unique and ordered.
+- Keep one primary scenario per example, but avoid toy-only scripts when a realistic flow is possible.
+- Refactors must preserve or increase test points (no silent coverage drop).
+- Prefer deterministic outputs so `expectedEvents` stays stable.
 
 ## Case Schema (`sl-tool-case`)
 

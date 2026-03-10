@@ -1,0 +1,13 @@
+<!-- import middle from middle.xml -->
+<module name="main" default_access="public">
+  <function name="pickCallTarget" return="script:out">
+    out = @middle.middle;
+  </function>
+
+  <script name="main">
+    <temp name="callTarget" type="script">@main.main</temp>
+    <code>callTarget = pickCallTarget();</code>
+    <text>before</text>
+    <call script="callTarget"/>
+  </script>
+</module>

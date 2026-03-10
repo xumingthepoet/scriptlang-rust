@@ -1,26 +1,14 @@
+<!-- import ids from ids.xml -->
+<!-- import target from target.xml -->
 <module name="main" default_access="public">
-  <enum name="State">
-    <member name="Idle"/>
-    <member name="Run"/>
-  </enum>
-
-  <script name="main">
-    <temp name="state" type="State">State.Idle</temp>
-    <text>start=${state}</text>
-    <choice text="Go?">
-      <option text="Yes">
-        <call script="@step" args="state"/>
+  <script name="main" access="public">
+    <choice text="pick location">
+      <option text="toA">
+        <return script="@target.go" args="ids.LocationId.A"/>
+      </option>
+      <option text="toB">
+        <return script="@target.go" args="ids.LocationId.B"/>
       </option>
     </choice>
-    <text>done</text>
-  </script>
-
-  <script name="step" args="State:s">
-    <code>if s == "Idle" { s = "Run"; }</code>
-    <return script="@tail" args="s"/>
-  </script>
-
-  <script name="tail" args="State:state">
-    <text>tail=${state}</text>
   </script>
 </module>

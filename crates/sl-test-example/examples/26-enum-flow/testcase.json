@@ -5,10 +5,8 @@
     { "kind": "choose", "index": 0 }
   ],
   "expectedEvents": [
-    { "kind": "text", "text": "start=Idle" },
-    { "kind": "choices", "promptText": "Go?", "choices": ["Yes"] },
-    { "kind": "text", "text": "tail=Run" },
-    { "kind": "text", "text": "done" },
+    { "kind": "choices", "promptText": "pick location", "choices": ["toA", "toB"] },
+    { "kind": "text", "text": "tag=A" },
     { "kind": "end" }
   ]
 }

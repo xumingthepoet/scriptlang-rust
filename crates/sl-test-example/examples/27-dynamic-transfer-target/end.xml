@@ -1,0 +1,5 @@
+<module name="end" default_access="public">
+  <script name="end">
+    <text>after</text>
+  </script>
+</module>

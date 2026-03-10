@@ -1,6 +1,10 @@
 <module name="main" default_access="public">
   <const name="baseHp" type="int">40</const>
+  <const name="bonusHp" type="int">15</const>
+  <const name="maxHp" type="int">baseHp + bonusHp</const>
+
   <script name="main">
     <text>base=${baseHp}</text>
+    <text>max=${maxHp}</text>
   </script>
 </module>

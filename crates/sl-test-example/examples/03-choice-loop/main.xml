@@ -1,0 +1,19 @@
+<module name="main" default_access="public">
+  <script name="main">
+    <temp name="round" type="int">1</temp>
+    <while when="round LTE 2">
+      <text>round=${round}</text>
+      <choice text="Pick action">
+        <option text="Train">
+          <text>train</text>
+          <code>round = round + 1;</code>
+        </option>
+        <option text="Rest">
+          <text>rest</text>
+          <code>round = round + 1;</code>
+        </option>
+      </choice>
+    </while>
+    <text>done</text>
+  </script>
+</module>

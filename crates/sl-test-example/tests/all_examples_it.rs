@@ -15,8 +15,8 @@ fn example_02_if_while_matches_testcase() {
 }
 
 #[test]
-fn example_03_choice_once_matches_testcase() {
-    assert_example("03-choice-once");
+fn example_03_choice_loop_matches_testcase() {
+    assert_example("03-choice-loop");
 }
 
 #[test]
@@ -110,8 +110,8 @@ fn example_21_directory_import_matches_testcase() {
 }
 
 #[test]
-fn example_21_dynamic_transfer_target_matches_testcase() {
-    assert_example("21-dynamic-transfer-target");
+fn example_27_dynamic_transfer_target_matches_testcase() {
+    assert_example("27-dynamic-transfer-target");
 }
 
 #[test]

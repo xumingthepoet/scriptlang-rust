@@ -4,6 +4,7 @@
   "actions": [],
   "expectedEvents": [
     { "kind": "text", "text": "base=40" },
+    { "kind": "text", "text": "max=55" },
     { "kind": "end" }
   ]
 }
