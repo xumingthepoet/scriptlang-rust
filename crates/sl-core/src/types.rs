@@ -50,12 +50,22 @@ pub enum ScriptType {
         element_type: Box<ScriptType>,
     },
     Map {
-        key_type: String,
+        key_type: MapKeyType,
         value_type: Box<ScriptType>,
     },
     Object {
         type_name: String,
         fields: BTreeMap<String, ScriptType>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum MapKeyType {
+    String,
+    Enum {
+        type_name: String,
+        members: Vec<String>,
     },
 }
 

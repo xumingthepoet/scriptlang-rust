@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::ScriptType;
+use crate::types::{MapKeyType, ScriptType};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -92,10 +92,17 @@ pub fn is_type_compatible(value: &SlValue, ty: &ScriptType) -> bool {
                 .all(|entry| is_type_compatible(entry, element_type)),
             _ => false,
         },
-        ScriptType::Map { value_type, .. } => match value {
-            SlValue::Map(values) => values
-                .values()
-                .all(|entry| is_type_compatible(entry, value_type)),
+        ScriptType::Map {
+            key_type,
+            value_type,
+        } => match value {
+            SlValue::Map(values) => values.iter().all(|(key, entry)| {
+                let key_ok = match key_type {
+                    MapKeyType::String => true,
+                    MapKeyType::Enum { members, .. } => members.iter().any(|member| member == key),
+                };
+                key_ok && is_type_compatible(entry, value_type)
+            }),
             _ => false,
         },
         ScriptType::Object { fields, .. } => match value {
@@ -196,7 +203,7 @@ mod tests {
         );
 
         let map_type = ScriptType::Map {
-            key_type: "string".to_string(),
+            key_type: MapKeyType::String,
             value_type: Box::new(ScriptType::Primitive {
                 name: "int".to_string(),
             }),
@@ -288,7 +295,7 @@ mod tests {
         ));
 
         let map_type = ScriptType::Map {
-            key_type: "string".to_string(),
+            key_type: MapKeyType::String,
             value_type: Box::new(ScriptType::Primitive {
                 name: "boolean".to_string(),
             }),
@@ -305,6 +312,30 @@ mod tests {
             &map_type
         ));
         assert!(!is_type_compatible(&SlValue::Bool(true), &map_type));
+
+        let enum_map_type = ScriptType::Map {
+            key_type: MapKeyType::Enum {
+                type_name: "State".to_string(),
+                members: vec!["Idle".to_string(), "Run".to_string()],
+            },
+            value_type: Box::new(ScriptType::Primitive {
+                name: "int".to_string(),
+            }),
+        };
+        assert!(is_type_compatible(
+            &SlValue::Map(BTreeMap::from([
+                ("Idle".to_string(), SlValue::Number(1.0)),
+                ("Run".to_string(), SlValue::Number(2.0))
+            ])),
+            &enum_map_type
+        ));
+        assert!(!is_type_compatible(
+            &SlValue::Map(BTreeMap::from([(
+                "Other".to_string(),
+                SlValue::Number(1.0)
+            )])),
+            &enum_map_type
+        ));
 
         let object_type = ScriptType::Object {
             type_name: "Obj".to_string(),

@@ -129,7 +129,18 @@ pub(crate) fn resolve_type_expr_with_lookup_with_aliases(
                 element_type: Box::new(resolved_element),
             })
         }
-        ParsedTypeExpr::Map(value_type) => {
+        ParsedTypeExpr::Map {
+            key_type,
+            value_type,
+        } => {
+            let resolved_key = resolve_type_expr_with_lookup_with_aliases(
+                key_type,
+                type_decls_map,
+                type_aliases,
+                resolved,
+                visiting,
+                span,
+            )?;
             let resolved_value = resolve_type_expr_with_lookup_with_aliases(
                 value_type,
                 type_decls_map,
@@ -139,7 +150,7 @@ pub(crate) fn resolve_type_expr_with_lookup_with_aliases(
                 span,
             )?;
             Ok(ScriptType::Map {
-                key_type: "string".to_string(),
+                key_type: resolve_map_key_type(&resolved_key, span)?,
                 value_type: Box::new(resolved_value),
             })
         }
@@ -173,10 +184,16 @@ pub(crate) fn resolve_type_expr(
         ParsedTypeExpr::Array(element_type) => Ok(ScriptType::Array {
             element_type: Box::new(resolve_type_expr(element_type, resolved_types, span)?),
         }),
-        ParsedTypeExpr::Map(value_type) => Ok(ScriptType::Map {
-            key_type: "string".to_string(),
-            value_type: Box::new(resolve_type_expr(value_type, resolved_types, span)?),
-        }),
+        ParsedTypeExpr::Map {
+            key_type,
+            value_type,
+        } => {
+            let resolved_key = resolve_type_expr(key_type, resolved_types, span)?;
+            Ok(ScriptType::Map {
+                key_type: resolve_map_key_type(&resolved_key, span)?,
+                value_type: Box::new(resolve_type_expr(value_type, resolved_types, span)?),
+            })
+        }
         ParsedTypeExpr::Custom(name) => match resolved_types.get(name).cloned() {
             Some(value) => Ok(value),
             None => Err(ScriptLangError::with_span(
@@ -185,6 +202,21 @@ pub(crate) fn resolve_type_expr(
                 span.clone(),
             )),
         },
+    }
+}
+
+fn resolve_map_key_type(ty: &ScriptType, span: &SourceSpan) -> Result<MapKeyType, ScriptLangError> {
+    match ty {
+        ScriptType::Primitive { name } if name == "string" => Ok(MapKeyType::String),
+        ScriptType::Enum { type_name, members } => Ok(MapKeyType::Enum {
+            type_name: type_name.clone(),
+            members: members.clone(),
+        }),
+        _ => Err(ScriptLangError::with_span(
+            "TYPE_MAP_KEY_UNSUPPORTED",
+            "Map key type must be string or enum type.",
+            span.clone(),
+        )),
     }
 }
 
@@ -413,7 +445,10 @@ mod type_expr_tests {
         assert_eq!(script_type_kind(&array), "array");
 
         let map = resolve_type_expr_with_lookup(
-            &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Custom("Obj".to_string()))),
+            &ParsedTypeExpr::Map {
+                key_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+                value_type: Box::new(ParsedTypeExpr::Custom("Obj".to_string())),
+            },
             &type_map,
             &mut resolved,
             &mut visiting,
@@ -443,7 +478,10 @@ mod type_expr_tests {
         assert_eq!(array_err.code, "TYPE_UNKNOWN");
 
         let map_err = resolve_type_expr_with_lookup(
-            &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Custom("Missing".to_string()))),
+            &ParsedTypeExpr::Map {
+                key_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+                value_type: Box::new(ParsedTypeExpr::Custom("Missing".to_string())),
+            },
             &type_map,
             &mut resolved,
             &mut visiting,
@@ -488,12 +526,44 @@ mod type_expr_tests {
         .expect("resolve array custom type");
         assert_eq!(script_type_kind(&resolved_array), "array");
         let resolved_map = resolve_type_expr(
-            &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Custom("Obj".to_string()))),
+            &ParsedTypeExpr::Map {
+                key_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+                value_type: Box::new(ParsedTypeExpr::Custom("Obj".to_string())),
+            },
             &resolved_types,
             &span,
         )
         .expect("resolve map custom type");
         assert_eq!(script_type_kind(&resolved_map), "map");
+
+        resolved_types.insert(
+            "Status".to_string(),
+            ScriptType::Enum {
+                type_name: "Status".to_string(),
+                members: vec!["Active".to_string(), "Inactive".to_string()],
+            },
+        );
+        let enum_key_map = resolve_type_expr(
+            &ParsedTypeExpr::Map {
+                key_type: Box::new(ParsedTypeExpr::Custom("Status".to_string())),
+                value_type: Box::new(ParsedTypeExpr::Primitive("int".to_string())),
+            },
+            &resolved_types,
+            &span,
+        )
+        .expect("enum key map should resolve");
+        assert_eq!(script_type_kind(&enum_key_map), "map");
+
+        let invalid_key = resolve_type_expr(
+            &ParsedTypeExpr::Map {
+                key_type: Box::new(ParsedTypeExpr::Primitive("int".to_string())),
+                value_type: Box::new(ParsedTypeExpr::Primitive("int".to_string())),
+            },
+            &resolved_types,
+            &span,
+        )
+        .expect_err("map key int should be rejected");
+        assert_eq!(invalid_key.code, "TYPE_MAP_KEY_UNSUPPORTED");
 
         let type_node_reserved = xml_element(
             "type",
@@ -528,7 +598,10 @@ mod type_expr_tests {
         .expect_err("unknown custom type in array should fail");
         assert_eq!(unknown_in_array.code, "TYPE_UNKNOWN");
         let unknown_in_map = resolve_type_expr(
-            &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Custom("Missing".to_string()))),
+            &ParsedTypeExpr::Map {
+                key_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+                value_type: Box::new(ParsedTypeExpr::Custom("Missing".to_string())),
+            },
             &resolved_types,
             &span,
         )

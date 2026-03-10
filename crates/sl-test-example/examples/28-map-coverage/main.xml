@@ -1,4 +1,9 @@
 <module name="main" default_access="public">
+  <enum name="Status">
+    <member name="Active"/>
+    <member name="Inactive"/>
+  </enum>
+
   <var name="wallet" type="#{int}">#{gold: 5}</var>
 
   <function name="boostCopy" args="#{int}:source,int:delta" return="#{int}:out">
@@ -13,6 +18,8 @@
 
   <script name="main">
     <temp name="stats" type="#{int}">#{hp: 10, mp: 2}</temp>
+    <temp name="statusMap" type="#{Status=>int}">#{Active: 7, Inactive: 2}</temp>
+    <temp name="statusKey" type="Status">Status.Active</temp>
     <temp name="nested" type="#{#{int}}">#{bag: #{apple: 1}}</temp>
     <temp name="slots" type="#{int[]}">#{line: [1, 2]}</temp>
 
@@ -39,6 +46,9 @@
 
     <code>stats = boostCopy(stats, 4);</code>
     <text>hp3=${stats["hp"]}</text>
+    <text>status0=${statusMap[Status.Inactive]}</text>
+    <code>statusMap[statusKey] = statusMap[statusKey] + 5;</code>
+    <text>status1=${statusMap["Active"]}</text>
 
     <text>gold0=${wallet["gold"]}</text>
     <code>wallet["gold"] = wallet["gold"] + stats["mp"];</code>

@@ -197,12 +197,17 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 <var name="nums" type="int[]">[1, 2, 3]</var>
 ```
 
-## 5.3 映射类型 `#{T}`
+## 5.3 映射类型 `#{K=>V}` / `#{V}`
 
-key 固定是 string。
+- `#{K=>V}`：显式 key/value 类型。
+- `#{V}`：简写，等价于 `#{string=>V}`。
+- `K` 当前仅支持：`string` 或 `enum` 类型。
+- 运行时底层 key 仍是 string；若 `K` 是 enum，则 key 必须命中 member 名。
 
 ```xml
-<var name="dict" type="#{int}">#{a: 1, b: 2}</var>
+<var name="dict" type="#{string=>int}">#{a: 1, b: 2}</var>
+<var name="dict2" type="#{int}">#{a: 1, b: 2}</var>
+<var name="stateScore" type="#{State=>int}">#{Idle: 0, Run: 10}</var>
 ```
 
 ## 5.4 自定义类型（来自 module）

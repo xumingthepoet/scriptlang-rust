@@ -659,6 +659,29 @@ mod scope_tests {
     }
 
     #[test]
+    pub(super) fn enum_key_map_write_rejects_unknown_key_at_runtime() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.xml",
+            r##"<module name="main" default_access="public">
+  <enum name="Status">
+    <member name="Active"/>
+    <member name="Inactive"/>
+  </enum>
+  <script name="main">
+    <temp name="tbl" type="#{Status=>int}">#{Active: 1}</temp>
+    <code>tbl["Unknown"] = 2;</code>
+  </script>
+</module>"##,
+        )]));
+
+        engine.start("main.main", None).expect("start");
+        let error = engine
+            .next_output()
+            .expect_err("unknown enum key should fail");
+        assert_eq!(error.code, "ENGINE_TYPE_MISMATCH");
+    }
+
+    #[test]
     pub(super) fn scope_helper_none_and_missing_root_paths_are_covered() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",

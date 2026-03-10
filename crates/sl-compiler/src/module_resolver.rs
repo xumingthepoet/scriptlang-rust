@@ -213,6 +213,13 @@ fn normalize_module_initializer(
         let member = parse_enum_literal_initializer(expr, type_name, members, visible_types, span)?;
         return Ok(Some(format!("\"{}\"", member.replace('"', "\\\""))));
     }
+    if let ScriptType::Map {
+        key_type: MapKeyType::Enum { type_name, members },
+        ..
+    } = resolved_type
+    {
+        validate_enum_map_initializer_keys_if_static(expr, type_name, members, span)?;
+    }
 
     Ok(Some(rewrite_and_validate_enum_literals_in_expression(
         expr,
@@ -2521,7 +2528,7 @@ mod module_resolver_tests {
         );
         assert_eq!(
             script_type_kind(&ScriptType::Map {
-                key_type: "string".to_string(),
+                key_type: MapKeyType::String,
                 value_type: Box::new(ScriptType::Primitive {
                     name: "int".to_string()
                 })
@@ -3644,6 +3651,38 @@ mod module_resolver_tests {
         );
         let error = result.expect_err("invalid enum literal in non-enum type should fail");
         assert_eq!(error.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
+    }
+
+    #[test]
+    fn normalize_module_initializer_validates_enum_map_keys_for_static_literals() {
+        let span = SourceSpan::synthetic();
+        let enum_key_map = ScriptType::Map {
+            key_type: MapKeyType::Enum {
+                type_name: "Status".to_string(),
+                members: vec!["Active".to_string(), "Inactive".to_string()],
+            },
+            value_type: Box::new(ScriptType::Primitive {
+                name: "int".to_string(),
+            }),
+        };
+
+        let valid = normalize_module_initializer(
+            &Some("#{Active: 1}".to_string()),
+            &enum_key_map,
+            &BTreeMap::new(),
+            &span,
+        )
+        .expect("valid enum map initializer should pass");
+        assert_eq!(valid.as_deref(), Some("#{Active: 1}"));
+
+        let invalid = normalize_module_initializer(
+            &Some("#{Unknown: 1}".to_string()),
+            &enum_key_map,
+            &BTreeMap::new(),
+            &span,
+        )
+        .expect_err("unknown enum map key should fail");
+        assert_eq!(invalid.code, "ENUM_MAP_KEY_UNKNOWN");
     }
 
     #[test]

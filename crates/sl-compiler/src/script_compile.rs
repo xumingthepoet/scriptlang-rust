@@ -1107,6 +1107,17 @@ pub(crate) fn parse_var_declaration(
                 &node.location,
             )?;
             expr = format!("\"{}\"", member.replace('"', "\\\""));
+        } else if let ScriptType::Map {
+            key_type: MapKeyType::Enum { type_name, members },
+            ..
+        } = &ty
+        {
+            validate_enum_map_initializer_keys_if_static(
+                &expr,
+                type_name,
+                members,
+                &node.location,
+            )?;
         }
         Some(expr)
     };
@@ -2582,7 +2593,10 @@ mod script_compile_tests {
         .expect("array lookup should resolve");
         assert_eq!(script_type_kind(&array_ty), "array");
         let map_ty = resolve_type_expr_with_lookup(
-            &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Primitive("string".to_string()))),
+            &ParsedTypeExpr::Map {
+                key_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+                value_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+            },
             &BTreeMap::new(),
             &mut resolved_for_lookup,
             &mut visiting_for_lookup,
@@ -2599,7 +2613,10 @@ mod script_compile_tests {
         .expect("array should resolve");
         assert_eq!(script_type_kind(&array), "array");
         let map_resolved = resolve_type_expr(
-            &ParsedTypeExpr::Map(Box::new(ParsedTypeExpr::Primitive("int".to_string()))),
+            &ParsedTypeExpr::Map {
+                key_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+                value_type: Box::new(ParsedTypeExpr::Primitive("int".to_string())),
+            },
             &BTreeMap::new(),
             &span,
         )
@@ -3653,6 +3670,15 @@ mod script_compile_tests {
         // Test temp enum with valid member - success path (lines 1097-1105)
         compile_ok_with_enum(
             r#"<script name="main"><temp name="s" type="Status">Status.Active</temp></script>"#,
+        );
+
+        // enum-key map initializer uses same literal shape as string-key map, but keys are validated
+        compile_error_with_enum(
+            r##"<script name="main"><temp name="tbl" type="#{Status=>int}">#{Unknown: 1}</temp></script>"##,
+            "ENUM_MAP_KEY_UNKNOWN",
+        );
+        compile_ok_with_enum(
+            r##"<script name="main"><temp name="tbl" type="#{Status=>int}">#{Active: 1}</temp></script>"##,
         );
     }
 }

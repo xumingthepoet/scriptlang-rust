@@ -91,7 +91,10 @@ pub(crate) enum ParsedTypeExpr {
     Primitive(String),
     Script,
     Array(Box<ParsedTypeExpr>),
-    Map(Box<ParsedTypeExpr>),
+    Map {
+        key_type: Box<ParsedTypeExpr>,
+        value_type: Box<ParsedTypeExpr>,
+    },
     Custom(String),
 }
 

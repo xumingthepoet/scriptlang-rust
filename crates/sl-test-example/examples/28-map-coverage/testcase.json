@@ -12,6 +12,8 @@
     { "kind": "choices", "promptText": "Map gate", "choices": ["Proceed"] },
     { "kind": "text", "text": "choice-ok" },
     { "kind": "text", "text": "hp3=24" },
+    { "kind": "text", "text": "status0=2" },
+    { "kind": "text", "text": "status1=12" },
     { "kind": "text", "text": "gold0=5" },
     { "kind": "text", "text": "gold1=7" },
     { "kind": "text", "text": "gold2=8" },

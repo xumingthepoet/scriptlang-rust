@@ -29,8 +29,19 @@ pub(crate) fn parse_type_expr(
                 span.clone(),
             ));
         }
+        if let Some((raw_key_type, raw_value_type)) = split_map_type_key_value(value) {
+            let key_type = parse_type_expr(raw_key_type, span)?;
+            let value_type = parse_type_expr(raw_value_type, span)?;
+            return Ok(ParsedTypeExpr::Map {
+                key_type: Box::new(key_type),
+                value_type: Box::new(value_type),
+            });
+        }
         let value_type = parse_type_expr(value.trim(), span)?;
-        return Ok(ParsedTypeExpr::Map(Box::new(value_type)));
+        return Ok(ParsedTypeExpr::Map {
+            key_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+            value_type: Box::new(value_type),
+        });
     }
 
     if type_name_regex().is_match(source) {
@@ -42,6 +53,63 @@ pub(crate) fn parse_type_expr(
         format!("Unsupported type syntax: \"{}\".", raw),
         span.clone(),
     ))
+}
+
+fn split_map_type_key_value(raw: &str) -> Option<(&str, &str)> {
+    let chars = raw.char_indices().collect::<Vec<_>>();
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut quote: Option<char> = None;
+    let mut idx = 0usize;
+
+    while idx < chars.len() {
+        let (_, ch) = chars[idx];
+        if let Some(active_quote) = quote {
+            if ch == '\\' {
+                idx += 2;
+                continue;
+            }
+            if ch == active_quote {
+                quote = None;
+            }
+            idx += 1;
+            continue;
+        }
+
+        if ch == '\'' || ch == '"' {
+            quote = Some(ch);
+            idx += 1;
+            continue;
+        }
+
+        match ch {
+            '(' => paren_depth += 1,
+            ')' if paren_depth > 0 => paren_depth -= 1,
+            '[' => bracket_depth += 1,
+            ']' if bracket_depth > 0 => bracket_depth -= 1,
+            '{' => brace_depth += 1,
+            '}' if brace_depth > 0 => brace_depth -= 1,
+            '=' if paren_depth == 0
+                && bracket_depth == 0
+                && brace_depth == 0
+                && chars.get(idx + 1).is_some_and(|(_, next)| *next == '>') =>
+            {
+                let (start, _) = chars[idx];
+                let end = chars[idx + 1].0 + '>'.len_utf8();
+                let left = raw[..start].trim();
+                let right = raw[end..].trim();
+                if left.is_empty() || right.is_empty() {
+                    return None;
+                }
+                return Some((left, right));
+            }
+            _ => {}
+        }
+        idx += 1;
+    }
+
+    None
 }
 
 pub(crate) fn type_name_regex() -> &'static Regex {
@@ -586,6 +654,108 @@ pub(crate) fn parse_enum_literal_initializer(
     Ok(member_name.to_string())
 }
 
+pub(crate) fn validate_enum_map_initializer_keys_if_static(
+    expr: &str,
+    enum_type_name: &str,
+    enum_members: &[String],
+    span: &SourceSpan,
+) -> Result<(), ScriptLangError> {
+    let trimmed = expr.trim();
+    let Some(inner) = trimmed
+        .strip_prefix("#{")
+        .and_then(|content| content.strip_suffix('}'))
+    else {
+        return Ok(());
+    };
+    if inner.trim().is_empty() {
+        return Ok(());
+    }
+
+    for entry in split_by_top_level_comma(inner) {
+        let Some(key_raw) = extract_map_literal_key_expr(&entry) else {
+            continue;
+        };
+        let Some(key) = decode_static_map_key(key_raw) else {
+            continue;
+        };
+        if !enum_members.iter().any(|member| member == &key) {
+            return Err(ScriptLangError::with_span(
+                "ENUM_MAP_KEY_UNKNOWN",
+                format!(
+                    "Unknown map key \"{}\" for enum key type \"{}\".",
+                    key, enum_type_name
+                ),
+                span.clone(),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn extract_map_literal_key_expr(entry: &str) -> Option<&str> {
+    let chars = entry.char_indices().collect::<Vec<_>>();
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut quote: Option<char> = None;
+    let mut idx = 0usize;
+
+    while idx < chars.len() {
+        let (offset, ch) = chars[idx];
+        if let Some(active_quote) = quote {
+            if ch == '\\' {
+                idx += 2;
+                continue;
+            }
+            if ch == active_quote {
+                quote = None;
+            }
+            idx += 1;
+            continue;
+        }
+
+        if ch == '\'' || ch == '"' {
+            quote = Some(ch);
+            idx += 1;
+            continue;
+        }
+
+        match ch {
+            '(' => paren_depth += 1,
+            ')' if paren_depth > 0 => paren_depth -= 1,
+            '[' => bracket_depth += 1,
+            ']' if bracket_depth > 0 => bracket_depth -= 1,
+            '{' => brace_depth += 1,
+            '}' if brace_depth > 0 => brace_depth -= 1,
+            ':' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                return Some(entry[..offset].trim());
+            }
+            _ => {}
+        }
+        idx += 1;
+    }
+    None
+}
+
+fn decode_static_map_key(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if type_name_regex().is_match(trimmed) && !trimmed.contains('.') {
+        return Some(trimmed.to_string());
+    }
+
+    let mut chars = trimmed.chars();
+    let first = chars.next()?;
+    if (first == '"' || first == '\'') && trimmed.ends_with(first) && trimmed.len() >= 2 {
+        return Some(trimmed[1..trimmed.len() - 1].to_string());
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod xml_utils_tests {
     use super::*;
@@ -596,7 +766,7 @@ mod xml_utils_tests {
             ParsedTypeExpr::Primitive(_) => "primitive",
             ParsedTypeExpr::Script => "script",
             ParsedTypeExpr::Array(_) => "array",
-            ParsedTypeExpr::Map(_) => "map",
+            ParsedTypeExpr::Map { .. } => "map",
             ParsedTypeExpr::Custom(_) => "custom",
         }
     }
@@ -608,11 +778,13 @@ mod xml_utils_tests {
         let script = parse_type_expr("script", &span).expect("script");
         let array = parse_type_expr("int[]", &span).expect("array");
         let map = parse_type_expr("#{int}", &span).expect("map");
+        let map_with_key = parse_type_expr("#{State=>int}", &span).expect("map with key");
         let custom = parse_type_expr("CustomType", &span).expect("custom");
         assert_eq!(parsed_type_kind(primitive), "primitive");
         assert_eq!(parsed_type_kind(script), "script");
         assert_eq!(parsed_type_kind(array), "array");
         assert_eq!(parsed_type_kind(map), "map");
+        assert_eq!(parsed_type_kind(map_with_key), "map");
         assert_eq!(parsed_type_kind(custom), "custom");
         let invalid_type = parse_type_expr("Map<int,string>", &span).expect_err("invalid");
         assert_eq!(invalid_type.code, "TYPE_PARSE_ERROR");
@@ -1086,6 +1258,36 @@ mod xml_utils_tests {
         )
         .expect_err("should fail with invalid enum member in template");
         assert_eq!(err.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
+    }
+
+    #[test]
+    fn enum_map_initializer_key_validation_covers_valid_and_invalid_keys() {
+        let span = SourceSpan::synthetic();
+        let members = vec!["A".to_string(), "B".to_string()];
+        validate_enum_map_initializer_keys_if_static(
+            "#{A: 1, B: 2}",
+            "ids.LocationId",
+            &members,
+            &span,
+        )
+        .expect("valid map keys should pass");
+
+        let error = validate_enum_map_initializer_keys_if_static(
+            "#{A: 1, X: 2}",
+            "ids.LocationId",
+            &members,
+            &span,
+        )
+        .expect_err("invalid key should fail");
+        assert_eq!(error.code, "ENUM_MAP_KEY_UNKNOWN");
+
+        validate_enum_map_initializer_keys_if_static(
+            "make_map()",
+            "ids.LocationId",
+            &members,
+            &span,
+        )
+        .expect("non-static expression should skip compile-time validation");
     }
 
     #[test]

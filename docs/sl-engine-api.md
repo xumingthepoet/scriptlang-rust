@@ -52,6 +52,9 @@
     - `moduleConstDeclarations`
     - `moduleConstInitOrder`
   - enum 类型会进入 `ScriptType::Enum { type_name, members }`，运行时值仍是字符串（member 名）。
+  - map 类型使用 `ScriptType::Map { key_type, value_type }`：
+    - `key_type` 支持 string 或 enum 元信息
+    - 运行时 map 仍是字符串 key（`BTreeMap<String, SlValue>`）
   - 可作为“离线编译后运行”的稳定输入
 
 ### 2.6 enum 运行约束（V1）
