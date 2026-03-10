@@ -1,6 +1,6 @@
 <!-- import ids from ids.xml -->
 <module name="target" default_access="public">
-  <script name="go" access="public" args="ids.LocationId:loc">
+  <script name="route" access="public" args="ids.LocationId:loc">
     <text>tag=${loc}</text>
   </script>
 </module>

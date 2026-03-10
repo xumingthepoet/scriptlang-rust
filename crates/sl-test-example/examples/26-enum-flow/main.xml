@@ -4,10 +4,10 @@
   <script name="main" access="public">
     <choice text="pick location">
       <option text="toA">
-        <return script="@target.go" args="ids.LocationId.A"/>
+        <return script="@target.route" args="ids.LocationId.A"/>
       </option>
       <option text="toB">
-        <return script="@target.go" args="ids.LocationId.B"/>
+        <return script="@target.route" args="ids.LocationId.B"/>
       </option>
     </choice>
   </script>

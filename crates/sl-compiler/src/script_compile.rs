@@ -238,7 +238,11 @@ pub(crate) fn compile_script(
     }
 
     let local_script_name = get_required_non_empty_attr(root, "name")?;
-    assert_name_not_reserved(&local_script_name, "script", root.location.clone())?;
+    assert_decl_name_not_reserved_or_rhai_keyword(
+        &local_script_name,
+        "script",
+        root.location.clone(),
+    )?;
     let script_name = qualified_script_name
         .unwrap_or(&local_script_name)
         .to_string();
@@ -724,13 +728,13 @@ pub(crate) fn compile_group_nodes(
                             let array_expr = get_required_non_empty_attr(choice_child, "array")?;
                             let item_name = get_required_non_empty_attr(choice_child, "item")?;
                             let index_name = get_optional_attr(choice_child, "index");
-                            assert_name_not_reserved(
+                            assert_decl_name_not_reserved_or_rhai_keyword(
                                 &item_name,
                                 "dynamic-options item",
                                 choice_child.location.clone(),
                             )?;
                             if let Some(index_name_value) = &index_name {
-                                assert_name_not_reserved(
+                                assert_decl_name_not_reserved_or_rhai_keyword(
                                     index_name_value,
                                     "dynamic-options index",
                                     choice_child.location.clone(),
@@ -1174,7 +1178,7 @@ pub(crate) fn parse_script_args(
             &root.location,
         )?;
 
-        assert_name_not_reserved(name, "script arg", root.location.clone())?;
+        assert_decl_name_not_reserved_or_rhai_keyword(name, "script arg", root.location.clone())?;
         if !names.insert(name.to_string()) {
             return Err(ScriptLangError::with_span(
                 "SCRIPT_ARGS_DUPLICATE",
@@ -1224,7 +1228,7 @@ pub(crate) fn parse_function_args(
             "function args",
             &node.location,
         )?;
-        assert_name_not_reserved(name, "function arg", node.location.clone())?;
+        assert_decl_name_not_reserved_or_rhai_keyword(name, "function arg", node.location.clone())?;
 
         if !names.insert(name.to_string()) {
             return Err(ScriptLangError::with_span(
@@ -1261,7 +1265,7 @@ pub(crate) fn parse_function_return(
         "function return",
         &node.location,
     )?;
-    assert_name_not_reserved(name, "function return", node.location.clone())?;
+    assert_decl_name_not_reserved_or_rhai_keyword(name, "function return", node.location.clone())?;
 
     Ok(ParsedFunctionParamDecl {
         name: name.to_string(),
@@ -1351,6 +1355,10 @@ mod script_compile_tests {
         let error =
             parse_script_args(&root_unknown_type, &visible_types).expect_err("unknown arg type");
         assert_eq!(error.code, "TYPE_UNKNOWN");
+        let root_keyword_arg = xml_element("script", &[("args", "int:shared")], Vec::new());
+        let error =
+            parse_script_args(&root_keyword_arg, &visible_types).expect_err("keyword arg name");
+        assert_eq!(error.code, "NAME_RHAI_KEYWORD_RESERVED");
 
         let fn_node = xml_element(
             "function",
@@ -1377,6 +1385,13 @@ mod script_compile_tests {
         let error =
             parse_function_declaration_node(&fn_reserved_arg).expect_err("reserved arg name");
         assert_eq!(error.code, "NAME_RESERVED_PREFIX");
+        let fn_keyword_arg = xml_element(
+            "function",
+            &[("name", "f"), ("args", "int:shared"), ("return", "int:r")],
+            vec![xml_text("r = 1;")],
+        );
+        let error = parse_function_declaration_node(&fn_keyword_arg).expect_err("keyword arg name");
+        assert_eq!(error.code, "NAME_RHAI_KEYWORD_RESERVED");
 
         let fn_bad_arg_type = xml_element(
             "function",
@@ -1418,6 +1433,13 @@ mod script_compile_tests {
         );
         let error = parse_function_return(&reserved_return).expect_err("reserved return binding");
         assert_eq!(error.code, "NAME_RESERVED_PREFIX");
+        let keyword_return = xml_element(
+            "function",
+            &[("name", "f"), ("return", "int:shared")],
+            vec![xml_text("shared = 1;")],
+        );
+        let error = parse_function_return(&keyword_return).expect_err("keyword return binding");
+        assert_eq!(error.code, "NAME_RHAI_KEYWORD_RESERVED");
 
         let invalid_return = xml_element(
             "function",
@@ -2209,6 +2231,14 @@ mod script_compile_tests {
                     "NAME_RESERVED_PREFIX",
                 ),
                 (
+                    "dynamic options keyword item",
+                    map(&[(
+                        "main.xml",
+                        "<script name=\"main\"><choice text=\"c\"><dynamic-options array=\"arr\" item=\"shared\"><option text=\"a\"/></dynamic-options></choice></script>",
+                    )]),
+                    "NAME_RHAI_KEYWORD_RESERVED",
+                ),
+                (
                     "input default unsupported",
                     map(&[(
                         "main.xml",
@@ -2279,6 +2309,14 @@ mod script_compile_tests {
                         "<script name=\"main\" args=\"int:__sl_x\"><text>x</text></script>",
                     )]),
                     "NAME_RESERVED_PREFIX",
+                ),
+                (
+                    "script args keyword",
+                    map(&[(
+                        "main.xml",
+                        "<script name=\"main\" args=\"int:shared\"><text>x</text></script>",
+                    )]),
+                    "NAME_RHAI_KEYWORD_RESERVED",
                 ),
                 (
                     "loop times template unsupported",
@@ -2621,6 +2659,23 @@ mod script_compile_tests {
         })
         .expect_err("compile_script should reject reserved name");
         assert_eq!(reserved_name_error.code, "NAME_RESERVED_PREFIX");
+        let keyword_name_root = xml_element("script", &[("name", "shared")], Vec::new());
+        let keyword_name_error = compile_script(CompileScriptOptions {
+            script_path: "x.xml",
+            root: &keyword_name_root,
+            script_access: AccessLevel::Private,
+            qualified_script_name: None,
+            module_name: None,
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+            all_script_access: &BTreeMap::new(),
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
+        })
+        .expect_err("compile_script should reject keyword name");
+        assert_eq!(keyword_name_error.code, "NAME_RHAI_KEYWORD_RESERVED");
 
         let reserved_var_root = xml_element(
             "script",

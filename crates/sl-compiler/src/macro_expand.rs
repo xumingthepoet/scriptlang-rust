@@ -56,7 +56,7 @@ pub(crate) fn validate_reserved_prefix_in_user_var_declarations(
     if node.name == "temp" {
         if let Some(name) = node.attributes.get("name") {
             if !name.is_empty() {
-                assert_name_not_reserved(name, "temp", node.location.clone())?;
+                assert_decl_name_not_reserved_or_rhai_keyword(name, "temp", node.location.clone())?;
             }
         }
     }
@@ -219,6 +219,18 @@ mod macro_expand_tests {
         let error = validate_reserved_prefix_in_user_var_declarations(&reserved_var)
             .expect_err("reserved var name should fail");
         assert_eq!(error.code, "NAME_RESERVED_PREFIX");
+        let keyword_var = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element(
+                "temp",
+                &[("name", "shared"), ("type", "int")],
+                vec![xml_text("1")],
+            ))],
+        );
+        let error = validate_reserved_prefix_in_user_var_declarations(&keyword_var)
+            .expect_err("keyword var name should fail");
+        assert_eq!(error.code, "NAME_RHAI_KEYWORD_RESERVED");
 
         let bad_loop = xml_element(
             "loop",

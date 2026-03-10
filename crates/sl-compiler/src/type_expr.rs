@@ -220,7 +220,7 @@ pub(crate) fn parse_type_declaration_node_with_namespace(
     default_access: AccessLevel,
 ) -> Result<ParsedTypeDecl, ScriptLangError> {
     let name = get_required_non_empty_attr(node, "name")?;
-    assert_name_not_reserved(&name, "type", node.location.clone())?;
+    assert_decl_name_not_reserved_or_rhai_keyword(&name, "type", node.location.clone())?;
     let access = parse_access_attr(node, "access", default_access)?;
 
     let mut fields = Vec::new();
@@ -236,7 +236,11 @@ pub(crate) fn parse_type_declaration_node_with_namespace(
         }
 
         let field_name = get_required_non_empty_attr(child, "name")?;
-        assert_name_not_reserved(&field_name, "type field", child.location.clone())?;
+        assert_decl_name_not_reserved_or_rhai_keyword(
+            &field_name,
+            "type field",
+            child.location.clone(),
+        )?;
         if !seen.insert(field_name.clone()) {
             return Err(ScriptLangError::with_span(
                 "TYPE_FIELD_DUPLICATE",
@@ -271,7 +275,7 @@ pub(crate) fn parse_enum_declaration_node_with_namespace(
     default_access: AccessLevel,
 ) -> Result<ParsedTypeDecl, ScriptLangError> {
     let name = get_required_non_empty_attr(node, "name")?;
-    assert_name_not_reserved(&name, "enum", node.location.clone())?;
+    assert_decl_name_not_reserved_or_rhai_keyword(&name, "enum", node.location.clone())?;
     let access = parse_access_attr(node, "access", default_access)?;
 
     let mut members = Vec::new();
@@ -285,7 +289,11 @@ pub(crate) fn parse_enum_declaration_node_with_namespace(
             ));
         }
         let member_name = get_required_non_empty_attr(child, "name")?;
-        assert_name_not_reserved(&member_name, "enum member", child.location.clone())?;
+        assert_decl_name_not_reserved_or_rhai_keyword(
+            &member_name,
+            "enum member",
+            child.location.clone(),
+        )?;
         if !seen.insert(member_name.clone()) {
             return Err(ScriptLangError::with_span(
                 "ENUM_MEMBER_DUPLICATE",
@@ -337,7 +345,7 @@ pub(crate) fn parse_function_declaration_node_with_namespace(
     default_access: AccessLevel,
 ) -> Result<ParsedFunctionDecl, ScriptLangError> {
     let name = get_required_non_empty_attr(node, "name")?;
-    assert_name_not_reserved(&name, "function", node.location.clone())?;
+    assert_decl_name_not_reserved_or_rhai_keyword(&name, "function", node.location.clone())?;
     let access = parse_access_attr(node, "access", default_access)?;
 
     let params = parse_function_args(node)?;
@@ -499,6 +507,18 @@ mod type_expr_tests {
         let field_error =
             parse_type_declaration_node(&type_node_reserved).expect_err("reserved field name");
         assert_eq!(field_error.code, "NAME_RESERVED_PREFIX");
+        let type_node_keyword = xml_element(
+            "type",
+            &[("name", "Bag")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("name", "shared"), ("type", "int")],
+                Vec::new(),
+            ))],
+        );
+        let field_error =
+            parse_type_declaration_node(&type_node_keyword).expect_err("keyword field name");
+        assert_eq!(field_error.code, "NAME_RHAI_KEYWORD_RESERVED");
 
         let unknown_in_array = resolve_type_expr(
             &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Custom("Missing".to_string()))),
@@ -538,6 +558,17 @@ mod type_expr_tests {
         ))
         .expect_err("type name cannot be reserved");
         assert_eq!(type_reserved_name.code, "NAME_RESERVED_PREFIX");
+        let type_keyword_name = parse_type_declaration_node(&xml_element(
+            "type",
+            &[("name", "shared")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("name", "v"), ("type", "int")],
+                Vec::new(),
+            ))],
+        ))
+        .expect_err("type name cannot be keyword");
+        assert_eq!(type_keyword_name.code, "NAME_RHAI_KEYWORD_RESERVED");
 
         let field_missing_name = parse_type_declaration_node(&xml_element(
             "type",
@@ -590,6 +621,13 @@ mod type_expr_tests {
         ))
         .expect_err("function name cannot be reserved");
         assert_eq!(function_reserved_name.code, "NAME_RESERVED_PREFIX");
+        let function_keyword_name = parse_function_declaration_node(&xml_element(
+            "function",
+            &[("name", "shared"), ("return", "int:r")],
+            vec![xml_text("r = 1;")],
+        ))
+        .expect_err("function name cannot be keyword");
+        assert_eq!(function_keyword_name.code, "NAME_RHAI_KEYWORD_RESERVED");
 
         let function_child_error = parse_function_declaration_node(&xml_element(
             "function",
@@ -738,6 +776,21 @@ mod type_expr_tests {
         )
         .expect_err("reserved member name should fail");
         assert_eq!(enum_reserved_name.code, "NAME_RESERVED_PREFIX");
+        let enum_keyword_member = parse_enum_declaration_node_with_namespace(
+            &xml_element(
+                "enum",
+                &[("name", "Status")],
+                vec![XmlNode::Element(xml_element(
+                    "member",
+                    &[("name", "shared")],
+                    Vec::new(),
+                ))],
+            ),
+            "module",
+            AccessLevel::Private,
+        )
+        .expect_err("keyword member name should fail");
+        assert_eq!(enum_keyword_member.code, "NAME_RHAI_KEYWORD_RESERVED");
 
         // Test enum with reserved type name
         let enum_reserved_type = parse_enum_declaration_node_with_namespace(
@@ -755,6 +808,21 @@ mod type_expr_tests {
         )
         .expect_err("reserved type name should fail");
         assert_eq!(enum_reserved_type.code, "NAME_RESERVED_PREFIX");
+        let enum_keyword_type = parse_enum_declaration_node_with_namespace(
+            &xml_element(
+                "enum",
+                &[("name", "shared")],
+                vec![XmlNode::Element(xml_element(
+                    "member",
+                    &[("name", "Value")],
+                    Vec::new(),
+                ))],
+            ),
+            "module",
+            AccessLevel::Private,
+        )
+        .expect_err("keyword type name should fail");
+        assert_eq!(enum_keyword_type.code, "NAME_RHAI_KEYWORD_RESERVED");
 
         // Test enum with namespace (qualified name)
         let enum_with_ns = parse_enum_declaration_node_with_namespace(

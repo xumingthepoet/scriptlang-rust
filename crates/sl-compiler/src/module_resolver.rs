@@ -163,8 +163,12 @@ fn parse_module_child(
         "script" => {
             let script_name = get_required_non_empty_attr(child, "name")
                 .map_err(|error| with_file_context(error, file_path))?;
-            assert_name_not_reserved(&script_name, "script", child.location.clone())
-                .map_err(|error| with_file_context(error, file_path))?;
+            assert_decl_name_not_reserved_or_rhai_keyword(
+                &script_name,
+                "script",
+                child.location.clone(),
+            )
+            .map_err(|error| with_file_context(error, file_path))?;
             let access = parse_access_attr(child, "access", default_access)
                 .map_err(|error| with_file_context(error, file_path))?;
             Ok(ParsedModuleChild::Script(ParsedModuleScript {
@@ -258,7 +262,7 @@ fn parse_module_binding_declaration(
     tag_name: &str,
 ) -> Result<ParsedModuleVarDecl, ScriptLangError> {
     let name = get_required_non_empty_attr(node, "name")?;
-    assert_name_not_reserved(&name, "module global", node.location.clone())?;
+    assert_decl_name_not_reserved_or_rhai_keyword(&name, "module global", node.location.clone())?;
     let access = parse_access_attr(node, "access", default_access)?;
 
     let type_raw = get_required_non_empty_attr(node, "type")?;
@@ -2077,6 +2081,20 @@ mod module_resolver_tests {
         assert!(bad_function_error
             .message
             .contains("In file \"bad-function.xml\":"));
+
+        let keyword_script = map(&[(
+            "keyword-script.xml",
+            r#"<module name="battle" default_access="public">
+  <script name="shared"/>
+</module>"#,
+        )]);
+        let keyword_script_sources = parse_sources(&keyword_script).expect("parse sources");
+        let keyword_script_error = parse_module_files(&keyword_script_sources)
+            .expect_err("keyword script name should fail");
+        assert_eq!(keyword_script_error.code, "NAME_RHAI_KEYWORD_RESERVED");
+        assert!(keyword_script_error
+            .message
+            .contains("In file \"keyword-script.xml\":"));
     }
 
     #[test]
@@ -2118,6 +2136,15 @@ mod module_resolver_tests {
         let error = parse_module_var_declaration(&reserved_name, "shared", AccessLevel::Private)
             .expect_err("reserved name should fail");
         assert_eq!(error.code, "NAME_RESERVED_PREFIX");
+
+        let keyword_name = xml_element(
+            "var",
+            &[("name", "shared"), ("type", "int")],
+            vec![xml_text("1")],
+        );
+        let error = parse_module_var_declaration(&keyword_name, "mod", AccessLevel::Private)
+            .expect_err("keyword name should fail");
+        assert_eq!(error.code, "NAME_RHAI_KEYWORD_RESERVED");
 
         let invalid_type = xml_element(
             "var",

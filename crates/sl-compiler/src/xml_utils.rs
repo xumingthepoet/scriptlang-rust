@@ -248,6 +248,97 @@ pub(crate) fn assert_name_not_reserved(
     ))
 }
 
+pub(crate) fn assert_decl_name_not_reserved_or_rhai_keyword(
+    name: &str,
+    label: &str,
+    span: SourceSpan,
+) -> Result<(), ScriptLangError> {
+    assert_name_not_reserved(name, label, span.clone())?;
+    if !rhai_decl_name_conflicts_keyword(name) {
+        return Ok(());
+    }
+
+    Err(ScriptLangError::with_span(
+        "NAME_RHAI_KEYWORD_RESERVED",
+        format!(
+            "Name \"{}\" for {} conflicts with Rhai keyword or reserved identifier.",
+            name, label
+        ),
+        span,
+    ))
+}
+
+fn rhai_decl_name_conflicts_keyword(name: &str) -> bool {
+    name.split('.').any(is_rhai_reserved_keyword)
+}
+
+fn is_rhai_reserved_keyword(name: &str) -> bool {
+    matches!(
+        name,
+        "_" | "Fn"
+            | "as"
+            | "async"
+            | "await"
+            | "break"
+            | "call"
+            | "case"
+            | "catch"
+            | "const"
+            | "continue"
+            | "curry"
+            | "debug"
+            | "default"
+            | "do"
+            | "else"
+            | "eval"
+            | "export"
+            | "false"
+            | "fn"
+            | "for"
+            | "go"
+            | "goto"
+            | "if"
+            | "import"
+            | "in"
+            | "is"
+            | "is_def_fn"
+            | "is_def_var"
+            | "is_shared"
+            | "let"
+            | "loop"
+            | "match"
+            | "module"
+            | "new"
+            | "nil"
+            | "null"
+            | "package"
+            | "print"
+            | "private"
+            | "protected"
+            | "public"
+            | "return"
+            | "shared"
+            | "spawn"
+            | "static"
+            | "super"
+            | "switch"
+            | "sync"
+            | "this"
+            | "thread"
+            | "throw"
+            | "true"
+            | "try"
+            | "type_of"
+            | "until"
+            | "use"
+            | "var"
+            | "void"
+            | "while"
+            | "with"
+            | "yield"
+    )
+}
+
 pub(crate) fn element_children(node: &XmlElementNode) -> impl Iterator<Item = &XmlElementNode> {
     node.children.iter().filter_map(|entry| match entry {
         XmlNode::Element(element) => Some(element),
@@ -995,5 +1086,16 @@ mod xml_utils_tests {
         )
         .expect_err("should fail with invalid enum member in template");
         assert_eq!(err.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
+    }
+
+    #[test]
+    fn declaration_name_keyword_guard_is_case_sensitive() {
+        let span = SourceSpan::synthetic();
+        let keyword = assert_decl_name_not_reserved_or_rhai_keyword("shared", "var", span.clone())
+            .expect_err("shared should be rejected");
+        assert_eq!(keyword.code, "NAME_RHAI_KEYWORD_RESERVED");
+
+        assert_decl_name_not_reserved_or_rhai_keyword("Shared", "var", span)
+            .expect("capitalized variant should pass");
     }
 }
