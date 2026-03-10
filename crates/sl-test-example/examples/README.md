@@ -34,7 +34,7 @@ This catalog keeps example intent explicit so examples can be refactored without
 | `21-directory-import` | directory import resolution |
 | `22-access-control` | `public/private` access boundaries |
 | `23-const-basics` | const declarations and const init dependency |
-| `24-invoke-dynamic` | dynamic `invoke(name, args)` from data |
+| `24-invoke-dynamic` | dynamic `invoke(fnVar, args)` via `function` reference |
 | `25-function-invoke` | function-call + invoke composition |
 | `26-enum-flow` | `<enum>` + `Type.Member` in attribute args |
 | `27-dynamic-transfer-target` | dynamic script target for call/return |

@@ -256,6 +256,32 @@ pub(crate) fn preprocess_scriptlang_rhai_input(
                 out.push('@');
                 index += 1;
             }
+            '*' if is_function_literal_start(&chars, index) => {
+                if let Some((function_name, next_index)) =
+                    parse_function_literal_name(&chars, index)
+                {
+                    let mut lookahead = next_index;
+                    while lookahead < chars.len() && chars[lookahead].is_whitespace() {
+                        lookahead += 1;
+                    }
+                    if chars.get(lookahead) == Some(&'(') {
+                        return Err(preprocess_error(
+                            "RHAI_PREPROCESS_FUNCTION_LITERAL_CALL_FORBIDDEN",
+                            context,
+                            "function literal cannot be called directly",
+                            "Use method(...) or module.method(...), not *module.method(...).",
+                        ));
+                    }
+                    out.push('"');
+                    out.push('*');
+                    out.push_str(&function_name);
+                    out.push('"');
+                    index = next_index;
+                    continue;
+                }
+                out.push('*');
+                index += 1;
+            }
             ch if is_scriptlang_token_char(ch) => {
                 let start = index;
                 index += 1;
@@ -287,6 +313,21 @@ fn is_script_literal_left_boundary(ch: Option<char>) -> bool {
     }
 }
 
+fn is_function_literal_start(chars: &[char], index: usize) -> bool {
+    if chars.get(index) != Some(&'*') || index + 1 >= chars.len() {
+        return false;
+    }
+    let mut left = index;
+    while left > 0 && chars[left - 1].is_whitespace() {
+        left -= 1;
+    }
+    if left == 0 {
+        return true;
+    }
+    let prev = chars[left - 1];
+    !prev.is_ascii_alphanumeric() && prev != '_' && prev != '.' && prev != ')' && prev != ']'
+}
+
 fn parse_script_literal_name(chars: &[char], at_index: usize) -> Option<(String, usize)> {
     let mut index = at_index + 1;
     let mut name = String::new();
@@ -316,6 +357,37 @@ fn parse_script_literal_name(chars: &[char], at_index: usize) -> Option<(String,
         break;
     }
 
+    Some((name, index))
+}
+
+fn parse_function_literal_name(chars: &[char], at_index: usize) -> Option<(String, usize)> {
+    let mut index = at_index + 1;
+    let mut name = String::new();
+
+    let first = *chars.get(index)?;
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return None;
+    }
+    name.push(first);
+    index += 1;
+
+    while let Some(ch) = chars.get(index).copied() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            name.push(ch);
+            index += 1;
+            continue;
+        }
+        if ch == '.' {
+            let next = chars.get(index + 1).copied()?;
+            if !next.is_ascii_alphabetic() && next != '_' {
+                return None;
+            }
+            name.push(ch);
+            index += 1;
+            continue;
+        }
+        break;
+    }
     Some((name, index))
 }
 
@@ -854,6 +926,55 @@ mod rhai_bridge_tests {
             preprocess_scriptlang_rhai_input("obj.@next", "code", RhaiInputMode::CodeBlock)
                 .expect("non-boundary @ should keep raw token");
         assert_eq!(prefixed, "obj.@next");
+    }
+
+    #[test]
+    fn preprocess_function_literals_support_assignment_and_reject_direct_call() {
+        let rewritten = preprocess_scriptlang_rhai_input(
+            "fn_ref = *main.add;",
+            "code",
+            RhaiInputMode::CodeBlock,
+        )
+        .expect("function literal assignment should be accepted");
+        assert_eq!(rewritten, "fn_ref = \"*main.add\";");
+
+        let short =
+            preprocess_scriptlang_rhai_input("fn_ref = *add;", "code", RhaiInputMode::CodeBlock)
+                .expect("short function literal should be accepted");
+        assert_eq!(short, "fn_ref = \"*add\";");
+
+        let multiply =
+            preprocess_scriptlang_rhai_input("v = x * y;", "code", RhaiInputMode::CodeBlock)
+                .expect("multiply should not become function literal");
+        assert_eq!(multiply, "v = x * y;");
+
+        let direct_call =
+            preprocess_scriptlang_rhai_input("*main.add(1)", "code", RhaiInputMode::CodeBlock)
+                .expect_err("direct function literal call should fail");
+        assert_eq!(
+            direct_call.code,
+            "RHAI_PREPROCESS_FUNCTION_LITERAL_CALL_FORBIDDEN"
+        );
+        let spaced_call =
+            preprocess_scriptlang_rhai_input("*main.add   (1)", "code", RhaiInputMode::CodeBlock)
+                .expect_err("spaced direct function literal call should fail");
+        assert_eq!(
+            spaced_call.code,
+            "RHAI_PREPROCESS_FUNCTION_LITERAL_CALL_FORBIDDEN"
+        );
+
+        let invalid_shape =
+            preprocess_scriptlang_rhai_input("*main.", "code", RhaiInputMode::CodeBlock)
+                .expect("invalid shape should keep raw token");
+        assert_eq!(invalid_shape, "*main.");
+        let invalid_first =
+            preprocess_scriptlang_rhai_input("*1main.add", "code", RhaiInputMode::CodeBlock)
+                .expect("invalid first char should stay raw");
+        assert_eq!(invalid_first, "*1main.add");
+        let invalid_segment =
+            preprocess_scriptlang_rhai_input("*main.1add", "code", RhaiInputMode::CodeBlock)
+                .expect("invalid segment head should stay raw");
+        assert_eq!(invalid_segment, "*main.1add");
     }
 
     #[test]

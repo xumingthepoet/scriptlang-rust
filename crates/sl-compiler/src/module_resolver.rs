@@ -1195,6 +1195,7 @@ mod module_resolver_tests {
             ScriptType::Primitive { .. } => "primitive",
             ScriptType::Enum { .. } => "enum",
             ScriptType::Script => "script",
+            ScriptType::Function => "function",
             ScriptType::Array { .. } => "array",
             ScriptType::Map { .. } => "map",
             ScriptType::Object { .. } => "object",
@@ -1204,6 +1205,7 @@ mod module_resolver_tests {
     #[test]
     fn resolve_visible_module_symbols_builds_function_signatures() {
         assert_eq!(script_type_kind(&ScriptType::Script), "script");
+        assert_eq!(script_type_kind(&ScriptType::Function), "function");
         assert_eq!(
             script_type_kind(&ScriptType::Enum {
                 type_name: "Status".to_string(),

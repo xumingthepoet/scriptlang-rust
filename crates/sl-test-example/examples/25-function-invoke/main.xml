@@ -1,17 +1,20 @@
 <!-- import lib from lib.xml -->
 <module name="main" default_access="public">
   <function name="run" access="public" args="int:x" return="int:out">
-    let step = "lib.add1";
+    let step = *lib.add1;
     let v = invoke(step, [x]);
-    out = invoke("lib.times2", [v]);
+    let mul = *lib.times2;
+    out = invoke(mul, [v]);
   </function>
   <function name="from_code" access="public" args="int:x" return="int:out">
-    out = main.run(x) + invoke("lib.add1", [x]);
+    let add = *lib.add1;
+    out = main.run(x) + invoke(add, [x]);
   </function>
   <script name="main">
     <temp name="value" type="int">0</temp>
+    <temp name="addFn" type="function">*lib.add1</temp>
     <code>value = main.from_code(3);</code>
-    <code>value = invoke("lib.add1", [value]);</code>
+    <code>value = invoke(addFn, [value]);</code>
     <text>${value}</text>
   </script>
 </module>

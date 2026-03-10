@@ -8,6 +8,9 @@ pub(crate) fn parse_type_expr(
     if source == "script" {
         return Ok(ParsedTypeExpr::Script);
     }
+    if source == "function" {
+        return Ok(ParsedTypeExpr::Function);
+    }
 
     if source == "int" || source == "float" || source == "string" || source == "boolean" {
         return Ok(ParsedTypeExpr::Primitive(source.to_string()));
@@ -765,6 +768,7 @@ mod xml_utils_tests {
         match expr {
             ParsedTypeExpr::Primitive(_) => "primitive",
             ParsedTypeExpr::Script => "script",
+            ParsedTypeExpr::Function => "function",
             ParsedTypeExpr::Array(_) => "array",
             ParsedTypeExpr::Map { .. } => "map",
             ParsedTypeExpr::Custom(_) => "custom",
@@ -776,12 +780,14 @@ mod xml_utils_tests {
         let span = SourceSpan::synthetic();
         let primitive = parse_type_expr("int", &span).expect("primitive");
         let script = parse_type_expr("script", &span).expect("script");
+        let function = parse_type_expr("function", &span).expect("function");
         let array = parse_type_expr("int[]", &span).expect("array");
         let map = parse_type_expr("#{int}", &span).expect("map");
         let map_with_key = parse_type_expr("#{State=>int}", &span).expect("map with key");
         let custom = parse_type_expr("CustomType", &span).expect("custom");
         assert_eq!(parsed_type_kind(primitive), "primitive");
         assert_eq!(parsed_type_kind(script), "script");
+        assert_eq!(parsed_type_kind(function), "function");
         assert_eq!(parsed_type_kind(array), "array");
         assert_eq!(parsed_type_kind(map), "map");
         assert_eq!(parsed_type_kind(map_with_key), "map");
@@ -821,6 +827,24 @@ mod xml_utils_tests {
 
         let bad_args = parse_args(Some("ref:   ".to_string())).expect_err("bad args");
         assert_eq!(bad_args.code, "CALL_ARGS_PARSE_ERROR");
+    }
+
+    #[test]
+    fn split_map_type_key_value_handles_nested_quotes_and_invalid_edges() {
+        assert_eq!(
+            split_map_type_key_value("string=>int"),
+            Some(("string", "int"))
+        );
+        assert_eq!(
+            split_map_type_key_value("string=>\"x=>y\""),
+            Some(("string", "\"x=>y\""))
+        );
+        assert_eq!(
+            split_map_type_key_value("string=>#{int=>int}"),
+            Some(("string", "#{int=>int}"))
+        );
+        assert_eq!(split_map_type_key_value("=>int"), None);
+        assert_eq!(split_map_type_key_value("string=>"), None);
     }
 
     #[test]

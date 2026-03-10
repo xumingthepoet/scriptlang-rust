@@ -1003,8 +1003,8 @@ impl ScriptLangEngine {
         }
 
         out.push_str("invoke = |name, args| {\n");
-        out.push_str("if type_of(name) != \"string\" || !name.contains(\".\") {\n");
-        out.push_str("throw \"__sl_err:ENGINE_INVOKE_NAME_INVALID:invoke(name, [args]) requires name in module.func format.\";\n");
+        out.push_str("if type_of(name) != \"string\" || !name.starts_with(\"*\") {\n");
+        out.push_str("throw \"__sl_err:ENGINE_INVOKE_TARGET_VAR_TYPE:invoke(fnVar, [args]) requires fnVar to hold a *function reference.\";\n");
         out.push_str("}\n");
         out.push_str("if type_of(args) != \"array\" {\n");
         out.push_str("throw \"__sl_err:ENGINE_INVOKE_ARGS_NOT_ARRAY:invoke(name, [args]) requires args to be an array.\";\n");
@@ -1016,7 +1016,7 @@ impl ScriptLangEngine {
             let Some(target_symbol) = self.invoke_function_symbols.get(qualified_name) else {
                 continue;
             };
-            out.push_str("if name == \"");
+            out.push_str("if name == \"*");
             out.push_str(qualified_name);
             out.push_str("\" {\n");
             out.push_str("if args.len != ");
@@ -1041,12 +1041,43 @@ impl ScriptLangEngine {
                 );
                 out.push_str(")\n}\n");
             }
+            if let Some((namespace, short_name)) = qualified_name.split_once('.') {
+                if current_module == Some(namespace) {
+                    out.push_str("if name == \"*");
+                    out.push_str(short_name);
+                    out.push_str("\" {\n");
+                    out.push_str("if args.len != ");
+                    out.push_str(&decl.params.len().to_string());
+                    out.push_str(" {\n");
+                    out.push_str(
+                        "throw \"__sl_err:ENGINE_INVOKE_ARG_COUNT_MISMATCH:Invoke target ",
+                    );
+                    out.push_str(qualified_name);
+                    out.push_str(" received unexpected arg count.\";\n");
+                    out.push_str("}\n");
+                    out.push_str("return ");
+                    out.push_str("call(");
+                    out.push_str(target_symbol);
+                    if decl.params.is_empty() {
+                        out.push_str(")\n}\n");
+                    } else {
+                        out.push_str(", ");
+                        out.push_str(
+                            &(0..decl.params.len())
+                                .map(|index| format!("args[{index}]"))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                        );
+                        out.push_str(")\n}\n");
+                    }
+                }
+            }
         }
         for qualified_name in self.invoke_all_functions.keys() {
             if self.invoke_public_functions.contains(qualified_name) {
                 continue;
             }
-            out.push_str("if name == \"");
+            out.push_str("if name == \"*");
             out.push_str(qualified_name);
             out.push_str("\" {\n");
             out.push_str("throw \"__sl_err:ENGINE_INVOKE_ACCESS_DENIED:Invoke target is private and cannot be called.\";\n");
@@ -2641,7 +2672,7 @@ mod eval_tests {
     }
 
     #[test]
-    pub(super) fn invoke_calls_public_function_without_import_and_supports_local_function_refs() {
+    pub(super) fn invoke_calls_public_function_with_function_ref_variable() {
         let files = map(&[
             (
                 "shared.xml",
@@ -2659,9 +2690,11 @@ mod eval_tests {
             (
                 "main.xml",
                 r#"
+<!-- import shared from shared.xml -->
 <module name="main" default_access="public">
   <script name="main">
-    <temp name="value" type="int">invoke(&quot;shared.add&quot;, [3, 4])</temp>
+    <temp name="fnRef" type="function">*shared.add</temp>
+    <temp name="value" type="int">invoke(fnRef, [3, 4])</temp>
     <text>${value}</text>
   </script>
 </module>
@@ -2728,25 +2761,34 @@ mod eval_tests {
             (
                 "main.xml",
                 r#"
+<!-- import shared from shared.xml -->
 <module name="main" default_access="public">
   <script name="private_call">
-    <temp name="x" type="int">invoke(&quot;shared.hidden&quot;, [1])</temp>
+    <temp name="fnRef" type="function">*shared.add</temp>
+    <code>fnRef = "*" + "shared.hidden";</code>
+    <temp name="x" type="int">invoke(fnRef, [1])</temp>
     <text>${x}</text>
   </script>
   <script name="missing_call">
-    <temp name="x" type="int">invoke(&quot;shared.missing&quot;, [1])</temp>
+    <temp name="fnRef" type="function">*shared.add</temp>
+    <code>fnRef = "*" + "shared.missing";</code>
+    <temp name="x" type="int">invoke(fnRef, [1])</temp>
     <text>${x}</text>
   </script>
   <script name="bad_name">
-    <temp name="x" type="int">invoke(&quot;add&quot;, [1, 2])</temp>
+    <temp name="fnRef" type="function">*shared.add</temp>
+    <code>fnRef = "shared.add";</code>
+    <temp name="x" type="int">invoke(fnRef, [1, 2])</temp>
     <text>${x}</text>
   </script>
   <script name="bad_args_shape">
-    <temp name="x" type="int">invoke(&quot;shared.add&quot;, 1)</temp>
+    <temp name="fnRef" type="function">*shared.add</temp>
+    <temp name="x" type="int">invoke(fnRef, 1)</temp>
     <text>${x}</text>
   </script>
   <script name="bad_arity">
-    <temp name="x" type="int">invoke(&quot;shared.add&quot;, [1])</temp>
+    <temp name="fnRef" type="function">*shared.add</temp>
+    <temp name="x" type="int">invoke(fnRef, [1])</temp>
     <text>${x}</text>
   </script>
 </module>
@@ -2778,7 +2820,7 @@ mod eval_tests {
         let bad_name_error = bad_name_engine
             .next_output()
             .expect_err("bad name should fail");
-        assert_eq!(bad_name_error.code, "ENGINE_INVOKE_NAME_INVALID");
+        assert_eq!(bad_name_error.code, "ENGINE_TYPE_MISMATCH");
 
         let mut bad_shape_engine = engine_from_sources(files.clone());
         bad_shape_engine
@@ -2797,6 +2839,65 @@ mod eval_tests {
             .next_output()
             .expect_err("bad arity should fail");
         assert_eq!(bad_arity_error.code, "ENGINE_INVOKE_ARG_COUNT_MISMATCH");
+    }
+
+    #[test]
+    pub(super) fn invoke_prelude_supports_star_targets_and_module_short_alias() {
+        let files = map(&[
+            (
+                "shared.xml",
+                r#"
+<module name="shared" default_access="public">
+  <function name="remote" access="public" args="int:x" return="int:out">
+    out = x + 1;
+  </function>
+</module>
+"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<!-- import shared from shared.xml -->
+<module name="main" default_access="public">
+  <function name="add" access="public" args="int:x" return="int:out">
+    out = x + 1;
+  </function>
+  <function name="ping" access="public" return="int:out">
+    out = 1;
+  </function>
+  <function name="hidden" access="private" args="int:x" return="int:out">
+    out = x;
+  </function>
+  <script name="main"><text>ok</text></script>
+</module>
+"#,
+            ),
+        ]);
+        let mut engine = engine_from_sources(files);
+        engine.start("main.main", None).expect("start");
+
+        let symbol_map = engine
+            .visible_function_symbols_by_script
+            .get("main.main")
+            .cloned()
+            .expect("function symbols should exist");
+        let prelude = engine
+            .build_module_prelude("main.main", &symbol_map)
+            .expect("prelude should build");
+        assert!(prelude.contains("name.starts_with(\"*\")"));
+        assert!(prelude.contains("if name == \"*main.add\""));
+        assert!(prelude.contains("if name == \"*add\""));
+        assert!(prelude.contains("if name == \"*main.hidden\""));
+
+        let local = engine.invoke_module_local_qualified("main");
+        assert!(local.contains_key("add"));
+        assert!(local.contains_key("ping"));
+        assert!(!local.contains_key("remote"));
+
+        let body_map = engine.invoke_body_symbol_map("main.add");
+        assert!(body_map.contains_key("add"));
+        let passthrough_map = engine.invoke_body_symbol_map("badname");
+        assert!(!passthrough_map.is_empty());
     }
 
     #[test]

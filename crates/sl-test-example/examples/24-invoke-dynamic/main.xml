@@ -1,8 +1,8 @@
+<!-- import shared from shared.xml -->
 <module name="main" default_access="public">
   <script name="main">
-    <temp name="targets" type="string[]">[]</temp>
-    <code>targets.push("shared.add");</code>
-    <temp name="value" type="int">invoke(targets[0], [3, 4])</temp>
+    <temp name="fnRef" type="function">*shared.add</temp>
+    <temp name="value" type="int">invoke(fnRef, [3, 4])</temp>
     <text>${value}</text>
   </script>
 </module>

@@ -44,6 +44,36 @@ fn is_integral_number(value: f64) -> bool {
     value.is_finite() && value.fract().abs() < f64::EPSILON
 }
 
+fn is_function_reference(value: &str) -> bool {
+    let Some(rest) = value.strip_prefix('*') else {
+        return false;
+    };
+    if rest.is_empty() {
+        return false;
+    }
+    let mut segment_count = 1usize;
+    for segment in rest.split('.') {
+        if segment.is_empty() {
+            return false;
+        }
+        let mut chars = segment.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        if !first.is_ascii_alphabetic() && first != '_' {
+            return false;
+        }
+        if !chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+            return false;
+        }
+        if segment_count > 2 {
+            return false;
+        }
+        segment_count += 1;
+    }
+    true
+}
+
 pub fn default_value_from_type(ty: &ScriptType) -> SlValue {
     match ty {
         ScriptType::Primitive { name } => match name.as_str() {
@@ -57,6 +87,7 @@ pub fn default_value_from_type(ty: &ScriptType) -> SlValue {
             SlValue::String(members.first().cloned().unwrap_or_default())
         }
         ScriptType::Script => SlValue::String(String::new()),
+        ScriptType::Function => SlValue::String(String::new()),
         ScriptType::Array { .. } => SlValue::Array(Vec::new()),
         ScriptType::Map { .. } => SlValue::Map(BTreeMap::new()),
         ScriptType::Object { fields, .. } => {
@@ -84,6 +115,10 @@ pub fn is_type_compatible(value: &SlValue, ty: &ScriptType) -> bool {
         },
         ScriptType::Script => match value {
             SlValue::String(value) => value.starts_with('@'),
+            _ => false,
+        },
+        ScriptType::Function => match value {
+            SlValue::String(value) => is_function_reference(value),
             _ => false,
         },
         ScriptType::Array { element_type } => match value {
@@ -247,6 +282,7 @@ mod tests {
             name: "float".to_string(),
         };
         let script_type = ScriptType::Script;
+        let function_type = ScriptType::Function;
         let enum_type = ScriptType::Enum {
             type_name: "State".to_string(),
             members: vec!["Idle".to_string(), "Run".to_string()],
@@ -267,6 +303,35 @@ mod tests {
             &script_type
         ));
         assert!(!is_type_compatible(&SlValue::Number(1.0), &script_type));
+        assert!(is_type_compatible(
+            &SlValue::String("*main.next".to_string()),
+            &function_type
+        ));
+        assert!(!is_type_compatible(
+            &SlValue::String("main.next".to_string()),
+            &function_type
+        ));
+        assert!(!is_type_compatible(
+            &SlValue::String("*".to_string()),
+            &function_type
+        ));
+        assert!(!is_type_compatible(
+            &SlValue::String("*bad-name".to_string()),
+            &function_type
+        ));
+        assert!(!is_type_compatible(
+            &SlValue::String("*bad.name.more".to_string()),
+            &function_type
+        ));
+        assert!(!is_type_compatible(
+            &SlValue::String("*1bad".to_string()),
+            &function_type
+        ));
+        assert!(!is_type_compatible(
+            &SlValue::String("*bad.".to_string()),
+            &function_type
+        ));
+        assert!(!is_type_compatible(&SlValue::Bool(true), &function_type));
         assert!(is_type_compatible(
             &SlValue::String("Idle".to_string()),
             &enum_type

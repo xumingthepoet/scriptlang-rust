@@ -90,6 +90,7 @@ pub(crate) struct ParsedFunctionParamDecl {
 pub(crate) enum ParsedTypeExpr {
     Primitive(String),
     Script,
+    Function,
     Array(Box<ParsedTypeExpr>),
     Map {
         key_type: Box<ParsedTypeExpr>,

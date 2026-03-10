@@ -38,6 +38,11 @@ fn script_literal_name_regex() -> &'static Regex {
     })
 }
 
+fn function_ref_var_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").expect("function ref var regex"))
+}
+
 fn qualify_script_literal_name(
     literal_name: &str,
     module_name: Option<&str>,
@@ -103,37 +108,334 @@ fn validate_script_literals_in_expression(
     Ok(())
 }
 
+fn qualify_function_literal_name(
+    literal_name: &str,
+    module_name: Option<&str>,
+    span: &SourceSpan,
+) -> Result<String, ScriptLangError> {
+    if literal_name.contains('.') {
+        return Ok(literal_name.to_string());
+    }
+    if let Some(module_name) = module_name {
+        return Ok(format!("{}.{}", module_name, literal_name));
+    }
+    Err(ScriptLangError::with_span(
+        "XML_FUNCTION_LITERAL_INVALID",
+        format!(
+            "Short function literal \"*{}\" requires module context.",
+            literal_name
+        ),
+        span.clone(),
+    ))
+}
+
+fn parse_function_literal_name(chars: &[char], start: usize) -> Option<(String, usize)> {
+    let mut index = start + 1;
+    let mut name = String::new();
+    let first = *chars.get(index)?;
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return None;
+    }
+    name.push(first);
+    index += 1;
+
+    while let Some(ch) = chars.get(index).copied() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            name.push(ch);
+            index += 1;
+            continue;
+        }
+        if ch == '.' {
+            let next = chars.get(index + 1).copied()?;
+            if !next.is_ascii_alphabetic() && next != '_' {
+                return None;
+            }
+            name.push(ch);
+            index += 1;
+            continue;
+        }
+        break;
+    }
+    Some((name, index))
+}
+
+fn is_function_literal_start(chars: &[char], index: usize) -> bool {
+    if chars[index] != '*' {
+        return false;
+    }
+    if index + 1 >= chars.len() {
+        return false;
+    }
+    let mut left = index;
+    while left > 0 && chars[left - 1].is_whitespace() {
+        left -= 1;
+    }
+    if left == 0 {
+        return true;
+    }
+    let prev = chars[left - 1];
+    !prev.is_ascii_alphanumeric() && prev != '_' && prev != '.' && prev != ')' && prev != ']'
+}
+
+fn normalize_and_validate_function_literals(
+    expr: &str,
+    span: &SourceSpan,
+    module_name: Option<&str>,
+    visible_functions: &BTreeMap<String, FunctionDecl>,
+) -> Result<String, ScriptLangError> {
+    let chars = expr.chars().collect::<Vec<_>>();
+    let mut out = String::with_capacity(expr.len());
+    let mut index = 0usize;
+
+    while index < chars.len() {
+        if is_function_literal_start(&chars, index) {
+            if let Some((literal_name, next_index)) = parse_function_literal_name(&chars, index) {
+                let qualified = qualify_function_literal_name(&literal_name, module_name, span)?;
+                if !visible_functions.contains_key(&qualified) {
+                    return Err(ScriptLangError::with_span(
+                        "XML_FUNCTION_LITERAL_NOT_FOUND",
+                        format!(
+                            "Function literal target \"{}\" not found or not visible.",
+                            qualified
+                        ),
+                        span.clone(),
+                    ));
+                }
+                let mut lookahead = next_index;
+                while lookahead < chars.len() && chars[lookahead].is_whitespace() {
+                    lookahead += 1;
+                }
+                if chars.get(lookahead) == Some(&'(') {
+                    return Err(ScriptLangError::with_span(
+                        "XML_FUNCTION_LITERAL_CALL_FORBIDDEN",
+                        "Function literal cannot be called directly. Use method(...) or module.method(...).",
+                        span.clone(),
+                    ));
+                }
+                out.push('*');
+                out.push_str(&qualified);
+                index = next_index;
+                continue;
+            }
+        }
+
+        out.push(chars[index]);
+        index += 1;
+    }
+
+    Ok(out)
+}
+
+fn extract_first_invoke_arg(chars: &[char], open_paren_index: usize) -> Option<String> {
+    let mut index = open_paren_index;
+    index += 1;
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut quote: Option<char> = None;
+    let mut out = String::new();
+
+    while index < chars.len() {
+        let ch = chars[index];
+        if let Some(active_quote) = quote {
+            out.push(ch);
+            if ch == '\\' && index + 1 < chars.len() {
+                index += 1;
+                out.push(chars[index]);
+            } else if ch == active_quote {
+                quote = None;
+            }
+            index += 1;
+            continue;
+        }
+
+        match ch {
+            '\'' | '"' => {
+                quote = Some(ch);
+                out.push(ch);
+            }
+            '(' => {
+                paren_depth += 1;
+                out.push(ch);
+            }
+            ')' => {
+                if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
+                    return Some(out.trim().to_string());
+                }
+                paren_depth = paren_depth.saturating_sub(1);
+                out.push(ch);
+            }
+            '[' => {
+                bracket_depth += 1;
+                out.push(ch);
+            }
+            ']' => {
+                bracket_depth = bracket_depth.saturating_sub(1);
+                out.push(ch);
+            }
+            '{' => {
+                brace_depth += 1;
+                out.push(ch);
+            }
+            '}' => {
+                brace_depth = brace_depth.saturating_sub(1);
+                out.push(ch);
+            }
+            ',' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                return Some(out.trim().to_string());
+            }
+            _ => out.push(ch),
+        }
+        index += 1;
+    }
+
+    None
+}
+
+fn validate_invoke_first_arg(
+    expr: &str,
+    span: &SourceSpan,
+    local_var_types: &BTreeMap<String, ScriptType>,
+    visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
+    visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
+) -> Result<(), ScriptLangError> {
+    let chars = expr.chars().collect::<Vec<_>>();
+    let mut index = 0usize;
+    while index + 6 <= chars.len() {
+        if chars[index] != 'i' {
+            index += 1;
+            continue;
+        }
+        let candidate = chars[index..chars.len().min(index + 6)]
+            .iter()
+            .collect::<String>();
+        if candidate != "invoke" {
+            index += 1;
+            continue;
+        }
+        let left_ok = if index == 0 {
+            true
+        } else {
+            let prev = chars[index - 1];
+            !prev.is_ascii_alphanumeric() && prev != '_' && prev != '.'
+        };
+        if !left_ok {
+            index += 1;
+            continue;
+        }
+        let mut open_index = index + 6;
+        while open_index < chars.len() && chars[open_index].is_whitespace() {
+            open_index += 1;
+        }
+        if chars.get(open_index) != Some(&'(') {
+            index += 1;
+            continue;
+        }
+        let first_arg = extract_first_invoke_arg(&chars, open_index).unwrap_or_default();
+        if !function_ref_var_regex().is_match(first_arg.trim()) {
+            return Err(ScriptLangError::with_span(
+                "XML_INVOKE_TARGET_VAR_REQUIRED",
+                "invoke first argument must be a function variable name.",
+                span.clone(),
+            ));
+        }
+        let var_name = first_arg.trim();
+        let declared_type = local_var_types
+            .get(var_name)
+            .or_else(|| visible_module_vars.get(var_name).map(|decl| &decl.r#type))
+            .or_else(|| visible_module_consts.get(var_name).map(|decl| &decl.r#type));
+        if !matches!(declared_type, Some(ScriptType::Function)) {
+            return Err(ScriptLangError::with_span(
+                "XML_INVOKE_TARGET_VAR_TYPE",
+                format!(
+                    "invoke first argument \"{}\" must declare type=\"function\".",
+                    var_name
+                ),
+                span.clone(),
+            ));
+        }
+        index = open_index + 1;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
 fn normalize_expression_literals(
     expr: &str,
     span: &SourceSpan,
     all_script_access: &BTreeMap<String, AccessLevel>,
     module_name: Option<&str>,
     visible_types: &BTreeMap<String, ScriptType>,
+    visible_functions: &BTreeMap<String, FunctionDecl>,
+    local_var_types: &BTreeMap<String, ScriptType>,
+    visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
+    visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
 ) -> Result<String, ScriptLangError> {
     validate_script_literals_in_expression(expr, span, all_script_access, module_name)?;
-    rewrite_and_validate_enum_literals_in_expression(expr, visible_types, span)
+    let normalized =
+        normalize_and_validate_function_literals(expr, span, module_name, visible_functions)?;
+    let rewritten =
+        rewrite_and_validate_enum_literals_in_expression(&normalized, visible_types, span)?;
+    validate_invoke_first_arg(
+        &rewritten,
+        span,
+        local_var_types,
+        visible_module_vars,
+        visible_module_consts,
+    )?;
+    Ok(rewritten)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn normalize_attribute_expression_literals(
     expr: &str,
     span: &SourceSpan,
     all_script_access: &BTreeMap<String, AccessLevel>,
     module_name: Option<&str>,
     visible_types: &BTreeMap<String, ScriptType>,
+    visible_functions: &BTreeMap<String, FunctionDecl>,
+    local_var_types: &BTreeMap<String, ScriptType>,
+    visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
+    visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
 ) -> Result<String, ScriptLangError> {
     validate_script_literals_in_expression(expr, span, all_script_access, module_name)?;
-    rewrite_and_validate_enum_literals_in_attr_expression(expr, visible_types, span)
+    let normalized =
+        normalize_and_validate_function_literals(expr, span, module_name, visible_functions)?;
+    let rewritten =
+        rewrite_and_validate_enum_literals_in_attr_expression(&normalized, visible_types, span)?;
+    validate_invoke_first_arg(
+        &rewritten,
+        span,
+        local_var_types,
+        visible_module_vars,
+        visible_module_consts,
+    )?;
+    Ok(rewritten)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn normalize_template_literals(
     template: &str,
     span: &SourceSpan,
     all_script_access: &BTreeMap<String, AccessLevel>,
     module_name: Option<&str>,
     visible_types: &BTreeMap<String, ScriptType>,
+    visible_functions: &BTreeMap<String, FunctionDecl>,
+    local_var_types: &BTreeMap<String, ScriptType>,
+    visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
+    visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
 ) -> Result<String, ScriptLangError> {
     let rewritten = rewrite_and_validate_enum_literals_in_template(template, visible_types, span)?;
     validate_script_literals_in_expression(&rewritten, span, all_script_access, module_name)?;
+    let rewritten =
+        normalize_and_validate_function_literals(&rewritten, span, module_name, visible_functions)?;
+    validate_invoke_first_arg(
+        &rewritten,
+        span,
+        local_var_types,
+        visible_module_vars,
+        visible_module_consts,
+    )?;
     Ok(rewritten)
 }
 
@@ -272,6 +574,7 @@ pub(crate) fn compile_script(
         &expanded_root,
         &mut builder,
         visible_types,
+        visible_functions,
         visible_module_vars,
         visible_module_consts,
         all_script_access,
@@ -317,6 +620,7 @@ pub(crate) fn compile_group(
         &BTreeMap::new(),
         &BTreeMap::new(),
         &BTreeMap::new(),
+        &BTreeMap::new(),
         None,
         visible_var_types,
         mode,
@@ -330,6 +634,7 @@ fn compile_group_with_context(
     container: &XmlElementNode,
     builder: &mut GroupBuilder,
     visible_types: &BTreeMap<String, ScriptType>,
+    visible_functions: &BTreeMap<String, FunctionDecl>,
     visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
     visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
     all_script_access: &BTreeMap<String, AccessLevel>,
@@ -355,6 +660,7 @@ fn compile_group_with_context(
         container,
         builder,
         visible_types,
+        visible_functions,
         visible_module_vars,
         visible_module_consts,
         all_script_access,
@@ -379,6 +685,7 @@ fn compile_child_group(
     child_container: &XmlElementNode,
     builder: &mut GroupBuilder,
     visible_types: &BTreeMap<String, ScriptType>,
+    visible_functions: &BTreeMap<String, FunctionDecl>,
     visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
     visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
     all_script_access: &BTreeMap<String, AccessLevel>,
@@ -392,6 +699,7 @@ fn compile_child_group(
         child_container,
         builder,
         visible_types,
+        visible_functions,
         visible_module_vars,
         visible_module_consts,
         all_script_access,
@@ -407,6 +715,7 @@ pub(crate) fn compile_group_nodes(
     container: &XmlElementNode,
     builder: &mut GroupBuilder,
     visible_types: &BTreeMap<String, ScriptType>,
+    visible_functions: &BTreeMap<String, FunctionDecl>,
     visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
     visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
     all_script_access: &BTreeMap<String, AccessLevel>,
@@ -435,6 +744,7 @@ pub(crate) fn compile_group_nodes(
                     child,
                     builder,
                     visible_types,
+                    visible_functions,
                     visible_module_vars,
                     visible_module_consts,
                     all_script_access,
@@ -470,6 +780,10 @@ pub(crate) fn compile_group_nodes(
                         all_script_access,
                         module_name,
                         visible_types,
+                        visible_functions,
+                        local_var_types,
+                        visible_module_vars,
+                        visible_module_consts,
                     )?;
                     if matches!(declaration.r#type, ScriptType::Script)
                         && (expr.trim_start().starts_with('"')
@@ -478,6 +792,16 @@ pub(crate) fn compile_group_nodes(
                         return Err(ScriptLangError::with_span(
                             "XML_SCRIPT_ASSIGN_STRING_FORBIDDEN",
                             "script type does not accept plain string literal; use @module.script.",
+                            child.location.clone(),
+                        ));
+                    }
+                    if matches!(declaration.r#type, ScriptType::Function)
+                        && (expr.trim_start().starts_with('"')
+                            || expr.trim_start().starts_with('\''))
+                    {
+                        return Err(ScriptLangError::with_span(
+                            "XML_FUNCTION_ASSIGN_STRING_FORBIDDEN",
+                            "function type does not accept plain string literal; use *module.function.",
                             child.location.clone(),
                         ));
                     }
@@ -497,6 +821,10 @@ pub(crate) fn compile_group_nodes(
                     all_script_access,
                     module_name,
                     visible_types,
+                    visible_functions,
+                    local_var_types,
+                    visible_module_vars,
+                    visible_module_consts,
                 )?,
                 tag: get_optional_attr(child, "tag")
                     .map(|value| value.trim().to_string())
@@ -520,6 +848,10 @@ pub(crate) fn compile_group_nodes(
                         all_script_access,
                         module_name,
                         visible_types,
+                        visible_functions,
+                        local_var_types,
+                        visible_module_vars,
+                        visible_module_consts,
                     )?,
                     location: child.location.clone(),
                 }
@@ -531,6 +863,10 @@ pub(crate) fn compile_group_nodes(
                     all_script_access,
                     module_name,
                     visible_types,
+                    visible_functions,
+                    local_var_types,
+                    visible_module_vars,
+                    visible_module_consts,
                 )?;
                 ScriptNode::Code {
                     id: builder.next_node_id("code"),
@@ -565,6 +901,7 @@ pub(crate) fn compile_group_nodes(
                     &then_container,
                     builder,
                     visible_types,
+                    visible_functions,
                     visible_module_vars,
                     visible_module_consts,
                     all_script_access,
@@ -581,6 +918,7 @@ pub(crate) fn compile_group_nodes(
                         else_child,
                         builder,
                         visible_types,
+                        visible_functions,
                         visible_module_vars,
                         visible_module_consts,
                         all_script_access,
@@ -610,6 +948,10 @@ pub(crate) fn compile_group_nodes(
                             all_script_access,
                             module_name,
                             visible_types,
+                            visible_functions,
+                            local_var_types,
+                            visible_module_vars,
+                            visible_module_consts,
                         )?
                     },
                     then_group_id,
@@ -626,6 +968,7 @@ pub(crate) fn compile_group_nodes(
                     child,
                     builder,
                     visible_types,
+                    visible_functions,
                     visible_module_vars,
                     visible_module_consts,
                     all_script_access,
@@ -643,6 +986,10 @@ pub(crate) fn compile_group_nodes(
                             all_script_access,
                             module_name,
                             visible_types,
+                            visible_functions,
+                            local_var_types,
+                            visible_module_vars,
+                            visible_module_consts,
                         )?
                     },
                     body_group_id,
@@ -656,6 +1003,10 @@ pub(crate) fn compile_group_nodes(
                     all_script_access,
                     module_name,
                     visible_types,
+                    visible_functions,
+                    local_var_types,
+                    visible_module_vars,
+                    visible_module_consts,
                 )?;
                 let mut entries = Vec::new();
                 let mut fall_over_seen = 0usize;
@@ -674,6 +1025,10 @@ pub(crate) fn compile_group_nodes(
                                         all_script_access,
                                         module_name,
                                         visible_types,
+                                        visible_functions,
+                                        local_var_types,
+                                        visible_module_vars,
+                                        visible_module_consts,
                                     )
                                 })
                                 .transpose()?;
@@ -697,6 +1052,7 @@ pub(crate) fn compile_group_nodes(
                                 choice_child,
                                 builder,
                                 visible_types,
+                                visible_functions,
                                 visible_module_vars,
                                 visible_module_consts,
                                 all_script_access,
@@ -715,6 +1071,10 @@ pub(crate) fn compile_group_nodes(
                                         all_script_access,
                                         module_name,
                                         visible_types,
+                                        visible_functions,
+                                        local_var_types,
+                                        visible_module_vars,
+                                        visible_module_consts,
                                     )?,
                                     when_expr,
                                     once,
@@ -783,6 +1143,7 @@ pub(crate) fn compile_group_nodes(
                                 template_option,
                                 builder,
                                 visible_types,
+                                visible_functions,
                                 visible_module_vars,
                                 visible_module_consts,
                                 all_script_access,
@@ -805,6 +1166,10 @@ pub(crate) fn compile_group_nodes(
                                             all_script_access,
                                             module_name,
                                             visible_types,
+                                            visible_functions,
+                                            local_var_types,
+                                            visible_module_vars,
+                                            visible_module_consts,
                                         )?,
                                         when_expr: {
                                             let when_expr =
@@ -817,6 +1182,10 @@ pub(crate) fn compile_group_nodes(
                                                         all_script_access,
                                                         module_name,
                                                         visible_types,
+                                                        visible_functions,
+                                                        local_var_types,
+                                                        visible_module_vars,
+                                                        visible_module_consts,
                                                     )?;
                                                 Some(rewritten)
                                             } else {
@@ -944,6 +1313,10 @@ pub(crate) fn compile_group_nodes(
                                 all_script_access,
                                 module_name,
                                 visible_types,
+                                visible_functions,
+                                local_var_types,
+                                visible_module_vars,
+                                visible_module_consts,
                             )?;
                             Ok::<_, ScriptLangError>(arg)
                         })
@@ -961,6 +1334,10 @@ pub(crate) fn compile_group_nodes(
                             all_script_access,
                             module_name,
                             visible_types,
+                            visible_functions,
+                            local_var_types,
+                            visible_module_vars,
+                            visible_module_consts,
                         )?;
                         Ok::<_, ScriptLangError>(arg)
                     })
@@ -1295,6 +1672,7 @@ mod script_compile_tests {
             ScriptType::Primitive { .. } => "primitive",
             ScriptType::Enum { .. } => "enum",
             ScriptType::Script => "script",
+            ScriptType::Function => "function",
             ScriptType::Array { .. } => "array",
             ScriptType::Map { .. } => "map",
             ScriptType::Object { .. } => "object",
@@ -1304,6 +1682,7 @@ mod script_compile_tests {
     #[test]
     fn parse_var_declaration_rejects_value_attr_and_child_elements() {
         assert_eq!(script_type_kind(&ScriptType::Script), "script");
+        assert_eq!(script_type_kind(&ScriptType::Function), "function");
         assert_eq!(
             script_type_kind(&ScriptType::Enum {
                 type_name: "Status".to_string(),
@@ -1459,6 +1838,265 @@ mod script_compile_tests {
         );
         let error = parse_function_return(&invalid_return).expect_err("invalid return type");
         assert_eq!(error.code, "TYPE_PARSE_ERROR");
+    }
+
+    #[test]
+    fn function_literal_and_invoke_validation_helpers_cover_new_paths() {
+        let span = SourceSpan::synthetic();
+        let mut visible_functions = BTreeMap::new();
+        visible_functions.insert(
+            "main.add".to_string(),
+            FunctionDecl {
+                name: "main.add".to_string(),
+                params: vec![FunctionParam {
+                    name: "x".to_string(),
+                    r#type: ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                    location: span.clone(),
+                }],
+                return_binding: FunctionReturn {
+                    name: "out".to_string(),
+                    r#type: ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                    location: span.clone(),
+                },
+                code: "out = x;".to_string(),
+                location: span.clone(),
+            },
+        );
+
+        assert_eq!(
+            qualify_function_literal_name("main.add", Some("main"), &span).expect("qualified"),
+            "main.add"
+        );
+        assert_eq!(
+            qualify_function_literal_name("add", Some("main"), &span).expect("short"),
+            "main.add"
+        );
+        let short_no_module =
+            qualify_function_literal_name("add", None, &span).expect_err("short should fail");
+        assert_eq!(short_no_module.code, "XML_FUNCTION_LITERAL_INVALID");
+
+        let parsed = parse_function_literal_name(&"*main.add".chars().collect::<Vec<_>>(), 0)
+            .expect("function literal parse");
+        assert_eq!(parsed.0, "main.add");
+        assert!(
+            parse_function_literal_name(&"*bad.".chars().collect::<Vec<_>>(), 0).is_none(),
+            "invalid function literal should fail parse"
+        );
+
+        assert!(is_function_literal_start(
+            &"*add".chars().collect::<Vec<_>>(),
+            0
+        ));
+        assert!(!is_function_literal_start(
+            &"x *add".chars().collect::<Vec<_>>(),
+            2
+        ));
+
+        let normalized = normalize_and_validate_function_literals(
+            "f = *add; g = *main.add;",
+            &span,
+            Some("main"),
+            &visible_functions,
+        )
+        .expect("function literal normalize");
+        assert_eq!(normalized, "f = *main.add; g = *main.add;");
+
+        let call_error = normalize_and_validate_function_literals(
+            "*main.add(1)",
+            &span,
+            Some("main"),
+            &visible_functions,
+        )
+        .expect_err("direct function literal call should fail");
+        assert_eq!(call_error.code, "XML_FUNCTION_LITERAL_CALL_FORBIDDEN");
+
+        let missing_error = normalize_and_validate_function_literals(
+            "*main.missing",
+            &span,
+            Some("main"),
+            &visible_functions,
+        )
+        .expect_err("missing function literal should fail");
+        assert_eq!(missing_error.code, "XML_FUNCTION_LITERAL_NOT_FOUND");
+
+        let chars = "invoke(fnRef, [1, foo(2)])".chars().collect::<Vec<_>>();
+        assert_eq!(
+            extract_first_invoke_arg(&chars, 6).as_deref(),
+            Some("fnRef"),
+            "extract first invoke arg should keep first segment"
+        );
+        let broken = "invoke(fnRef".chars().collect::<Vec<_>>();
+        assert!(
+            extract_first_invoke_arg(&broken, 6).is_none(),
+            "broken invoke should not extract arg"
+        );
+
+        let mut local_var_types = BTreeMap::new();
+        local_var_types.insert("fnRef".to_string(), ScriptType::Function);
+        validate_invoke_first_arg(
+            "invoke(fnRef, [1])",
+            &span,
+            &local_var_types,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("function var invoke should pass");
+
+        let invoke_literal_error = validate_invoke_first_arg(
+            "invoke(*main.add, [1])",
+            &span,
+            &local_var_types,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect_err("invoke literal should fail");
+        assert_eq!(invoke_literal_error.code, "XML_INVOKE_TARGET_VAR_REQUIRED");
+
+        let mut non_function_vars = BTreeMap::new();
+        non_function_vars.insert(
+            "x".to_string(),
+            ScriptType::Primitive {
+                name: "int".to_string(),
+            },
+        );
+        let invoke_non_function_error = validate_invoke_first_arg(
+            "invoke(x, [1])",
+            &span,
+            &non_function_vars,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect_err("invoke non-function var should fail");
+        assert_eq!(invoke_non_function_error.code, "XML_INVOKE_TARGET_VAR_TYPE");
+
+        let fallback_literal = normalize_and_validate_function_literals(
+            "*1bad",
+            &span,
+            Some("main"),
+            &visible_functions,
+        )
+        .expect("invalid function literal token should stay raw");
+        assert_eq!(fallback_literal, "*1bad");
+        assert!(!is_function_literal_start(
+            &"*".chars().collect::<Vec<_>>(),
+            0
+        ));
+
+        let mut all_script_access = BTreeMap::new();
+        all_script_access.insert("main.next".to_string(), AccessLevel::Public);
+        let normalized_expr = normalize_expression_literals(
+            "target = *add; step = @next; invoke(fnRef, [1]);",
+            &span,
+            &all_script_access,
+            Some("main"),
+            &BTreeMap::new(),
+            &visible_functions,
+            &local_var_types,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("normalize expression should pass");
+        assert!(normalized_expr.contains("*main.add"));
+        assert!(normalized_expr.contains("@next"));
+
+        let normalized_attr = normalize_attribute_expression_literals(
+            "invoke(fnRef, [1])",
+            &span,
+            &all_script_access,
+            Some("main"),
+            &BTreeMap::new(),
+            &visible_functions,
+            &local_var_types,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("normalize attr should pass");
+        assert_eq!(normalized_attr, "invoke(fnRef, [1])");
+
+        let normalized_template = normalize_template_literals(
+            "go ${invoke(fnRef, [1])}",
+            &span,
+            &all_script_access,
+            Some("main"),
+            &BTreeMap::new(),
+            &visible_functions,
+            &local_var_types,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("normalize template should pass");
+        assert!(normalized_template.contains("invoke(fnRef, [1])"));
+
+        let nested_chars = r#"invoke(foo("a\"b", [1], {k: (2)}), [3])"#
+            .chars()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            extract_first_invoke_arg(&nested_chars, 6).as_deref(),
+            Some(r#"foo("a\"b", [1], {k: (2)})"#)
+        );
+
+        validate_invoke_first_arg(
+            "obj.invoke(fnRef, [1])",
+            &span,
+            &local_var_types,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("non-builtin invoke call should be ignored");
+        validate_invoke_first_arg(
+            "invoke fnRef, [1]",
+            &span,
+            &local_var_types,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("invoke without open paren should be ignored");
+    }
+
+    #[test]
+    fn function_temp_rejects_plain_string_initializer() {
+        let root = parse_xml_document(
+            r#"<script name="main"><temp name="fnRef" type="function">"main.add"</temp></script>"#,
+        )
+        .expect("xml")
+        .root;
+        let mut visible_functions = BTreeMap::new();
+        visible_functions.insert(
+            "main.add".to_string(),
+            FunctionDecl {
+                name: "main.add".to_string(),
+                params: Vec::new(),
+                return_binding: FunctionReturn {
+                    name: "out".to_string(),
+                    r#type: ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                    location: SourceSpan::synthetic(),
+                },
+                code: "out = 1;".to_string(),
+                location: SourceSpan::synthetic(),
+            },
+        );
+        let error = compile_script(CompileScriptOptions {
+            script_path: "main.xml",
+            root: &root,
+            script_access: AccessLevel::Public,
+            qualified_script_name: Some("main.main"),
+            module_name: Some("main"),
+            visible_types: &BTreeMap::new(),
+            visible_functions: &visible_functions,
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+            all_script_access: &BTreeMap::new(),
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
+        })
+        .expect_err("function temp with string should fail");
+        assert_eq!(error.code, "XML_FUNCTION_ASSIGN_STRING_FORBIDDEN");
     }
 
     #[test]

@@ -46,6 +46,7 @@ pub enum ScriptType {
         members: Vec<String>,
     },
     Script,
+    Function,
     Array {
         element_type: Box<ScriptType>,
     },

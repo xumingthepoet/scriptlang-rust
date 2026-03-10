@@ -115,6 +115,7 @@ pub(crate) fn resolve_type_expr_with_lookup_with_aliases(
 ) -> Result<ScriptType, ScriptLangError> {
     match expr {
         ParsedTypeExpr::Script => Ok(ScriptType::Script),
+        ParsedTypeExpr::Function => Ok(ScriptType::Function),
         ParsedTypeExpr::Primitive(name) => Ok(ScriptType::Primitive { name: name.clone() }),
         ParsedTypeExpr::Array(element_type) => {
             let resolved_element = resolve_type_expr_with_lookup_with_aliases(
@@ -180,6 +181,7 @@ pub(crate) fn resolve_type_expr(
 ) -> Result<ScriptType, ScriptLangError> {
     match expr {
         ParsedTypeExpr::Script => Ok(ScriptType::Script),
+        ParsedTypeExpr::Function => Ok(ScriptType::Function),
         ParsedTypeExpr::Primitive(name) => Ok(ScriptType::Primitive { name: name.clone() }),
         ParsedTypeExpr::Array(element_type) => Ok(ScriptType::Array {
             element_type: Box::new(resolve_type_expr(element_type, resolved_types, span)?),
@@ -406,6 +408,7 @@ mod type_expr_tests {
             ScriptType::Primitive { .. } => "primitive",
             ScriptType::Enum { .. } => "enum",
             ScriptType::Script => "script",
+            ScriptType::Function => "function",
             ScriptType::Array { .. } => "array",
             ScriptType::Map { .. } => "map",
             ScriptType::Object { .. } => "object",
@@ -415,6 +418,7 @@ mod type_expr_tests {
     #[test]
     fn type_resolution_helpers_cover_nested_array_and_map_paths() {
         assert_eq!(script_type_kind(&ScriptType::Script), "script");
+        assert_eq!(script_type_kind(&ScriptType::Function), "function");
         let span = SourceSpan::synthetic();
         let mut resolved = BTreeMap::new();
         let mut visiting = HashSet::new();
@@ -466,6 +470,15 @@ mod type_expr_tests {
         )
         .expect("script type should resolve");
         assert_eq!(script_type_kind(&script), "script");
+        let function = resolve_type_expr_with_lookup(
+            &ParsedTypeExpr::Function,
+            &type_map,
+            &mut resolved,
+            &mut visiting,
+            &span,
+        )
+        .expect("function type should resolve");
+        assert_eq!(script_type_kind(&function), "function");
 
         let array_err = resolve_type_expr_with_lookup(
             &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Custom("Missing".to_string()))),

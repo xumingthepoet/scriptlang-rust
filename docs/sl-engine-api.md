@@ -57,12 +57,17 @@
     - 运行时 map 仍是字符串 key（`BTreeMap<String, SlValue>`）
   - 可作为“离线编译后运行”的稳定输入
 
-### 2.6 enum 运行约束（V1）
+### 2.6 enum / function 运行约束（V1）
 
 - enum 在结构化声明位点必须显式给 `Type.Member`（如 `<temp>/<var>/<const>`）。
 - `Type.Member` 在编译期会重写为对应 member 名字符串。
 - 对可静态定位目标脚本的 `call/return`，参数个数在编译期校验。
 - 动态目标调用仍保留运行时校验。
+- `function` 已是内建类型，值语义为 `*module.func` 或 `*short` 引用字符串。
+- `invoke` 仅支持 `invoke(fnVar, [args])`：
+  - 第一参数必须是 `function` 类型变量；
+  - 不支持 `invoke("module.func", [args])`；
+  - 不支持 `invoke(*module.func, [args])`。
 
 ## 3. `sl-api` 高层 API
 
