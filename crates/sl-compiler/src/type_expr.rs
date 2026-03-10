@@ -490,6 +490,35 @@ mod type_expr_tests {
         .expect_err("unknown map value type should fail");
         assert_eq!(map_err.code, "TYPE_UNKNOWN");
 
+        // Test invalid map key type (int) via resolve_type_expr_with_lookup_with_aliases
+        // This covers line 153 (resolve_map_key_type error path)
+        let map_invalid_key = resolve_type_expr_with_lookup(
+            &ParsedTypeExpr::Map {
+                key_type: Box::new(ParsedTypeExpr::Primitive("int".to_string())),
+                value_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+            },
+            &type_map,
+            &mut resolved,
+            &mut visiting,
+            &span,
+        )
+        .expect_err("map key int should be rejected in resolve_type_expr_with_lookup");
+        assert_eq!(map_invalid_key.code, "TYPE_MAP_KEY_UNSUPPORTED");
+
+        // Test map key type that fails to resolve (unknown custom type) - covers line 143
+        let map_key_unknown = resolve_type_expr_with_lookup(
+            &ParsedTypeExpr::Map {
+                key_type: Box::new(ParsedTypeExpr::Custom("NonExistent".to_string())),
+                value_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+            },
+            &type_map,
+            &mut resolved,
+            &mut visiting,
+            &span,
+        )
+        .expect_err("map key unknown type should fail to resolve");
+        assert_eq!(map_key_unknown.code, "TYPE_UNKNOWN");
+
         let _ = parse_type_expr("#{int[]}", &span).expect("type should parse");
         let nested_array_error =
             parse_type_expr("Custom[]]", &span).expect_err("invalid nested array syntax");
@@ -554,6 +583,7 @@ mod type_expr_tests {
         .expect("enum key map should resolve");
         assert_eq!(script_type_kind(&enum_key_map), "map");
 
+        // Test invalid map key type (int) - covers resolve_map_key_type error path (line 193)
         let invalid_key = resolve_type_expr(
             &ParsedTypeExpr::Map {
                 key_type: Box::new(ParsedTypeExpr::Primitive("int".to_string())),
@@ -564,6 +594,18 @@ mod type_expr_tests {
         )
         .expect_err("map key int should be rejected");
         assert_eq!(invalid_key.code, "TYPE_MAP_KEY_UNSUPPORTED");
+
+        // Test map key type that fails to resolve (unknown custom type) - covers line 191
+        let key_resolve_fail = resolve_type_expr(
+            &ParsedTypeExpr::Map {
+                key_type: Box::new(ParsedTypeExpr::Custom("NonExistent".to_string())),
+                value_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+            },
+            &resolved_types,
+            &span,
+        )
+        .expect_err("map key unknown type should fail to resolve");
+        assert_eq!(key_resolve_fail.code, "TYPE_UNKNOWN");
 
         let type_node_reserved = xml_element(
             "type",

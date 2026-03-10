@@ -795,6 +795,26 @@ mod xml_utils_tests {
         let bad_map_value = parse_type_expr("#{[]}", &span).expect_err("invalid map value type");
         assert_eq!(bad_map_value.code, "TYPE_PARSE_ERROR");
 
+        // Test empty key in map type - covers split_map_type_key_value returning None (line 103)
+        let empty_key = parse_type_expr("#{=>int}", &span).expect_err("empty key");
+        assert_eq!(empty_key.code, "TYPE_PARSE_ERROR");
+
+        // Test empty value in map type - covers split_map_type_key_value returning None
+        let empty_value = parse_type_expr("#{State=>}", &span).expect_err("empty value");
+        assert_eq!(empty_value.code, "TYPE_PARSE_ERROR");
+
+        // Test invalid key type - covers parse_type_expr error propagation for key type (line 33-34)
+        // When split_map_type_key_value returns Some but parsing key type fails
+        let invalid_key_type =
+            parse_type_expr("#{{invalid}=>int}", &span).expect_err("invalid key type");
+        assert_eq!(invalid_key_type.code, "TYPE_PARSE_ERROR");
+
+        // Test invalid value type - covers parse_type_expr error propagation for value type (line 34)
+        // When split_map_type_key_value returns Some but parsing value type fails
+        let invalid_value_type =
+            parse_type_expr("#{State=>[invalid]}", &span).expect_err("invalid value type");
+        assert_eq!(invalid_value_type.code, "TYPE_PARSE_ERROR");
+
         let args = parse_args(Some("1, ref:hp, a + 1".to_string())).expect("args");
         assert_eq!(args.len(), 3);
         assert!(args[1].is_ref);
@@ -1288,6 +1308,119 @@ mod xml_utils_tests {
             &span,
         )
         .expect("non-static expression should skip compile-time validation");
+
+        // Test quoted keys - covers decode_static_map_key quote handling (line 752-753)
+        validate_enum_map_initializer_keys_if_static(
+            "#{\"A\": 1, \"B\": 2}",
+            "ids.LocationId",
+            &members,
+            &span,
+        )
+        .expect("valid quoted map keys should pass");
+
+        // Test single-quoted keys - covers single quote handling
+        validate_enum_map_initializer_keys_if_static(
+            "#{'A': 1, 'B': 2}",
+            "ids.LocationId",
+            &members,
+            &span,
+        )
+        .expect("valid single-quoted map keys should pass");
+
+        // Test map with colon in value (not key) - covers bracket/brace depth handling
+        validate_enum_map_initializer_keys_if_static(
+            "#{A: #{X: 1}}",
+            "ids.LocationId",
+            &members,
+            &span,
+        )
+        .expect("nested map should pass validation");
+
+        // Test map with array value containing colon - covers bracket depth
+        validate_enum_map_initializer_keys_if_static(
+            "#{A: [1, 2]}",
+            "ids.LocationId",
+            &members,
+            &span,
+        )
+        .expect("array value should pass");
+
+        // Test empty map literal - covers empty check at line 744
+        validate_enum_map_initializer_keys_if_static("#{}", "ids.LocationId", &members, &span)
+            .expect("empty map should pass");
+
+        // Test key with colon in parentheses - covers paren depth at line 725-726
+        validate_enum_map_initializer_keys_if_static(
+            "#{A: (x: 1)}",
+            "ids.LocationId",
+            &members,
+            &span,
+        )
+        .expect("parenthesized value should pass");
+
+        // Test key with quoted string - covers quote handling in extract_map_literal_key_expr (lines 724-727)
+        // Key is a quoted string, not the value
+        validate_enum_map_initializer_keys_if_static(
+            "#{\"A\": 1}",
+            "ids.LocationId",
+            &members,
+            &span,
+        )
+        .expect("quoted key should pass");
+
+        // Test entry without colon (no key:value pair) - covers continue at line 679 when extract returns None
+        validate_enum_map_initializer_keys_if_static(
+            "#{A: 1, some_expr}",
+            "ids.LocationId",
+            &members,
+            &span,
+        )
+        .expect("non-key-value expression should be skipped");
+
+        // Test key with escaped quote inside string - covers escape character handling in extract_map_literal_key_expr (line 708-709)
+        // This exercises the ch == '\\' branch when processing escaped characters inside quotes
+        validate_enum_map_initializer_keys_if_static(
+            "#{A\\\"B: 1}",
+            "ids.LocationId",
+            &members,
+            &span,
+        )
+        .expect("escaped char in key should pass");
+
+        // Test numeric key - covers decode_static_map_key returning None (line 679)
+        // "123" is extracted as key but decode_static_map_key returns None for non-identifier strings
+        validate_enum_map_initializer_keys_if_static(
+            "#{123: 1}",
+            "ids.LocationId",
+            &members,
+            &span,
+        )
+        .expect("numeric key should be skipped");
+
+        // Test key with only whitespace - covers decode_static_map_key returning None at line 744
+        // when trimmed is empty
+        validate_enum_map_initializer_keys_if_static("#{  : 1}", "ids.LocationId", &members, &span)
+            .expect("whitespace-only key should be skipped");
+
+        // Test key with dot (qualified name) - should be skipped by decode_static_map_key
+        // as it returns early when type_name_regex matches but contains '.'
+        validate_enum_map_initializer_keys_if_static(
+            "#{A.B: 1}",
+            "ids.LocationId",
+            &members,
+            &span,
+        )
+        .expect("qualified name key should be skipped");
+
+        // Test key with special prefix - covers decode_static_map_key reaching line 751
+        // when key is not identifier, not quoted, but non-empty
+        validate_enum_map_initializer_keys_if_static(
+            "#{@invalid: 1}",
+            "ids.LocationId",
+            &members,
+            &span,
+        )
+        .expect("special prefix key should be skipped");
     }
 
     #[test]
