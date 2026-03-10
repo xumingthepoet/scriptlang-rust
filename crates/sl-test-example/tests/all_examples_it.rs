@@ -115,6 +115,11 @@ fn example_27_dynamic_transfer_target_matches_testcase() {
 }
 
 #[test]
+fn example_28_map_coverage_matches_testcase() {
+    assert_example("28-map-coverage");
+}
+
+#[test]
 fn example_22_access_control_matches_testcase() {
     assert_example("22-access-control");
 }

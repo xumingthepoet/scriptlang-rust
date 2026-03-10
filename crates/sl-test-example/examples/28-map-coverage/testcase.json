@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "sl-tool-case",
+  "entryScript": "main.main",
+  "actions": [
+    { "kind": "choose", "index": 0 }
+  ],
+  "expectedEvents": [
+    { "kind": "text", "text": "hp0=10" },
+    { "kind": "text", "text": "hp1=13" },
+    { "kind": "text", "text": "hp2=15" },
+    { "kind": "text", "text": "if-ok" },
+    { "kind": "choices", "promptText": "Map gate", "choices": ["Proceed"] },
+    { "kind": "text", "text": "choice-ok" },
+    { "kind": "text", "text": "hp3=24" },
+    { "kind": "text", "text": "gold0=5" },
+    { "kind": "text", "text": "gold1=7" },
+    { "kind": "text", "text": "gold2=8" },
+    { "kind": "text", "text": "apple=3" },
+    { "kind": "text", "text": "slot3=3" },
+    { "kind": "end" }
+  ]
+}

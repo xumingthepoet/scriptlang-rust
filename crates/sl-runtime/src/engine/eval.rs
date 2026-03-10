@@ -158,7 +158,12 @@ impl ScriptLangEngine {
                 .get(1)
                 .expect("capture group 1 must exist for each regex capture");
             output.push_str(&template[last_index..full.start()]);
-            let value = self.eval_expression(expr.as_str())?;
+            let value = self.execute_rhai_with_mode(
+                expr.as_str(),
+                true,
+                "text interpolation",
+                RhaiInputMode::TextInterpolationExpr,
+            )?;
             output.push_str(&slvalue_to_text(&value));
             last_index = full.end();
         }
@@ -1514,6 +1519,27 @@ mod eval_tests {
             .next_output()
             .expect_err("attribute double quote string should fail");
         assert_eq!(error.code, "RHAI_PREPROCESS_FORBIDDEN_DOUBLE_QUOTE");
+    }
+
+    #[test]
+    pub(super) fn text_interpolation_uses_double_quote_mode() {
+        let mut supported = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><temp name="name" type="string">"Rin"</temp><text>${name == "Rin"}</text></script>"#,
+        )]));
+        supported.start("main", None).expect("start");
+        let output = supported.next_output().expect("text");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "true"));
+
+        let mut forbidden = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><temp name="name" type="string">"Rin"</temp><text>${name == 'Rin'}</text></script>"#,
+        )]));
+        forbidden.start("main", None).expect("start");
+        let error = forbidden
+            .next_output()
+            .expect_err("single quote in text interpolation should fail");
+        assert_eq!(error.code, "RHAI_PREPROCESS_FORBIDDEN_SINGLE_QUOTE");
     }
 
     #[test]

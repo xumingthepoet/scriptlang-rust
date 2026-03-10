@@ -1,0 +1,55 @@
+<module name="main" default_access="public">
+  <var name="wallet" type="#{int}">#{gold: 5}</var>
+
+  <function name="boostCopy" args="#{int}:source,int:delta" return="#{int}:out">
+    out = source;
+    out["hp"] = out["hp"] + delta;
+  </function>
+
+  <script name="boostByRef" args="ref:#{int}:stats">
+    <code>stats["hp"] = stats["hp"] + 5;</code>
+    <return/>
+  </script>
+
+  <script name="main">
+    <temp name="stats" type="#{int}">#{hp: 10, mp: 2}</temp>
+    <temp name="nested" type="#{#{int}}">#{bag: #{apple: 1}}</temp>
+    <temp name="slots" type="#{int[]}">#{line: [1, 2]}</temp>
+
+    <text>hp0=${stats["hp"]}</text>
+    <code>stats["hp"] = stats["hp"] + 3;</code>
+    <text>hp1=${stats["hp"]}</text>
+
+    <code>let key = "hp"; stats[key] = stats[key] + 2;</code>
+    <text>hp2=${stats["hp"]}</text>
+
+    <if when="stats['hp'] > 10">
+      <text>if-ok</text>
+      <else>
+        <text>if-bad</text>
+      </else>
+    </if>
+
+    <choice text="Map gate">
+      <option text="Proceed" when="stats['hp'] > 10">
+        <call script="@boostByRef" args="ref:stats"/>
+        <text>choice-ok</text>
+      </option>
+    </choice>
+
+    <code>stats = boostCopy(stats, 4);</code>
+    <text>hp3=${stats["hp"]}</text>
+
+    <text>gold0=${wallet["gold"]}</text>
+    <code>wallet["gold"] = wallet["gold"] + stats["mp"];</code>
+    <text>gold1=${wallet["gold"]}</text>
+    <code>wallet.gold = wallet.gold + 1;</code>
+    <text>gold2=${wallet.gold}</text>
+
+    <code>nested["bag"]["apple"] = nested["bag"]["apple"] + 2;</code>
+    <text>apple=${nested["bag"]["apple"]}</text>
+
+    <code>slots["line"].push(3);</code>
+    <text>slot3=${slots["line"][2]}</text>
+  </script>
+</module>

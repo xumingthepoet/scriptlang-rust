@@ -130,6 +130,7 @@ pub(crate) fn replace_module_global_symbol(
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum RhaiInputMode {
     AttributeExpr,
+    TextInterpolationExpr,
     CodeBlock,
 }
 
@@ -150,6 +151,14 @@ pub(crate) fn preprocess_scriptlang_rhai_input(
                     out.push_str(&encoded);
                     index = next_index;
                 }
+                RhaiInputMode::TextInterpolationExpr => {
+                    return Err(preprocess_error(
+                        "RHAI_PREPROCESS_FORBIDDEN_SINGLE_QUOTE",
+                        context,
+                        "single-quoted strings are forbidden in text interpolation expressions",
+                        "Use double-quoted strings like \"text\" inside ${...}.",
+                    ));
+                }
                 RhaiInputMode::CodeBlock => {
                     return Err(preprocess_error(
                         "RHAI_PREPROCESS_FORBIDDEN_SINGLE_QUOTE",
@@ -168,7 +177,7 @@ pub(crate) fn preprocess_scriptlang_rhai_input(
                         "Use single-quoted strings like 'text' in XML attributes.",
                     ));
                 }
-                RhaiInputMode::CodeBlock => {
+                RhaiInputMode::TextInterpolationExpr | RhaiInputMode::CodeBlock => {
                     out.push('"');
                     index += 1;
                     let mut closed = false;
@@ -787,6 +796,25 @@ mod rhai_bridge_tests {
             unterminated_string.code,
             "RHAI_PREPROCESS_STRING_UNTERMINATED"
         );
+    }
+
+    #[test]
+    fn preprocess_text_interpolation_uses_double_quote_rules() {
+        let rewritten = preprocess_scriptlang_rhai_input(
+            r#"name == "Rin" AND hp LTE 1"#,
+            "text interpolation",
+            RhaiInputMode::TextInterpolationExpr,
+        )
+        .expect("text interpolation should allow double quotes");
+        assert_eq!(rewritten, r#"name == "Rin" && hp <= 1"#);
+
+        let single_quote = preprocess_scriptlang_rhai_input(
+            "name == 'Rin'",
+            "text interpolation",
+            RhaiInputMode::TextInterpolationExpr,
+        )
+        .expect_err("text interpolation should reject single quotes");
+        assert_eq!(single_quote.code, "RHAI_PREPROCESS_FORBIDDEN_SINGLE_QUOTE");
     }
 
     #[test]

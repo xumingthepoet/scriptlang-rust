@@ -38,6 +38,7 @@ This catalog keeps example intent explicit so examples can be refactored without
 | `25-function-invoke` | function-call + invoke composition |
 | `26-enum-flow` | `<enum>` + `Type.Member` in attribute args |
 | `27-dynamic-transfer-target` | dynamic script target for call/return |
+| `28-map-coverage` | map `#{T}` full-path usage (declaration/read-write/nested/array/ref/function/when) |
 
 ## Notes
 - `26-enum-flow` intentionally covers enum member usage directly in XML attribute expressions (`args="ids.LocationId.A"`).
