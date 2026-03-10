@@ -23,8 +23,9 @@ for ((round = 1; round <= MAX_ROUNDS; round++)); do
   echo "$claude_output"
   echo "claude exit code: ${claude_status}"
   if [[ "$claude_status" -ne 0 ]]; then
-    echo "claude failed in round ${round}; sleeping 10 minutes before continuing."
+    echo "claude failed in round ${round}; sleeping 10 minutes and skipping make gate for this round."
     sleep 600
+    continue
   fi
 
   echo "===== Round ${round}/${MAX_ROUNDS}: running make gate ====="
