@@ -1081,4 +1081,16 @@ mod type_expr_tests {
         .expect("enum type should resolve even when in visiting set");
         assert_eq!(script_type_kind(&result2), "enum");
     }
+
+    #[test]
+    fn function_body_without_return_statement_fails() {
+        // Test FUNCTION_RETURN_STATEMENT_REQUIRED error path
+        let fn_no_return = parse_function_declaration_node(&xml_element(
+            "function",
+            &[("name", "f"), ("returnType", "int")],
+            vec![xml_text("let x = 1;")],
+        ))
+        .expect_err("function without return statement should fail");
+        assert_eq!(fn_no_return.code, "FUNCTION_RETURN_STATEMENT_REQUIRED");
+    }
 }

@@ -1109,4 +1109,27 @@ mod rhai_bridge_tests {
         )]));
         assert_eq!(slvalue_to_rhai_literal(&map), "#{key: \"value\"}");
     }
+
+    #[test]
+    fn is_function_literal_start_edge_cases_covered() {
+        // 318:16 - 测试 chars.get(index) 不是 '*' 的情况
+        let chars: Vec<char> = "abc".chars().collect();
+        assert!(!is_function_literal_start(&chars, 0)); // 第一个字符不是 '*'
+
+        // 测试边界情况：索引超出范围
+        assert!(!is_function_literal_start(&chars, 10)); // 索引超出范围
+        assert!(!is_function_literal_start(&chars, 3)); // 正好在边界上
+
+        // 测试 '*' 后没有更多字符
+        let chars2: Vec<char> = "*".chars().collect();
+        assert!(!is_function_literal_start(&chars2, 0)); // '*' 后面没有字符
+    }
+
+    #[test]
+    fn parse_function_literal_name_edge_cases_covered() {
+        // 367:34 - 测试 chars.get(index) 返回 None 的情况
+        let chars: Vec<char> = "*".chars().collect();
+        // 传入 at_index = 0，所以 index + 1 = 1，超出边界
+        assert!(parse_function_literal_name(&chars, 0).is_none());
+    }
 }

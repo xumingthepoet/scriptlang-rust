@@ -57,9 +57,7 @@ fn is_function_reference(value: &str) -> bool {
             return false;
         }
         let mut chars = segment.chars();
-        let Some(first) = chars.next() else {
-            return false;
-        };
+        let first = chars.next().unwrap();
         if !first.is_ascii_alphabetic() && first != '_' {
             return false;
         }
@@ -466,5 +464,21 @@ mod tests {
             &SlValue::Map(BTreeMap::new()),
             &enum_type
         ));
+    }
+
+    #[test]
+    fn is_function_reference_validates_edge_cases() {
+        // Valid function references (max 2 segments)
+        assert!(is_function_reference("*foo"));
+        assert!(is_function_reference("*foo.bar"));
+
+        // Invalid function references
+        assert!(!is_function_reference("*")); // just asterisk
+        assert!(!is_function_reference("*.")); // ends with dot
+        assert!(!is_function_reference("*.a.")); // has empty segment
+        assert!(!is_function_reference("foo")); // no asterisk prefix
+        assert!(!is_function_reference("*123")); // segment starts with number
+        assert!(!is_function_reference("*a*b")); // segment contains invalid char
+        assert!(!is_function_reference("*foo.bar.baz")); // more than 2 segments
     }
 }

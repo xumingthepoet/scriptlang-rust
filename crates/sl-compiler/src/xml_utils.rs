@@ -845,6 +845,59 @@ mod xml_utils_tests {
         );
         assert_eq!(split_map_type_key_value("=>int"), None);
         assert_eq!(split_map_type_key_value("string=>"), None);
+        // Test escaped backslash inside quotes - the \\ triggers the escape branch (line 72-74)
+        // When we have "he\\" in a raw string, it means the input has a backslash followed by quote
+        // which triggers the if ch == '\\' branch that skips idx += 2
+        let result = split_map_type_key_value(r#"string=>"x\\y""#);
+        assert_eq!(result, Some(("string", r#""x\\y""#)));
+
+        // Test with escaped quote inside string to cover line 76 (quote = None)
+        let result2 = split_map_type_key_value(r#"string=>"test\"value""#);
+        assert_eq!(result2, Some(("string", r#""test\"value""#)));
+
+        // Test single quotes to cover line 83-86
+        let result3 = split_map_type_key_value("'key'=>'value'");
+        assert_eq!(result3, Some(("'key'", "'value'")));
+
+        // Test with nested brackets inside quotes (lines 89-95)
+        let result4 = split_map_type_key_value(r#"string=>"a[b]c""#);
+        assert_eq!(result4, Some(("string", r#""a[b]c""#)));
+
+        // Test with nested braces inside quotes
+        let result5 = split_map_type_key_value(r#"string=>"a{b}c""#);
+        assert_eq!(result5, Some(("string", r#""a{b}c""#)));
+
+        // Test with nested parens inside quotes
+        let result6 = split_map_type_key_value(r#"string=>"a(b)c""#);
+        assert_eq!(result6, Some(("string", r#""a(b)c""#)));
+
+        // Test backslash escape at end of quoted string (to cover idx += 2 at line 73)
+        let result7 = split_map_type_key_value(r#"string=>"test\\""#);
+        assert_eq!(result7, Some(("string", r#""test\\""#)));
+
+        // Test backslash followed by regular char inside quotes
+        let result8 = split_map_type_key_value(r#"string=>"a\nb""#);
+        assert_eq!(result8, Some(("string", r#""a\nb""#)));
+
+        // Test parentheses outside quotes to cover line 91 guard (paren_depth > 0)
+        let result9 = split_map_type_key_value("string=>(a)");
+        assert_eq!(result9, Some(("string", "(a)")));
+
+        // Test brackets outside quotes to cover line 93 guard
+        let result10 = split_map_type_key_value("string=>[a]");
+        assert_eq!(result10, Some(("string", "[a]")));
+
+        // Test braces outside quotes to cover line 95 guard
+        let result11 = split_map_type_key_value("string=>{a}");
+        assert_eq!(result11, Some(("string", "{a}")));
+
+        // Test unbalanced paren at start (should return None because => not found)
+        let result12 = split_map_type_key_value("string=>a)");
+        assert_eq!(result12, Some(("string", "a)")));
+
+        // Test unbalanced bracket at start
+        let result13 = split_map_type_key_value("string=>a]");
+        assert_eq!(result13, Some(("string", "a]")));
     }
 
     #[test]

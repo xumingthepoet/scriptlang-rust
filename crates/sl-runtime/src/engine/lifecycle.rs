@@ -1512,4 +1512,33 @@ mod lifecycle_tests {
         assert_eq!(*uninit, SlValue::Number(0.0));
         assert_eq!(*init, SlValue::Number(42.0));
     }
+
+    #[test]
+    pub(super) fn all_enum_members_unknown_enum_fails() {
+        // 383:28, 383:32 - Test error path when enum not found
+        let files = map(&[(
+            "main.script.xml",
+            r#"
+    <module name="main" default_access="public">
+      <enum name="State">
+        <member name="Idle"/>
+        <member name="Run"/>
+      </enum>
+      <script name="main">
+        <temp name="members" type="string[]">all_enum_members("NonExistent")</temp>
+        <text>${members}</text>
+      </script>
+    </module>
+    "#,
+        )]);
+        let mut engine = engine_from_sources(files);
+        engine
+            .start("main.main", None)
+            .expect("start should succeed");
+        let error = engine
+            .next_output()
+            .expect_err("all_enum_members with unknown enum should fail");
+        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
+        assert!(error.message.contains("unknown enum type"));
+    }
 }

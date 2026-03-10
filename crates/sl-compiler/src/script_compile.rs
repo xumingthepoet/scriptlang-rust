@@ -1819,9 +1819,53 @@ mod script_compile_tests {
             vec![xml_text("return 1;")],
         );
         let parsed_return = parse_function_return(&function_node).expect("return should parse");
-        match parsed_return.type_expr {
-            ParsedTypeExpr::Primitive(ref name) => assert_eq!(name, "int"),
-            _ => panic!("return type should be primitive int"),
+        let is_primitive =
+            matches!(&parsed_return.type_expr, ParsedTypeExpr::Primitive(n) if n == "int");
+        assert!(is_primitive, "return type should be primitive int");
+
+        // Test non-primitive return types to cover the match branch
+        let array_func = xml_element(
+            "function",
+            &[("name", "f"), ("returnType", "int[]")],
+            vec![xml_text("return [];")],
+        );
+        let parsed_array = parse_function_return(&array_func).expect("array return should parse");
+        // Use match to cover all branches explicitly
+        match &parsed_array.type_expr {
+            ParsedTypeExpr::Array(_) => {}
+            _ => panic!("expected Array type"),
+        }
+
+        // Also directly test parse_type_expr to cover all ParsedTypeExpr variants
+        let span = SourceSpan::synthetic();
+        let parsed_script = parse_type_expr("script", &span).expect("script type should parse");
+        match &parsed_script {
+            ParsedTypeExpr::Script => {}
+            _ => panic!("expected Script type"),
+        }
+
+        let parsed_function =
+            parse_type_expr("function", &span).expect("function type should parse");
+        match &parsed_function {
+            ParsedTypeExpr::Function => {}
+            _ => panic!("expected Function type"),
+        }
+
+        let parsed_custom = parse_type_expr("CustomType", &span).expect("custom type should parse");
+        match &parsed_custom {
+            ParsedTypeExpr::Custom(_) => {}
+            _ => panic!("expected Custom type"),
+        }
+
+        let map_func = xml_element(
+            "function",
+            &[("name", "f"), ("returnType", "#{int}")],
+            vec![xml_text("return {};")],
+        );
+        let parsed_map = parse_function_return(&map_func).expect("map return should parse");
+        match &parsed_map.type_expr {
+            ParsedTypeExpr::Map { .. } => {}
+            _ => panic!("expected Map type"),
         }
 
         let span = SourceSpan::synthetic();
@@ -1852,6 +1896,10 @@ mod script_compile_tests {
         assert_eq!(error.code, "TYPE_PARSE_ERROR");
         assert!(contains_return_statement("if x > 0 { return x; }"));
         assert!(!contains_return_statement("x = x + 1;"));
+        // return preceded/followed by alphanumeric or underscore should not match
+        assert!(!contains_return_statement("return_value"));
+        assert!(!contains_return_statement("x_return"));
+        assert!(!contains_return_statement("preturn")); // 'return' at start but preceded by 'p'
     }
 
     #[test]
@@ -1900,6 +1948,19 @@ mod script_compile_tests {
             "invalid function literal should fail parse"
         );
 
+        // Test line 135: chars.get(index) returns None when start + 1 >= chars.len()
+        // "*a" has 2 chars, start=1 gives index=2 which is >= 2 (out of bounds)
+        assert!(
+            parse_function_literal_name(&"*a".chars().collect::<Vec<_>>(), 1).is_none(),
+            "start at last char should return None"
+        );
+
+        // Test line 150: next char after '.' is not alphanumeric or '_'
+        assert!(
+            parse_function_literal_name(&"*a.@".chars().collect::<Vec<_>>(), 0).is_none(),
+            "dot followed by non-alphanumeric should return None"
+        );
+
         assert!(is_function_literal_start(
             &"*add".chars().collect::<Vec<_>>(),
             0
@@ -1935,6 +1996,30 @@ mod script_compile_tests {
         )
         .expect_err("missing function literal should fail");
         assert_eq!(missing_error.code, "XML_FUNCTION_LITERAL_NOT_FOUND");
+
+        // Test line 193: short function literal without module context
+        let no_module_error =
+            normalize_and_validate_function_literals("*add", &span, None, &visible_functions)
+                .expect_err("short function literal without module should fail");
+        assert_eq!(no_module_error.code, "XML_FUNCTION_LITERAL_INVALID");
+
+        // Test line 205-206: whitespace after function literal
+        let with_whitespace = normalize_and_validate_function_literals(
+            "*add ",
+            &span,
+            Some("main"),
+            &visible_functions,
+        )
+        .expect("trailing whitespace should be ok");
+        assert_eq!(with_whitespace, "*main.add ");
+
+        // Test line 262-263: closing paren at top level
+        let simple_paren = "invoke(fn)".chars().collect::<Vec<_>>();
+        assert_eq!(
+            extract_first_invoke_arg(&simple_paren, 6).as_deref(),
+            Some("fn"),
+            "simple paren should return the arg"
+        );
 
         let chars = "invoke(fnRef, [1, foo(2)])".chars().collect::<Vec<_>>();
         assert_eq!(
@@ -1986,6 +2071,52 @@ mod script_compile_tests {
         .expect_err("invoke non-function var should fail");
         assert_eq!(invoke_non_function_error.code, "XML_INVOKE_TARGET_VAR_TYPE");
 
+        // Test line 345: variable in visible_module_vars
+        let mut module_vars = BTreeMap::new();
+        module_vars.insert(
+            "fnRef".to_string(),
+            ModuleVarDecl {
+                namespace: "main".to_string(),
+                name: "fnRef".to_string(),
+                qualified_name: "main.fnRef".to_string(),
+                access: AccessLevel::Public,
+                r#type: ScriptType::Function,
+                initial_value_expr: None,
+                location: span.clone(),
+            },
+        );
+        validate_invoke_first_arg(
+            "invoke(fnRef, [1])",
+            &span,
+            &BTreeMap::new(), // empty local_var_types
+            &module_vars,
+            &BTreeMap::new(),
+        )
+        .expect("function var in module vars should pass");
+
+        // Test line 346: variable in visible_module_consts
+        let mut module_consts = BTreeMap::new();
+        module_consts.insert(
+            "fnRef".to_string(),
+            ModuleConstDecl {
+                namespace: "main".to_string(),
+                name: "fnRef".to_string(),
+                qualified_name: "main.fnRef".to_string(),
+                access: AccessLevel::Public,
+                r#type: ScriptType::Function,
+                initial_value_expr: None,
+                location: span.clone(),
+            },
+        );
+        validate_invoke_first_arg(
+            "invoke(fnRef, [1])",
+            &span,
+            &BTreeMap::new(), // empty local_var_types
+            &BTreeMap::new(), // empty module_vars
+            &module_consts,
+        )
+        .expect("function var in module consts should pass");
+
         let fallback_literal = normalize_and_validate_function_literals(
             "*1bad",
             &span,
@@ -2016,6 +2147,67 @@ mod script_compile_tests {
         assert!(normalized_expr.contains("*main.add"));
         assert!(normalized_expr.contains("@next"));
 
+        // Test line 385: validate_invoke_first_arg error path through normalize_expression_literals
+        let mut non_function_vars = BTreeMap::new();
+        non_function_vars.insert(
+            "fnRef".to_string(),
+            ScriptType::Primitive {
+                name: "int".to_string(),
+            },
+        );
+        let invoke_error = normalize_expression_literals(
+            "invoke(fnRef, [1])",
+            &span,
+            &all_script_access,
+            Some("main"),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &non_function_vars,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect_err("invoke non-function should fail");
+        assert_eq!(invoke_error.code, "XML_INVOKE_TARGET_VAR_TYPE");
+
+        // Test line 376: normalize_and_validate_function_literals error path
+        let missing_fn_error = normalize_expression_literals(
+            "*missing.func",
+            &span,
+            &all_script_access,
+            Some("main"),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect_err("missing function should fail");
+        assert_eq!(missing_fn_error.code, "XML_FUNCTION_LITERAL_NOT_FOUND");
+
+        // Test line 378: rewrite_and_validate_enum_literals_in_expression error path
+        // First, set up an enum type
+        let mut visible_types = BTreeMap::new();
+        visible_types.insert(
+            "Status".to_string(),
+            ScriptType::Enum {
+                type_name: "Status".to_string(),
+                members: vec!["Active".to_string()],
+            },
+        );
+        let enum_error = normalize_expression_literals(
+            "Status.Invalid",
+            &span,
+            &all_script_access,
+            Some("main"),
+            &visible_types,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect_err("invalid enum member should fail");
+        assert_eq!(enum_error.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
+
         let normalized_attr = normalize_attribute_expression_literals(
             "invoke(fnRef, [1])",
             &span,
@@ -2043,6 +2235,84 @@ mod script_compile_tests {
         )
         .expect("normalize template should pass");
         assert!(normalized_template.contains("invoke(fnRef, [1])"));
+
+        // Test line 403: normalize_and_validate_function_literals error in attr
+        let missing_fn_attr_error = normalize_attribute_expression_literals(
+            "*missing.func",
+            &span,
+            &all_script_access,
+            Some("main"),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect_err("missing function in attr should fail");
+        assert_eq!(missing_fn_attr_error.code, "XML_FUNCTION_LITERAL_NOT_FOUND");
+
+        // Test line 405: rewrite_and_validate_enum_literals_in_attr_expression error
+        let enum_attr_error = normalize_attribute_expression_literals(
+            "Status.Invalid",
+            &span,
+            &all_script_access,
+            Some("main"),
+            &visible_types,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect_err("invalid enum in attr should fail");
+        assert_eq!(enum_attr_error.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
+
+        // Test line 412: validate_invoke_first_arg error in attr
+        let invoke_attr_error = normalize_attribute_expression_literals(
+            "invoke(x, [1])",
+            &span,
+            &all_script_access,
+            Some("main"),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &non_function_vars,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect_err("invoke non-function in attr should fail");
+        assert_eq!(invoke_attr_error.code, "XML_INVOKE_TARGET_VAR_TYPE");
+
+        // Test line 431: normalize_and_validate_function_literals error in template
+        let missing_fn_template_error = normalize_template_literals(
+            "${*missing.func}",
+            &span,
+            &all_script_access,
+            Some("main"),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect_err("missing function in template should fail");
+        assert_eq!(
+            missing_fn_template_error.code,
+            "XML_FUNCTION_LITERAL_NOT_FOUND"
+        );
+
+        // Test line 438: validate_invoke_first_arg error in template
+        let invoke_template_error = normalize_template_literals(
+            "${invoke(x, [1])}",
+            &span,
+            &all_script_access,
+            Some("main"),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &non_function_vars,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect_err("invoke non-function in template should fail");
+        assert_eq!(invoke_template_error.code, "XML_INVOKE_TARGET_VAR_TYPE");
 
         let nested_chars = r#"invoke(foo("a\"b", [1], {k: (2)}), [3])"#
             .chars()
