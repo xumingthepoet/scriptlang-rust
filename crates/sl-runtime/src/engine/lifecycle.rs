@@ -610,8 +610,8 @@ mod lifecycle_tests {
                 "shared.xml",
                 r#"
     <module name="shared" default_access="public">
-      <function name="addWithGameBonus" args="int:a1,int:a2" return="int:out">
-        out = a1 + a2;
+      <function name="addWithGameBonus" args="int:a1,int:a2" returnType="int">
+        return a1 + a2;
       </function>
     </module>
     "#,
@@ -646,7 +646,7 @@ mod lifecycle_tests {
             "main.xml",
             r#"
 <module name="main" default_access="public">
-  <function name="invoke" return="int:out">out = 1;</function>
+  <function name="invoke" returnType="int">return 1;</function>
   <script name="main"><text>ok</text></script>
 </module>
 "#,
@@ -681,8 +681,8 @@ mod lifecycle_tests {
             "main.xml",
             r#"
     <module name="main" default_access="public">
-      <function name="foo-bar" return="int:out">out = 1;</function>
-      <function name="foo_bar" return="int:out">out = 2;</function>
+      <function name="foo-bar" returnType="int">return 1;</function>
+      <function name="foo_bar" returnType="int">return 2;</function>
       <script name="main"><text>Hello</text></script>
     </module>
     "#,
@@ -907,8 +907,8 @@ mod lifecycle_tests {
                 r#"
     <module name="shared" default_access="public">
       <var name="hp" type="int">1</var>
-      <function name="addWithGameBonus" args="int:a1,int:a2" return="int:out">
-    out = a1 + a2;
+      <function name="addWithGameBonus" args="int:a1,int:a2" returnType="int">
+    return a1 + a2;
       </function>
     </module>
     "#,

@@ -383,8 +383,18 @@ pub(crate) fn parse_function_declaration_node_with_namespace(
     let access = parse_access_attr(node, "access", default_access)?;
 
     let params = parse_function_args(node)?;
-    let return_binding = parse_function_return(node)?;
+    let return_decl = parse_function_return(node)?;
     let code = parse_inline_required_no_element_children(node)?;
+    if !contains_return_statement(&code) {
+        return Err(ScriptLangError::with_span(
+            "FUNCTION_RETURN_STATEMENT_REQUIRED",
+            format!(
+                "<function name=\"{}\"> body must contain at least one return statement.",
+                name
+            ),
+            node.location.clone(),
+        ));
+    }
 
     let qualified_name = format!("{}.{}", namespace, name);
     Ok(ParsedFunctionDecl {
@@ -392,7 +402,7 @@ pub(crate) fn parse_function_declaration_node_with_namespace(
         qualified_name,
         access,
         params,
-        return_binding,
+        return_decl,
         code,
         location: node.location.clone(),
     })
@@ -736,30 +746,30 @@ mod type_expr_tests {
 
         let function_missing_name = parse_function_declaration_node(&xml_element(
             "function",
-            &[("return", "int:r")],
-            vec![xml_text("r = 1;")],
+            &[("returnType", "int")],
+            vec![xml_text("return 1;")],
         ))
         .expect_err("function name should be required");
         assert_eq!(function_missing_name.code, "XML_MISSING_ATTR");
 
         let function_reserved_name = parse_function_declaration_node(&xml_element(
             "function",
-            &[("name", "__sl_f"), ("return", "int:r")],
-            vec![xml_text("r = 1;")],
+            &[("name", "__sl_f"), ("returnType", "int")],
+            vec![xml_text("return 1;")],
         ))
         .expect_err("function name cannot be reserved");
         assert_eq!(function_reserved_name.code, "NAME_RESERVED_PREFIX");
         let function_keyword_name = parse_function_declaration_node(&xml_element(
             "function",
-            &[("name", "shared"), ("return", "int:r")],
-            vec![xml_text("r = 1;")],
+            &[("name", "shared"), ("returnType", "int")],
+            vec![xml_text("return 1;")],
         ))
         .expect_err("function name cannot be keyword");
         assert_eq!(function_keyword_name.code, "NAME_RHAI_KEYWORD_RESERVED");
 
         let function_child_error = parse_function_declaration_node(&xml_element(
             "function",
-            &[("name", "f"), ("return", "int:r")],
+            &[("name", "f"), ("returnType", "int")],
             vec![XmlNode::Element(xml_element("x", &[], Vec::new()))],
         ))
         .expect_err("function code cannot contain child nodes");
@@ -800,8 +810,8 @@ mod type_expr_tests {
         let function_invalid_access = parse_function_declaration_node_with_namespace(
             &xml_element(
                 "function",
-                &[("name", "f"), ("access", "bad"), ("return", "int:r")],
-                vec![xml_text("r = 1;")],
+                &[("name", "f"), ("access", "bad"), ("returnType", "int")],
+                vec![xml_text("return 1;")],
             ),
             "module",
             AccessLevel::Private,

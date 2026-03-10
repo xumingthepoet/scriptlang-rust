@@ -119,7 +119,6 @@ pub struct FunctionParam {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FunctionReturn {
-    pub name: String,
     pub r#type: ScriptType,
     pub location: SourceSpan,
 }

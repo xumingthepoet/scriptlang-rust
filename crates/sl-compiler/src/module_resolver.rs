@@ -530,7 +530,7 @@ pub(crate) fn resolve_visible_module_symbols(
                 });
             }
 
-            let rb = &decl.return_binding;
+            let rb = &decl.return_decl;
             let return_type = resolve_type_expr_in_namespace(
                 &rb.type_expr,
                 &visible_types,
@@ -549,9 +549,8 @@ pub(crate) fn resolve_visible_module_symbols(
                     name: decl.qualified_name.clone(),
                     params,
                     return_binding: FunctionReturn {
-                        name: decl.return_binding.name.clone(),
                         r#type: return_type,
-                        location: decl.return_binding.location.clone(),
+                        location: decl.return_decl.location.clone(),
                     },
                     code: normalized_code,
                     location: decl.location.clone(),
@@ -804,10 +803,10 @@ pub(crate) fn collect_functions_for_bundle(
             }
 
             let return_type = resolve_type_expr_in_namespace(
-                &decl.return_binding.type_expr,
+                &decl.return_decl.type_expr,
                 &visible_types,
                 function_namespace,
-                &decl.return_binding.location,
+                &decl.return_decl.location,
             )?;
             let normalized_code = rewrite_and_validate_enum_literals_in_expression(
                 &decl.code,
@@ -821,9 +820,8 @@ pub(crate) fn collect_functions_for_bundle(
                     name: decl.qualified_name.clone(),
                     params,
                     return_binding: FunctionReturn {
-                        name: decl.return_binding.name.clone(),
                         r#type: return_type,
-                        location: decl.return_binding.location.clone(),
+                        location: decl.return_decl.location.clone(),
                     },
                     code: normalized_code,
                     location: decl.location.clone(),
@@ -1236,8 +1234,7 @@ mod module_resolver_tests {
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                     location: span.clone(),
                 }],
-                return_binding: ParsedFunctionParamDecl {
-                    name: "ret".to_string(),
+                return_decl: ParsedFunctionReturnDecl {
                     type_expr: ParsedTypeExpr::Custom("Obj".to_string()),
                     location: span.clone(),
                 },
@@ -1279,8 +1276,7 @@ mod module_resolver_tests {
                 qualified_name: "main.test".to_string(),
                 access: AccessLevel::Public,
                 params: vec![],
-                return_binding: ParsedFunctionParamDecl {
-                    name: "ret".to_string(),
+                return_decl: ParsedFunctionReturnDecl {
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                     location: span.clone(),
                 },
@@ -1413,8 +1409,7 @@ mod module_resolver_tests {
                         qualified_name: "a.doit".to_string(),
                         access: AccessLevel::Public,
                         params: Vec::new(),
-                        return_binding: ParsedFunctionParamDecl {
-                            name: "out".to_string(),
+                        return_decl: ParsedFunctionReturnDecl {
                             type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                             location: span.clone(),
                         },
@@ -1434,8 +1429,7 @@ mod module_resolver_tests {
                         qualified_name: "b.doit".to_string(),
                         access: AccessLevel::Public,
                         params: Vec::new(),
-                        return_binding: ParsedFunctionParamDecl {
-                            name: "out".to_string(),
+                        return_decl: ParsedFunctionReturnDecl {
                             type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                             location: span.clone(),
                         },
@@ -1472,8 +1466,7 @@ mod module_resolver_tests {
                 qualified_name: "shared.foo".to_string(),
                 access: AccessLevel::Public,
                 params: vec![],
-                return_binding: ParsedFunctionParamDecl {
-                    name: "out".to_string(),
+                return_decl: ParsedFunctionReturnDecl {
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                     location: span.clone(),
                 },
@@ -1509,8 +1502,7 @@ mod module_resolver_tests {
                     type_expr: ParsedTypeExpr::Custom("UnknownType".to_string()),
                     location: span.clone(),
                 }],
-                return_binding: ParsedFunctionParamDecl {
-                    name: "out".to_string(),
+                return_decl: ParsedFunctionReturnDecl {
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                     location: span.clone(),
                 },
@@ -1538,8 +1530,7 @@ mod module_resolver_tests {
                 qualified_name: "shared.foo".to_string(),
                 access: AccessLevel::Public,
                 params: vec![],
-                return_binding: ParsedFunctionParamDecl {
-                    name: "out".to_string(),
+                return_decl: ParsedFunctionReturnDecl {
                     type_expr: ParsedTypeExpr::Custom("NonExistentType".to_string()),
                     location: span.clone(),
                 },
@@ -1983,8 +1974,8 @@ mod module_resolver_tests {
             (
                 "shared.xml",
                 r#"<module name="shared" default_access="public">
-  <function name="add" args="int:a,int:b" return="int:result">
-    result = a + b;
+  <function name="add" args="int:a,int:b" returnType="int">
+    return a + b;
   </function>
 </module>"#,
             ),
@@ -2011,8 +2002,8 @@ mod module_resolver_tests {
             "shared.xml",
             r#"<module name="shared" default_access="public">
   <type name="Obj"><field name="value" type="int"/></type>
-  <function name="make" args="int:seed" return="Obj:ret">
-    ret = #{ value: seed };
+  <function name="make" args="int:seed" returnType="Obj">
+    return #{ value: seed };
   </function>
 </module>"#,
         )]);
@@ -2079,8 +2070,8 @@ mod module_resolver_tests {
         let bad_function = map(&[(
             "bad-function.xml",
             r#"<module name="shared" default_access="public">
-  <function name="bad" args="int:a" return="int">
-    a = a + 1;
+  <function name="bad" args="int:a" return="int:r">
+    r = a + 1;
   </function>
 </module>"#,
         )]);
@@ -2251,8 +2242,7 @@ mod module_resolver_tests {
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                         location: span.clone(),
                     }],
-                    return_binding: ParsedFunctionParamDecl {
-                        name: "ret".to_string(),
+                    return_decl: ParsedFunctionReturnDecl {
                         type_expr: ParsedTypeExpr::Custom("Obj".to_string()),
                         location: span.clone(),
                     },
@@ -2354,8 +2344,7 @@ mod module_resolver_tests {
                     qualified_name: "make".to_string(),
                     access: AccessLevel::Public,
                     params: Vec::new(),
-                    return_binding: ParsedFunctionParamDecl {
-                        name: "ret".to_string(),
+                    return_decl: ParsedFunctionReturnDecl {
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                         location: span.clone(),
                     },
@@ -2393,8 +2382,7 @@ mod module_resolver_tests {
                         qualified_name: "odd.make".to_string(),
                         access: AccessLevel::Public,
                         params: Vec::new(),
-                        return_binding: ParsedFunctionParamDecl {
-                            name: "ret".to_string(),
+                        return_decl: ParsedFunctionReturnDecl {
                             type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                             location: span.clone(),
                         },
@@ -2406,8 +2394,7 @@ mod module_resolver_tests {
                         qualified_name: "make".to_string(),
                         access: AccessLevel::Public,
                         params: Vec::new(),
-                        return_binding: ParsedFunctionParamDecl {
-                            name: "ret".to_string(),
+                        return_decl: ParsedFunctionReturnDecl {
                             type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                             location: span.clone(),
                         },
@@ -2445,8 +2432,7 @@ mod module_resolver_tests {
                         type_expr: ParsedTypeExpr::Custom("Missing".to_string()),
                         location: span.clone(),
                     }],
-                    return_binding: ParsedFunctionParamDecl {
-                        name: "ret".to_string(),
+                    return_decl: ParsedFunctionReturnDecl {
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                         location: span.clone(),
                     },
@@ -2471,8 +2457,7 @@ mod module_resolver_tests {
                     qualified_name: "bad.f".to_string(),
                     access: AccessLevel::Public,
                     params: Vec::new(),
-                    return_binding: ParsedFunctionParamDecl {
-                        name: "ret".to_string(),
+                    return_decl: ParsedFunctionReturnDecl {
                         type_expr: ParsedTypeExpr::Custom("Missing".to_string()),
                         location: span.clone(),
                     },
@@ -2753,8 +2738,7 @@ mod module_resolver_tests {
                     qualified_name: "main.boost".to_string(),
                     access: AccessLevel::Public,
                     params: Vec::new(),
-                    return_binding: ParsedFunctionParamDecl {
-                        name: "out".to_string(),
+                    return_decl: ParsedFunctionReturnDecl {
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                         location: span.clone(),
                     },
@@ -2894,8 +2878,7 @@ mod module_resolver_tests {
                 qualified_name: "other.hidden".to_string(),
                 access: AccessLevel::Private,
                 params: Vec::new(),
-                return_binding: ParsedFunctionParamDecl {
-                    name: "out".to_string(),
+                return_decl: ParsedFunctionReturnDecl {
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                     location: span.clone(),
                 },
@@ -3416,8 +3399,7 @@ mod module_resolver_tests {
                     type_expr: ParsedTypeExpr::Custom("UnknownType".to_string()),
                     location: span.clone(),
                 }],
-                return_binding: ParsedFunctionParamDecl {
-                    name: "out".to_string(),
+                return_decl: ParsedFunctionReturnDecl {
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                     location: span.clone(),
                 },
@@ -3444,8 +3426,7 @@ mod module_resolver_tests {
                 qualified_name: "shared.foo".to_string(),
                 access: AccessLevel::Public,
                 params: vec![],
-                return_binding: ParsedFunctionParamDecl {
-                    name: "out".to_string(),
+                return_decl: ParsedFunctionReturnDecl {
                     type_expr: ParsedTypeExpr::Custom("NonExistentType".to_string()),
                     location: span.clone(),
                 },
@@ -3731,7 +3712,7 @@ mod module_resolver_tests {
             "main.xml",
             r#"<module name="main" default_access="public">
 <enum name="Status"><member name="Active"/><member name="Inactive"/></enum>
-<function name="test" args="" return="int:ret">ret = Status.Unknown;</function>
+<function name="test" args="" returnType="int">return Status.Unknown;</function>
 <script name="main"><text>test</text></script>
 </module>"#,
         )]);

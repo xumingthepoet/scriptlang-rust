@@ -17,8 +17,8 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
     <member name="Idle"/>
     <member name="Run"/>
   </enum>
-  <function name="boost" args="int:x" return="int:out">
-    out = x + 1;
+  <function name="boost" args="int:x" returnType="int">
+    return x + 1;
   </function>
   <var name="baseHp" type="int">100</var>
   <script name="main">
@@ -129,8 +129,8 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 
 ```xml
 <module name="shared" default_access="public">
-  <function name="boost" args="int:x" return="int:out">
-    out = x + 1;
+  <function name="boost" args="int:x" returnType="int">
+    return x + 1;
   </function>
 </module>
 ```
@@ -566,13 +566,13 @@ module 相关规则与 `<call>` 相同：
 
 限制：
 - module 函数 `args` 不支持 `ref:`
-- module 函数 `return` 不支持 `ref:`
+- module 函数 `returnType` 不支持 `ref:`
 - 函数体只能是内联代码文本，不允许子元素
 
 ```xml
 <module name="shared" default_access="public">
-  <function name="add" args="int:a,int:b" return="int:out">
-    out = a + b;
+  <function name="add" args="int:a,int:b" returnType="int">
+    return a + b;
   </function>
 </module>
 ```
@@ -581,11 +581,11 @@ module 相关规则与 `<call>` 相同：
 
 ```xml
 <module name="router" default_access="public">
-  <function name="pick" args="script:current" return="script:next">
-    next = @router.fallback;
+  <function name="pick" args="script:current" returnType="script">
     if current == @router.main {
-      next = @router.alt;
+      return @router.alt;
     }
+    return @router.fallback;
   </function>
 </module>
 ```
@@ -594,11 +594,11 @@ module 相关规则与 `<call>` 相同：
 
 ```xml
 <module name="router" default_access="public">
-  <function name="pick" args="function:current" return="function:next">
-    next = *router.fallback;
+  <function name="pick" args="function:current" returnType="function">
     if current == *router.main {
-      next = *router.alt;
+      return *router.alt;
     }
+    return *router.fallback;
   </function>
 </module>
 ```

@@ -3,18 +3,19 @@
   <var name="a" type="int">0</var>
   <var name="arr" type="int[]">[0]</var>
   <var name="meta" type="#{int}">#{bonus: 0}</var>
-  <function name="helper" access="private" args="int:x" return="int:out">
-    out = a + x + lib.a + lib.b - 2;
+  <function name="helper" access="private" args="int:x" returnType="int">
+    let out = a + x + lib.a + lib.b - 2;
     a = 2;
     arr[0] = 10;
     arr.push(x + 3);
     meta.bonus = arr[1] + a;
+    return out;
   </function>
 
-  <function name="add" access="public" args="int:a,int:b" return="int:out">
-    out = helper(a) + b;
+  <function name="add" access="public" args="int:a,int:b" returnType="int">
+    let out = helper(a) + b;
     arr.push(b);
     meta.bonus = meta.bonus + arr[2];
-    out = out + shared.a + arr[0] + arr[1] + arr[2] + meta.bonus;
+    return out + shared.a + arr[0] + arr[1] + arr[2] + meta.bonus;
   </function>
 </module>

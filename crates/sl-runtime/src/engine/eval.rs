@@ -903,12 +903,6 @@ impl ScriptLangEngine {
                 }
             }
 
-            let default_value = default_value_from_type(&decl.return_binding.r#type);
-            out.push_str(&format!(
-                "let {} = {};\n",
-                decl.return_binding.name,
-                slvalue_to_rhai_literal(&default_value)
-            ));
             let preprocessed = preprocess_scriptlang_rhai_input(
                 &decl.code,
                 "function body",
@@ -926,9 +920,7 @@ impl ScriptLangEngine {
                 for (alias, local_qualified) in
                     self.collect_bundle_module_short_aliases(function_namespace)
                 {
-                    if decl.params.iter().any(|param| param.name == alias)
-                        || alias == decl.return_binding.name
-                    {
+                    if decl.params.iter().any(|param| param.name == alias) {
                         continue;
                     }
                     let Some((namespace, field)) = local_qualified.split_once('.') else {
@@ -942,9 +934,7 @@ impl ScriptLangEngine {
                 for (alias, local_qualified) in
                     self.collect_bundle_module_const_short_aliases(function_namespace)
                 {
-                    if decl.params.iter().any(|param| param.name == alias)
-                        || alias == decl.return_binding.name
-                    {
+                    if decl.params.iter().any(|param| param.name == alias) {
                         continue;
                     }
                     let Some((namespace, field)) = local_qualified.split_once('.') else {
@@ -960,7 +950,6 @@ impl ScriptLangEngine {
                 rewrite_module_global_qualified_access(&rewritten, &function_rewrite_map);
             out.push_str(&rewritten);
             out.push('\n');
-            out.push_str(&decl.return_binding.name);
             out.push_str("\n};\n");
         }
 
@@ -1596,7 +1585,7 @@ mod eval_tests {
         let bad_function = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><function name="bad" return="string:out">out = 'bad';</function></module>"#,
+                r#"<module name="shared" default_access="public"><function name="bad" returnType="string">return 'bad';</function></module>"#,
             ),
             (
                 "main.script.xml",
@@ -2232,8 +2221,8 @@ mod eval_tests {
                     "shared.xml",
                     r#"
 <module name="shared" default_access="public">
-  <function name="add_bonus" args="int:x" return="int:out">
-    out = x + game.bonus;
+  <function name="add_bonus" args="int:x" returnType="int">
+    return x + game.bonus;
   </function>
 </module>
 "#,
@@ -2366,7 +2355,7 @@ mod eval_tests {
         let mut missing_symbol = engine_from_sources(map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><function name="add" return="int:out">out = 1;</function></module>"#,
+                r#"<module name="shared" default_access="public"><function name="add" returnType="int">return 1;</function></module>"#,
             ),
             (
                 "main.script.xml",
@@ -2387,7 +2376,7 @@ mod eval_tests {
         let mut prelude_missing_global = engine_from_sources(map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><function name="add" return="int:out">out = 1;</function></module>"#,
+                r#"<module name="shared" default_access="public"><function name="add" returnType="int">return 1;</function></module>"#,
             ),
             (
                 "main.script.xml",
@@ -2678,11 +2667,11 @@ mod eval_tests {
                 "shared.xml",
                 r#"
 <module name="shared" default_access="public">
-  <function name="helper" access="private" args="int:x" return="int:out">
-    out = x + 1;
+  <function name="helper" access="private" args="int:x" returnType="int">
+    return x + 1;
   </function>
-  <function name="add" access="public" args="int:a,int:b" return="int:out">
-    out = helper(a) + b;
+  <function name="add" access="public" args="int:a,int:b" returnType="int">
+    return helper(a) + b;
   </function>
 </module>
 "#,
@@ -2715,9 +2704,9 @@ mod eval_tests {
                 r#"
 <module name="event_system" default_access="public">
   <var name="listeners" type="int">0</var>
-  <function name="add" return="int:out">
+  <function name="add" returnType="int">
     event_system.listeners += 1;
-    out = event_system.listeners;
+    return event_system.listeners;
   </function>
 </module>
 "#,
@@ -2749,11 +2738,11 @@ mod eval_tests {
                 "shared.xml",
                 r#"
 <module name="shared" default_access="public">
-  <function name="hidden" access="private" args="int:a" return="int:out">
-    out = a + 1;
+  <function name="hidden" access="private" args="int:a" returnType="int">
+    return a + 1;
   </function>
-  <function name="add" access="public" args="int:a,int:b" return="int:out">
-    out = a + b;
+  <function name="add" access="public" args="int:a,int:b" returnType="int">
+    return a + b;
   </function>
 </module>
 "#,
@@ -2848,8 +2837,8 @@ mod eval_tests {
                 "shared.xml",
                 r#"
 <module name="shared" default_access="public">
-  <function name="remote" access="public" args="int:x" return="int:out">
-    out = x + 1;
+  <function name="remote" access="public" args="int:x" returnType="int">
+    return x + 1;
   </function>
 </module>
 "#,
@@ -2859,14 +2848,14 @@ mod eval_tests {
                 r#"
 <!-- import shared from shared.xml -->
 <module name="main" default_access="public">
-  <function name="add" access="public" args="int:x" return="int:out">
-    out = x + 1;
+  <function name="add" access="public" args="int:x" returnType="int">
+    return x + 1;
   </function>
-  <function name="ping" access="public" return="int:out">
-    out = 1;
+  <function name="ping" access="public" returnType="int">
+    return 1;
   </function>
-  <function name="hidden" access="private" args="int:x" return="int:out">
-    out = x;
+  <function name="hidden" access="private" args="int:x" returnType="int">
+    return x;
   </function>
   <script name="main"><text>ok</text></script>
 </module>
@@ -3161,8 +3150,8 @@ mod eval_tests {
         let files = map(&[(
             "main.xml",
             r#"<module name="main" default_access="public">
-  <function name="test" access="public" args="" return="int:out">
-    out = 1;
+  <function name="test" access="public" args="" returnType="int">
+    return 1;
   </function>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -3181,8 +3170,8 @@ mod eval_tests {
         let files = map(&[(
             "main.xml",
             r#"<module name="main" default_access="public">
-  <function name="add" access="public" args="int:a,int:b" return="int:out">
-    out = a + b;
+  <function name="add" access="public" args="int:a,int:b" returnType="int">
+    return a + b;
   </function>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -3204,8 +3193,8 @@ mod eval_tests {
             r#"<module name="main" default_access="public">
   <var name="score" type="int">10</var>
   <const name="max_score" type="int">100</const>
-  <function name="get_score" access="public" args="int:score" return="int:result">
-    result = score;
+  <function name="get_score" access="public" args="int:score" returnType="int">
+    return score;
   </function>
   <script name="main">
     <temp name="s" type="int">main.get_score(5)</temp>
@@ -3227,8 +3216,8 @@ mod eval_tests {
         let files = map(&[(
             "main.xml",
             r#"<module name="main" default_access="public">
-  <function name="add" access="public" args="int:a,int:b" return="int:out">
-    out = a + b;
+  <function name="add" access="public" args="int:a,int:b" returnType="int">
+    return a + b;
   </function>
   <script name="main"><text>ok</text></script>
 </module>"#,

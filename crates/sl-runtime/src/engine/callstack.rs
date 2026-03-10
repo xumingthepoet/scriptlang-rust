@@ -1253,7 +1253,7 @@ mod callstack_tests {
             ),
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><function name="make" return="int:out">out = 1;</function></module>"#,
+                r#"<module name="shared" default_access="public"><function name="make" returnType="int">return 1;</function></module>"#,
             ),
         ]));
         module_engine.invoke_function_symbols.clear();
@@ -1276,8 +1276,8 @@ mod callstack_tests {
             (
                 "shared.xml",
                 r#"<module name="shared" default_access="public">
-  <function name="add" args="int:a,int:b" return="int:result">
-    result = a + b;
+  <function name="add" args="int:a,int:b" returnType="int">
+    return a + b;
   </function>
 </module>"#,
             ),

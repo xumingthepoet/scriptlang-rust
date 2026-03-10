@@ -1638,28 +1638,37 @@ pub(crate) fn parse_function_args(
 
 pub(crate) fn parse_function_return(
     node: &XmlElementNode,
-) -> Result<ParsedFunctionParamDecl, ScriptLangError> {
-    let raw = get_required_non_empty_attr(node, "return")?;
-    if raw.starts_with("ref:") {
+) -> Result<ParsedFunctionReturnDecl, ScriptLangError> {
+    if has_attr(node, "return") {
         return Err(ScriptLangError::with_span(
-            "XML_FUNCTION_RETURN_REF_UNSUPPORTED",
-            "Attribute \"return\" on <function> cannot use ref mode.",
+            "FUNCTION_RETURN_ATTR_INVALID",
+            "Attribute \"return\" is not allowed on <function>.",
             node.location.clone(),
         ));
     }
-    let (type_raw, name) = parse_type_name_segment(
-        &raw,
-        "FUNCTION_RETURN_PARSE_ERROR",
-        "function return",
-        &node.location,
-    )?;
-    assert_decl_name_not_reserved_or_rhai_keyword(name, "function return", node.location.clone())?;
-
-    Ok(ParsedFunctionParamDecl {
-        name: name.to_string(),
-        type_expr: parse_type_expr(type_raw, &node.location)?,
+    let raw = get_required_non_empty_attr(node, "returnType")?;
+    Ok(ParsedFunctionReturnDecl {
+        type_expr: parse_type_expr(&raw, &node.location)?,
         location: node.location.clone(),
     })
+}
+
+pub(crate) fn contains_return_statement(code: &str) -> bool {
+    let bytes = code.as_bytes();
+    let mut idx = 0usize;
+    while idx + 6 <= bytes.len() {
+        if &bytes[idx..idx + 6] == b"return" {
+            let left_ok =
+                idx == 0 || !(bytes[idx - 1].is_ascii_alphanumeric() || bytes[idx - 1] == b'_');
+            let right_ok = idx + 6 == bytes.len()
+                || !(bytes[idx + 6].is_ascii_alphanumeric() || bytes[idx + 6] == b'_');
+            if left_ok && right_ok {
+                return true;
+            }
+        }
+        idx += 1;
+    }
+    false
 }
 
 #[cfg(test)]
@@ -1752,41 +1761,41 @@ mod script_compile_tests {
 
         let fn_node = xml_element(
             "function",
-            &[("name", "f"), ("args", "ref:int:a"), ("return", "int:r")],
-            vec![xml_text("r = a;")],
+            &[("name", "f"), ("args", "ref:int:a"), ("returnType", "int")],
+            vec![xml_text("return a;")],
         );
         let error = parse_function_declaration_node(&fn_node).expect_err("ref arg unsupported");
         assert_eq!(error.code, "XML_FUNCTION_ARGS_REF_UNSUPPORTED");
 
         let fn_bad_return = xml_element(
             "function",
-            &[("name", "f"), ("args", "int:a"), ("return", "ref:int:r")],
-            vec![xml_text("r = a;")],
+            &[("name", "f"), ("args", "int:a"), ("return", "int:r")],
+            vec![xml_text("return a;")],
         );
         let error =
-            parse_function_declaration_node(&fn_bad_return).expect_err("ref return unsupported");
-        assert_eq!(error.code, "XML_FUNCTION_RETURN_REF_UNSUPPORTED");
+            parse_function_declaration_node(&fn_bad_return).expect_err("return attr invalid");
+        assert_eq!(error.code, "FUNCTION_RETURN_ATTR_INVALID");
 
         let fn_reserved_arg = xml_element(
             "function",
-            &[("name", "f"), ("args", "int:__sl_a"), ("return", "int:r")],
-            vec![xml_text("r = 1;")],
+            &[("name", "f"), ("args", "int:__sl_a"), ("returnType", "int")],
+            vec![xml_text("return 1;")],
         );
         let error =
             parse_function_declaration_node(&fn_reserved_arg).expect_err("reserved arg name");
         assert_eq!(error.code, "NAME_RESERVED_PREFIX");
         let fn_keyword_arg = xml_element(
             "function",
-            &[("name", "f"), ("args", "int:shared"), ("return", "int:r")],
-            vec![xml_text("r = 1;")],
+            &[("name", "f"), ("args", "int:shared"), ("returnType", "int")],
+            vec![xml_text("return 1;")],
         );
         let error = parse_function_declaration_node(&fn_keyword_arg).expect_err("keyword arg name");
         assert_eq!(error.code, "NAME_RHAI_KEYWORD_RESERVED");
 
         let fn_bad_arg_type = xml_element(
             "function",
-            &[("name", "f"), ("args", "#{ }:a"), ("return", "int:r")],
-            vec![xml_text("r = 1;")],
+            &[("name", "f"), ("args", "#{ }:a"), ("returnType", "int")],
+            vec![xml_text("return 1;")],
         );
         let error =
             parse_function_declaration_node(&fn_bad_arg_type).expect_err("bad arg type syntax");
@@ -1806,11 +1815,14 @@ mod script_compile_tests {
     fn parse_function_return_and_type_expr_success_paths_are_covered() {
         let function_node = xml_element(
             "function",
-            &[("name", "f"), ("return", "int:out")],
-            vec![xml_text("out = 1;")],
+            &[("name", "f"), ("returnType", "int")],
+            vec![xml_text("return 1;")],
         );
         let parsed_return = parse_function_return(&function_node).expect("return should parse");
-        assert_eq!(parsed_return.name, "out");
+        match parsed_return.type_expr {
+            ParsedTypeExpr::Primitive(ref name) => assert_eq!(name, "int"),
+            _ => panic!("return type should be primitive int"),
+        }
 
         let span = SourceSpan::synthetic();
         let _ = parse_type_expr("int[]", &span).expect("array should parse");
@@ -1818,26 +1830,28 @@ mod script_compile_tests {
 
         let reserved_return = xml_element(
             "function",
-            &[("name", "f"), ("return", "int:__sl_out")],
-            vec![xml_text("__sl_out = 1;")],
+            &[("name", "f"), ("return", "int:out")],
+            vec![xml_text("return 1;")],
         );
-        let error = parse_function_return(&reserved_return).expect_err("reserved return binding");
-        assert_eq!(error.code, "NAME_RESERVED_PREFIX");
+        let error = parse_function_return(&reserved_return).expect_err("return attr should fail");
+        assert_eq!(error.code, "FUNCTION_RETURN_ATTR_INVALID");
         let keyword_return = xml_element(
             "function",
-            &[("name", "f"), ("return", "int:shared")],
-            vec![xml_text("shared = 1;")],
+            &[("name", "f"), ("returnType", "int:out")],
+            vec![xml_text("return 1;")],
         );
-        let error = parse_function_return(&keyword_return).expect_err("keyword return binding");
-        assert_eq!(error.code, "NAME_RHAI_KEYWORD_RESERVED");
+        let error = parse_function_return(&keyword_return).expect_err("invalid return type syntax");
+        assert_eq!(error.code, "TYPE_PARSE_ERROR");
 
         let invalid_return = xml_element(
             "function",
-            &[("name", "f"), ("return", "#{ }:out")],
-            vec![xml_text("out = 1;")],
+            &[("name", "f"), ("returnType", "#{ }:out")],
+            vec![xml_text("return 1;")],
         );
         let error = parse_function_return(&invalid_return).expect_err("invalid return type");
         assert_eq!(error.code, "TYPE_PARSE_ERROR");
+        assert!(contains_return_statement("if x > 0 { return x; }"));
+        assert!(!contains_return_statement("x = x + 1;"));
     }
 
     #[test]
@@ -1856,7 +1870,6 @@ mod script_compile_tests {
                     location: span.clone(),
                 }],
                 return_binding: FunctionReturn {
-                    name: "out".to_string(),
                     r#type: ScriptType::Primitive {
                         name: "int".to_string(),
                     },
@@ -2071,7 +2084,6 @@ mod script_compile_tests {
                 name: "main.add".to_string(),
                 params: Vec::new(),
                 return_binding: FunctionReturn {
-                    name: "out".to_string(),
                     r#type: ScriptType::Primitive {
                         name: "int".to_string(),
                     },
@@ -2777,7 +2789,7 @@ mod script_compile_tests {
                     map(&[
                         (
                             "x.xml",
-                            "<module name=\"x\"><function name=\"f\" return=\"int:r\">r=1;</function><function name=\"f\" return=\"int:r\">r=2;</function></module>",
+                            "<module name=\"x\"><function name=\"f\" returnType=\"int\">return 1;</function><function name=\"f\" returnType=\"int\">return 2;</function></module>",
                         ),
                         (
                             "main.xml",
@@ -3434,8 +3446,8 @@ mod script_compile_tests {
       <type name="Obj">
         <field name="values" type="#{int[]}"/>
       </type>
-      <function name="build" return="Obj:r">
-        r = #{values: #{a: [1]}};
+      <function name="build" returnType="Obj">
+        return #{values: #{a: [1]}};
       </function>
     </module>
     "##,
@@ -3694,54 +3706,58 @@ mod script_compile_tests {
 
         let empty_fn_args = parse_function_args(&xml_element(
             "function",
-            &[("name", "f"), ("args", "   "), ("return", "int:r")],
-            vec![xml_text("r = 1;")],
+            &[("name", "f"), ("args", "   "), ("returnType", "int")],
+            vec![xml_text("return 1;")],
         ))
         .expect("empty function args should be accepted");
         assert!(empty_fn_args.is_empty());
         let fn_args_bad_start = parse_function_args(&xml_element(
             "function",
-            &[("name", "f"), ("args", ":a"), ("return", "int:r")],
-            vec![xml_text("r = 1;")],
+            &[("name", "f"), ("args", ":a"), ("returnType", "int")],
+            vec![xml_text("return 1;")],
         ))
         .expect_err("bad function args should fail");
         assert_eq!(fn_args_bad_start.code, "FUNCTION_ARGS_PARSE_ERROR");
         let fn_args_bad_end = parse_function_args(&xml_element(
             "function",
-            &[("name", "f"), ("args", "int:"), ("return", "int:r")],
-            vec![xml_text("r = 1;")],
+            &[("name", "f"), ("args", "int:"), ("returnType", "int")],
+            vec![xml_text("return 1;")],
         ))
         .expect_err("bad function args should fail");
         assert_eq!(fn_args_bad_end.code, "FUNCTION_ARGS_PARSE_ERROR");
         let fn_args_dup = parse_function_args(&xml_element(
             "function",
-            &[("name", "f"), ("args", "int:a,int:a"), ("return", "int:r")],
-            vec![xml_text("r = 1;")],
+            &[
+                ("name", "f"),
+                ("args", "int:a,int:a"),
+                ("returnType", "int"),
+            ],
+            vec![xml_text("return 1;")],
         ))
         .expect_err("duplicate function args should fail");
         assert_eq!(fn_args_dup.code, "FUNCTION_ARGS_DUPLICATE");
         let fn_args_no_colon = parse_function_args(&xml_element(
             "function",
-            &[("name", "f"), ("args", "int"), ("return", "int:r")],
-            vec![xml_text("r = 1;")],
+            &[("name", "f"), ("args", "int"), ("returnType", "int")],
+            vec![xml_text("return 1;")],
         ))
         .expect_err("function arg without colon should fail");
         assert_eq!(fn_args_no_colon.code, "FUNCTION_ARGS_PARSE_ERROR");
 
-        let ret_no_colon = parse_function_return(&xml_element(
+        let ret_attr_invalid = parse_function_return(&xml_element(
             "function",
             &[("name", "f"), ("return", "int")],
             vec![xml_text("x")],
         ))
-        .expect_err("return parse should fail");
-        assert_eq!(ret_no_colon.code, "FUNCTION_RETURN_PARSE_ERROR");
+        .expect_err("return attr should fail");
+        assert_eq!(ret_attr_invalid.code, "FUNCTION_RETURN_ATTR_INVALID");
         let ret_bad_edge = parse_function_return(&xml_element(
             "function",
-            &[("name", "f"), ("return", "int:")],
+            &[("name", "f"), ("returnType", "int:")],
             vec![xml_text("x")],
         ))
         .expect_err("return parse should fail");
-        assert_eq!(ret_bad_edge.code, "FUNCTION_RETURN_PARSE_ERROR");
+        assert_eq!(ret_bad_edge.code, "TYPE_PARSE_ERROR");
 
         let empty_call_args = parse_args(Some("   ".to_string())).expect("empty call args");
         assert!(empty_call_args.is_empty());

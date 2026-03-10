@@ -52,7 +52,7 @@ pub(crate) struct ParsedFunctionDecl {
     pub(crate) qualified_name: String,
     pub(crate) access: AccessLevel,
     pub(crate) params: Vec<ParsedFunctionParamDecl>,
-    pub(crate) return_binding: ParsedFunctionParamDecl,
+    pub(crate) return_decl: ParsedFunctionReturnDecl,
     pub(crate) code: String,
     pub(crate) location: SourceSpan,
 }
@@ -82,6 +82,12 @@ pub(crate) struct ParsedModuleConstDecl {
 #[derive(Debug, Clone)]
 pub(crate) struct ParsedFunctionParamDecl {
     pub(crate) name: String,
+    pub(crate) type_expr: ParsedTypeExpr,
+    pub(crate) location: SourceSpan,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ParsedFunctionReturnDecl {
     pub(crate) type_expr: ParsedTypeExpr,
     pub(crate) location: SourceSpan,
 }

@@ -1,9 +1,9 @@
 <!-- import end from end.xml -->
 <module name="middle" default_access="public">
-  <function name="pickReturnTarget" args="script:current" return="script:next">
-    next = current;
+  <function name="pickReturnTarget" args="script:current" returnType="script">
+    return current;
     if current == @end.end {
-      next = @end.end;
+      return @end.end;
     }
   </function>
 

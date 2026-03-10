@@ -1,8 +1,8 @@
 <module name="lib" default_access="public">
-  <function name="add1" access="public" args="int:x" return="int:out">
-    out = x + 1;
+  <function name="add1" access="public" args="int:x" returnType="int">
+    return x + 1;
   </function>
-  <function name="times2" access="public" args="int:x" return="int:out">
-    out = x * 2;
+  <function name="times2" access="public" args="int:x" returnType="int">
+    return x * 2;
   </function>
 </module>

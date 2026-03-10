@@ -1,7 +1,7 @@
 <!-- import middle from middle.xml -->
 <module name="main" default_access="public">
-  <function name="pickCallTarget" return="script:out">
-    out = @middle.middle;
+  <function name="pickCallTarget" returnType="script">
+    return @middle.middle;
   </function>
 
   <script name="main">

@@ -6,9 +6,10 @@
 
   <var name="wallet" type="#{int}">#{gold: 5}</var>
 
-  <function name="boostCopy" args="#{int}:source,int:delta" return="#{int}:out">
-    out = source;
+  <function name="boostCopy" args="#{int}:source,int:delta" returnType="#{int}">
+    let out = source;
     out["hp"] = out["hp"] + delta;
+    return out;
   </function>
 
   <script name="boostByRef" args="ref:#{int}:stats">
