@@ -16,7 +16,15 @@ fi
 
 for ((round = 1; round <= MAX_ROUNDS; round++)); do
   echo "===== Round ${round}/${MAX_ROUNDS}: invoking claude ====="
-  claude -p --dangerously-skip-permissions "$PROMPT"
+  set +e
+  claude_output="$(claude -p --dangerously-skip-permissions "$PROMPT" 2>&1)"
+  claude_status=$?
+  set -e
+  echo "$claude_output"
+  echo "claude exit code: ${claude_status}"
+  if [[ "$claude_status" -ne 0 ]]; then
+    echo "claude failed in round ${round}; continuing."
+  fi
 
   echo "===== Round ${round}/${MAX_ROUNDS}: running make gate ====="
   set +e
