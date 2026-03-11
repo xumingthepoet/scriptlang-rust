@@ -1,0 +1,16 @@
+<module name="event_system" export="function:always_true,set_condition,notify">
+  <function name="always_true" return_type="boolean">
+    return true;
+  </function>
+
+  <var name="stored_condition" type="function">*event_system.always_true</var>
+
+  <function name="set_condition" args="function:condition" return_type="boolean">
+    stored_condition = condition;
+    return true;
+  </function>
+
+  <function name="notify" return_type="boolean">
+    return invoke(stored_condition, []);
+  </function>
+</module>

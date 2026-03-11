@@ -41,6 +41,7 @@ This catalog keeps example intent explicit so examples can be refactored without
 | `28-map-coverage` | map `#{K=>V}` + `#{V}` usage (string key + enum key + nested/array/ref/function/when) |
 | `29-alias-directives` | multi-module alias stress: type/var/const alias across arrays/maps/const/function/multi-script call chains |
 | `30-invoke-function-alias-module-var` | regression for `invoke(function, ...)` where function body reads explicit alias to imported module var |
+| `31-invoke-map-short-function-ref` | regression for enum-key map storing short `*function` refs that are later passed to `invoke(...)` |
 
 ## Notes
 - `26-enum-flow` intentionally covers enum member usage directly in XML attribute expressions (`args="ids.LocationId.A"`).

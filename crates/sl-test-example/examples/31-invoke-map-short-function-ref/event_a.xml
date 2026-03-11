@@ -1,0 +1,29 @@
+<!-- import event_system from event_system.xml -->
+<module name="event_a" export="function:can_phase_2_fn,can_phase_3_fn;script:register">
+  <enum name="Phase">
+    <member name="P2"/>
+    <member name="P3"/>
+  </enum>
+
+  <const name="condition_map" type="#{event_a.Phase=>function}">#{
+    event_a.Phase.P2: *can_phase_2_fn,
+    event_a.Phase.P3: *can_phase_3_fn
+  }</const>
+
+  <function name="can_phase_2_fn" return_type="boolean">
+    return false;
+  </function>
+
+  <function name="can_phase_3_fn" return_type="boolean">
+    return true;
+  </function>
+
+  <script name="register">
+    <temp name="cond_fn" type="function">*event_system.always_true</temp>
+    <code>
+      cond_fn = condition_map[event_a.Phase.P3];
+      event_system.set_condition(cond_fn);
+    </code>
+    <return/>
+  </script>
+</module>

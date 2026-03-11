@@ -248,7 +248,7 @@ fn is_function_literal_start(chars: &[char], index: usize) -> bool {
     !prev.is_ascii_alphanumeric() && prev != '_' && prev != '.' && prev != ')' && prev != ']'
 }
 
-fn normalize_and_validate_function_literals(
+pub(crate) fn normalize_and_validate_function_literals(
     expr: &str,
     span: &SourceSpan,
     module_name: Option<&str>,

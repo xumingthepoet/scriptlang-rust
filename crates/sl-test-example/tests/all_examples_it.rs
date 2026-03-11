@@ -130,6 +130,11 @@ fn example_30_invoke_function_alias_module_var_matches_testcase() {
 }
 
 #[test]
+fn example_31_invoke_map_short_function_ref_matches_testcase() {
+    assert_example("31-invoke-map-short-function-ref");
+}
+
+#[test]
 fn example_22_access_control_matches_testcase() {
     assert_example("22-access-control");
 }

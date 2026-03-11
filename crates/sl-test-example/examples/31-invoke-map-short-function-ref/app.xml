@@ -1,0 +1,9 @@
+<!-- import event_system from event_system.xml -->
+<!-- import event_a from event_a.xml -->
+<module name="app" export="script:main">
+  <script name="main">
+    <call script="@event_a.register"/>
+    <code>let ok = event_system.notify();</code>
+    <text>${ok}</text>
+  </script>
+</module>

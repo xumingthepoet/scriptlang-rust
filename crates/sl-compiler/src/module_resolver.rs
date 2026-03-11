@@ -559,6 +559,7 @@ fn normalize_module_initializer(
     resolved_type: &ScriptType,
     alias_rewrite_map: &BTreeMap<String, String>,
     visible_types: &BTreeMap<String, ScriptType>,
+    visible_functions: &BTreeMap<String, FunctionDecl>,
     module_name: &str,
     span: &SourceSpan,
 ) -> Result<Option<String>, ScriptLangError> {
@@ -592,8 +593,14 @@ fn normalize_module_initializer(
         Some(module_name),
         None,
     )?;
-    Ok(Some(rewrite_and_validate_enum_literals_in_expression(
+    let function_rewritten = normalize_and_validate_function_literals(
         &script_rewritten,
+        span,
+        Some(module_name),
+        visible_functions,
+    )?;
+    Ok(Some(rewrite_and_validate_enum_literals_in_expression(
+        &function_rewritten,
         visible_types,
         span,
     )?))
@@ -1110,6 +1117,7 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
                     &resolved_type,
                     &alias_rewrite_map,
                     &visible_types_in_scope,
+                    &functions,
                     &decl.namespace,
                     &decl.location,
                 )?;
@@ -1191,6 +1199,7 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
                     &resolved_type,
                     &alias_rewrite_map,
                     &visible_types_in_scope,
+                    &functions,
                     &decl.namespace,
                     &decl.location,
                 )?;
@@ -1547,6 +1556,7 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
 
 pub(crate) fn collect_module_vars_for_bundle(
     module_by_path: &BTreeMap<String, ModuleDeclarations>,
+    visible_functions: &BTreeMap<String, FunctionDecl>,
 ) -> Result<(BTreeMap<String, ModuleVarDecl>, Vec<String>), ScriptLangError> {
     let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
     let mut type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -1629,6 +1639,7 @@ pub(crate) fn collect_module_vars_for_bundle(
                     &resolved_type,
                     &alias_rewrite_map,
                     &visible_types,
+                    visible_functions,
                     &decl.namespace,
                     &decl.location,
                 )?;
@@ -1653,6 +1664,7 @@ pub(crate) fn collect_module_vars_for_bundle(
 pub(crate) fn collect_module_consts_for_bundle(
     module_by_path: &BTreeMap<String, ModuleDeclarations>,
     module_vars: &BTreeMap<String, ModuleVarDecl>,
+    visible_functions: &BTreeMap<String, FunctionDecl>,
 ) -> Result<(BTreeMap<String, ModuleConstDecl>, Vec<String>), ScriptLangError> {
     let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
     let mut type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -1735,6 +1747,7 @@ pub(crate) fn collect_module_consts_for_bundle(
                     &resolved_type,
                     &alias_rewrite_map,
                     &visible_types,
+                    visible_functions,
                     &decl.namespace,
                     &decl.location,
                 )?;
@@ -3302,8 +3315,9 @@ mod module_resolver_tests {
                 module_global_const_decls: Vec::new(),
             },
         )]);
-        let (bundle_globals, init_order) = collect_module_vars_for_bundle(&module_for_bundle)
-            .expect("bundle alias should resolve");
+        let (bundle_globals, init_order) =
+            collect_module_vars_for_bundle(&module_for_bundle, &BTreeMap::new())
+                .expect("bundle alias should resolve");
         assert!(bundle_globals.contains_key("bundle.item"));
         assert_eq!(init_order, vec!["bundle.item".to_string()]);
 
@@ -3492,7 +3506,7 @@ mod module_resolver_tests {
             .expect_err("module global type should resolve");
         assert_eq!(error.code, "TYPE_UNKNOWN");
 
-        let bundle_error = collect_module_vars_for_bundle(&bad_global_type)
+        let bundle_error = collect_module_vars_for_bundle(&bad_global_type, &BTreeMap::new())
             .expect_err("bundle module global type should resolve");
         assert_eq!(bundle_error.code, "TYPE_UNKNOWN");
 
@@ -4056,8 +4070,9 @@ mod module_resolver_tests {
                 },
             ),
         ]);
-        let duplicate_error = collect_module_consts_for_bundle(&duplicate, &module_vars)
-            .expect_err("duplicate const should fail");
+        let duplicate_error =
+            collect_module_consts_for_bundle(&duplicate, &module_vars, &BTreeMap::new())
+                .expect_err("duplicate const should fail");
         assert_eq!(duplicate_error.code, "MODULE_GLOBAL_CONST_DUPLICATE");
 
         let bad_order = BTreeMap::from([(
@@ -4088,8 +4103,9 @@ mod module_resolver_tests {
                 ],
             },
         )]);
-        let order_error = collect_module_consts_for_bundle(&bad_order, &module_vars)
-            .expect_err("forward const reference should fail");
+        let order_error =
+            collect_module_consts_for_bundle(&bad_order, &module_vars, &BTreeMap::new())
+                .expect_err("forward const reference should fail");
         assert_eq!(order_error.code, "MODULE_CONST_INIT_ORDER");
     }
 
@@ -4163,8 +4179,9 @@ mod module_resolver_tests {
             ),
         ]);
         let module_vars = BTreeMap::new();
-        let error = collect_module_consts_for_bundle(&module_by_path, &module_vars)
-            .expect_err("duplicate type should fail");
+        let error =
+            collect_module_consts_for_bundle(&module_by_path, &module_vars, &BTreeMap::new())
+                .expect_err("duplicate type should fail");
         assert_eq!(error.code, "TYPE_DECL_DUPLICATE");
     }
 
@@ -4476,7 +4493,7 @@ mod module_resolver_tests {
             ("a.xml".to_string(), module1),
             ("b.xml".to_string(), module2),
         ]);
-        let error = collect_module_vars_for_bundle(&module_by_path)
+        let error = collect_module_vars_for_bundle(&module_by_path, &BTreeMap::new())
             .expect_err("duplicate type should fail");
         assert_eq!(error.code, "TYPE_DECL_DUPLICATE");
     }
@@ -4504,8 +4521,8 @@ mod module_resolver_tests {
             module_global_const_decls: Vec::new(),
         };
         let module_by_path = BTreeMap::from([("a.xml".to_string(), module)]);
-        let error =
-            collect_module_vars_for_bundle(&module_by_path).expect_err("invalid type should fail");
+        let error = collect_module_vars_for_bundle(&module_by_path, &BTreeMap::new())
+            .expect_err("invalid type should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
     }
 
@@ -4532,8 +4549,9 @@ mod module_resolver_tests {
             module_global_const_decls: Vec::new(),
         };
         let module_by_path = BTreeMap::from([("a.xml".to_string(), module)]);
-        let error = collect_module_consts_for_bundle(&module_by_path, &BTreeMap::new())
-            .expect_err("invalid type should fail");
+        let error =
+            collect_module_consts_for_bundle(&module_by_path, &BTreeMap::new(), &BTreeMap::new())
+                .expect_err("invalid type should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
     }
 
@@ -4550,6 +4568,7 @@ mod module_resolver_tests {
         let result = normalize_module_initializer(
             &None,
             &enum_type,
+            &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
             "main",
@@ -4575,6 +4594,7 @@ mod module_resolver_tests {
             &enum_type,
             &BTreeMap::new(),
             &visible_types,
+            &BTreeMap::new(),
             "main",
             &span,
         );
@@ -4600,6 +4620,7 @@ mod module_resolver_tests {
             &enum_type,
             &BTreeMap::new(),
             &visible_types,
+            &BTreeMap::new(),
             "main",
             &span,
         );
@@ -4623,6 +4644,7 @@ mod module_resolver_tests {
             &enum_type,
             &BTreeMap::new(),
             &visible_types,
+            &BTreeMap::new(),
             "main",
             &span,
         );
@@ -4650,6 +4672,7 @@ mod module_resolver_tests {
             &int_type,
             &BTreeMap::new(),
             &visible_types,
+            &BTreeMap::new(),
             "main",
             &span,
         );
@@ -4675,6 +4698,7 @@ mod module_resolver_tests {
             &enum_key_map,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            &BTreeMap::new(),
             "main",
             &span,
         )
@@ -4684,6 +4708,7 @@ mod module_resolver_tests {
         let invalid = normalize_module_initializer(
             &Some("#{Unknown: 1}".to_string()),
             &enum_key_map,
+            &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
             "main",
