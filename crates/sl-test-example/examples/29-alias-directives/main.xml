@@ -1,0 +1,11 @@
+<!-- import shared from shared.xml -->
+<!-- alias shared.Unit -->
+<!-- alias shared.hp as health -->
+<!-- alias shared.BASE as base -->
+<module name="main" default_access="public">
+  <script name="main">
+    <temp name="hero" type="Unit">#{hp: health + base}</temp>
+    <text>hero.hp=${hero.hp}</text>
+    <text>shared.hp=${shared.hp}</text>
+  </script>
+</module>

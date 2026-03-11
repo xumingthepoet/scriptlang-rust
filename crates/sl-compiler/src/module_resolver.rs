@@ -407,10 +407,20 @@ pub(crate) fn global_data_symbol_regex() -> &'static Regex {
     })
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_visible_module_symbols(
     reachable: &BTreeSet<String>,
     module_by_path: &BTreeMap<String, ModuleDeclarations>,
     local_module_name: Option<&str>,
+) -> Result<VisibleModuleResolution, ScriptLangError> {
+    resolve_visible_module_symbols_with_aliases(reachable, module_by_path, local_module_name, &[])
+}
+
+pub(crate) fn resolve_visible_module_symbols_with_aliases(
+    reachable: &BTreeSet<String>,
+    module_by_path: &BTreeMap<String, ModuleDeclarations>,
+    local_module_name: Option<&str>,
+    alias_directives: &[AliasDirective],
 ) -> Result<VisibleModuleResolution, ScriptLangError> {
     let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
     let mut local_type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -710,7 +720,108 @@ pub(crate) fn resolve_visible_module_symbols(
         module_consts.entry(alias).or_insert(decl);
     }
 
+    apply_explicit_alias_directives(
+        alias_directives,
+        &mut visible_types,
+        &functions,
+        &mut module_vars,
+        &mut module_consts,
+    )?;
+
     Ok((visible_types, functions, module_vars, module_consts))
+}
+
+fn apply_explicit_alias_directives(
+    alias_directives: &[AliasDirective],
+    visible_types: &mut BTreeMap<String, ScriptType>,
+    visible_functions: &BTreeMap<String, FunctionDecl>,
+    visible_module_vars: &mut BTreeMap<String, ModuleVarDecl>,
+    visible_module_consts: &mut BTreeMap<String, ModuleConstDecl>,
+) -> Result<(), ScriptLangError> {
+    let mut explicit_alias_target_by_name = BTreeMap::new();
+
+    for directive in alias_directives {
+        let target = directive.target_qualified_name.as_str();
+        let alias = directive.alias_name.as_str();
+
+        if let Some(existing_target) = explicit_alias_target_by_name.get(alias) {
+            if existing_target == target {
+                continue;
+            }
+            return Err(ScriptLangError::new(
+                "ALIAS_NAME_CONFLICT",
+                format!(
+                    "Alias \"{}\" points to both \"{}\" and \"{}\".",
+                    alias, existing_target, target
+                ),
+            ));
+        }
+
+        if let Some(target_type) = visible_types.get(target).cloned() {
+            if visible_types.contains_key(alias) {
+                return Err(ScriptLangError::new(
+                    "ALIAS_NAME_CONFLICT",
+                    format!(
+                        "Alias name \"{}\" conflicts with existing visible type.",
+                        alias
+                    ),
+                ));
+            }
+            visible_types.insert(alias.to_string(), target_type);
+            explicit_alias_target_by_name.insert(alias.to_string(), target.to_string());
+            continue;
+        }
+
+        if let Some(target_var) = visible_module_vars.get(target).cloned() {
+            if visible_module_vars.contains_key(alias) {
+                return Err(ScriptLangError::new(
+                    "ALIAS_NAME_CONFLICT",
+                    format!(
+                        "Alias name \"{}\" conflicts with existing visible module variable.",
+                        alias
+                    ),
+                ));
+            }
+            visible_module_vars.insert(alias.to_string(), target_var);
+            explicit_alias_target_by_name.insert(alias.to_string(), target.to_string());
+            continue;
+        }
+
+        if let Some(target_const) = visible_module_consts.get(target).cloned() {
+            if visible_module_consts.contains_key(alias) {
+                return Err(ScriptLangError::new(
+                    "ALIAS_NAME_CONFLICT",
+                    format!(
+                        "Alias name \"{}\" conflicts with existing visible module constant.",
+                        alias
+                    ),
+                ));
+            }
+            visible_module_consts.insert(alias.to_string(), target_const);
+            explicit_alias_target_by_name.insert(alias.to_string(), target.to_string());
+            continue;
+        }
+
+        if visible_functions.contains_key(target) {
+            return Err(ScriptLangError::new(
+                "ALIAS_TARGET_KIND_UNSUPPORTED",
+                format!(
+                    "Alias target \"{}\" is a function. Alias only supports type/module var/module const.",
+                    target
+                ),
+            ));
+        }
+
+        return Err(ScriptLangError::new(
+            "ALIAS_TARGET_NOT_FOUND",
+            format!(
+                "Alias target \"{}\" is not visible in current module closure.",
+                target
+            ),
+        ));
+    }
+
+    Ok(())
 }
 
 pub(crate) fn collect_functions_for_bundle(
@@ -1620,6 +1731,170 @@ mod module_resolver_tests {
     }
 
     #[test]
+    fn resolve_visible_module_symbols_with_aliases_supports_and_validates_alias_rules() {
+        let span = SourceSpan::synthetic();
+        let modules = BTreeMap::from([(
+            "shared.xml".to_string(),
+            ModuleDeclarations {
+                type_decls: vec![ParsedTypeDecl {
+                    name: "Unit".to_string(),
+                    qualified_name: "shared.Unit".to_string(),
+                    access: AccessLevel::Public,
+                    fields: vec![ParsedTypeFieldDecl {
+                        name: "hp".to_string(),
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        location: span.clone(),
+                    }],
+                    enum_members: Vec::new(),
+                    location: span.clone(),
+                }],
+                function_decls: vec![ParsedFunctionDecl {
+                    name: "boost".to_string(),
+                    qualified_name: "shared.boost".to_string(),
+                    access: AccessLevel::Public,
+                    params: vec![ParsedFunctionParamDecl {
+                        name: "x".to_string(),
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        location: span.clone(),
+                    }],
+                    return_decl: ParsedFunctionReturnDecl {
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        location: span.clone(),
+                    },
+                    code: "ret = x + 1;".to_string(),
+                    location: span.clone(),
+                }],
+                module_global_var_decls: vec![
+                    ParsedModuleVarDecl {
+                        namespace: "shared".to_string(),
+                        name: "hp".to_string(),
+                        qualified_name: "shared.hp".to_string(),
+                        access: AccessLevel::Public,
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        initial_value_expr: Some("1".to_string()),
+                        location: span.clone(),
+                    },
+                    ParsedModuleVarDecl {
+                        namespace: "shared".to_string(),
+                        name: "mp".to_string(),
+                        qualified_name: "shared.mp".to_string(),
+                        access: AccessLevel::Public,
+                        type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        initial_value_expr: Some("2".to_string()),
+                        location: span.clone(),
+                    },
+                ],
+                module_global_const_decls: vec![ParsedModuleConstDecl {
+                    namespace: "shared".to_string(),
+                    name: "BASE".to_string(),
+                    qualified_name: "shared.BASE".to_string(),
+                    access: AccessLevel::Public,
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    initial_value_expr: Some("10".to_string()),
+                    location: span,
+                }],
+            },
+        )]);
+        let reachable = BTreeSet::from(["shared.xml".to_string()]);
+
+        let aliases = vec![
+            AliasDirective {
+                target_qualified_name: "shared.Unit".to_string(),
+                alias_name: "Hero".to_string(),
+            },
+            AliasDirective {
+                target_qualified_name: "shared.hp".to_string(),
+                alias_name: "health".to_string(),
+            },
+            AliasDirective {
+                target_qualified_name: "shared.BASE".to_string(),
+                alias_name: "base".to_string(),
+            },
+            AliasDirective {
+                target_qualified_name: "shared.hp".to_string(),
+                alias_name: "health".to_string(),
+            },
+        ];
+        let (types, _functions, module_vars, module_consts) =
+            resolve_visible_module_symbols_with_aliases(
+                &reachable,
+                &modules,
+                Some("main"),
+                &aliases,
+            )
+            .expect("aliases should resolve");
+        assert!(types.contains_key("Hero"));
+        assert_eq!(
+            module_vars
+                .get("health")
+                .expect("module var alias should exist")
+                .qualified_name,
+            "shared.hp"
+        );
+        assert_eq!(
+            module_consts
+                .get("base")
+                .expect("module const alias should exist")
+                .qualified_name,
+            "shared.BASE"
+        );
+
+        let not_found = resolve_visible_module_symbols_with_aliases(
+            &reachable,
+            &modules,
+            Some("main"),
+            &[AliasDirective {
+                target_qualified_name: "shared.missing".to_string(),
+                alias_name: "x".to_string(),
+            }],
+        )
+        .expect_err("missing alias target should fail");
+        assert_eq!(not_found.code, "ALIAS_TARGET_NOT_FOUND");
+
+        let function_target = resolve_visible_module_symbols_with_aliases(
+            &reachable,
+            &modules,
+            Some("main"),
+            &[AliasDirective {
+                target_qualified_name: "shared.boost".to_string(),
+                alias_name: "boost2".to_string(),
+            }],
+        )
+        .expect_err("function target should fail");
+        assert_eq!(function_target.code, "ALIAS_TARGET_KIND_UNSUPPORTED");
+
+        let name_conflict = resolve_visible_module_symbols_with_aliases(
+            &reachable,
+            &modules,
+            Some("shared"),
+            &[AliasDirective {
+                target_qualified_name: "shared.hp".to_string(),
+                alias_name: "hp".to_string(),
+            }],
+        )
+        .expect_err("alias name collision should fail");
+        assert_eq!(name_conflict.code, "ALIAS_NAME_CONFLICT");
+
+        let divergent_rebind = resolve_visible_module_symbols_with_aliases(
+            &reachable,
+            &modules,
+            Some("main"),
+            &[
+                AliasDirective {
+                    target_qualified_name: "shared.hp".to_string(),
+                    alias_name: "stat".to_string(),
+                },
+                AliasDirective {
+                    target_qualified_name: "shared.mp".to_string(),
+                    alias_name: "stat".to_string(),
+                },
+            ],
+        )
+        .expect_err("same alias to different targets should fail");
+        assert_eq!(divergent_rebind.code, "ALIAS_NAME_CONFLICT");
+    }
+
+    #[test]
     fn compile_bundle_rejects_module_global_forward_reference() {
         let files = map(&[
             (
@@ -2181,6 +2456,7 @@ mod module_resolver_tests {
             SourceFile {
                 kind: SourceKind::Json,
                 imports: Vec::new(),
+                alias_directives: Vec::new(),
                 xml_root: None,
                 json_value: Some(SlValue::Number(1.0)),
             },
@@ -2203,6 +2479,7 @@ mod module_resolver_tests {
             SourceFile {
                 kind: SourceKind::Json,
                 imports: Vec::new(),
+                alias_directives: Vec::new(),
                 xml_root: None,
                 json_value: None,
             },
@@ -2555,6 +2832,7 @@ mod module_resolver_tests {
         let bad_root = SourceFile {
             kind: SourceKind::ModuleXml,
             imports: Vec::new(),
+            alias_directives: Vec::new(),
             xml_root: Some(compiler_test_support::xml_element(
                 "script",
                 &[("name", "x")],
@@ -2569,6 +2847,7 @@ mod module_resolver_tests {
         let reserved_script = SourceFile {
             kind: SourceKind::ModuleXml,
             imports: Vec::new(),
+            alias_directives: Vec::new(),
             xml_root: Some(compiler_test_support::xml_element(
                 "module",
                 &[("name", "battle")],
@@ -2587,6 +2866,7 @@ mod module_resolver_tests {
         let missing_script_name = SourceFile {
             kind: SourceKind::ModuleXml,
             imports: Vec::new(),
+            alias_directives: Vec::new(),
             xml_root: Some(compiler_test_support::xml_element(
                 "module",
                 &[("name", "battle")],
@@ -2605,6 +2885,7 @@ mod module_resolver_tests {
         let unsupported_kind = SourceFile {
             kind: SourceKind::Json,
             imports: Vec::new(),
+            alias_directives: Vec::new(),
             xml_root: None,
             json_value: Some(SlValue::Bool(false)),
         };
@@ -2617,6 +2898,7 @@ mod module_resolver_tests {
             SourceFile {
                 kind: SourceKind::ModuleXml,
                 imports: Vec::new(),
+                alias_directives: Vec::new(),
                 xml_root: Some(compiler_test_support::xml_element(
                     "module",
                     &[("name", "battle")],
@@ -2639,12 +2921,14 @@ mod module_resolver_tests {
         let json_source = SourceFile {
             kind: SourceKind::Json,
             imports: Vec::new(),
+            alias_directives: Vec::new(),
             xml_root: None,
             json_value: Some(SlValue::Bool(true)),
         };
         let module_source = SourceFile {
             kind: SourceKind::ModuleXml,
             imports: Vec::new(),
+            alias_directives: Vec::new(),
             xml_root: Some(compiler_test_support::xml_element(
                 "module",
                 &[("name", "main")],
@@ -2672,6 +2956,7 @@ mod module_resolver_tests {
                 SourceFile {
                     kind: SourceKind::ModuleXml,
                     imports: Vec::new(),
+                    alias_directives: Vec::new(),
                     xml_root: Some(compiler_test_support::xml_element(
                         "module",
                         &[("name", "main")],
@@ -2703,6 +2988,7 @@ mod module_resolver_tests {
                     SourceFile {
                         kind: SourceKind::ModuleXml,
                         imports: Vec::new(),
+                        alias_directives: Vec::new(),
                         xml_root: Some(compiler_test_support::xml_element(
                             "module",
                             &[("name", "main")],

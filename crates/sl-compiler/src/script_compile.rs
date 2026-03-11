@@ -3439,6 +3439,7 @@ mod script_compile_tests {
             SourceFile {
                 kind: SourceKind::Json,
                 imports: Vec::new(),
+                alias_directives: Vec::new(),
                 xml_root: None,
                 json_value: Some(SlValue::Number(1.0)),
             },
@@ -3448,6 +3449,7 @@ mod script_compile_tests {
             SourceFile {
                 kind: SourceKind::Json,
                 imports: Vec::new(),
+                alias_directives: Vec::new(),
                 xml_root: None,
                 json_value: Some(SlValue::Number(2.0)),
             },

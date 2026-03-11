@@ -39,6 +39,7 @@ This catalog keeps example intent explicit so examples can be refactored without
 | `26-enum-flow` | `<enum>` + `Type.Member` in attribute args |
 | `27-dynamic-transfer-target` | dynamic script target for call/return |
 | `28-map-coverage` | map `#{K=>V}` + `#{V}` usage (string key + enum key + nested/array/ref/function/when) |
+| `29-alias-directives` | `<!-- alias Module.Entity [as Alias] -->` for type/var/const visibility |
 
 ## Notes
 - `26-enum-flow` intentionally covers enum member usage directly in XML attribute expressions (`args="ids.LocationId.A"`).

@@ -120,6 +120,11 @@ fn example_28_map_coverage_matches_testcase() {
 }
 
 #[test]
+fn example_29_alias_directives_matches_testcase() {
+    assert_example("29-alias-directives");
+}
+
+#[test]
 fn example_22_access_control_matches_testcase() {
     assert_example("22-access-control");
 }

@@ -1,0 +1,7 @@
+<module name="shared" default_access="public">
+  <type name="Unit">
+    <field name="hp" type="int"/>
+  </type>
+  <var name="hp" type="int">10</var>
+  <const name="BASE" type="int">2</const>
+</module>

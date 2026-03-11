@@ -42,6 +42,12 @@ pub enum ImportDirective {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AliasDirective {
+    pub target_qualified_name: String,
+    pub alias_name: String,
+}
+
 pub fn parse_import_directives(source: &str) -> Vec<ImportDirective> {
     let mut directives = Vec::new();
 
@@ -102,6 +108,45 @@ pub fn parse_import_directives(source: &str) -> Vec<ImportDirective> {
     directives
 }
 
+pub fn parse_alias_directives(source: &str) -> Vec<AliasDirective> {
+    let mut directives = Vec::new();
+
+    for caps in alias_directive_regex().captures_iter(source) {
+        let raw = caps
+            .get(1)
+            .expect("alias directive regex should always capture body")
+            .as_str()
+            .trim();
+        let Some(alias_caps) = alias_directive_body_regex().captures(raw) else {
+            continue;
+        };
+        let target_qualified_name = alias_caps
+            .get(1)
+            .expect("alias directive body regex should capture target")
+            .as_str()
+            .trim();
+        let alias_name = alias_caps
+            .get(2)
+            .map(|value| value.as_str().trim().to_string())
+            .unwrap_or_else(|| {
+                target_qualified_name
+                    .split('.')
+                    .nth(1)
+                    .unwrap_or_default()
+                    .to_string()
+            });
+        if target_qualified_name.is_empty() || alias_name.is_empty() {
+            continue;
+        }
+        directives.push(AliasDirective {
+            target_qualified_name: target_qualified_name.to_string(),
+            alias_name,
+        });
+    }
+
+    directives
+}
+
 pub fn reject_non_import_dependency_directives(source: &str) -> Result<(), ScriptLangError> {
     if let Some(caps) = non_import_dependency_directive_regex().captures(source) {
         let keyword = caps
@@ -142,6 +187,24 @@ fn directory_import_body_regex() -> &'static Regex {
     REGEX.get_or_init(|| {
         Regex::new(r"^import\s*\{\s*(.+?)\s*\}\s+from\s+(.+?)$")
             .expect("directory import body regex must compile")
+    })
+}
+
+fn alias_directive_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"(?m)^\s*<!--\s*(alias.+?)\s*-->\s*$")
+            .expect("alias directive regex must compile")
+    })
+}
+
+fn alias_directive_body_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(
+            r"^alias\s+([A-Za-z_][A-Za-z0-9_-]*\.[A-Za-z_][A-Za-z0-9_-]*)(?:\s+as\s+([A-Za-z_][A-Za-z0-9_-]*))?$",
+        )
+        .expect("alias directive body regex must compile")
     })
 }
 
@@ -241,25 +304,6 @@ mod tests {
     }
 
     #[test]
-    fn reject_non_import_dependency_directives_reports_unsupported_directive() {
-        let source = r#"
-<!-- dependency: a.xml -->
-<module name="main" default_access="public"></module>
-"#;
-
-        let error = reject_non_import_dependency_directives(source)
-            .expect_err("non-import dependency directive should fail");
-        assert_eq!(error.code, "IMPORT_DIRECTIVE_UNSUPPORTED");
-
-        let valid = r#"
-<!-- import Shared from shared.xml -->
-<module name="main" default_access="public"></module>
-"#;
-        reject_non_import_dependency_directives(valid)
-            .expect("import directive should pass whitelist");
-    }
-
-    #[test]
     fn parse_import_directives_ignores_malformed_entries() {
         let source = r#"
 <!-- import from shared.xml -->
@@ -288,6 +332,69 @@ mod tests {
 
         assert!(parse_import_directives("<!-- import Shared from    -->").is_empty());
         assert!(parse_import_directives("<!-- import { Shared } from    -->").is_empty());
+    }
+
+    #[test]
+    fn parse_alias_directives_extracts_with_and_without_as() {
+        let source = r#"
+<!-- alias shared.hp -->
+<!-- alias shared.maxHp as max -->
+<!-- alias shared -->
+<!-- alias shared.hp as -->
+"#;
+
+        let aliases = parse_alias_directives(source);
+        assert_eq!(
+            aliases,
+            vec![
+                AliasDirective {
+                    target_qualified_name: "shared.hp".to_string(),
+                    alias_name: "hp".to_string(),
+                },
+                AliasDirective {
+                    target_qualified_name: "shared.maxHp".to_string(),
+                    alias_name: "max".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_alias_directives_ignores_malformed_and_non_alias_comments() {
+        let source = r#"
+<!--! alias shared.hp as hp -->
+<!-- dependency: shared.hp -->
+<!-- alias shared as hp -->
+<!-- alias shared.hp as -->
+<!-- alias shared.hp as hp -->
+"#;
+        let aliases = parse_alias_directives(source);
+        assert_eq!(
+            aliases,
+            vec![AliasDirective {
+                target_qualified_name: "shared.hp".to_string(),
+                alias_name: "hp".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn reject_non_import_dependency_directives_reports_unsupported_directive() {
+        let source = r#"
+<!-- dependency: a.xml -->
+<module name="main" default_access="public"></module>
+"#;
+
+        let error = reject_non_import_dependency_directives(source)
+            .expect_err("non-import dependency directive should fail");
+        assert_eq!(error.code, "IMPORT_DIRECTIVE_UNSUPPORTED");
+
+        let valid = r#"
+<!-- import Shared from shared.xml -->
+<module name="main" default_access="public"></module>
+"#;
+        reject_non_import_dependency_directives(valid)
+            .expect("import directive should pass whitelist");
     }
 
     #[test]

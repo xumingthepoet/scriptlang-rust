@@ -43,10 +43,11 @@ pub fn compile_project_bundle_from_xml_map(
             // collect_module_vars_for_bundle, collect_module_consts_for_bundle). The error path
             // here would only trigger if those earlier checks were removed.
             let (visible_types, visible_functions, visible_module_vars, visible_module_consts) =
-                resolve_visible_module_symbols(
+                resolve_visible_module_symbols_with_aliases(
                     reachable,
                     &module_by_path,
                     script_decl.module_name.as_deref(),
+                    &source.alias_directives,
                 )
                 .expect("resolve_visible_module_symbols should not fail - duplicate checks already done in collect_*_for_bundle");
             let ir = compile_script(CompileScriptOptions {
@@ -607,6 +608,7 @@ mod pipeline_tests {
         let json_source = SourceFile {
             kind: SourceKind::Json,
             imports: Vec::new(),
+            alias_directives: Vec::new(),
             xml_root: None,
             json_value: Some(SlValue::Bool(true)),
         };
@@ -706,6 +708,59 @@ mod pipeline_tests {
         assert!(conflict_main.visible_module_vars.contains_key("a.hp"));
         assert!(conflict_main.visible_module_vars.contains_key("b.hp"));
         assert!(!conflict_main.visible_module_vars.contains_key("hp"));
+    }
+
+    #[test]
+    fn compile_bundle_supports_explicit_alias_directives() {
+        let files = map(&[
+            (
+                "shared.xml",
+                r#"
+<module name="shared" default_access="public">
+  <type name="Unit">
+    <field name="hp" type="int"/>
+  </type>
+  <var name="hp" type="int">10</var>
+  <const name="BASE" type="int">2</const>
+</module>
+"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<!-- import shared from shared.xml -->
+<!-- alias shared.Unit as Hero -->
+<!-- alias shared.hp as health -->
+<!-- alias shared.BASE as base -->
+<module name="main" default_access="public">
+  <script name="main">
+    <temp name="hero" type="Hero">#{hp: health + base}</temp>
+    <text>${hero.hp}</text>
+  </script>
+</module>
+"#,
+            ),
+        ]);
+
+        let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        let main = bundle
+            .scripts
+            .get("main.main")
+            .expect("main script should exist");
+        assert_eq!(
+            main.visible_module_vars
+                .get("health")
+                .expect("module var alias should exist")
+                .qualified_name,
+            "shared.hp"
+        );
+        assert_eq!(
+            main.visible_module_consts
+                .get("base")
+                .expect("module const alias should exist")
+                .qualified_name,
+            "shared.BASE"
+        );
     }
 
     #[test]
@@ -923,6 +978,7 @@ mod pipeline_tests {
                 ),
                 json_value: None,
                 imports: Vec::new(),
+                alias_directives: Vec::new(),
             },
         )]);
         let error = parse_module_scripts(&bad_sources).expect_err("module parse should fail");
@@ -933,6 +989,7 @@ mod pipeline_tests {
             SourceFile {
                 kind: SourceKind::Json,
                 imports: Vec::new(),
+                alias_directives: Vec::new(),
                 xml_root: None,
                 json_value: Some(SlValue::Bool(true)),
             },

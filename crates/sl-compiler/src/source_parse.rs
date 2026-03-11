@@ -5,6 +5,7 @@ struct ParsedSourceEntry {
     root: XmlElementNode,
     module_name: String,
     imports: Vec<ImportDirective>,
+    alias_directives: Vec<AliasDirective>,
 }
 
 pub(crate) fn parse_sources(
@@ -35,6 +36,7 @@ pub(crate) fn parse_sources(
             SourceFile {
                 kind: SourceKind::ModuleXml,
                 imports,
+                alias_directives: parsed.alias_directives,
                 xml_root: Some(parsed.root),
                 json_value: None,
             },
@@ -75,6 +77,7 @@ fn parse_source_entry(
         root: document.root,
         module_name,
         imports: parse_import_directives(source_text),
+        alias_directives: parse_alias_directives(source_text),
     })
 }
 
@@ -357,6 +360,7 @@ mod source_parse_tests {
                 r#"
 <!-- import Helper from extras/helper.xml -->
 <!-- import { Battle, Common } from shared/ -->
+<!-- alias Common.hp as common_hp -->
 <module name="Main" default_access="public"><script name="main"></script></module>
 "#
                 .to_string(),
@@ -383,6 +387,16 @@ mod source_parse_tests {
                 "shared/z-last.xml".to_string(),
                 "shared/a-first.xml".to_string(),
             ]
+        );
+        assert_eq!(
+            sources
+                .get("main.xml")
+                .expect("main source")
+                .alias_directives,
+            vec![AliasDirective {
+                target_qualified_name: "Common.hp".to_string(),
+                alias_name: "common_hp".to_string(),
+            }]
         );
     }
 

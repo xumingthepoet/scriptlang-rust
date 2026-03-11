@@ -54,6 +54,8 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 ```xml
 <!-- import Shared from shared.xml -->
 <!-- import { Battle, Shared } from modules/ -->
+<!-- alias Shared.hp -->
+<!-- alias Shared.BASE as base -->
 ```
 
 示例：
@@ -74,6 +76,23 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 - `<!-- import { Battle, Shared } from modules/ -->` 递归扫描目录，只导入显式列出的 module。
 - 目录 import 要求目录树内 module 名唯一；重名直接报错。
 - import 缺失、目录未匹配到任何 module、或循环依赖都会编译报错。
+
+## 2.1 alias 语法
+
+使用 XML 注释行：
+
+```xml
+<!-- alias Shared.hp -->
+<!-- alias Shared.Hero as HeroType -->
+```
+
+规则：
+- `alias` 目标只支持两段限定名 `Module.Entity`。
+- `<!-- alias Shared.hp -->` 等价于 `<!-- alias Shared.hp as hp -->`。
+- `alias` 只影响当前文件脚本编译时的可见符号，不会新增 import 边。
+- `alias` 目标必须在当前 import + access 可见闭包内。
+- `alias` 仅支持 `type` / module `var` / module `const`，不支持 function。
+- 同名 alias 指向不同目标会编译报错；alias 名与同类已可见名字冲突也会编译报错。
 
 ## 3. `<script>` 顶层属性
 

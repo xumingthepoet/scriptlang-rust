@@ -12,8 +12,9 @@ pub(crate) use sl_core::{
     SlValue, SourceSpan, VarDeclaration, COMPILED_PROJECT_SCHEMA,
 };
 pub(crate) use sl_parser::{
-    parse_import_directives, parse_xml_document, reject_non_import_dependency_directives,
-    ImportDirective, XmlElementNode, XmlNode, XmlTextNode,
+    parse_alias_directives, parse_import_directives, parse_xml_document,
+    reject_non_import_dependency_directives, AliasDirective, ImportDirective, XmlElementNode,
+    XmlNode, XmlTextNode,
 };
 
 mod artifact;

@@ -24,6 +24,7 @@ pub(crate) enum SourceKind {
 pub(crate) struct SourceFile {
     pub(crate) kind: SourceKind,
     pub(crate) imports: Vec<String>,
+    pub(crate) alias_directives: Vec<AliasDirective>,
     pub(crate) xml_root: Option<XmlElementNode>,
     #[allow(dead_code)]
     pub(crate) json_value: Option<SlValue>,

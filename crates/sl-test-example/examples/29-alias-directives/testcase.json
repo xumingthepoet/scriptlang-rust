@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "sl-tool-case",
+  "entryScript": "main.main",
+  "actions": [],
+  "expectedEvents": [
+    { "kind": "text", "text": "hero.hp=12" },
+    { "kind": "text", "text": "shared.hp=10" },
+    { "kind": "end" }
+  ]
+}
