@@ -1648,13 +1648,6 @@ pub(crate) fn parse_function_return(
             node.location.clone(),
         ));
     }
-    if has_attr(node, "returnType") {
-        return Err(ScriptLangError::with_span(
-            "FUNCTION_RETURN_TYPE_ATTR_RENAMED",
-            "Attribute \"returnType\" has been removed; use \"return_type\".",
-            node.location.clone(),
-        ));
-    }
     let raw = get_required_non_empty_attr(node, "return_type")?;
     Ok(ParsedFunctionReturnDecl {
         type_expr: parse_type_expr(&raw, &node.location)?,
@@ -1801,15 +1794,6 @@ mod script_compile_tests {
         let error =
             parse_function_declaration_node(&fn_bad_return).expect_err("return attr invalid");
         assert_eq!(error.code, "FUNCTION_RETURN_ATTR_INVALID");
-        let fn_old_return_attr = xml_element(
-            "function",
-            &[("name", "f"), ("args", "int:a"), ("returnType", "int")],
-            vec![xml_text("return a;")],
-        );
-        let error = parse_function_declaration_node(&fn_old_return_attr)
-            .expect_err("old returnType attr should fail");
-        assert_eq!(error.code, "FUNCTION_RETURN_TYPE_ATTR_RENAMED");
-
         let fn_reserved_arg = xml_element(
             "function",
             &[
@@ -3209,14 +3193,6 @@ mod script_compile_tests {
                         "<script name=\"main\"><input var=\"x\" text=\"p\" max_length=\"abc\"/></script>",
                     )]),
                     "XML_INPUT_MAX_LENGTH_INVALID",
-                ),
-                (
-                    "function returnType renamed",
-                    map(&[(
-                        "main.xml",
-                        "<module name=\"main\"><function name=\"f\" returnType=\"int\">return 1;</function></module>",
-                    )]),
-                    "FUNCTION_RETURN_TYPE_ATTR_RENAMED",
                 ),
                 (
                     "return ref unsupported",
