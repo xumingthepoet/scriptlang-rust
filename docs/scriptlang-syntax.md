@@ -287,6 +287,8 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 <code>nextScene = @main.result;</code>
 ```
 
+在 module 脚本上下文里可写 `@short`（如 `@next`），编译期会补全为 `@module.script`。
+
 `function` 类型也可在 `<code>` 中赋值（值必须是 `*...` 函数引用字面量）：
 
 ```xml
@@ -478,6 +480,7 @@ module 相关规则：
 - 在同 module 内调用 sibling script 时使用 `@next`
 - `@short` 会在编译期补全为当前 module 的限定名
 - `@short` 仅可用于 module 脚本上下文；在非 module 脚本中使用会编译失败
+- 若 `script` 来自变量，变量值需是 `@module.script` 形态（module 内写入 `@short` 时会在编译期补全）
 - 变量目标只支持“变量名”本身，不支持路径表达式（如 `a.b`）
 - `script="battle.main"`、`script="${...}"` 会编译失败
 - `script="next"` 只有在 `next` 是可见且类型为 `script` 的变量时才合法；否则会编译失败
@@ -510,6 +513,7 @@ module 相关规则与 `<call>` 相同：
 - 对外跳转到 module 脚本时使用 `@battle.next`
 - 同 module 内可写短名 `@next`
 - `@short` 仅可用于 module 脚本上下文；在非 module 脚本中使用会编译失败
+- 若 `script` 来自变量，变量值需是 `@module.script` 形态（module 内写入 `@short` 时会在编译期补全）
 - 变量目标只支持“变量名”本身，不支持路径表达式（如 `a.b`）
 - `script="${...}"` 已移除，动态目标用 `script` 类型变量承载
 

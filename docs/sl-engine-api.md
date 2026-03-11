@@ -104,6 +104,7 @@ assert!(scripts.contains_key("main.main"));
 
 编译产物约束（与 alias 相关）：
 - module `var/const` 的短名/显式 alias 在编译期预处理为限定名访问，运行期按限定名执行。
+- `script` 字面量短名（如 `@next`）在编译期补全为限定名（如 `@main.next`）；运行期不再对 script 目标做模块前缀补全。
 
 ```rust
 use std::collections::BTreeMap;

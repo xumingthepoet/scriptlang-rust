@@ -22,14 +22,6 @@ fn script_target_var_regex() -> &'static Regex {
     REGEX.get_or_init(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").expect("target var regex"))
 }
 
-fn script_literal_regex() -> &'static Regex {
-    static REGEX: OnceLock<Regex> = OnceLock::new();
-    REGEX.get_or_init(|| {
-        Regex::new(r"@([A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)?)")
-            .expect("script literal regex")
-    })
-}
-
 fn script_literal_name_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
@@ -94,18 +86,97 @@ fn validate_script_literal_access(
     Ok(())
 }
 
-fn validate_script_literals_in_expression(
+fn parse_script_literal_name(chars: &[char], at_index: usize) -> Option<(String, usize)> {
+    let mut index = at_index + 1;
+    let mut name = String::new();
+    let mut seen_dot = false;
+
+    let first = *chars.get(index)?;
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return None;
+    }
+    name.push(first);
+    index += 1;
+
+    while let Some(ch) = chars.get(index).copied() {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+            name.push(ch);
+            index += 1;
+            continue;
+        }
+        if ch == '.' && !seen_dot {
+            let next = chars.get(index + 1).copied()?;
+            if !next.is_ascii_alphabetic() && next != '_' {
+                return None;
+            }
+            seen_dot = true;
+            name.push(ch);
+            index += 1;
+            continue;
+        }
+        break;
+    }
+
+    Some((name, index))
+}
+
+fn is_script_literal_left_boundary(ch: Option<char>) -> bool {
+    match ch {
+        None => true,
+        Some(value) => !value.is_ascii_alphanumeric() && value != '_' && value != '.',
+    }
+}
+
+pub(crate) fn normalize_and_validate_script_literals_in_expression(
     expr: &str,
     span: &SourceSpan,
-    all_script_access: &BTreeMap<String, AccessLevel>,
     module_name: Option<&str>,
-) -> Result<(), ScriptLangError> {
-    for caps in script_literal_regex().captures_iter(expr) {
-        let literal_name = caps.get(1).expect("script literal regex capture").as_str();
-        let qualified = qualify_script_literal_name(literal_name, module_name, span)?;
-        validate_script_literal_access(&qualified, all_script_access, module_name, span)?;
+    all_script_access: Option<&BTreeMap<String, AccessLevel>>,
+) -> Result<String, ScriptLangError> {
+    let chars = expr.chars().collect::<Vec<_>>();
+    let mut out = String::with_capacity(expr.len());
+    let mut index = 0usize;
+    let mut quote: Option<char> = None;
+
+    while index < chars.len() {
+        let ch = chars[index];
+        if let Some(active_quote) = quote {
+            out.push(ch);
+            if ch == '\\' && index + 1 < chars.len() {
+                index += 1;
+                out.push(chars[index]);
+            } else if ch == active_quote {
+                quote = None;
+            }
+            index += 1;
+            continue;
+        }
+
+        if ch == '\'' || ch == '"' {
+            quote = Some(ch);
+            out.push(ch);
+            index += 1;
+            continue;
+        }
+
+        if ch == '@' && is_script_literal_left_boundary(chars.get(index.wrapping_sub(1)).copied()) {
+            if let Some((literal_name, next_index)) = parse_script_literal_name(&chars, index) {
+                let qualified = qualify_script_literal_name(&literal_name, module_name, span)?;
+                if let Some(access_map) = all_script_access {
+                    validate_script_literal_access(&qualified, access_map, module_name, span)?;
+                }
+                out.push('@');
+                out.push_str(&qualified);
+                index = next_index;
+                continue;
+            }
+        }
+
+        out.push(ch);
+        index += 1;
     }
-    Ok(())
+
+    Ok(out)
 }
 
 fn qualify_function_literal_name(
@@ -371,9 +442,18 @@ fn normalize_expression_literals(
     visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
     visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
 ) -> Result<String, ScriptLangError> {
-    validate_script_literals_in_expression(expr, span, all_script_access, module_name)?;
-    let normalized =
-        normalize_and_validate_function_literals(expr, span, module_name, visible_functions)?;
+    let script_rewritten = normalize_and_validate_script_literals_in_expression(
+        expr,
+        span,
+        module_name,
+        Some(all_script_access),
+    )?;
+    let normalized = normalize_and_validate_function_literals(
+        &script_rewritten,
+        span,
+        module_name,
+        visible_functions,
+    )?;
     let blocked_names = local_var_types
         .keys()
         .cloned()
@@ -408,9 +488,18 @@ fn normalize_attribute_expression_literals(
     visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
     visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
 ) -> Result<String, ScriptLangError> {
-    validate_script_literals_in_expression(expr, span, all_script_access, module_name)?;
-    let normalized =
-        normalize_and_validate_function_literals(expr, span, module_name, visible_functions)?;
+    let script_rewritten = normalize_and_validate_script_literals_in_expression(
+        expr,
+        span,
+        module_name,
+        Some(all_script_access),
+    )?;
+    let normalized = normalize_and_validate_function_literals(
+        &script_rewritten,
+        span,
+        module_name,
+        visible_functions,
+    )?;
     let blocked_names = local_var_types
         .keys()
         .cloned()
@@ -449,7 +538,12 @@ fn normalize_template_literals(
     visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
 ) -> Result<String, ScriptLangError> {
     let rewritten = rewrite_and_validate_enum_literals_in_template(template, visible_types, span)?;
-    validate_script_literals_in_expression(&rewritten, span, all_script_access, module_name)?;
+    let rewritten = normalize_and_validate_script_literals_in_expression(
+        &rewritten,
+        span,
+        module_name,
+        Some(all_script_access),
+    )?;
     let rewritten =
         normalize_and_validate_function_literals(&rewritten, span, module_name, visible_functions)?;
     let blocked_names = local_var_types
@@ -2171,7 +2265,7 @@ mod script_compile_tests {
         )
         .expect("normalize expression should pass");
         assert!(normalized_expr.contains("*main.add"));
-        assert!(normalized_expr.contains("@next"));
+        assert!(normalized_expr.contains("@main.next"));
 
         // Test line 385: validate_invoke_first_arg error path through normalize_expression_literals
         let mut non_function_vars = BTreeMap::new();
@@ -4263,16 +4357,30 @@ mod script_compile_tests {
                 .expect_err("private cross-module should fail");
         assert_eq!(denied.code, "XML_SCRIPT_TARGET_ACCESS_DENIED");
 
-        validate_script_literals_in_expression(
+        let normalized = normalize_and_validate_script_literals_in_expression(
             "dst = @main.next; alt = @battle-loop.main;",
             &span,
-            &access_map,
             Some("main"),
+            Some(&access_map),
         )
         .expect("script literals in expression should validate");
-        let short_literal_error =
-            validate_script_literals_in_expression("dst = @next;", &span, &access_map, None)
-                .expect_err("short literal without module should fail in expressions");
+        assert_eq!(normalized, "dst = @main.next; alt = @battle-loop.main;");
+        let boundary = normalize_and_validate_script_literals_in_expression(
+            "obj.@next + @next",
+            &span,
+            Some("main"),
+            Some(&access_map),
+        )
+        .expect("non-boundary script token should stay raw");
+        assert_eq!(boundary, "obj.@next + @main.next");
+
+        let short_literal_error = normalize_and_validate_script_literals_in_expression(
+            "dst = @next;",
+            &span,
+            None,
+            Some(&access_map),
+        )
+        .expect_err("short literal without module should fail in expressions");
         assert_eq!(short_literal_error.code, "XML_SCRIPT_TARGET_INVALID");
 
         let node = xml_element("call", &[("script", "@main.next")], Vec::new());

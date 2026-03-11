@@ -46,22 +46,38 @@ impl ScriptLangEngine {
         Ok(())
     }
 
-    fn qualify_target_script(
+    fn normalize_target_script(
         &self,
         resolved: &str,
         missing_code: &str,
         missing_message: &str,
     ) -> Result<String, ScriptLangError> {
-        let mut target_script = resolved.trim().to_string();
+        let target_script = resolved.trim().to_string();
         if target_script.is_empty() {
             return Err(ScriptLangError::new(missing_code, missing_message));
         }
-        if !target_script.contains('.') {
-            if let Some(module_name) = self.resolve_current_module_name() {
-                target_script = format!("{}.{}", module_name, target_script);
-            }
-        }
         Ok(target_script)
+    }
+
+    fn is_script_name_segment(segment: &str) -> bool {
+        let mut chars = segment.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        if !first.is_ascii_alphabetic() && first != '_' {
+            return false;
+        }
+        chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    }
+
+    fn is_qualified_script_name(name: &str) -> bool {
+        let Some((module_name, local_name)) = name.split_once('.') else {
+            return false;
+        };
+        if module_name.is_empty() || local_name.is_empty() || local_name.contains('.') {
+            return false;
+        }
+        Self::is_script_name_segment(module_name) && Self::is_script_name_segment(local_name)
     }
 
     fn resolve_target_script(
@@ -72,7 +88,7 @@ impl ScriptLangEngine {
     ) -> Result<String, ScriptLangError> {
         match target {
             ScriptTarget::Literal { script_name } => {
-                self.qualify_target_script(script_name, missing_code, missing_message)
+                self.normalize_target_script(script_name, missing_code, missing_message)
             }
             ScriptTarget::Variable { var_name } => {
                 let value = self.read_variable(var_name)?;
@@ -88,7 +104,18 @@ impl ScriptLangEngine {
                         format!("Target variable \"{}\" must be script.", var_name),
                     )
                 })?;
-                self.qualify_target_script(stripped, missing_code, missing_message)
+                let target_script =
+                    self.normalize_target_script(stripped, missing_code, missing_message)?;
+                if !Self::is_qualified_script_name(&target_script) {
+                    return Err(ScriptLangError::new(
+                        "ENGINE_TARGET_VAR_TYPE",
+                        format!(
+                            "Target variable \"{}\" must be script and hold @module.script.",
+                            var_name
+                        ),
+                    ));
+                }
+                Ok(target_script)
             }
         }
     }
@@ -1596,7 +1623,7 @@ mod callstack_tests {
     }
 
     #[test]
-    pub(super) fn resolve_target_script_qualifies_module_local_names_only_when_available() {
+    pub(super) fn resolve_target_script_keeps_short_literals_without_runtime_qualification() {
         let mut engine = engine_from_sources(map(&[(
             "battle.module.xml",
             r#"
@@ -1608,20 +1635,15 @@ mod callstack_tests {
         )]));
         engine.start("battle.main", None).expect("start");
 
-        let qualified = engine
-            .resolve_target_script(&lit("next"), "ERR", "err")
-            .expect("module local name should qualify");
-        assert_eq!(qualified, "battle.next");
-
         let explicit = engine
             .resolve_target_script(&lit("battle.next"), "ERR", "err")
             .expect("explicit qualified target should stay as is");
         assert_eq!(explicit, "battle.next");
 
-        let missing_local = engine
-            .resolve_target_script(&lit("other"), "ERR", "err")
-            .expect("unknown local name should qualify to current module");
-        assert_eq!(missing_local, "battle.other");
+        let short_literal = engine
+            .resolve_target_script(&lit("next"), "ERR", "err")
+            .expect("short literal should stay as-is");
+        assert_eq!(short_literal, "next");
 
         let mut plain_engine = engine_from_sources(map(&[(
             "main.script.xml",
@@ -1630,8 +1652,8 @@ mod callstack_tests {
         plain_engine.start("main.main", None).expect("start");
         let plain = plain_engine
             .resolve_target_script(&lit("next"), "ERR", "err")
-            .expect("module-local script names should qualify");
-        assert_eq!(plain, "main.next");
+            .expect("short literal should remain unqualified");
+        assert_eq!(plain, "next");
 
         let mut idle_engine = engine_from_sources(map(&[(
             "main.script.xml",
@@ -1639,56 +1661,33 @@ mod callstack_tests {
         )]));
         let idle = idle_engine
             .resolve_target_script(&lit("next"), "ERR", "err")
-            .expect("target resolution without active frame should still work");
+            .expect("target resolution without active frame should keep literal");
         assert_eq!(idle, "next");
-
-        let mut missing_script_engine = engine_from_sources(map(&[(
-            "main.script.xml",
-            r#"<script name="main"><text>x</text></script>"#,
-        )]));
-        let root_group_id = missing_script_engine
-            .scripts
-            .get("main")
-            .expect("main script")
-            .root_group_id
-            .clone();
-        missing_script_engine.frames.push(RuntimeFrame {
-            frame_id: 1,
-            group_id: root_group_id,
-            node_index: 0,
-            scope: BTreeMap::new(),
-            completion: CompletionKind::None,
-            script_root: true,
-            return_continuation: None,
-            var_types: BTreeMap::new(),
-        });
-        missing_script_engine.scripts.remove("main");
-        let missing_script_result = missing_script_engine
-            .resolve_target_script(&lit("next"), "ERR", "err")
-            .expect("group metadata should still qualify to current module");
-        assert_eq!(missing_script_result, "main.next");
     }
 
     #[test]
-    pub(super) fn resolve_target_script_keeps_short_name_for_alias_without_module() {
+    pub(super) fn resolve_target_script_variable_rejects_short_script_literal() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><temp name="cmd" type="string">""</temp><input var="cmd" text="go"/></script>"#,
         )]));
         engine.start("main.main", None).expect("start");
         let group_id = engine.frames.last().expect("frame").group_id.clone();
-        engine.group_lookup.insert(
-            group_id.clone(),
-            super::lifecycle::GroupLookup {
-                script_name: "main".to_string(),
-                group_id,
-            },
-        );
+        engine.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::from([("dst".to_string(), SlValue::String("@next".to_string()))]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
+        }];
 
-        let target = engine
-            .resolve_target_script(&lit("next"), "ERR", "err")
-            .expect("alias-backed current script should keep short name");
-        assert_eq!(target, "next");
+        let error = engine
+            .resolve_target_script(&var("dst"), "ERR", "err")
+            .expect_err("short variable target should fail");
+        assert_eq!(error.code, "ENGINE_TARGET_VAR_TYPE");
     }
 
     #[test]

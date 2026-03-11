@@ -235,6 +235,7 @@ fn normalize_module_initializer(
     resolved_type: &ScriptType,
     alias_rewrite_map: &BTreeMap<String, String>,
     visible_types: &BTreeMap<String, ScriptType>,
+    module_name: &str,
     span: &SourceSpan,
 ) -> Result<Option<String>, ScriptLangError> {
     let Some(expr) = expr.as_ref() else {
@@ -261,8 +262,14 @@ fn normalize_module_initializer(
     }
 
     let alias_rewritten = rewrite_module_symbol_aliases_in_expression(expr, alias_rewrite_map);
-    Ok(Some(rewrite_and_validate_enum_literals_in_expression(
+    let script_rewritten = normalize_and_validate_script_literals_in_expression(
         &alias_rewritten,
+        span,
+        Some(module_name),
+        None,
+    )?;
+    Ok(Some(rewrite_and_validate_enum_literals_in_expression(
+        &script_rewritten,
         visible_types,
         span,
     )?))
@@ -663,8 +670,14 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
             );
             let alias_rewritten_code =
                 rewrite_module_symbol_aliases_in_expression(&decl.code, &alias_rewrite_map);
-            let normalized_code = rewrite_and_validate_enum_literals_in_expression(
+            let script_rewritten_code = normalize_and_validate_script_literals_in_expression(
                 &alias_rewritten_code,
+                &decl.location,
+                Some(function_namespace),
+                None,
+            )?;
+            let normalized_code = rewrite_and_validate_enum_literals_in_expression(
+                &script_rewritten_code,
                 &visible_types_in_scope,
                 &decl.location,
             )?;
@@ -757,6 +770,7 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
                     &resolved_type,
                     &alias_rewrite_map,
                     &visible_types_in_scope,
+                    &decl.namespace,
                     &decl.location,
                 )?;
                 ModuleVarDecl {
@@ -837,6 +851,7 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
                     &resolved_type,
                     &alias_rewrite_map,
                     &visible_types_in_scope,
+                    &decl.namespace,
                     &decl.location,
                 )?;
                 ModuleConstDecl {
@@ -1146,8 +1161,14 @@ pub(crate) fn collect_functions_for_bundle(
             );
             let alias_rewritten_code =
                 rewrite_module_symbol_aliases_in_expression(&decl.code, &alias_rewrite_map);
-            let normalized_code = rewrite_and_validate_enum_literals_in_expression(
+            let script_rewritten_code = normalize_and_validate_script_literals_in_expression(
                 &alias_rewritten_code,
+                &decl.location,
+                Some(function_namespace),
+                None,
+            )?;
+            let normalized_code = rewrite_and_validate_enum_literals_in_expression(
+                &script_rewritten_code,
                 &visible_types,
                 &decl.location,
             )?;
@@ -1258,6 +1279,7 @@ pub(crate) fn collect_module_vars_for_bundle(
                     &resolved_type,
                     &alias_rewrite_map,
                     &visible_types,
+                    &decl.namespace,
                     &decl.location,
                 )?;
                 ModuleVarDecl {
@@ -1363,6 +1385,7 @@ pub(crate) fn collect_module_consts_for_bundle(
                     &resolved_type,
                     &alias_rewrite_map,
                     &visible_types,
+                    &decl.namespace,
                     &decl.location,
                 )?;
                 ModuleConstDecl {
@@ -1592,7 +1615,7 @@ mod module_resolver_tests {
                     type_expr: ParsedTypeExpr::Custom("Obj".to_string()),
                     location: span.clone(),
                 },
-                code: "ret = #{value: seed};".to_string(),
+                code: "dst = @next; ret = #{value: seed};".to_string(),
                 location: span.clone(),
             }],
             module_global_var_decls: Vec::new(),
@@ -1609,6 +1632,7 @@ mod module_resolver_tests {
         let function = functions.get("make").expect("function should exist");
         assert_eq!(function.params.len(), 1);
         assert!(module_vars.is_empty());
+        assert!(function.code.contains("@shared.next"));
         assert_eq!(script_type_kind(&function.return_binding.r#type), "object");
     }
 
@@ -4181,6 +4205,7 @@ mod module_resolver_tests {
             &enum_type,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            "main",
             &span,
         );
         let error = result.expect_err("enum without init should fail");
@@ -4203,6 +4228,7 @@ mod module_resolver_tests {
             &enum_type,
             &BTreeMap::new(),
             &visible_types,
+            "main",
             &span,
         );
         let value = result
@@ -4227,6 +4253,7 @@ mod module_resolver_tests {
             &enum_type,
             &BTreeMap::new(),
             &visible_types,
+            "main",
             &span,
         );
         let error = result.expect_err("invalid enum member should fail");
@@ -4249,6 +4276,7 @@ mod module_resolver_tests {
             &enum_type,
             &BTreeMap::new(),
             &visible_types,
+            "main",
             &span,
         );
         let error = result.expect_err("string literal for enum should fail");
@@ -4275,6 +4303,7 @@ mod module_resolver_tests {
             &int_type,
             &BTreeMap::new(),
             &visible_types,
+            "main",
             &span,
         );
         let error = result.expect_err("invalid enum literal in non-enum type should fail");
@@ -4299,6 +4328,7 @@ mod module_resolver_tests {
             &enum_key_map,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            "main",
             &span,
         )
         .expect("valid enum map initializer should pass");
@@ -4309,6 +4339,7 @@ mod module_resolver_tests {
             &enum_key_map,
             &BTreeMap::new(),
             &BTreeMap::new(),
+            "main",
             &span,
         )
         .expect_err("unknown enum map key should fail");
