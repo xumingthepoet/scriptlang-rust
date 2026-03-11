@@ -215,6 +215,82 @@ fn collect_namespace_module_symbol_aliases<'a>(
     aliases
 }
 
+fn collect_module_symbol_targets<'a>(
+    modules: impl Iterator<Item = &'a ModuleDeclarations>,
+) -> BTreeSet<String> {
+    let mut targets = BTreeSet::new();
+    for module in modules {
+        for decl in &module.module_global_var_decls {
+            targets.insert(decl.qualified_name.clone());
+        }
+        for decl in &module.module_global_const_decls {
+            targets.insert(decl.qualified_name.clone());
+        }
+    }
+    targets
+}
+
+fn collect_module_explicit_visible_symbol_aliases(
+    module_alias_directives_by_namespace: &BTreeMap<String, Vec<AliasDirective>>,
+    module_symbol_targets: &BTreeSet<String>,
+) -> Result<BTreeMap<String, BTreeMap<String, String>>, ScriptLangError> {
+    let mut aliases_by_namespace = BTreeMap::new();
+
+    for (namespace, directives) in module_alias_directives_by_namespace {
+        let mut aliases = BTreeMap::new();
+        for directive in directives {
+            let target = directive.target_qualified_name.as_str();
+            if !module_symbol_targets.contains(target) {
+                continue;
+            }
+            let alias = directive.alias_name.as_str();
+            if let Some(existing_target) = aliases.get(alias) {
+                if existing_target == target {
+                    continue;
+                }
+                return Err(ScriptLangError::new(
+                    "ALIAS_NAME_CONFLICT",
+                    format!(
+                        "Alias \"{}\" points to both \"{}\" and \"{}\".",
+                        alias, existing_target, target
+                    ),
+                ));
+            }
+            aliases.insert(alias.to_string(), target.to_string());
+        }
+        if !aliases.is_empty() {
+            aliases_by_namespace.insert(namespace.clone(), aliases);
+        }
+    }
+
+    Ok(aliases_by_namespace)
+}
+
+fn merge_namespace_module_symbol_aliases(
+    base: &mut BTreeMap<String, BTreeMap<String, String>>,
+    explicit: &BTreeMap<String, BTreeMap<String, String>>,
+) -> Result<(), ScriptLangError> {
+    for (namespace, explicit_aliases) in explicit {
+        let namespace_aliases = base.entry(namespace.clone()).or_default();
+        for (alias, target) in explicit_aliases {
+            if let Some(existing_target) = namespace_aliases.get(alias) {
+                if existing_target == target {
+                    continue;
+                }
+                return Err(ScriptLangError::new(
+                    "ALIAS_NAME_CONFLICT",
+                    format!(
+                        "Alias \"{}\" points to both \"{}\" and \"{}\".",
+                        alias, existing_target, target
+                    ),
+                ));
+            }
+            namespace_aliases.insert(alias.clone(), target.clone());
+        }
+    }
+    Ok(())
+}
+
 fn namespace_alias_rewrite_map(
     namespace_aliases_by_namespace: &BTreeMap<String, BTreeMap<String, String>>,
     namespace: &str,
@@ -592,9 +668,19 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
             .expect("explicit alias type target should exist in resolved type map");
         local_visible_types.entry(alias.clone()).or_insert(ty);
     }
-    let namespace_aliases_by_namespace = collect_namespace_module_symbol_aliases(
-        reachable.iter().filter_map(|path| module_by_path.get(path)),
-    );
+    let reachable_modules = reachable.iter().filter_map(|path| module_by_path.get(path));
+    let module_symbol_targets =
+        collect_module_symbol_targets(reachable.iter().filter_map(|path| module_by_path.get(path)));
+    let module_scoped_explicit_symbol_aliases = collect_module_explicit_visible_symbol_aliases(
+        module_alias_directives_by_namespace,
+        &module_symbol_targets,
+    )?;
+    let mut namespace_aliases_by_namespace =
+        collect_namespace_module_symbol_aliases(reachable_modules);
+    merge_namespace_module_symbol_aliases(
+        &mut namespace_aliases_by_namespace,
+        &module_scoped_explicit_symbol_aliases,
+    )?;
 
     let mut functions: BTreeMap<String, FunctionDecl> = BTreeMap::new();
     let mut function_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -1052,8 +1138,16 @@ fn apply_explicit_alias_directives(
     Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn collect_functions_for_bundle(
     module_by_path: &BTreeMap<String, ModuleDeclarations>,
+) -> Result<(BTreeMap<String, FunctionDecl>, BTreeSet<String>), ScriptLangError> {
+    collect_functions_for_bundle_with_aliases(module_by_path, &BTreeMap::new())
+}
+
+pub(crate) fn collect_functions_for_bundle_with_aliases(
+    module_by_path: &BTreeMap<String, ModuleDeclarations>,
+    module_alias_directives_by_namespace: &BTreeMap<String, Vec<AliasDirective>>,
 ) -> Result<(BTreeMap<String, FunctionDecl>, BTreeSet<String>), ScriptLangError> {
     let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
     let mut type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -1105,8 +1199,17 @@ pub(crate) fn collect_functions_for_bundle(
             .expect("resolved type aliases must point to resolved types");
         visible_types.insert(alias.clone(), ty);
     }
-    let namespace_aliases_by_namespace =
+    let module_symbol_targets = collect_module_symbol_targets(module_by_path.values());
+    let module_scoped_explicit_symbol_aliases = collect_module_explicit_visible_symbol_aliases(
+        module_alias_directives_by_namespace,
+        &module_symbol_targets,
+    )?;
+    let mut namespace_aliases_by_namespace =
         collect_namespace_module_symbol_aliases(module_by_path.values());
+    merge_namespace_module_symbol_aliases(
+        &mut namespace_aliases_by_namespace,
+        &module_scoped_explicit_symbol_aliases,
+    )?;
 
     let mut functions = BTreeMap::new();
     let mut public_functions = BTreeSet::new();

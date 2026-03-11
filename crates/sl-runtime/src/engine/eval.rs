@@ -2562,6 +2562,78 @@ mod eval_tests {
     }
 
     #[test]
+    pub(super) fn invoke_function_supports_explicit_module_alias_for_module_global() {
+        let files = map(&[
+            (
+                "game.xml",
+                r#"
+<module name="game" default_access="public">
+  <type name="WorldState">
+    <field name="day_count" type="int"/>
+  </type>
+  <var name="world_state" type="WorldState">#{day_count: 1}</var>
+</module>
+"#,
+            ),
+            (
+                "bus.xml",
+                r#"
+<module name="bus" default_access="public">
+  <type name="Listener">
+    <field name="condition_function" type="function"/>
+  </type>
+  <var name="listeners" type="Listener[]">[]</var>
+
+  <function name="add" args="function:f" return_type="boolean">
+    listeners.push(#{condition_function: f});
+    return true;
+  </function>
+
+  <function name="ping" return_type="boolean">
+    if listeners.len() == 0 {
+      return false;
+    }
+    let it = listeners[0];
+    return invoke(it.condition_function, []);
+  </function>
+</module>
+"#,
+            ),
+            (
+                "evt.xml",
+                r#"
+<!-- import game from game.xml -->
+<!-- alias game.world_state as world_state -->
+<module name="evt" default_access="public">
+  <function name="can" return_type="boolean">
+    return world_state.day_count > 0;
+  </function>
+</module>
+"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<!-- import bus from bus.xml -->
+<!-- import evt from evt.xml -->
+<module name="app" default_access="public">
+  <script name="main" access="public">
+    <code>bus.add(*evt.can);</code>
+    <if when="bus.ping()">
+      <text>ok</text>
+    </if>
+  </script>
+</module>
+"#,
+            ),
+        ]);
+        let mut engine = engine_from_sources(files);
+        engine.start("app.main", None).expect("start");
+        let output = engine.next_output().expect("text");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "ok"));
+    }
+
+    #[test]
     pub(super) fn invoke_reports_private_missing_name_and_shape_errors() {
         let files = map(&[
             (

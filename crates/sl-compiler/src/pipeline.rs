@@ -25,7 +25,10 @@ pub fn compile_project_bundle_from_xml_map(
         collect_module_alias_directives_by_namespace(&sources);
     let global_data = BTreeMap::new();
     let (invoke_all_functions, invoke_public_functions) =
-        collect_functions_for_bundle(&module_by_path)?;
+        collect_functions_for_bundle_with_aliases(
+            &module_by_path,
+            &module_alias_directives_by_namespace,
+        )?;
     let (module_var_declarations, module_var_init_order) =
         collect_module_vars_for_bundle(&module_by_path)?;
     let (module_const_declarations, module_const_init_order) =
@@ -337,6 +340,56 @@ mod pipeline_tests {
         );
         assert!(main.visible_functions.contains_key("boost"));
         assert!(main.visible_module_vars.contains_key("baseHp"));
+    }
+
+    #[test]
+    fn compile_bundle_rewrites_explicit_module_alias_in_invoke_functions() {
+        let files = map(&[
+            (
+                "game.xml",
+                r#"
+<module name="game" default_access="public">
+  <type name="WorldState">
+    <field name="day_count" type="int"/>
+  </type>
+  <var name="world_state" type="WorldState">#{day_count: 1}</var>
+</module>
+"#,
+            ),
+            (
+                "evt.xml",
+                r#"
+<!-- import game from game.xml -->
+<!-- alias game.world_state as world_state -->
+<module name="evt" default_access="public">
+  <function name="can" return_type="boolean">
+    return world_state.day_count > 0;
+  </function>
+  <script name="main"><text>ok</text></script>
+</module>
+"#,
+            ),
+            (
+                "app.xml",
+                r#"
+<!-- import evt from evt.xml -->
+<module name="app" default_access="public">
+  <script name="main"><text>run</text></script>
+</module>
+"#,
+            ),
+        ]);
+
+        let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        let app = bundle.scripts.get("app.main").expect("app script");
+        let can = app
+            .invoke_all_functions
+            .get("evt.can")
+            .expect("evt.can should be present in invoke function map");
+        assert!(
+            can.code.contains("game.world_state.day_count"),
+            "explicit alias in module function should be rewritten to qualified access"
+        );
     }
 
     #[test]
