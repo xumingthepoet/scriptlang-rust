@@ -45,7 +45,7 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 - 跨 module import 只能访问对方 `public` 元素；`private` 仅在本 module 内可见。
 - 宿主入口脚本必须是 `public`；`private` 脚本不能作为 entry。
 - 声明名（`script/type/enum/field/member/function/args/return/var/const/temp/dynamic-options item/index`）会在编译期做 Rhai 关键字冲突检查，命中时报 `NAME_RHAI_KEYWORD_RESERVED`（大小写敏感）。
-- 兼容性说明：`module name` 当前仅做 `__` 前缀保留检查，不参与 Rhai 关键字冲突拦截。
+- 当前约束：`module name` 仅做 `__` 前缀保留检查，不参与 Rhai 关键字冲突拦截。
 
 ## 2. import 语法
 

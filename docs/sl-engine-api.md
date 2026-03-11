@@ -128,7 +128,7 @@ assert_eq!(project.entry_script, "main.main");
 - `random_seed`: 随机种子（决定 `random(n)` 序列）
 - `random_sequence`: 可选随机序列；存在时覆盖 `random_seed`
 - `random_sequence_index`: 随机序列起始下标（仅 `random_sequence` 存在时生效）
-- `compiler_version`: 快照版本兼容用
+- `compiler_version`: 快照版本标识与校验用
 
 ```rust
 use std::collections::BTreeMap;
