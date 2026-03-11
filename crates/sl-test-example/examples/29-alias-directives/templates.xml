@@ -1,0 +1,32 @@
+<!-- import ids from ids.xml -->
+<!-- alias ids.LocationId -->
+<!-- alias ids.Terrain -->
+<!-- alias ids.Coord -->
+<module name="templates" default_access="public">
+  <type name="RouteNode">
+    <field name="id" type="LocationId"/>
+    <field name="terrain" type="Terrain"/>
+    <field name="coord" type="Coord"/>
+  </type>
+
+  <const name="seed_nodes" type="RouteNode[]">[
+    #{id: LocationId.Home, terrain: Terrain.Plain, coord: #{x: 0, y: 0}},
+    #{id: LocationId.Town, terrain: Terrain.Forest, coord: #{x: 3, y: 4}}
+  ]</const>
+
+  <const name="seed_distance" type="#{LocationId=>int}">#{
+    Home: 1,
+    Town: 4,
+    Port: 9
+  }</const>
+
+  <const name="routes_by_start" type="#{LocationId=>RouteNode[]}">#{
+    Home: [#{id: LocationId.Home, terrain: Terrain.Plain, coord: #{x: 0, y: 0}}],
+    Town: [#{id: LocationId.Town, terrain: Terrain.Forest, coord: #{x: 3, y: 4}}],
+    Port: [#{id: LocationId.Port, terrain: Terrain.Sea, coord: #{x: 9, y: 1}}]
+  }</const>
+
+  <script name="echo_seed">
+    <text>seed.home=${seed_distance[LocationId.Home]}</text>
+  </script>
+</module>

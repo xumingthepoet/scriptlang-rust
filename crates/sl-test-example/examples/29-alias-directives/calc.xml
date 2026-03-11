@@ -1,0 +1,20 @@
+<!-- import ids from ids.xml -->
+<!-- import templates from templates.xml -->
+<!-- alias ids.LocationId -->
+<module name="calc" default_access="public">
+  <function name="distanceOf" args="#{LocationId=>int}:distance_map,LocationId:id" return_type="int">
+    return distance_map[id];
+  </function>
+
+  <function name="totalNodeDistance" args="templates.RouteNode[]:nodes,#{LocationId=>int}:distance_map" return_type="int">
+    let total = 0;
+    for node in nodes {
+      total += distance_map[node.id];
+    }
+    return total;
+  </function>
+
+  <script name="show_total" args="templates.RouteNode[]:nodes,#{LocationId=>int}:distance_map">
+    <text>total=${totalNodeDistance(nodes, distance_map)}</text>
+  </script>
+</module>

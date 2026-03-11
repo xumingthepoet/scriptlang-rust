@@ -3,8 +3,12 @@
   "entryScript": "main.main",
   "actions": [],
   "expectedEvents": [
-    { "kind": "text", "text": "hero.hp=12" },
-    { "kind": "text", "text": "shared.hp=10" },
+    { "kind": "text", "text": "home.routes=1" },
+    { "kind": "text", "text": "nodes=3" },
+    { "kind": "text", "text": "home=4" },
+    { "kind": "text", "text": "port=9" },
+    { "kind": "text", "text": "total=17" },
+    { "kind": "text", "text": "seed.home=1" },
     { "kind": "end" }
   ]
 }

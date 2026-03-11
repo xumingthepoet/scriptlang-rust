@@ -1,0 +1,18 @@
+<module name="ids" default_access="public">
+  <enum name="LocationId">
+    <member name="Home"/>
+    <member name="Town"/>
+    <member name="Port"/>
+  </enum>
+
+  <enum name="Terrain">
+    <member name="Plain"/>
+    <member name="Forest"/>
+    <member name="Sea"/>
+  </enum>
+
+  <type name="Coord">
+    <field name="x" type="int"/>
+    <field name="y" type="int"/>
+  </type>
+</module>
