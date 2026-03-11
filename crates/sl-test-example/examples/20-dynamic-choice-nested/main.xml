@@ -1,4 +1,4 @@
-<module name="main" default_access="public">
+<module name="main" export="script:main">
   <script name="main">
     <temp name="outerCandidates" type="int[]">[1]</temp>
     <temp name="innerCandidates" type="int[]">[10]</temp>

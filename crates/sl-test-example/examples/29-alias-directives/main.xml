@@ -6,7 +6,7 @@
 <!-- alias templates.seed_nodes as seed_nodes -->
 <!-- alias templates.seed_distance as seed_distance -->
 <!-- alias templates.routes_by_start as routes_by_start -->
-<module name="main" default_access="public">
+<module name="main" export="script:main,boost_home,append_port,emit_report">
   <script name="main">
     <temp name="nodes" type="Node[]">seed_nodes</temp>
     <temp name="distance_map" type="#{LocationId=>int}">seed_distance</temp>

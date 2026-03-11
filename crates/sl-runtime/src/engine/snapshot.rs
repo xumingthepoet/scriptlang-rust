@@ -673,7 +673,7 @@ mod snapshot_tests {
             (
                 "shared.xml",
                 r#"
-    <module name="shared" default_access="public">
+    <module name="shared" export="var:hp">
       <var name="hp" type="int">10</var>
     </module>
     "#,
@@ -713,7 +713,7 @@ mod snapshot_tests {
     pub(super) fn snapshot_does_not_store_module_consts_and_resume_rebuilds_them() {
         let files = map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:base">
   <const name="base" type="int">7</const>
   <script name="main">
     <choice text="Pick">
@@ -741,7 +741,7 @@ mod snapshot_tests {
     pub(super) fn resume_fails_when_module_const_declaration_missing() {
         let files = map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:base">
   <const name="base" type="int">7</const>
   <script name="main">
     <choice text="Pick"><option text="A"><text>x</text></option></choice>
@@ -769,7 +769,7 @@ mod snapshot_tests {
             (
                 "shared.xml",
                 r#"
-    <module name="shared" default_access="public">
+    <module name="shared" export="var:hp">
       <var name="hp" type="int">10</var>
     </module>
     "#,
@@ -820,7 +820,7 @@ mod snapshot_tests {
             (
                 "shared.xml",
                 r#"
-    <module name="shared" default_access="public">
+    <module name="shared" export="var:hp">
       <var name="hp" type="int">10</var>
     </module>
     "#,

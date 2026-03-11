@@ -177,7 +177,7 @@ mod macro_expand_tests {
         let files = map(&[(
             "main.xml",
             r#"
-    <module name="main" default_access="public">
+    <module name="main" export="script:main">
     <script name="main">
       <temp name="i" type="int">0</temp>
       <loop times="2">

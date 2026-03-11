@@ -1,5 +1,5 @@
 <!-- import {shared} from ../support/ -->
-<module name="battle" default_access="public">
+<module name="battle" export="script:battle">
 <script name="battle">
   <text>battle=${shared.boost(shared.base)}</text>
 </script>

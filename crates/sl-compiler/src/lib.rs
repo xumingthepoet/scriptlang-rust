@@ -120,7 +120,7 @@ pub(crate) mod compiler_test_support {
         let replaced_open = regex.replace(
             source,
             format!(
-                r#"{prefix}<module name="{module_name}" default_access="public">
+                r#"{prefix}<module name="{module_name}" export="script:{module_name}">
 <{root_name}{attrs}>"#
             ),
         );
@@ -171,7 +171,7 @@ pub(crate) mod compiler_test_support {
 </module>
 "#,
             );
-            assert!(script.contains(r#"<module name="main" default_access="public">"#));
+            assert!(script.contains(r#"<module name="main" export="script:main">"#));
             assert!(script.contains(r#"<script name="main">"#));
             assert!(!script.trim_end().ends_with("</module>\n</module>"));
 
@@ -192,7 +192,7 @@ pub(crate) mod compiler_test_support {
             let module = normalize_test_source_content(
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
   <script name="main"/>
 </module>
 "#,

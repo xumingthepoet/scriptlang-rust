@@ -1,4 +1,4 @@
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <temp name="hp" type="int">3</temp>
   <if when="hp > 2">

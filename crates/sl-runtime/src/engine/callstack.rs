@@ -1280,7 +1280,7 @@ mod callstack_tests {
             ),
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><function name="make" return_type="int">return 1;</function></module>"#,
+                r#"<module name="shared" export="function:make"><function name="make" return_type="int">return 1;</function></module>"#,
             ),
         ]));
         module_engine.invoke_function_symbols.clear();
@@ -1302,7 +1302,7 @@ mod callstack_tests {
         let mut engine = engine_from_sources(map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public">
+                r#"<module name="shared" export="function:add">
   <function name="add" args="int:a,int:b" return_type="int">
     return a + b;
   </function>
@@ -1627,7 +1627,7 @@ mod callstack_tests {
         let mut engine = engine_from_sources(map(&[(
             "battle.module.xml",
             r#"
-<module name="battle" default_access="public">
+<module name="battle" export="script:main,next">
   <script name="main"><temp name="cmd" type="string">""</temp><input var="cmd" text="go"/></script>
   <script name="next"><text>x</text></script>
 </module>
@@ -1694,9 +1694,9 @@ mod callstack_tests {
     pub(super) fn call_access_control_enforces_private_visibility_rules() {
         let mut same_module = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="private">
-<script name="main" access="public"><call script="@hidden"/></script>
-<script name="hidden" access="private"><text>ok</text></script>
+            r#"<module name="main" export="script:main">
+<script name="main"><call script="@hidden"/></script>
+<script name="hidden"><text>ok</text></script>
 </module>"#,
         )]));
         same_module.start("main.main", None).expect("start");
@@ -1708,13 +1708,13 @@ mod callstack_tests {
         let mut cross_module = engine_from_sources(map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><script name="hidden" access="private"><text>hidden</text></script></module>"#,
+                r#"<module name="shared"><script name="hidden"><text>hidden</text></script></module>"#,
             ),
             (
                 "main.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main"><text>x</text></script>
 </module>
 "#,
@@ -1748,13 +1748,13 @@ mod callstack_tests {
         let mut dynamic_cross_module = engine_from_sources(map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><script name="hidden" access="private"><text>hidden</text></script></module>"#,
+                r#"<module name="shared"><script name="hidden"><text>hidden</text></script></module>"#,
             ),
             (
                 "main.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main"><text>x</text></script>
 </module>
 "#,
@@ -1798,8 +1798,8 @@ mod callstack_tests {
         let mut engine = engine_from_sources(map(&[
             (
                 "lib.xml",
-                r#"<module name="lib" default_access="public">
-  <script name="secret" access="private"><text>hidden</text></script>
+                r#"<module name="lib">
+  <script name="secret"><text>hidden</text></script>
 </module>"#,
             ),
             (
@@ -1844,8 +1844,8 @@ mod callstack_tests {
         let mut engine = engine_from_sources(map(&[
             (
                 "lib.xml",
-                r#"<module name="lib" default_access="public">
-  <script name="helper" access="private"><text>help</text></script>
+                r#"<module name="lib">
+  <script name="helper"><text>help</text></script>
 </module>"#,
             ),
             (
@@ -1892,8 +1892,8 @@ mod callstack_tests {
         let mut engine = engine_from_sources(map(&[
             (
                 "lib.xml",
-                r#"<module name="lib" default_access="public">
-  <script name="secret" access="private"><text>hidden</text></script>
+                r#"<module name="lib">
+  <script name="secret"><text>hidden</text></script>
 </module>"#,
             ),
             (
@@ -1928,8 +1928,8 @@ mod callstack_tests {
         // Test by directly invoking the validation method with constructed inputs
         let mut engine = engine_from_sources(map(&[(
             "lib.xml",
-            r#"<module name="lib" default_access="public">
-  <script name="secret" access="private"><text>hidden</text></script>
+            r#"<module name="lib">
+  <script name="secret"><text>hidden</text></script>
 </module>"#,
         )]));
 
@@ -1970,8 +1970,8 @@ mod callstack_tests {
         // This makes resolve_current_module_name() return None
         let mut engine = engine_from_sources(map(&[(
             "lib.xml",
-            r#"<module name="lib" default_access="public">
-  <script name="secret" access="private"><text>hidden</text></script>
+            r#"<module name="lib">
+  <script name="secret"><text>hidden</text></script>
 </module>"#,
         )]));
 
@@ -1984,14 +1984,14 @@ mod callstack_tests {
         let mut engine2 = engine_from_sources(map(&[
             (
                 "main.xml",
-                r#"<module name="main" default_access="public">
+                r#"<module name="main" export="script:main">
   <script name="main"><text>hello</text></script>
 </module>"#,
             ),
             (
                 "lib.xml",
-                r#"<module name="lib" default_access="public">
-  <script name="secret" access="private"><text>hidden</text></script>
+                r#"<module name="lib">
+  <script name="secret"><text>hidden</text></script>
 </module>"#,
             ),
         ]));

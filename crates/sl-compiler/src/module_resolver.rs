@@ -2,7 +2,17 @@ use crate::*;
 
 struct ParsedModuleHeader {
     namespace: String,
-    default_access: AccessLevel,
+    export_targets: ModuleExportTargets,
+}
+
+#[derive(Debug, Clone, Default)]
+struct ModuleExportTargets {
+    scripts: BTreeSet<String>,
+    functions: BTreeSet<String>,
+    vars: BTreeSet<String>,
+    consts: BTreeSet<String>,
+    types: BTreeSet<String>,
+    enums: BTreeSet<String>,
 }
 
 enum ParsedModuleChild {
@@ -79,7 +89,7 @@ fn parse_module_source(
 
     let ParsedModuleHeader {
         namespace,
-        default_access,
+        export_targets,
     } = parse_module_header(root, file_path)?;
 
     let mut type_decls = Vec::new();
@@ -89,7 +99,7 @@ fn parse_module_source(
     let mut scripts = Vec::new();
 
     for child in element_children(root) {
-        match parse_module_child(child, root, file_path, &namespace, default_access)? {
+        match parse_module_child(child, root, file_path, &namespace)? {
             ParsedModuleChild::Type(decl) => type_decls.push(decl),
             ParsedModuleChild::Function(decl) => function_decls.push(decl),
             ParsedModuleChild::ModuleVar(decl) => module_global_var_decls.push(decl),
@@ -97,6 +107,16 @@ fn parse_module_source(
             ParsedModuleChild::Script(script) => scripts.push(script),
         }
     }
+    apply_module_export_targets(
+        &export_targets,
+        &mut type_decls,
+        &mut function_decls,
+        &mut module_global_var_decls,
+        &mut module_global_const_decls,
+        &mut scripts,
+        &root.location,
+    )
+    .map_err(|error| with_file_context(error, file_path))?;
 
     Ok(ParsedModuleSource {
         module: ModuleDeclarations {
@@ -121,17 +141,27 @@ fn parse_module_header(
         return Err(with_file_context(
             ScriptLangError::with_span(
                 "XML_ATTR_NOT_ALLOWED",
-                "Attribute \"defaul_access\" is invalid. Use \"default_access\".",
+                "Attribute \"defaul_access\" is removed. Use module \"export\".",
                 root.location.clone(),
             ),
             file_path,
         ));
     }
-    let default_access = parse_access_attr(root, "default_access", AccessLevel::Private)
-        .map_err(|error| with_file_context(error, file_path))?;
+    if has_attr(root, "default_access") {
+        return Err(with_file_context(
+            ScriptLangError::with_span(
+                "XML_ATTR_NOT_ALLOWED",
+                "Attribute \"default_access\" is removed. Use module \"export\".",
+                root.location.clone(),
+            ),
+            file_path,
+        ));
+    }
+    let export_targets =
+        parse_module_export_targets(root).map_err(|error| with_file_context(error, file_path))?;
     Ok(ParsedModuleHeader {
         namespace,
-        default_access,
+        export_targets,
     })
 }
 
@@ -140,24 +170,27 @@ fn parse_module_child(
     root: &XmlElementNode,
     file_path: &str,
     namespace: &str,
-    default_access: AccessLevel,
 ) -> Result<ParsedModuleChild, ScriptLangError> {
     match child.name.as_str() {
-        "type" => parse_type_declaration_node_with_namespace(child, namespace, default_access)
-            .map(ParsedModuleChild::Type)
-            .map_err(|error| with_file_context(error, file_path)),
-        "enum" => parse_enum_declaration_node_with_namespace(child, namespace, default_access)
-            .map(ParsedModuleChild::Type)
-            .map_err(|error| with_file_context(error, file_path)),
+        "type" => {
+            parse_type_declaration_node_with_namespace(child, namespace, AccessLevel::Private)
+                .map(ParsedModuleChild::Type)
+                .map_err(|error| with_file_context(error, file_path))
+        }
+        "enum" => {
+            parse_enum_declaration_node_with_namespace(child, namespace, AccessLevel::Private)
+                .map(ParsedModuleChild::Type)
+                .map_err(|error| with_file_context(error, file_path))
+        }
         "function" => {
-            parse_function_declaration_node_with_namespace(child, namespace, default_access)
+            parse_function_declaration_node_with_namespace(child, namespace, AccessLevel::Private)
                 .map(ParsedModuleChild::Function)
                 .map_err(|error| with_file_context(error, file_path))
         }
-        "var" => parse_module_var_declaration(child, namespace, default_access)
+        "var" => parse_module_var_declaration(child, namespace, AccessLevel::Private)
             .map(ParsedModuleChild::ModuleVar)
             .map_err(|error| with_file_context(error, file_path)),
-        "const" => parse_module_const_declaration(child, namespace, default_access)
+        "const" => parse_module_const_declaration(child, namespace, AccessLevel::Private)
             .map(ParsedModuleChild::ModuleConst)
             .map_err(|error| with_file_context(error, file_path)),
         "script" => {
@@ -169,11 +202,19 @@ fn parse_module_child(
                 child.location.clone(),
             )
             .map_err(|error| with_file_context(error, file_path))?;
-            let access = parse_access_attr(child, "access", default_access)
-                .map_err(|error| with_file_context(error, file_path))?;
+            if has_attr(child, "access") {
+                return Err(with_file_context(
+                    ScriptLangError::with_span(
+                        "XML_ATTR_NOT_ALLOWED",
+                        "Attribute \"access\" is removed. Use module \"export\".",
+                        child.location.clone(),
+                    ),
+                    file_path,
+                ));
+            }
             Ok(ParsedModuleChild::Script(ParsedModuleScript {
                 qualified_script_name: format!("{}.{}", namespace, script_name),
-                access,
+                access: AccessLevel::Private,
                 root: child.clone(),
             }))
         }
@@ -190,6 +231,213 @@ fn parse_module_child(
 
 fn with_file_context(error: ScriptLangError, file_path: &str) -> ScriptLangError {
     with_file_context_shared(error, file_path)
+}
+
+fn parse_module_export_targets(
+    root: &XmlElementNode,
+) -> Result<ModuleExportTargets, ScriptLangError> {
+    let Some(raw) = get_optional_attr(root, "export") else {
+        return Ok(ModuleExportTargets::default());
+    };
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Ok(ModuleExportTargets::default());
+    }
+
+    let mut targets = ModuleExportTargets::default();
+    for group in raw.split(';') {
+        let group = group.trim();
+        if group.is_empty() {
+            return Err(ScriptLangError::with_span(
+                "XML_EXPORT_INVALID",
+                "Attribute \"export\" contains an empty group.",
+                root.location.clone(),
+            ));
+        }
+        let Some((kind_raw, names_raw)) = group.split_once(':') else {
+            return Err(ScriptLangError::with_span(
+                "XML_EXPORT_INVALID",
+                format!(
+                    "Attribute \"export\" group \"{}\" must be in \"kind:name1,name2\" format.",
+                    group
+                ),
+                root.location.clone(),
+            ));
+        };
+        let kind = kind_raw.trim();
+        let names_raw = names_raw.trim();
+        if names_raw.is_empty() {
+            return Err(ScriptLangError::with_span(
+                "XML_EXPORT_INVALID",
+                format!(
+                    "Attribute \"export\" group \"{}\" must include at least one name.",
+                    group
+                ),
+                root.location.clone(),
+            ));
+        }
+        for name in names_raw.split(',') {
+            let name = name.trim();
+            if name.is_empty() {
+                return Err(ScriptLangError::with_span(
+                    "XML_EXPORT_INVALID",
+                    format!(
+                        "Attribute \"export\" group \"{}\" contains an empty name.",
+                        group
+                    ),
+                    root.location.clone(),
+                ));
+            }
+            let inserted = match kind {
+                "script" => targets.scripts.insert(name.to_string()),
+                "function" => targets.functions.insert(name.to_string()),
+                "var" => targets.vars.insert(name.to_string()),
+                "const" => targets.consts.insert(name.to_string()),
+                "type" => targets.types.insert(name.to_string()),
+                "enum" => targets.enums.insert(name.to_string()),
+                _ => {
+                    return Err(ScriptLangError::with_span(
+                        "XML_EXPORT_KIND_INVALID",
+                        format!(
+                            "Unsupported export kind \"{}\". Allowed kinds: script/function/var/const/type/enum.",
+                            kind
+                        ),
+                        root.location.clone(),
+                    ))
+                }
+            };
+            if !inserted {
+                return Err(ScriptLangError::with_span(
+                    "XML_EXPORT_DUPLICATE",
+                    format!(
+                        "Duplicate export entry \"{}:{}\" in module \"export\".",
+                        kind, name
+                    ),
+                    root.location.clone(),
+                ));
+            }
+        }
+    }
+
+    Ok(targets)
+}
+
+fn apply_module_export_targets(
+    export_targets: &ModuleExportTargets,
+    type_decls: &mut [ParsedTypeDecl],
+    function_decls: &mut [ParsedFunctionDecl],
+    module_var_decls: &mut [ParsedModuleVarDecl],
+    module_const_decls: &mut [ParsedModuleConstDecl],
+    scripts: &mut [ParsedModuleScript],
+    span: &SourceSpan,
+) -> Result<(), ScriptLangError> {
+    let type_names = type_decls
+        .iter()
+        .filter(|decl| decl.enum_members.is_empty())
+        .map(|decl| decl.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let enum_names = type_decls
+        .iter()
+        .filter(|decl| !decl.enum_members.is_empty())
+        .map(|decl| decl.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let function_names = function_decls
+        .iter()
+        .map(|decl| decl.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let var_names = module_var_decls
+        .iter()
+        .map(|decl| decl.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let const_names = module_const_decls
+        .iter()
+        .map(|decl| decl.name.as_str())
+        .collect::<BTreeSet<_>>();
+    let script_names = scripts
+        .iter()
+        .map(|script| {
+            script
+                .qualified_script_name
+                .split_once('.')
+                .map(|(_, name)| name)
+                .unwrap_or(script.qualified_script_name.as_str())
+        })
+        .collect::<BTreeSet<_>>();
+
+    validate_export_names("type", &export_targets.types, &type_names, span)?;
+    validate_export_names("enum", &export_targets.enums, &enum_names, span)?;
+    validate_export_names("function", &export_targets.functions, &function_names, span)?;
+    validate_export_names("var", &export_targets.vars, &var_names, span)?;
+    validate_export_names("const", &export_targets.consts, &const_names, span)?;
+    validate_export_names("script", &export_targets.scripts, &script_names, span)?;
+
+    for decl in type_decls {
+        decl.access = if (!decl.enum_members.is_empty()
+            && export_targets.enums.contains(&decl.name))
+            || (decl.enum_members.is_empty() && export_targets.types.contains(&decl.name))
+        {
+            AccessLevel::Public
+        } else {
+            AccessLevel::Private
+        };
+    }
+    for decl in function_decls {
+        decl.access = if export_targets.functions.contains(&decl.name) {
+            AccessLevel::Public
+        } else {
+            AccessLevel::Private
+        };
+    }
+    for decl in module_var_decls {
+        decl.access = if export_targets.vars.contains(&decl.name) {
+            AccessLevel::Public
+        } else {
+            AccessLevel::Private
+        };
+    }
+    for decl in module_const_decls {
+        decl.access = if export_targets.consts.contains(&decl.name) {
+            AccessLevel::Public
+        } else {
+            AccessLevel::Private
+        };
+    }
+    for script in scripts {
+        let short_name = script
+            .qualified_script_name
+            .split_once('.')
+            .map(|(_, name)| name)
+            .unwrap_or(script.qualified_script_name.as_str());
+        script.access = if export_targets.scripts.contains(short_name) {
+            AccessLevel::Public
+        } else {
+            AccessLevel::Private
+        };
+    }
+
+    Ok(())
+}
+
+fn validate_export_names(
+    kind: &str,
+    exported: &BTreeSet<String>,
+    declared: &BTreeSet<&str>,
+    span: &SourceSpan,
+) -> Result<(), ScriptLangError> {
+    for name in exported {
+        if declared.contains(name.as_str()) {
+            continue;
+        }
+        return Err(ScriptLangError::with_span(
+            "XML_EXPORT_TARGET_NOT_FOUND",
+            format!(
+                "Export target \"{}:{}\" does not exist in this module.",
+                kind, name
+            ),
+            span.clone(),
+        ));
+    }
+    Ok(())
 }
 
 fn collect_namespace_module_symbol_aliases<'a>(
@@ -354,9 +602,9 @@ fn normalize_module_initializer(
 pub(crate) fn parse_module_var_declaration(
     node: &XmlElementNode,
     namespace: &str,
-    default_access: AccessLevel,
+    declared_access: AccessLevel,
 ) -> Result<ParsedModuleVarDecl, ScriptLangError> {
-    let parsed = parse_module_binding_declaration(node, namespace, default_access, "var")?;
+    let parsed = parse_module_binding_declaration(node, namespace, declared_access, "var")?;
     Ok(ParsedModuleVarDecl {
         namespace: parsed.namespace,
         name: parsed.name,
@@ -371,9 +619,9 @@ pub(crate) fn parse_module_var_declaration(
 pub(crate) fn parse_module_const_declaration(
     node: &XmlElementNode,
     namespace: &str,
-    default_access: AccessLevel,
+    declared_access: AccessLevel,
 ) -> Result<ParsedModuleConstDecl, ScriptLangError> {
-    let parsed = parse_module_binding_declaration(node, namespace, default_access, "const")?;
+    let parsed = parse_module_binding_declaration(node, namespace, declared_access, "const")?;
     Ok(ParsedModuleConstDecl {
         namespace: parsed.namespace,
         name: parsed.name,
@@ -388,12 +636,18 @@ pub(crate) fn parse_module_const_declaration(
 fn parse_module_binding_declaration(
     node: &XmlElementNode,
     namespace: &str,
-    default_access: AccessLevel,
+    declared_access: AccessLevel,
     tag_name: &str,
 ) -> Result<ParsedModuleVarDecl, ScriptLangError> {
     let name = get_required_non_empty_attr(node, "name")?;
     assert_decl_name_not_reserved_or_rhai_keyword(&name, "module global", node.location.clone())?;
-    let access = parse_access_attr(node, "access", default_access)?;
+    if has_attr(node, "access") {
+        return Err(ScriptLangError::with_span(
+            "XML_ATTR_NOT_ALLOWED",
+            "Attribute \"access\" is removed. Use module \"export\".",
+            node.location.clone(),
+        ));
+    }
 
     let type_raw = get_required_non_empty_attr(node, "type")?;
     let type_expr = parse_type_expr(&type_raw, &node.location)?;
@@ -431,7 +685,7 @@ fn parse_module_binding_declaration(
         namespace: namespace.to_string(),
         name: name.clone(),
         qualified_name: format!("{}.{}", namespace, name),
-        access,
+        access: declared_access,
         type_expr,
         initial_value_expr,
         location: node.location.clone(),
@@ -2369,7 +2623,7 @@ mod module_resolver_tests {
             (
                 "shared.xml",
                 r#"
-<module name="shared" default_access="public">
+<module name="shared" export="var:a,b">
   <var name="a" type="int">b + 1</var>
   <var name="b" type="int">1</var>
 </module>
@@ -2379,7 +2633,7 @@ mod module_resolver_tests {
                 "main.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main"><text>ok</text></script>
 </module>
 "#,
@@ -2397,7 +2651,7 @@ mod module_resolver_tests {
             (
                 "shared.xml",
                 r#"
-<module name="shared" default_access="public">
+<module name="shared" export="var:b,a">
   <var name="b" type="int">1</var>
   <var name="a" type="int">b + 1</var>
 </module>
@@ -2407,7 +2661,7 @@ mod module_resolver_tests {
                 "main.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main"><text>ok</text></script>
 </module>
 "#,
@@ -2425,13 +2679,13 @@ mod module_resolver_tests {
         let files_with_value = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int" value="1"/></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int" value="1"/></module>"#,
             ),
             (
                 "main.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main"><text>ok</text></script>
 </module>
 "#,
@@ -2444,13 +2698,13 @@ mod module_resolver_tests {
         let files_with_child = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int"><text>1</text></var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int"><text>1</text></var></module>"#,
             ),
             (
                 "main.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main"><text>ok</text></script>
 </module>
 "#,
@@ -2467,13 +2721,13 @@ mod module_resolver_tests {
         let files_missing_name = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><const type="int">1</const></module>"#,
+                r#"<module name="shared"><const type="int">1</const></module>"#,
             ),
             (
                 "main.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main"><text>ok</text></script>
 </module>
 "#,
@@ -2487,13 +2741,13 @@ mod module_resolver_tests {
         let files_missing_type = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><const name="base">1</const></module>"#,
+                r#"<module name="shared" export="const:base"><const name="base">1</const></module>"#,
             ),
             (
                 "main.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main"><text>ok</text></script>
 </module>
 "#,
@@ -2509,13 +2763,13 @@ mod module_resolver_tests {
         let files = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><const name="base" type="UnknownType">1</const></module>"#,
+                r#"<module name="shared" export="const:base"><const name="base" type="UnknownType">1</const></module>"#,
             ),
             (
                 "main.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main"><text>ok</text></script>
 </module>
 "#,
@@ -2558,11 +2812,11 @@ mod module_resolver_tests {
         let duplicate_types_bundle = map(&[
             (
                 "a.xml",
-                r#"<module name="shared" default_access="public"><type name="T"><field name="v" type="int"/></type></module>"#,
+                r#"<module name="shared" export="type:T"><type name="T"><field name="v" type="int"/></type></module>"#,
             ),
             (
                 "b.xml",
-                r#"<module name="shared" default_access="public"><type name="T"><field name="v" type="int"/></type></module>"#,
+                r#"<module name="shared" export="type:T"><type name="T"><field name="v" type="int"/></type></module>"#,
             ),
         ]);
         let duplicate_types_error = compile_project_bundle_from_xml_map(&duplicate_types_bundle)
@@ -2572,11 +2826,11 @@ mod module_resolver_tests {
         let duplicate_globals_bundle = map(&[
             (
                 "a.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int">1</var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">1</var></module>"#,
             ),
             (
                 "b.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int">2</var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">2</var></module>"#,
             ),
         ]);
         let duplicate_globals_error =
@@ -2587,13 +2841,13 @@ mod module_resolver_tests {
         let empty_initializer = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int"/></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int"/></module>"#,
             ),
             (
                 "main.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main"><text>${shared.hp}</text></script>
 </module>
 "#,
@@ -2670,18 +2924,18 @@ mod module_resolver_tests {
         let duplicate_types = map(&[
             (
                 "a.xml",
-                r#"<module name="a" default_access="public"><type name="T"><field name="v" type="int"/></type></module>"#,
+                r#"<module name="a" export="type:T"><type name="T"><field name="v" type="int"/></type></module>"#,
             ),
             (
                 "b.xml",
-                r#"<module name="b" default_access="public"><type name="T"><field name="v" type="int"/></type></module>"#,
+                r#"<module name="b" export="type:T"><type name="T"><field name="v" type="int"/></type></module>"#,
             ),
             (
                 "main.xml",
                 r#"
     <!-- import a from a.xml -->
     <!-- import b from b.xml -->
-    <module name="main" default_access="public">
+    <module name="main" export="script:main">
 <script name="main"><temp name="v" type="T"/></script>
 </module>
     "#,
@@ -2694,13 +2948,13 @@ mod module_resolver_tests {
         let recursive = map(&[
             (
                 "x.xml",
-                r#"<module name="x" default_access="public"><type name="A"><field name="b" type="B"/></type><type name="B"><field name="a" type="A"/></type></module>"#,
+                r#"<module name="x" export="type:A,B"><type name="A"><field name="b" type="B"/></type><type name="B"><field name="a" type="A"/></type></module>"#,
             ),
             (
                 "main.xml",
                 r#"
     <!-- import x from x.xml -->
-    <module name="main" default_access="public">
+    <module name="main" export="script:main">
 <script name="main"><temp name="v" type="A"/></script>
 </module>
     "#,
@@ -2717,7 +2971,7 @@ mod module_resolver_tests {
         let files = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public">
+                r#"<module name="shared" export="function:add">
   <function name="add" args="int:a,int:b" return_type="int">
     return a + b;
   </function>
@@ -2727,7 +2981,7 @@ mod module_resolver_tests {
                 "main.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <code>let x = shared.add(1, 2);</code>
   <text>${x}</text>
@@ -2744,7 +2998,7 @@ mod module_resolver_tests {
     fn parse_module_files_and_type_resolution_success_paths_are_covered() {
         let files = map(&[(
             "shared.xml",
-            r#"<module name="shared" default_access="public">
+            r#"<module name="shared" export="function:make;type:Obj">
   <type name="Obj"><field name="value" type="int"/></type>
   <function name="make" args="int:seed" return_type="Obj">
     return #{ value: seed };
@@ -2765,7 +3019,7 @@ mod module_resolver_tests {
     fn parse_module_files_attaches_file_path_for_module_errors() {
         let files = map(&[(
             "bad.xml",
-            r#"<module name="shared" default_access="public">
+            r#"<module name="shared">
   <oops/>
 </module>"#,
         )]);
@@ -2800,10 +3054,7 @@ mod module_resolver_tests {
             .message
             .contains("In file \"missing-name.xml\":"));
 
-        let reserved_name = map(&[(
-            "reserved.xml",
-            r#"<module name="__sl_bad" default_access="public"></module>"#,
-        )]);
+        let reserved_name = map(&[("reserved.xml", r#"<module name="__sl_bad"></module>"#)]);
         let reserved_name_sources = parse_sources(&reserved_name).expect("parse sources");
         let reserved_name_error =
             parse_module_files(&reserved_name_sources).expect_err("reserved name should fail");
@@ -2813,7 +3064,7 @@ mod module_resolver_tests {
 
         let bad_function = map(&[(
             "bad-function.xml",
-            r#"<module name="shared" default_access="public">
+            r#"<module name="shared" export="function:bad">
   <function name="bad" args="int:a" return="int:r">
     r = a + 1;
   </function>
@@ -2828,7 +3079,7 @@ mod module_resolver_tests {
 
         let keyword_script = map(&[(
             "keyword-script.xml",
-            r#"<module name="battle" default_access="public">
+            r#"<module name="battle" export="script:shared">
   <script name="shared"/>
 </module>"#,
         )]);
@@ -2846,7 +3097,7 @@ mod module_resolver_tests {
         // Test line 151: enum parse error is wrapped with file context
         let duplicate_enum_member = BTreeMap::from([(
             "bad-enum.xml".to_string(),
-            r#"<module name="bad" default_access="public">
+            r#"<module name="bad" export="enum:Status">
 <enum name="Status">
   <member name="Active"/>
   <member name="Active"/>
@@ -2909,15 +3160,15 @@ mod module_resolver_tests {
             .expect_err("type should be required");
         assert_eq!(error.code, "XML_MISSING_ATTR");
 
-        // Test with explicit access attribute (covers line 160)
+        // Legacy access attribute is no longer supported.
         let with_access = xml_element(
             "var",
             &[("name", "gold"), ("type", "int"), ("access", "public")],
             vec![xml_text("100")],
         );
-        let parsed = parse_module_var_declaration(&with_access, "shared", AccessLevel::Private)
-            .expect("var with access should parse");
-        assert_eq!(parsed.access, AccessLevel::Public);
+        let error = parse_module_var_declaration(&with_access, "shared", AccessLevel::Private)
+            .expect_err("var access should be rejected");
+        assert_eq!(error.code, "XML_ATTR_NOT_ALLOWED");
 
         let mut invalid_sources = BTreeMap::new();
         invalid_sources.insert(
@@ -3274,7 +3525,7 @@ mod module_resolver_tests {
     fn parse_module_helpers_cover_module_specific_paths() {
         let sources = parse_sources(&compiler_test_support::map(&[(
             "battle.xml",
-            r#"<module name="battle" default_access="public"><script name="main"><text>x</text></script></module>"#,
+            r#"<module name="battle" export="script:main"><script name="main"><text>x</text></script></module>"#,
         )]))
         .expect("sources should parse");
 
@@ -3285,7 +3536,7 @@ mod module_resolver_tests {
         // Test parsing module with enum declaration (covers line 149-151)
         let enum_sources = parse_sources(&compiler_test_support::map(&[(
             "status.xml",
-            r#"<module name="status" default_access="public">
+            r#"<module name="status" export="script:main;enum:Status">
 <enum name="Status"><member name="Active"/><member name="Inactive"/></enum>
 <script name="main"><text>ok</text></script>
 </module>"#,
@@ -3526,13 +3777,13 @@ mod module_resolver_tests {
         let files = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int" access="invalid">1</var></module>"#,
+                r#"<module name="shared"><var name="hp" type="int" access="invalid">1</var></module>"#,
             ),
             (
                 "main.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main"><text>ok</text></script>
 </module>
 "#,
@@ -3540,14 +3791,14 @@ mod module_resolver_tests {
         ]);
         let error =
             compile_project_bundle_from_xml_map(&files).expect_err("invalid access should fail");
-        assert_eq!(error.code, "XML_ACCESS_INVALID");
+        assert_eq!(error.code, "XML_ATTR_NOT_ALLOWED");
     }
 
     #[test]
     fn compile_bundle_supports_module_const_declarations() {
         let files = map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:base">
   <const name="base" type="int">7</const>
   <script name="main"><text>${base}</text></script>
 </module>"#,
@@ -3564,7 +3815,7 @@ mod module_resolver_tests {
     fn compile_bundle_rejects_const_initializer_referencing_var() {
         let files = map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;var:hp;const:bad">
   <var name="hp" type="int">10</var>
   <const name="bad" type="int">hp + 1</const>
   <script name="main"><text>${bad}</text></script>
@@ -3576,7 +3827,7 @@ mod module_resolver_tests {
 
         let files_qualified = map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;var:hp;const:bad">
   <var name="hp" type="int">10</var>
   <const name="bad" type="int">main.hp + 1</const>
   <script name="main"><text>${bad}</text></script>
@@ -4451,7 +4702,7 @@ mod module_resolver_tests {
         // Test module var with invalid enum literal (triggers lines 604/902)
         let files = map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;enum:Status;var:status">
 <enum name="Status"><member name="Active"/><member name="Inactive"/></enum>
 <var name="status" type="Status">Status.Unknown</var>
 <script name="main"><text>test</text></script>
@@ -4464,7 +4715,7 @@ mod module_resolver_tests {
         // Test module const with invalid enum literal (triggers lines 668/1004)
         let files_const = map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;enum:Status;const:status">
 <enum name="Status"><member name="Active"/><member name="Inactive"/></enum>
 <const name="status" type="Status">Status.Unknown</const>
 <script name="main"><text>test</text></script>
@@ -4484,7 +4735,7 @@ mod module_resolver_tests {
         // Test function with invalid enum literal in code body
         let files = map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;function:test;enum:Status">
 <enum name="Status"><member name="Active"/><member name="Inactive"/></enum>
 <function name="test" args="" return_type="int">return Status.Unknown;</function>
 <script name="main"><text>test</text></script>

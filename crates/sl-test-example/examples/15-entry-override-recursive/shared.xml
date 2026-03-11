@@ -1,5 +1,5 @@
 <!-- import math from nested/math.xml -->
-<module name="shared" default_access="public">
+<module name="shared" export="function:greet;type:Player">
   <type name="Player">
     <field name="name" type="string"/>
     <field name="power" type="int"/>

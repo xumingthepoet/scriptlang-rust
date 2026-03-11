@@ -1105,7 +1105,7 @@ mod eval_tests {
     pub(super) fn module_const_is_readonly_during_code_execution() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:base">
   <const name="base" type="int">7</const>
   <script name="main">
     <code>base = 9;</code>
@@ -1123,7 +1123,7 @@ mod eval_tests {
     pub(super) fn module_const_qualified_name_is_readonly_during_code_execution() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:base">
   <const name="base" type="int">7</const>
   <script name="main">
     <code>main.base = 9;</code>
@@ -1141,7 +1141,7 @@ mod eval_tests {
     pub(super) fn module_global_initializer_can_read_module_consts() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;var:hp;const:base">
   <const name="base" type="int">7</const>
   <var name="hp" type="int">1</var>
   <script name="main"><text>ok</text></script>
@@ -1159,7 +1159,7 @@ mod eval_tests {
         let mut engine = engine_from_sources_with_global_data(
             map(&[(
                 "main.xml",
-                r#"<module name="main" default_access="public">
+                r#"<module name="main" export="script:main;const:base">
   <const name="base" type="int">7</const>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -1409,7 +1409,7 @@ mod eval_tests {
         let bad_initializer = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int">1 &lt;= 1</var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">1 &lt;= 1</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1426,7 +1426,7 @@ mod eval_tests {
         let bad_function = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><function name="bad" return_type="string">return 'bad';</function></module>"#,
+                r#"<module name="shared" export="function:bad"><function name="bad" return_type="string">return 'bad';</function></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1457,7 +1457,7 @@ mod eval_tests {
         let host_blocked_files = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int">1</var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">1</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1494,7 +1494,7 @@ mod eval_tests {
                 (
                     "shared.xml",
                     r#"
-<module name="shared" default_access="public">
+<module name="shared" export="var:a,b">
   <var name="a" type="int">1</var>
   <var name="b" type="int">a + game.hp</var>
 </module>
@@ -1523,7 +1523,7 @@ mod eval_tests {
         let bad_initializer = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int">unknown +</var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">unknown +</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1543,7 +1543,7 @@ mod eval_tests {
             map(&[
                 (
                     "shared.xml",
-                    r#"<module name="shared" default_access="public"><var name="hp" type="int">{ game = 1; 1 }</var></module>"#,
+                    r#"<module name="shared" export="var:hp"><var name="hp" type="int">{ game = 1; 1 }</var></module>"#,
                 ),
                 (
                     "main.script.xml",
@@ -1567,7 +1567,7 @@ mod eval_tests {
         let module_files = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int">7</var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">7</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1630,7 +1630,7 @@ mod eval_tests {
         let namespace_type_error = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int">7</var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">7</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1654,7 +1654,7 @@ mod eval_tests {
         let namespace_extra_field = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int">7</var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">7</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1685,7 +1685,7 @@ mod eval_tests {
         let full_alias_type_mismatch = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int">7</var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">7</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1709,7 +1709,7 @@ mod eval_tests {
         let short_alias_files = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int">7</var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">7</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1735,7 +1735,7 @@ mod eval_tests {
         let short_alias_type_mismatch = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int">7</var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">7</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1827,7 +1827,7 @@ mod eval_tests {
         let mut alias_visibility_engine = engine_from_sources(map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int">1</var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">1</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1865,7 +1865,7 @@ mod eval_tests {
         let files = map(&[(
             "main.xml",
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main;var:hp">
   <var name="hp" type="int">7</var>
   <script name="main">
     <code>hp = hp + 1;</code>
@@ -1886,7 +1886,7 @@ mod eval_tests {
         let mismatch_files = map(&[(
             "main.xml",
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main;var:hp">
   <var name="hp" type="int">7</var>
   <script name="main">
     <code>hp = "bad";</code>
@@ -1904,7 +1904,7 @@ mod eval_tests {
         let unsupported_files = map(&[(
             "main.xml",
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main;var:hp">
   <var name="hp" type="int">7</var>
   <script name="main">
     <code>hp = ();</code>
@@ -2050,7 +2050,7 @@ mod eval_tests {
                 (
                     "shared.xml",
                     r#"
-<module name="shared" default_access="public">
+<module name="shared" export="function:add_bonus">
   <function name="add_bonus" args="int:x" return_type="int">
     return x + game.bonus;
   </function>
@@ -2147,7 +2147,7 @@ mod eval_tests {
         let mut ns_unit = engine_from_sources(map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int">7</var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">7</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -2166,7 +2166,7 @@ mod eval_tests {
         let mut alias_unit = engine_from_sources(map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int">7</var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">7</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -2185,7 +2185,7 @@ mod eval_tests {
         let mut missing_symbol = engine_from_sources(map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><function name="add" return_type="int">return 1;</function></module>"#,
+                r#"<module name="shared" export="function:add"><function name="add" return_type="int">return 1;</function></module>"#,
             ),
             (
                 "main.script.xml",
@@ -2206,7 +2206,7 @@ mod eval_tests {
         let mut prelude_missing_global = engine_from_sources(map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><function name="add" return_type="int">return 1;</function></module>"#,
+                r#"<module name="shared" export="function:add"><function name="add" return_type="int">return 1;</function></module>"#,
             ),
             (
                 "main.script.xml",
@@ -2242,7 +2242,7 @@ mod eval_tests {
             map(&[(
                 "main.xml",
                 r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
   <script name="main">
     <temp name="game" type="int">1</temp>
     <code>game = game + 1;</code>
@@ -2264,7 +2264,7 @@ mod eval_tests {
         // Test for line 256: Runtime error in eval_with_scope
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:base">
   <const name="base" type="int">7</const>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -2282,7 +2282,7 @@ mod eval_tests {
         // Return a type that can't be converted to the declared type
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:base">
   <const name="base" type="int">7</const>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -2302,7 +2302,7 @@ mod eval_tests {
         // This is tested indirectly via const initialization with qualified names
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:base">
   <const name="base" type="int">7</const>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -2317,7 +2317,7 @@ mod eval_tests {
         // Test line 208: when host_functions is not empty, return error
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:base">
   <const name="base" type="int">7</const>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -2337,7 +2337,7 @@ mod eval_tests {
         // Test line 798: when namespace != module_name, skip the entry
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:local">
   <const name="local" type="int">1</const>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -2368,7 +2368,7 @@ mod eval_tests {
         // Test line 218: when qualified_name in module_consts_value doesn't contain '.', skip it
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:base">
   <const name="base" type="int">7</const>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -2398,7 +2398,7 @@ mod eval_tests {
         // Test line 344: preprocess_scriptlang_rhai_input returns error for single quote in CodeBlock mode
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:base">
   <const name="base" type="int">7</const>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -2419,7 +2419,7 @@ mod eval_tests {
         // Test line 379: when visible_consts contains a non-dotted name, skip it
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:base">
   <const name="base" type="int">7</const>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -2441,7 +2441,7 @@ mod eval_tests {
         // Test line 133: when qualified_name in module_vars_value doesn't contain '.', skip it
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;var:score">
   <var name="score" type="int">10</var>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -2468,7 +2468,7 @@ mod eval_tests {
         // Test line 160: when qualified_name in module_consts_value doesn't contain '.', skip it
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:BASE">
   <const name="BASE" type="int">10</const>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -2496,11 +2496,11 @@ mod eval_tests {
             (
                 "shared.xml",
                 r#"
-<module name="shared" default_access="public">
-  <function name="helper" access="private" args="int:x" return_type="int">
+<module name="shared" export="function:add">
+  <function name="helper" args="int:x" return_type="int">
     return x + 1;
   </function>
-  <function name="add" access="public" args="int:a,int:b" return_type="int">
+  <function name="add" args="int:a,int:b" return_type="int">
     return helper(a) + b;
   </function>
 </module>
@@ -2510,7 +2510,7 @@ mod eval_tests {
                 "main.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
   <script name="main">
     <temp name="fnRef" type="function">*shared.add</temp>
     <temp name="value" type="int">invoke(fnRef, [3, 4])</temp>
@@ -2532,7 +2532,7 @@ mod eval_tests {
             (
                 "event_system.xml",
                 r#"
-<module name="event_system" default_access="public">
+<module name="event_system" export="function:add;var:listeners">
   <var name="listeners" type="int">0</var>
   <function name="add" return_type="int">
     event_system.listeners += 1;
@@ -2545,7 +2545,7 @@ mod eval_tests {
                 "main.xml",
                 r#"
 <!-- import event_system from event_system.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
   <script name="main">
     <temp name="v" type="int">0</temp>
     <code>v = event_system.add();</code>
@@ -2567,7 +2567,7 @@ mod eval_tests {
             (
                 "game.xml",
                 r#"
-<module name="game" default_access="public">
+<module name="game" export="type:WorldState;var:world_state">
   <type name="WorldState">
     <field name="day_count" type="int"/>
   </type>
@@ -2578,7 +2578,7 @@ mod eval_tests {
             (
                 "bus.xml",
                 r#"
-<module name="bus" default_access="public">
+<module name="bus" export="function:add,ping;type:Listener;var:listeners">
   <type name="Listener">
     <field name="condition_function" type="function"/>
   </type>
@@ -2604,7 +2604,7 @@ mod eval_tests {
                 r#"
 <!-- import game from game.xml -->
 <!-- alias game.world_state as world_state -->
-<module name="evt" default_access="public">
+<module name="evt" export="function:can">
   <function name="can" return_type="boolean">
     return world_state.day_count > 0;
   </function>
@@ -2616,8 +2616,8 @@ mod eval_tests {
                 r#"
 <!-- import bus from bus.xml -->
 <!-- import evt from evt.xml -->
-<module name="app" default_access="public">
-  <script name="main" access="public">
+<module name="app" export="script:main">
+  <script name="main">
     <code>bus.add(*evt.can);</code>
     <if when="bus.ping()">
       <text>ok</text>
@@ -2639,11 +2639,11 @@ mod eval_tests {
             (
                 "shared.xml",
                 r#"
-<module name="shared" default_access="public">
-  <function name="hidden" access="private" args="int:a" return_type="int">
+<module name="shared" export="function:add">
+  <function name="hidden" args="int:a" return_type="int">
     return a + 1;
   </function>
-  <function name="add" access="public" args="int:a,int:b" return_type="int">
+  <function name="add" args="int:a,int:b" return_type="int">
     return a + b;
   </function>
 </module>
@@ -2653,7 +2653,7 @@ mod eval_tests {
                 "main.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:private_call,missing_call,bad_name,bad_args_shape,bad_arity">
   <script name="private_call">
     <temp name="fnRef" type="function">*shared.add</temp>
     <code>fnRef = "*" + "shared.hidden";</code>
@@ -2738,8 +2738,8 @@ mod eval_tests {
             (
                 "shared.xml",
                 r#"
-<module name="shared" default_access="public">
-  <function name="remote" access="public" args="int:x" return_type="int">
+<module name="shared" export="function:remote">
+  <function name="remote" args="int:x" return_type="int">
     return x + 1;
   </function>
 </module>
@@ -2749,14 +2749,14 @@ mod eval_tests {
                 "main.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
-  <function name="add" access="public" args="int:x" return_type="int">
+<module name="main" export="script:main;function:add,ping">
+  <function name="add" args="int:x" return_type="int">
     return x + 1;
   </function>
-  <function name="ping" access="public" return_type="int">
+  <function name="ping" return_type="int">
     return 1;
   </function>
-  <function name="hidden" access="private" args="int:x" return_type="int">
+  <function name="hidden" args="int:x" return_type="int">
     return x;
   </function>
   <script name="main"><text>ok</text></script>
@@ -2797,7 +2797,7 @@ mod eval_tests {
         // This triggers the branch at line 110-117 in create_script_root_scope
         let files = map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;enum:State">
   <enum name="State">
     <member name="Idle"/>
     <member name="Run"/>
@@ -2821,7 +2821,7 @@ mod eval_tests {
         // Test line 344: preprocess_scriptlang_rhai_input returns error for single quote in CodeBlock mode
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:base">
   <const name="base" type="int">7</const>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -2843,7 +2843,7 @@ mod eval_tests {
         // This happens when the module has no consts
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;var:score">
   <var name="score" type="int">10</var>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -2863,7 +2863,7 @@ mod eval_tests {
 
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;var:score;const:BASE">
   <const name="BASE" type="int">10</const>
   <var name="score" type="int">10</var>
   <script name="main"><text>ok</text></script>
@@ -2903,7 +2903,7 @@ mod eval_tests {
 
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:BASE">
   <const name="BASE" type="int">10</const>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -2942,7 +2942,7 @@ mod eval_tests {
         // When module_alias_map points to a qualified_name not in module_vars_value
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;var:score">
   <var name="score" type="int">10</var>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -2975,7 +2975,7 @@ mod eval_tests {
         // When const_alias_map points to a qualified_name not in module_consts_value
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:BASE">
   <const name="BASE" type="int">10</const>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -3010,7 +3010,7 @@ mod eval_tests {
         // When script has no visible functions, prelude is empty
         let files = map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;var:score">
   <var name="score" type="int">10</var>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -3035,7 +3035,7 @@ mod eval_tests {
         // Note: This requires the short alias to be set up and then code tries to mutate it
         let files = map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;var:score;const:BASE">
   <const name="BASE" type="int">10</const>
   <var name="score" type="int">10</var>
   <script name="main">
@@ -3057,8 +3057,8 @@ mod eval_tests {
         // This is covered by most tests that use modules with functions
         let files = map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
-  <function name="test" access="public" args="" return_type="int">
+            r#"<module name="main" export="script:main;function:test">
+  <function name="test" args="" return_type="int">
     return 1;
   </function>
   <script name="main"><text>ok</text></script>
@@ -3077,8 +3077,8 @@ mod eval_tests {
         // We test by having a function that gets processed
         let files = map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
-  <function name="add" access="public" args="int:a,int:b" return_type="int">
+            r#"<module name="main" export="script:main;function:add">
+  <function name="add" args="int:a,int:b" return_type="int">
     return a + b;
   </function>
   <script name="main"><text>ok</text></script>
@@ -3098,10 +3098,10 @@ mod eval_tests {
         // module var/const alias, skip the alias rewrite to avoid shadowing
         let files = map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;function:get_score;var:score;const:max_score">
   <var name="score" type="int">10</var>
   <const name="max_score" type="int">100</const>
-  <function name="get_score" access="public" args="int:score" return_type="int">
+  <function name="get_score" args="int:score" return_type="int">
     return score;
   </function>
   <script name="main">
@@ -3123,8 +3123,8 @@ mod eval_tests {
         // This happens when module has no var/const declarations
         let files = map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
-  <function name="add" access="public" args="int:a,int:b" return_type="int">
+            r#"<module name="main" export="script:main;function:add">
+  <function name="add" args="int:a,int:b" return_type="int">
     return a + b;
   </function>
   <script name="main"><text>ok</text></script>

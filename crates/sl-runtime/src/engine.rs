@@ -124,7 +124,7 @@ pub(super) mod runtime_test_support {
         let replaced_open = regex.replace(
             source,
             format!(
-                r#"{prefix}<module name="{module_name}" default_access="public">
+                r#"{prefix}<module name="{module_name}" export="script:{module_name}">
 <{root_name}{attrs}>"#
             ),
         );
@@ -244,7 +244,7 @@ pub(super) mod runtime_test_support {
     fn test_source_normalization_covers_stray_closing_and_missing_name_paths() {
         let normalized_script =
             normalize_test_source_content("<script name=\"main\"><text>x</text></script></module>");
-        assert!(normalized_script.contains("<module name=\"main\" default_access=\"public\">"));
+        assert!(normalized_script.contains("<module name=\"main\" export=\"script:main\">"));
         assert!(!normalized_script.contains("</module></module>"));
 
         let normalized_module = normalize_test_source_content("<module name=\"shared\"></module>");
@@ -265,7 +265,7 @@ pub(super) mod runtime_test_support {
     fn compile_project_from_sources_adds_unique_local_alias_only_once() {
         let unique = compile_project_from_sources(map(&[(
             "battle.module.xml",
-            r#"<module name="battle" default_access="public"><script name="main"><text>x</text></script></module>"#,
+            r#"<module name="battle" export="script:main"><script name="main"><text>x</text></script></module>"#,
         )]));
         assert!(unique.scripts.contains_key("battle.main"));
         assert!(unique.scripts.contains_key("main"));
@@ -274,11 +274,11 @@ pub(super) mod runtime_test_support {
         let duplicate = compile_project_from_sources(map(&[
             (
                 "a.module.xml",
-                r#"<module name="a" default_access="public"><script name="main"><text>a</text></script></module>"#,
+                r#"<module name="a" export="script:main"><script name="main"><text>a</text></script></module>"#,
             ),
             (
                 "b.module.xml",
-                r#"<module name="b" default_access="public"><script name="main"><text>b</text></script></module>"#,
+                r#"<module name="b" export="script:main"><script name="main"><text>b</text></script></module>"#,
             ),
         ]));
         assert!(duplicate.scripts.contains_key("a.main"));

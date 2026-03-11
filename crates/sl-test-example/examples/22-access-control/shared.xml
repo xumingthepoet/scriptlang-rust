@@ -1,5 +1,5 @@
-<module name="shared" default_access="private">
-<script name="show" access="public">
+<module name="shared" export="script:show">
+<script name="show">
   <text>public import ok</text>
 </script>
 <script name="hide">

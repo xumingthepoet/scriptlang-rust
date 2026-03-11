@@ -235,7 +235,7 @@ mod pipeline_tests {
         let files = map(&[(
             "main.xml",
             r#"
-    <module name="main" default_access="public">
+    <module name="main" export="script:main">
     <script name="main">
       <text>Hello</text>
       <choice text="Pick">
@@ -258,7 +258,7 @@ mod pipeline_tests {
             (
                 "shared.xml",
                 r#"
-<module name="shared" default_access="public">
+<module name="shared" export="var:hp">
   <var name="hp" type="int">100</var>
 </module>
 "#,
@@ -267,7 +267,7 @@ mod pipeline_tests {
                 "battle.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="battle" default_access="public">
+<module name="battle" export="script:battle">
 <script name="battle">
   <text>battle.hp=${shared.hp}</text>
 </script>
@@ -279,7 +279,7 @@ mod pipeline_tests {
                 r#"
 <!-- import shared from shared.xml -->
 <!-- import battle from battle.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <text>main.hp=${shared.hp}</text>
   <call script="@battle.battle"/>
@@ -300,7 +300,7 @@ mod pipeline_tests {
         let files = map(&[(
             "battle.xml",
             r#"
-<module name="battle" default_access="public">
+<module name="battle" export="script:main,next;function:boost;type:Combatant;var:baseHp">
   <type name="Combatant">
     <field name="hp" type="int"/>
   </type>
@@ -348,7 +348,7 @@ mod pipeline_tests {
             (
                 "game.xml",
                 r#"
-<module name="game" default_access="public">
+<module name="game" export="type:WorldState;var:world_state">
   <type name="WorldState">
     <field name="day_count" type="int"/>
   </type>
@@ -361,7 +361,7 @@ mod pipeline_tests {
                 r#"
 <!-- import game from game.xml -->
 <!-- alias game.world_state as world_state -->
-<module name="evt" default_access="public">
+<module name="evt" export="script:main;function:can">
   <function name="can" return_type="boolean">
     return world_state.day_count > 0;
   </function>
@@ -373,7 +373,7 @@ mod pipeline_tests {
                 "app.xml",
                 r#"
 <!-- import evt from evt.xml -->
-<module name="app" default_access="public">
+<module name="app" export="script:main">
   <script name="main"><text>run</text></script>
 </module>
 "#,
@@ -397,11 +397,11 @@ mod pipeline_tests {
         let files = map(&[
             (
                 "callee.xml",
-                r#"<module name="callee" default_access="public"><script name="callee" args="int:x"><return/></script></module>"#,
+                r#"<module name="callee" export="script:callee"><script name="callee" args="int:x"><return/></script></module>"#,
             ),
             (
                 "main.xml",
-                r#"<module name="main" default_access="public"><script name="main"><call script="@callee.callee"/></script></module>"#,
+                r#"<module name="main" export="script:main"><script name="main"><call script="@callee.callee"/></script></module>"#,
             ),
         ]);
 
@@ -415,11 +415,11 @@ mod pipeline_tests {
         let files = map(&[
             (
                 "next.xml",
-                r#"<module name="next" default_access="public"><script name="next" args="int:x"><text>${x}</text></script></module>"#,
+                r#"<module name="next" export="script:next"><script name="next" args="int:x"><text>${x}</text></script></module>"#,
             ),
             (
                 "main.xml",
-                r#"<module name="main" default_access="public"><script name="main"><return script="@next.next"/></script></module>"#,
+                r#"<module name="main" export="script:main"><script name="main"><return script="@next.next"/></script></module>"#,
             ),
         ]);
 
@@ -433,11 +433,11 @@ mod pipeline_tests {
         let files = map(&[
             (
                 "a.xml",
-                r#"<module name="a" default_access="public"><script name="main"><text>A</text></script></module>"#,
+                r#"<module name="a" export="script:main"><script name="main"><text>A</text></script></module>"#,
             ),
             (
                 "b.xml",
-                r#"<module name="b" default_access="public"><script name="main"><text>B</text></script></module>"#,
+                r#"<module name="b" export="script:main"><script name="main"><text>B</text></script></module>"#,
             ),
         ]);
 
@@ -457,46 +457,56 @@ mod pipeline_tests {
             compile_project_bundle_from_xml_map(&missing_name).expect_err("module name required");
         assert_eq!(missing_name_error.code, "XML_MODULE_NAME_MISSING");
 
-        let invalid_child = map(&[(
-            "bad.xml",
-            r#"<module name="bad" default_access="public"><unknown/></module>"#,
-        )]);
+        let invalid_child = map(&[("bad.xml", r#"<module name="bad"><unknown/></module>"#)]);
         let invalid_child_error =
             compile_project_bundle_from_xml_map(&invalid_child).expect_err("invalid child");
         assert_eq!(invalid_child_error.code, "XML_MODULE_CHILD_INVALID");
 
         let duplicate = map(&[(
             "bad.xml",
-            r#"<module name="bad" default_access="public"><script name="main"/><script name="main"/></module>"#,
+            r#"<module name="bad" export="script:main"><script name="main"/><script name="main"/></module>"#,
         )]);
         let duplicate_error =
             compile_project_bundle_from_xml_map(&duplicate).expect_err("duplicate qualified name");
         assert_eq!(duplicate_error.code, "SCRIPT_NAME_DUPLICATE");
 
-        let invalid_default_access = map(&[(
+        let invalid_export_format = map(&[(
             "bad.xml",
-            r#"<module name="bad" default_access="open"><script name="main"><text>x</text></script></module>"#,
+            r#"<module name="bad" export="script"><script name="main"><text>x</text></script></module>"#,
         )]);
-        let invalid_default_access_error =
-            compile_project_bundle_from_xml_map(&invalid_default_access)
-                .expect_err("invalid default_access should fail");
-        assert_eq!(invalid_default_access_error.code, "XML_ACCESS_INVALID");
+        let invalid_export_format_error =
+            compile_project_bundle_from_xml_map(&invalid_export_format)
+                .expect_err("invalid export format should fail");
+        assert_eq!(invalid_export_format_error.code, "XML_EXPORT_INVALID");
 
-        let invalid_access = map(&[(
+        let invalid_export_kind = map(&[(
             "bad.xml",
-            r#"<module name="bad" default_access="public"><script name="main" access="open"><text>x</text></script></module>"#,
+            r#"<module name="bad" export="invalid:main"><script name="main"><text>x</text></script></module>"#,
         )]);
-        let invalid_access_error = compile_project_bundle_from_xml_map(&invalid_access)
-            .expect_err("invalid access should fail");
-        assert_eq!(invalid_access_error.code, "XML_ACCESS_INVALID");
+        let invalid_export_kind_error = compile_project_bundle_from_xml_map(&invalid_export_kind)
+            .expect_err("invalid export kind should fail");
+        assert_eq!(invalid_export_kind_error.code, "XML_EXPORT_KIND_INVALID");
 
-        let typo_default_access = map(&[(
+        let duplicate_export_target = map(&[(
             "bad.xml",
-            r#"<module name="bad" defaul_access="public"><script name="main"><text>x</text></script></module>"#,
+            r#"<module name="bad" export="script:main;script:main"><script name="main"><text>x</text></script></module>"#,
         )]);
-        let typo_default_access_error = compile_project_bundle_from_xml_map(&typo_default_access)
-            .expect_err("defaul_access typo should fail");
-        assert_eq!(typo_default_access_error.code, "XML_ATTR_NOT_ALLOWED");
+        let duplicate_export_target_error =
+            compile_project_bundle_from_xml_map(&duplicate_export_target)
+                .expect_err("duplicate export target should fail");
+        assert_eq!(duplicate_export_target_error.code, "XML_EXPORT_DUPLICATE");
+
+        let export_target_not_found = map(&[(
+            "bad.xml",
+            r#"<module name="bad" export="script:missing"><script name="main"><text>x</text></script></module>"#,
+        )]);
+        let export_target_not_found_error =
+            compile_project_bundle_from_xml_map(&export_target_not_found)
+                .expect_err("export target must exist");
+        assert_eq!(
+            export_target_not_found_error.code,
+            "XML_EXPORT_TARGET_NOT_FOUND"
+        );
     }
 
     #[test]
@@ -505,7 +515,7 @@ mod pipeline_tests {
             (
                 "shared/support/types.xml",
                 r#"
-<module name="shared" default_access="public">
+<module name="shared" export="function:boost">
   <function name="boost" args="int:x" return_type="int">
     return x + 1;
   </function>
@@ -516,7 +526,7 @@ mod pipeline_tests {
                 "shared/nested/battle.xml",
                 r#"
 <!-- import {shared} from ../support/ -->
-<module name="battle" default_access="public">
+<module name="battle" export="script:battle">
 <script name="battle">
   <text>battle=${shared.boost(3)}</text>
 </script>
@@ -527,7 +537,7 @@ mod pipeline_tests {
                 "main.xml",
                 r#"
 <!-- import {battle, shared} from shared/ -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <text>main=${shared.boost(3)}</text>
   <call script="@battle.battle"/>
@@ -548,13 +558,13 @@ mod pipeline_tests {
         let files = map(&[
             (
                 "main.xml",
-                r#"<module name="main" default_access="public">
+                r#"<module name="main" export="script:main">
 <script name="main"><text>Main</text></script>
 </module>"#,
             ),
             (
                 "alt.xml",
-                r#"<module name="alt" default_access="public">
+                r#"<module name="alt" export="script:alt">
 <script name="alt"><text>Alt</text></script>
 </module>"#,
             ),
@@ -586,7 +596,7 @@ mod pipeline_tests {
             "main.xml",
             r#"
     <!-- import missing from missing.xml -->
-    <module name="main" default_access="public">
+    <module name="main" export="script:main">
 <script name="main"></script>
 </module>
     "#,
@@ -599,7 +609,7 @@ mod pipeline_tests {
             "main.xml",
             r#"
     <!-- import {missing} from missing/ -->
-    <module name="main" default_access="public">
+    <module name="main" export="script:main">
 <script name="main"></script>
 </module>
     "#,
@@ -614,7 +624,7 @@ mod pipeline_tests {
                 "a.xml",
                 r#"
     <!-- import b from b.xml -->
-    <module name="a" default_access="public">
+    <module name="a" export="script:a">
 <script name="a"></script>
 </module>
     "#,
@@ -623,7 +633,7 @@ mod pipeline_tests {
                 "b.xml",
                 r#"
     <!-- import a from a.xml -->
-    <module name="b" default_access="public">
+    <module name="b" export="script:b">
 <script name="b"></script>
 </module>
     "#,
@@ -638,7 +648,7 @@ mod pipeline_tests {
                 "main.xml",
                 r#"
     <!-- import {loop} from shared/ -->
-    <module name="main" default_access="public">
+    <module name="main" export="script:main">
 <script name="main"></script>
 </module>
     "#,
@@ -647,7 +657,7 @@ mod pipeline_tests {
                 "shared/loop.xml",
                 r#"
     <!-- import main from ../main.xml -->
-    <module name="loop" default_access="public">
+    <module name="loop" export="script:loop">
 <script name="loop"></script>
 </module>
     "#,
@@ -696,7 +706,7 @@ mod pipeline_tests {
 
         let bad_module = map(&[(
             "bad.xml",
-            r#"<module name="bad" default_access="public"><script><text>x</text></script></module>"#,
+            r#"<module name="bad"><script><text>x</text></script></module>"#,
         )]);
         let error = compile_project_bundle_from_xml_map(&bad_module)
             .expect_err("module script validation should propagate through pipeline");
@@ -712,7 +722,7 @@ mod pipeline_tests {
 
         let compile_error_case = map(&[(
             "broken.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main">
 <script name="main"><break/></script>
 </module>"#,
         )]);
@@ -725,7 +735,7 @@ mod pipeline_tests {
     fn compile_bundle_wraps_visible_symbol_resolution_errors_with_file_context() {
         let files = map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;function:broken">
 <function name="broken" args="Missing:x" return_type="int">return 1;</function>
 <script name="main"><text>Main</text></script>
 </module>"#,
@@ -740,13 +750,13 @@ mod pipeline_tests {
         let unique = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int">1</var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">1</var></module>"#,
             ),
             (
                 "main.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main"><text>${hp + shared.hp}</text></script>
 </module>
 "#,
@@ -760,18 +770,18 @@ mod pipeline_tests {
         let conflict = map(&[
             (
                 "a.xml",
-                r#"<module name="a" default_access="public"><var name="hp" type="int">1</var></module>"#,
+                r#"<module name="a" export="var:hp"><var name="hp" type="int">1</var></module>"#,
             ),
             (
                 "b.xml",
-                r#"<module name="b" default_access="public"><var name="hp" type="int">2</var></module>"#,
+                r#"<module name="b" export="var:hp"><var name="hp" type="int">2</var></module>"#,
             ),
             (
                 "main.xml",
                 r#"
 <!-- import a from a.xml -->
 <!-- import b from b.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main"><text>${a.hp + b.hp}</text></script>
 </module>
 "#,
@@ -790,7 +800,7 @@ mod pipeline_tests {
             (
                 "shared.xml",
                 r#"
-<module name="shared" default_access="public">
+<module name="shared" export="type:Unit;var:hp;const:BASE">
   <type name="Unit">
     <field name="hp" type="int"/>
   </type>
@@ -806,7 +816,7 @@ mod pipeline_tests {
 <!-- alias shared.Unit as Hero -->
 <!-- alias shared.hp as health -->
 <!-- alias shared.BASE as base -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
   <script name="main">
     <temp name="hero" type="Hero">#{hp: health + base}</temp>
     <text>${hero.hp}</text>
@@ -843,7 +853,7 @@ mod pipeline_tests {
             (
                 "ids.xml",
                 r#"
-<module name="ids" default_access="public">
+<module name="ids" export="enum:LocationId,MessageKey">
   <enum name="LocationId">
     <member name="Home"/>
   </enum>
@@ -859,15 +869,15 @@ mod pipeline_tests {
 <!-- import ids from ids.xml -->
 <!-- alias ids.LocationId -->
 <!-- alias ids.MessageKey -->
-<module name="main" default_access="public">
+<module name="main" export="script:main;function:check;type:Pair">
   <type name="Pair">
     <field name="loc" type="LocationId"/>
     <field name="msg" type="MessageKey"/>
   </type>
-  <function name="check" access="public" args="MessageKey:message_key,LocationId:location_id" return_type="boolean">
+  <function name="check" args="MessageKey:message_key,LocationId:location_id" return_type="boolean">
     return message_key == MessageKey.Ping AND location_id == LocationId.Home;
   </function>
-  <script name="main" access="public">
+  <script name="main">
     <text>ok</text>
   </script>
 </module>
@@ -885,7 +895,7 @@ mod pipeline_tests {
             (
                 "ids.xml",
                 r#"
-<module name="ids" default_access="public">
+<module name="ids" export="enum:LocationId">
   <enum name="LocationId">
     <member name="Home"/>
   </enum>
@@ -897,7 +907,7 @@ mod pipeline_tests {
                 r#"
 <!-- import ids from ids.xml -->
 <!-- alias ids.LocationId -->
-<module name="map_data" default_access="public">
+<module name="map_data" export="type:Node">
   <type name="Node">
     <field name="location_id" type="LocationId"/>
   </type>
@@ -909,8 +919,8 @@ mod pipeline_tests {
                 r#"
 <!-- import ids from ids.xml -->
 <!-- import map_data from map_data.xml -->
-<module name="actions" default_access="public">
-  <script name="main" access="public" args="ids.LocationId:from_id">
+<module name="actions" export="script:main">
+  <script name="main" args="ids.LocationId:from_id">
     <text>${from_id}</text>
   </script>
 </module>
@@ -928,7 +938,7 @@ mod pipeline_tests {
             (
                 "ids.xml",
                 r#"
-<module name="ids" default_access="public">
+<module name="ids" export="enum:LocationId">
   <enum name="LocationId">
     <member name="Home"/>
   </enum>
@@ -940,7 +950,7 @@ mod pipeline_tests {
                 r#"
 <!-- import ids from ids.xml -->
 <!-- alias ids.LocationId -->
-<module name="map_data" default_access="public">
+<module name="map_data" export="type:Node;const:nodes">
   <type name="Node">
     <field name="location_id" type="LocationId"/>
   </type>
@@ -954,8 +964,8 @@ mod pipeline_tests {
                 "app.xml",
                 r#"
 <!-- import map_data from map_data.xml -->
-<module name="app" default_access="public">
-  <script name="main" access="public">
+<module name="app" export="script:main">
+  <script name="main">
     <text>ok</text>
   </script>
 </module>
@@ -976,7 +986,7 @@ mod pipeline_tests {
             (
                 "shared.xml",
                 r#"
-<module name="shared" default_access="public">
+<module name="shared" export="script:main">
   <script name="main"><text>ok</text></script>
 </module>
 "#,
@@ -986,7 +996,7 @@ mod pipeline_tests {
                 r#"
 <!-- import shared from shared.xml -->
 <!-- alias shared.Missing -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
   <script name="main"><text>ok</text></script>
 </module>
 "#,
@@ -1003,7 +1013,7 @@ mod pipeline_tests {
     fn compile_bundle_requires_temp_and_enforces_access_visibility() {
         let removed_var = map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public"><script name="main"><var name="x" type="int">1</var></script></module>"#,
+            r#"<module name="main" export="script:main"><script name="main"><var name="x" type="int">1</var></script></module>"#,
         )]);
         let removed_var_error = compile_project_bundle_from_xml_map(&removed_var)
             .expect_err("script <var> should fail");
@@ -1018,7 +1028,7 @@ mod pipeline_tests {
                 "main.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main"><text>${shared.hp}</text></script>
 </module>
 "#,
@@ -1031,13 +1041,13 @@ mod pipeline_tests {
         let public_import = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int">1</var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">1</var></module>"#,
             ),
             (
                 "main.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main"><text>${shared.hp}</text></script>
 </module>
 "#,
@@ -1052,8 +1062,8 @@ mod pipeline_tests {
     fn compile_bundle_tracks_script_access_metadata() {
         let files = map(&[(
             "main.xml",
-            r#"<module name="main" default_access="private">
-<script name="main" access="public"><text>pub</text></script>
+            r#"<module name="main" export="script:main">
+<script name="main"><text>pub</text></script>
 <script name="hidden"><text>pri</text></script>
 </module>"#,
         )]);
@@ -1110,13 +1120,13 @@ mod pipeline_tests {
         let conflict = map(&[
             (
                 "a.xml",
-                r#"<module name="shared" default_access="public">
+                r#"<module name="shared" export="type:Obj">
 <type name="Obj"><field name="x" type="int"/></type>
 </module>"#,
             ),
             (
                 "b.xml",
-                r#"<module name="shared" default_access="public">
+                r#"<module name="shared" export="type:Obj">
 <type name="Obj"><field name="y" type="int"/></type>
 </module>"#,
             ),
@@ -1125,7 +1135,7 @@ mod pipeline_tests {
                 r#"
 <!-- import shared from a.xml -->
 <!-- import shared from b.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main"><text>Hello</text></script>
 </module>
 "#,
@@ -1143,13 +1153,13 @@ mod pipeline_tests {
         let files = map(&[
             (
                 "a.xml",
-                r#"<module name="shared" default_access="public">
+                r#"<module name="shared" export="type:Obj">
 <type name="Obj"><field name="x" type="int"/></type>
 </module>"#,
             ),
             (
                 "b.xml",
-                r#"<module name="shared" default_access="public">
+                r#"<module name="shared" export="type:Obj">
 <type name="Obj"><field name="y" type="int"/></type>
 </module>"#,
             ),
@@ -1158,7 +1168,7 @@ mod pipeline_tests {
                 r#"
 <!-- import shared from a.xml -->
 <!-- import shared from b.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main"><text>Hello</text></script>
 </module>
 "#,
@@ -1177,20 +1187,20 @@ mod pipeline_tests {
         let files = map(&[
             (
                 "a.xml",
-                r#"<module name="shared" default_access="public">
+                r#"<module name="shared" export="function:foo">
 <function name="foo" args="int:x" return_type="int">return x + 1;</function>
 </module>"#,
             ),
             (
                 "b.xml",
-                r#"<module name="shared" default_access="public">
+                r#"<module name="shared" export="function:foo">
 <function name="foo" args="int:y" return_type="int">return y + 2;</function>
 </module>"#,
             ),
             (
                 "main.xml",
                 r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main"><text>Hello</text></script>
 </module>
 "#,

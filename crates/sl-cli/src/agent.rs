@@ -387,7 +387,7 @@ mod agent_tests {
         fs::create_dir_all(&root).expect("root should be created");
         write_file(
             &root.join("main.xml"),
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main">
 <script name="main"><debug>dbg=${1+1}</debug><text>ok</text></script>
 </module>"#,
         );
@@ -411,7 +411,7 @@ mod agent_tests {
         write_file(
             &root.join("main.xml"),
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -448,7 +448,7 @@ mod agent_tests {
         write_file(
             &root.join("main.xml"),
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -510,7 +510,7 @@ mod agent_tests {
         write_file(
             &root.join("main.xml"),
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <choice text="Pick">
     <option text="A">
@@ -557,7 +557,7 @@ mod agent_tests {
         write_file(
             &root.join("main.xml"),
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <choice text="Pick">
     <option text="A">

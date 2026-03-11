@@ -1,4 +1,4 @@
-<module name="shared" default_access="public">
+<module name="shared" export="function:add,addWithGameBonus;type:CustomType">
   <type name="CustomType">
     <field name="value" type="int"/>
   </type>

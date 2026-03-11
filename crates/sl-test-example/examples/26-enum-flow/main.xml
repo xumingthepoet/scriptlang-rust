@@ -1,7 +1,7 @@
 <!-- import ids from ids.xml -->
 <!-- import target from target.xml -->
-<module name="main" default_access="public">
-  <script name="main" access="public">
+<module name="main" export="script:main">
+  <script name="main">
     <choice text="pick location">
       <option text="toA">
         <return script="@target.route" args="ids.LocationId.A"/>

@@ -310,7 +310,7 @@ mod tests {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -329,7 +329,7 @@ mod tests {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -349,11 +349,11 @@ mod tests {
         let scripts = map(&[
             (
                 "main.xml",
-                r#"<module name="main" default_access="public"><script name="main"><text>Main</text></script></module>"#,
+                r#"<module name="main" export="script:main"><script name="main"><text>Main</text></script></module>"#,
             ),
             (
                 "alt.xml",
-                r#"<module name="alt" default_access="public"><script name="alt"><text>Alt</text></script></module>"#,
+                r#"<module name="alt" export="script:alt"><script name="alt"><text>Alt</text></script></module>"#,
             ),
         ]);
         let project = compile_project_from_xml_map(&scripts, Some("alt.alt".to_string()))
@@ -367,7 +367,7 @@ mod tests {
         let scripts = map(&[(
             "battle.xml",
             r#"
-<module name="battle" default_access="public">
+<module name="battle" export="script:main">
   <script name="main"><text>Battle</text></script>
 </module>
 "#,
@@ -382,7 +382,7 @@ mod tests {
     fn compile_project_from_xml_map_returns_error_for_missing_explicit_entry() {
         let scripts = map(&[(
             "foo.xml",
-            r#"<module name="foo" default_access="public"><script name="foo"><text>Hello</text></script></module>"#,
+            r#"<module name="foo" export="script:foo"><script name="foo"><text>Hello</text></script></module>"#,
         )]);
         let error = compile_project_from_xml_map(&scripts, Some("missing".to_string()))
             .expect_err("missing entry should fail");
@@ -393,7 +393,7 @@ mod tests {
     fn compile_project_from_xml_map_returns_error_without_main_when_entry_missing() {
         let scripts = map(&[(
             "foo.xml",
-            r#"<module name="foo" default_access="public"><script name="foo"><text>Hello</text></script></module>"#,
+            r#"<module name="foo" export="script:foo"><script name="foo"><text>Hello</text></script></module>"#,
         )]);
         let error =
             compile_project_from_xml_map(&scripts, None).expect_err("default main should fail");
@@ -413,7 +413,7 @@ mod tests {
         let explicit_scripts = map(&[
             (
                 "main.xml",
-                r#"<module name="main" default_access="public"><script name="main"><text>Main</text></script></module>"#,
+                r#"<module name="main" export="script:main"><script name="main"><text>Main</text></script></module>"#,
             ),
             (
                 "hidden.xml",
@@ -430,7 +430,7 @@ mod tests {
     fn compile_artifact_from_xml_map_builds_artifact() {
         let scripts = map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public"><script name="main"><text>Main</text></script></module>"#,
+            r#"<module name="main" export="script:main"><script name="main"><text>Main</text></script></module>"#,
         )]);
         let artifact = compile_artifact_from_xml_map(&scripts, None).expect("compile artifact");
         assert_eq!(artifact.schema_version, sl_core::COMPILED_PROJECT_SCHEMA);
@@ -442,7 +442,7 @@ mod tests {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <choice text="Pick"><option text="A"><text>A</text></option></choice>
 </script>
@@ -524,7 +524,7 @@ mod tests {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <choice text="Pick"><option text="A"><text>A</text></option></choice>
 </script>
@@ -566,7 +566,7 @@ mod tests {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -597,7 +597,7 @@ mod tests {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <temp name="a" type="int">random(5)</temp>
   <text>${a}</text>
@@ -640,7 +640,7 @@ mod tests {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -684,7 +684,7 @@ mod tests {
         let scripts = map(&[(
             "battle.xml",
             r#"
-<module name="battle" default_access="public">
+<module name="battle" export="script:main,next;function:boost;var:score">
   <var name="score" type="int">1</var>
   <function name="boost" args="int:x" return_type="int">return x + 1;</function>
   <script name="main">
@@ -739,7 +739,7 @@ mod tests {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -805,7 +805,7 @@ mod tests {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <temp name="x" type="int">1</temp>
 </script>
@@ -916,7 +916,7 @@ mod tests {
         let scripts = map(&[(
             "main.xml",
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <temp name="name" type="string">"Traveler"</temp>
   <input var="name" text="Name"/>

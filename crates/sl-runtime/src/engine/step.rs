@@ -726,7 +726,7 @@ mod step_tests {
             (
                 "shared.xml",
                 r#"
-<module name="shared" default_access="public">
+<module name="shared" export="var:hp">
   <var name="hp" type="int">100</var>
 </module>
 "#,

@@ -1,4 +1,4 @@
-<module name="shared" default_access="public">
+<module name="shared" export="function:boost;var:base">
   <var name="base" type="int">5</var>
   <function name="boost" args="int:x" return_type="int">
     return x + 2;

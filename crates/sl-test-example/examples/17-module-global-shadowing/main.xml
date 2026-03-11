@@ -1,6 +1,6 @@
 <!-- import shared from shared.xml -->
 <!-- import battle from battle.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <temp name="hp" type="int">10</temp>
   <text>main.local.before=${hp}</text>

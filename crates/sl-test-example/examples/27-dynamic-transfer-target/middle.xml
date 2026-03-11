@@ -1,5 +1,5 @@
 <!-- import end from end.xml -->
-<module name="middle" default_access="public">
+<module name="middle" export="script:middle;function:pickReturnTarget">
   <function name="pickReturnTarget" args="script:current" return_type="script">
     return current;
     if current == @end.end {

@@ -1,4 +1,4 @@
-<module name="buff" default_access="public">
+<module name="buff" export="script:buff">
 <script name="buff" args="int:amount,ref:int:target">
   <code>target = target + amount;</code>
   <return/>

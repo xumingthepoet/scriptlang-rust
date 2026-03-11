@@ -508,7 +508,7 @@ mod boundary_tests {
     pub(super) fn submit_input_rejects_module_const_target() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:heroName">
   <const name="heroName" type="string">"Traveler"</const>
   <script name="main">
     <input var="heroName" text="Name your hero"/>

@@ -1,4 +1,4 @@
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <temp name="title" type="string">"Module Globals Demo"</temp>
   <temp name="heroName" type="string">"Rin"</temp>

@@ -305,7 +305,7 @@ mod scope_tests {
             (
                 "shared.xml",
                 r#"
-<module name="shared" default_access="public">
+<module name="shared" export="var:hp">
   <var name="hp" type="int">1</var>
 </module>
 "#,
@@ -377,7 +377,7 @@ mod scope_tests {
     pub(super) fn module_const_is_readonly_for_direct_and_path_writes() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:base">
   <const name="base" type="int">7</const>
   <script name="main"><text>${base}</text></script>
 </module>"#,
@@ -501,7 +501,7 @@ mod scope_tests {
             (
                 "shared.xml",
                 r#"
-<module name="shared" default_access="public">
+<module name="shared" export="var:hp">
   <var name="hp" type="int">100</var>
 </module>
 "#,
@@ -547,7 +547,7 @@ mod scope_tests {
             (
                 "shared.xml",
                 r#"
-<module name="shared" default_access="public">
+<module name="shared" export="var:hp">
   <var name="hp" type="int">7</var>
 </module>
 "#,
@@ -578,7 +578,7 @@ mod scope_tests {
         let files = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int">7</var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">7</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -611,7 +611,7 @@ mod scope_tests {
         let files = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="score" type="int">0</var></module>"#,
+                r#"<module name="shared" export="var:score"><var name="score" type="int">0</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -637,7 +637,7 @@ mod scope_tests {
         let files = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" default_access="public"><var name="hp" type="int">10</var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">10</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -664,7 +664,7 @@ mod scope_tests {
     pub(super) fn enum_key_map_write_rejects_unknown_key_at_runtime() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r##"<module name="main" default_access="public">
+            r##"<module name="main" export="script:main;enum:Status">
   <enum name="Status">
     <member name="Active"/>
     <member name="Inactive"/>

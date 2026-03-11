@@ -2,7 +2,7 @@
 <!-- alias ids.LocationId -->
 <!-- alias ids.Terrain -->
 <!-- alias ids.Coord -->
-<module name="templates" default_access="public">
+<module name="templates" export="script:echo_seed;type:RouteNode;const:seed_nodes,seed_distance,routes_by_start">
   <type name="RouteNode">
     <field name="id" type="LocationId"/>
     <field name="terrain" type="Terrain"/>

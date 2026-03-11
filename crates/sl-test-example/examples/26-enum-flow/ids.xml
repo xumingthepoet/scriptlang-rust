@@ -1,4 +1,4 @@
-<module name="ids" default_access="public">
+<module name="ids" export="enum:LocationId">
   <enum name="LocationId">
     <member name="A"/>
     <member name="B"/>

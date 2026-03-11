@@ -624,7 +624,7 @@ mod lifecycle_tests {
             (
                 "shared.xml",
                 r#"
-    <module name="shared" default_access="public">
+    <module name="shared" export="function:addWithGameBonus">
       <function name="addWithGameBonus" args="int:a1,int:a2" return_type="int">
         return a1 + a2;
       </function>
@@ -660,7 +660,7 @@ mod lifecycle_tests {
         let files = map(&[(
             "main.xml",
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main;function:invoke">
   <function name="invoke" return_type="int">return 1;</function>
   <script name="main"><text>ok</text></script>
 </module>
@@ -695,7 +695,7 @@ mod lifecycle_tests {
         let files = map(&[(
             "main.xml",
             r#"
-    <module name="main" default_access="public">
+    <module name="main" export="script:main;function:foo-bar,foo_bar">
       <function name="foo-bar" return_type="int">return 1;</function>
       <function name="foo_bar" return_type="int">return 2;</function>
       <script name="main"><text>Hello</text></script>
@@ -750,7 +750,7 @@ mod lifecycle_tests {
         let files = map(&[(
             "main.xml",
             r#"
-    <module name="main" default_access="public">
+    <module name="main" export="script:main;enum:State">
       <enum name="State">
         <member name="Idle"/>
         <member name="Run"/>
@@ -944,7 +944,7 @@ mod lifecycle_tests {
             (
                 "shared.xml",
                 r#"
-    <module name="shared" default_access="public">
+    <module name="shared" export="function:addWithGameBonus;var:hp">
       <var name="hp" type="int">1</var>
       <function name="addWithGameBonus" args="int:a1,int:a2" return_type="int">
     return a1 + a2;
@@ -1022,7 +1022,7 @@ mod lifecycle_tests {
             (
                 "shared.xml",
                 r#"
-    <module name="shared" default_access="public">
+    <module name="shared" export="var:hp">
       <var name="hp" type="int">"bad"</var>
     </module>
     "#,
@@ -1046,7 +1046,7 @@ mod lifecycle_tests {
     pub(super) fn start_rejects_module_const_initializer_type_mismatch() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main;const:base">
   <const name="base" type="int">"bad"</const>
   <script name="main"><text>ok</text></script>
 </module>"#,
@@ -1061,7 +1061,7 @@ mod lifecycle_tests {
     pub(super) fn initialize_module_consts_reports_missing_decl() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public"><script name="main"><text>ok</text></script></module>"#,
+            r#"<module name="main" export="script:main"><script name="main"><text>ok</text></script></module>"#,
         )]));
         engine.module_const_init_order = vec!["main.base".to_string()];
         let error = engine
@@ -1210,7 +1210,7 @@ mod lifecycle_tests {
         // Test line 442: when module const has no initial_value_expr, uses default value
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public"><script name="main"><text>ok</text></script></module>"#,
+            r#"<module name="main" export="script:main"><script name="main"><text>ok</text></script></module>"#,
         )]));
         // Manually add a module const without initial_value_expr
         engine.module_const_declarations.insert(
@@ -1243,7 +1243,7 @@ mod lifecycle_tests {
     pub(super) fn initialize_module_consts_requires_enum_initializer() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public"><script name="main"><text>ok</text></script></module>"#,
+            r#"<module name="main" export="script:main"><script name="main"><text>ok</text></script></module>"#,
         )]));
         engine.module_const_declarations.insert(
             "main.state".to_string(),
@@ -1271,7 +1271,7 @@ mod lifecycle_tests {
     pub(super) fn initialize_module_vars_requires_enum_initializer() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public"><script name="main"><text>ok</text></script></module>"#,
+            r#"<module name="main" export="script:main"><script name="main"><text>ok</text></script></module>"#,
         )]));
         engine.module_var_declarations.insert(
             "main.state".to_string(),
@@ -1300,7 +1300,7 @@ mod lifecycle_tests {
         // Test line 441: when module const initializer references missing variable
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public"><script name="main"><text>ok</text></script></module>"#,
+            r#"<module name="main" export="script:main"><script name="main"><text>ok</text></script></module>"#,
         )]));
         // Add module const with invalid initializer
         engine.module_const_declarations.insert(
@@ -1329,7 +1329,7 @@ mod lifecycle_tests {
         // Test lines 457-460: module const not in init_order uses default value
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public"><script name="main"><text>ok</text></script></module>"#,
+            r#"<module name="main" export="script:main"><script name="main"><text>ok</text></script></module>"#,
         )]));
         // Add two module consts: one in init_order, one not
         engine.module_const_declarations.insert(

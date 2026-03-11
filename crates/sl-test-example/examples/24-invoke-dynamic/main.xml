@@ -1,5 +1,5 @@
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
   <script name="main">
     <temp name="fnRef" type="function">*shared.add</temp>
     <temp name="value" type="int">invoke(fnRef, [3, 4])</temp>

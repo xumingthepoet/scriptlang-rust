@@ -275,11 +275,17 @@ pub(crate) fn parse_type_declaration_node(
 pub(crate) fn parse_type_declaration_node_with_namespace(
     node: &XmlElementNode,
     namespace: &str,
-    default_access: AccessLevel,
+    declared_access: AccessLevel,
 ) -> Result<ParsedTypeDecl, ScriptLangError> {
     let name = get_required_non_empty_attr(node, "name")?;
     assert_decl_name_not_reserved_or_rhai_keyword(&name, "type", node.location.clone())?;
-    let access = parse_access_attr(node, "access", default_access)?;
+    if has_attr(node, "access") {
+        return Err(ScriptLangError::with_span(
+            "XML_ATTR_NOT_ALLOWED",
+            "Attribute \"access\" is removed. Use module \"export\".",
+            node.location.clone(),
+        ));
+    }
 
     let mut fields = Vec::new();
     let mut seen = HashSet::new();
@@ -320,7 +326,7 @@ pub(crate) fn parse_type_declaration_node_with_namespace(
     Ok(ParsedTypeDecl {
         name,
         qualified_name,
-        access,
+        access: declared_access,
         fields,
         enum_members: Vec::new(),
         location: node.location.clone(),
@@ -330,11 +336,17 @@ pub(crate) fn parse_type_declaration_node_with_namespace(
 pub(crate) fn parse_enum_declaration_node_with_namespace(
     node: &XmlElementNode,
     namespace: &str,
-    default_access: AccessLevel,
+    declared_access: AccessLevel,
 ) -> Result<ParsedTypeDecl, ScriptLangError> {
     let name = get_required_non_empty_attr(node, "name")?;
     assert_decl_name_not_reserved_or_rhai_keyword(&name, "enum", node.location.clone())?;
-    let access = parse_access_attr(node, "access", default_access)?;
+    if has_attr(node, "access") {
+        return Err(ScriptLangError::with_span(
+            "XML_ATTR_NOT_ALLOWED",
+            "Attribute \"access\" is removed. Use module \"export\".",
+            node.location.clone(),
+        ));
+    }
 
     let mut members = Vec::new();
     let mut seen = HashSet::new();
@@ -383,7 +395,7 @@ pub(crate) fn parse_enum_declaration_node_with_namespace(
     Ok(ParsedTypeDecl {
         name,
         qualified_name,
-        access,
+        access: declared_access,
         fields: Vec::new(),
         enum_members: members,
         location: node.location.clone(),
@@ -400,11 +412,17 @@ pub(crate) fn parse_function_declaration_node(
 pub(crate) fn parse_function_declaration_node_with_namespace(
     node: &XmlElementNode,
     namespace: &str,
-    default_access: AccessLevel,
+    declared_access: AccessLevel,
 ) -> Result<ParsedFunctionDecl, ScriptLangError> {
     let name = get_required_non_empty_attr(node, "name")?;
     assert_decl_name_not_reserved_or_rhai_keyword(&name, "function", node.location.clone())?;
-    let access = parse_access_attr(node, "access", default_access)?;
+    if has_attr(node, "access") {
+        return Err(ScriptLangError::with_span(
+            "XML_ATTR_NOT_ALLOWED",
+            "Attribute \"access\" is removed. Use module \"export\".",
+            node.location.clone(),
+        ));
+    }
 
     let params = parse_function_args(node)?;
     let return_decl = parse_function_return(node)?;
@@ -424,7 +442,7 @@ pub(crate) fn parse_function_declaration_node_with_namespace(
     Ok(ParsedFunctionDecl {
         name,
         qualified_name,
-        access,
+        access: declared_access,
         params,
         return_decl,
         code,
@@ -813,7 +831,7 @@ mod type_expr_tests {
             "object"
         );
 
-        // Test invalid access attribute on type
+        // Legacy access attribute on type should fail.
         let type_invalid_access = parse_type_declaration_node_with_namespace(
             &xml_element(
                 "type",
@@ -828,9 +846,9 @@ mod type_expr_tests {
             AccessLevel::Private,
         )
         .expect_err("invalid access should fail");
-        assert_eq!(type_invalid_access.code, "XML_ACCESS_INVALID");
+        assert_eq!(type_invalid_access.code, "XML_ATTR_NOT_ALLOWED");
 
-        // Test invalid access attribute on function
+        // Legacy access attribute on function should fail.
         let function_invalid_access = parse_function_declaration_node_with_namespace(
             &xml_element(
                 "function",
@@ -841,7 +859,7 @@ mod type_expr_tests {
             AccessLevel::Private,
         )
         .expect_err("invalid access should fail");
-        assert_eq!(function_invalid_access.code, "XML_ACCESS_INVALID");
+        assert_eq!(function_invalid_access.code, "XML_ATTR_NOT_ALLOWED");
     }
 
     #[test]
@@ -1040,7 +1058,7 @@ mod type_expr_tests {
         .expect_err("missing name should fail");
         assert_eq!(enum_missing_name.code, "XML_MISSING_ATTR");
 
-        // Test enum with invalid access
+        // Legacy access attribute on enum should fail.
         let enum_invalid_access = parse_enum_declaration_node_with_namespace(
             &xml_element(
                 "enum",
@@ -1055,7 +1073,7 @@ mod type_expr_tests {
             AccessLevel::Private,
         )
         .expect_err("invalid access should fail");
-        assert_eq!(enum_invalid_access.code, "XML_ACCESS_INVALID");
+        assert_eq!(enum_invalid_access.code, "XML_ATTR_NOT_ALLOWED");
 
         // Test enum member missing name attribute (line 287 error branch)
         let enum_member_missing_name = parse_enum_declaration_node_with_namespace(

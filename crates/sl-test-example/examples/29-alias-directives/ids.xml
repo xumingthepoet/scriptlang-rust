@@ -1,4 +1,4 @@
-<module name="ids" default_access="public">
+<module name="ids" export="type:Coord;enum:LocationId,Terrain">
   <enum name="LocationId">
     <member name="Home"/>
     <member name="Town"/>

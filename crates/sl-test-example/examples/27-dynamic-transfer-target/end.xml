@@ -1,4 +1,4 @@
-<module name="end" default_access="public">
+<module name="end" export="script:end">
   <script name="end">
     <text>after</text>
   </script>

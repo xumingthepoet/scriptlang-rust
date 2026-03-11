@@ -175,7 +175,7 @@ mod boundary_runner_tests {
         let mut hidden = create_engine_from_xml(CreateEngineFromXmlOptions {
             scripts_xml: std::collections::BTreeMap::from([(
                 "main.xml".to_string(),
-                r#"<module name="main" default_access="public">
+                r#"<module name="main" export="script:main">
 <script name="main"><debug>dbg</debug><text>ok</text></script>
 </module>"#
                     .to_string(),
@@ -196,7 +196,7 @@ mod boundary_runner_tests {
         let mut shown = create_engine_from_xml(CreateEngineFromXmlOptions {
             scripts_xml: std::collections::BTreeMap::from([(
                 "main.xml".to_string(),
-                r#"<module name="main" default_access="public">
+                r#"<module name="main" export="script:main">
 <script name="main"><debug>dbg</debug><text>ok</text></script>
 </module>"#
                     .to_string(),

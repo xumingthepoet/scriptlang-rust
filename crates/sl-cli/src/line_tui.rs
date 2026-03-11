@@ -234,7 +234,7 @@ mod line_tui_tests {
         let choice_input_scenario = load_temp_scenario(
             "line-tui-choice-input",
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -267,7 +267,7 @@ mod line_tui_tests {
         let choice_quit_scenario = load_temp_scenario(
             "line-tui-choice-quit",
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -310,7 +310,7 @@ mod line_tui_tests {
         let input_quit_scenario = load_temp_scenario(
             "line-tui-input-quit",
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <temp name="name" type="string">"Traveler"</temp>
   <input var="name" text="Name"/>
@@ -372,7 +372,7 @@ mod line_tui_tests {
         let scenario = load_temp_scenario(
             "line-tui-commands",
             r#"
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <choice text="Pick">
     <option text="A"><text>A</text></option>
@@ -450,7 +450,7 @@ mod line_tui_tests {
     fn handle_line_cmd_delegates_to_tui_command_handler() {
         let scenario = load_temp_scenario(
             "line-tui-handle-line",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main">
 <script name="main"><text>ok</text></script>
 </module>"#,
         );

@@ -1,4 +1,4 @@
-<module name="main" default_access="public">
+<module name="main" export="script:main">
   <script name="main">
     <temp name="candidates" type="int[]">[2, 3]</temp>
 

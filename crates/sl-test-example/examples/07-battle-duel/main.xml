@@ -2,7 +2,7 @@
 <!-- import battle-loop from battle-loop.xml -->
 <!-- import victory from victory.xml -->
 <!-- import defeat from defeat.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
   <script name="main">
     <temp name="player" type="actors.Combatant">#{name: "Hero", hp: 12}</temp>
     <temp name="enemy" type="actors.Combatant">#{name: "Bandit", hp: 12}</temp>

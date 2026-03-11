@@ -1,10 +1,10 @@
 <!-- import shared from shared.xml -->
-<module name="main" default_access="public">
+<module name="main" export="script:main">
 <script name="main">
   <call script="@hidden"/>
   <call script="@shared.show"/>
 </script>
-<script name="hidden" access="private">
+<script name="hidden">
   <text>private sibling ok</text>
 </script>
 </module>

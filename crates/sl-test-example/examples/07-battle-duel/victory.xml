@@ -1,4 +1,4 @@
-<module name="victory" default_access="public">
+<module name="victory" export="script:victory">
   <script name="victory">
     <text>Ending: Victory</text>
     <text>You chose enough pressure and won the duel.</text>

@@ -133,7 +133,7 @@ mod artifact_tests {
     fn compile_artifact_from_xml_map_builds_artifact() {
         let files = compiler_test_support::map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main">
 <script name="main"><text>Hello</text></script>
 </module>"#,
         )]);
@@ -149,7 +149,7 @@ mod artifact_tests {
     fn compile_artifact_from_xml_map_validates_entry_script() {
         let files = compiler_test_support::map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main">
 <script name="main"><text>Hello</text></script>
 </module>"#,
         )]);
@@ -164,13 +164,13 @@ mod artifact_tests {
         let files = compiler_test_support::map(&[
             (
                 "main.xml",
-                r#"<module name="main" default_access="public">
+                r#"<module name="main" export="script:main">
 <script name="main"><text>Main</text></script>
 </module>"#,
             ),
             (
                 "alt.xml",
-                r#"<module name="alt" default_access="public">
+                r#"<module name="alt" export="script:alt">
 <script name="alt"><text>Alt</text></script>
 </module>"#,
             ),
@@ -181,7 +181,7 @@ mod artifact_tests {
 
         let no_main = compiler_test_support::map(&[(
             "alt.xml",
-            r#"<module name="alt" default_access="public">
+            r#"<module name="alt" export="script:alt">
 <script name="alt"><text>Alt</text></script>
 </module>"#,
         )]);
@@ -205,7 +205,7 @@ mod artifact_tests {
         let private_explicit = compiler_test_support::map(&[
             (
                 "main.xml",
-                r#"<module name="main" default_access="public"><script name="main"><text>Main</text></script></module>"#,
+                r#"<module name="main" export="script:main"><script name="main"><text>Main</text></script></module>"#,
             ),
             (
                 "hidden.xml",
@@ -230,7 +230,7 @@ mod artifact_tests {
     fn write_and_read_artifact_json_roundtrip() {
         let files = compiler_test_support::map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main">
 <script name="main"><text>Hello</text></script>
 </module>"#,
         )]);
@@ -248,7 +248,7 @@ mod artifact_tests {
     fn write_and_read_artifact_json_reports_io_and_schema_errors() {
         let files = compiler_test_support::map(&[(
             "main.xml",
-            r#"<module name="main" default_access="public">
+            r#"<module name="main" export="script:main">
 <script name="main"><text>Hello</text></script>
 </module>"#,
         )]);

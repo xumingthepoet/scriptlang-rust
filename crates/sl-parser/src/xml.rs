@@ -382,7 +382,7 @@ mod tests {
     fn reject_non_import_dependency_directives_reports_unsupported_directive() {
         let source = r#"
 <!-- dependency: a.xml -->
-<module name="main" default_access="public"></module>
+<module name="main"></module>
 "#;
 
         let error = reject_non_import_dependency_directives(source)
@@ -391,7 +391,7 @@ mod tests {
 
         let valid = r#"
 <!-- import Shared from shared.xml -->
-<module name="main" default_access="public"></module>
+<module name="main"></module>
 "#;
         reject_non_import_dependency_directives(valid)
             .expect("import directive should pass whitelist");

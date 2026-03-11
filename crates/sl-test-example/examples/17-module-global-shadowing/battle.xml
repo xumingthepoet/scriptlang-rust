@@ -1,5 +1,5 @@
 <!-- import shared from shared.xml -->
-<module name="battle" default_access="public">
+<module name="battle" export="script:battle">
 <script name="battle">
   <temp name="hp" type="int">30</temp>
   <code>hp = hp + 5; shared.hp = shared.hp - 40;</code>

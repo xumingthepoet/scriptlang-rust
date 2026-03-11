@@ -1,12 +1,12 @@
 <!-- import lib from lib.xml -->
-<module name="main" default_access="public">
-  <function name="run" access="public" args="int:x" return_type="int">
+<module name="main" export="script:main;function:run,from_code">
+  <function name="run" args="int:x" return_type="int">
     let step = *lib.add1;
     let v = invoke(step, [x]);
     let mul = *lib.times2;
     return invoke(mul, [v]);
   </function>
-  <function name="from_code" access="public" args="int:x" return_type="int">
+  <function name="from_code" args="int:x" return_type="int">
     let add = *lib.add1;
     return main.run(x) + invoke(add, [x]);
   </function>

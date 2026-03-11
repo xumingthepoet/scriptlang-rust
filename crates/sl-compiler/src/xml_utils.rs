@@ -230,28 +230,6 @@ pub(crate) fn parse_bool_attr(
     }
 }
 
-pub(crate) fn parse_access_attr(
-    node: &XmlElementNode,
-    attr_name: &str,
-    default: AccessLevel,
-) -> Result<AccessLevel, ScriptLangError> {
-    let Some(raw) = get_optional_attr(node, attr_name) else {
-        return Ok(default);
-    };
-    match raw.trim() {
-        "public" => Ok(AccessLevel::Public),
-        "private" => Ok(AccessLevel::Private),
-        _ => Err(ScriptLangError::with_span(
-            "XML_ACCESS_INVALID",
-            format!(
-                "Attribute \"{}\" on <{}> must be \"public\" or \"private\".",
-                attr_name, node.name
-            ),
-            node.location.clone(),
-        )),
-    }
-}
-
 pub(crate) fn split_by_top_level_comma(raw: &str) -> Vec<String> {
     let mut parts = Vec::new();
     let mut current = String::new();

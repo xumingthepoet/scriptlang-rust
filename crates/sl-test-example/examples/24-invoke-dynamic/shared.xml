@@ -1,9 +1,9 @@
 <!-- import lib from lib.xml -->
-<module name="shared" default_access="public">
+<module name="shared" export="function:add;var:a,arr,meta">
   <var name="a" type="int">0</var>
   <var name="arr" type="int[]">[0]</var>
   <var name="meta" type="#{int}">#{bonus: 0}</var>
-  <function name="helper" access="private" args="int:x" return_type="int">
+  <function name="helper" args="int:x" return_type="int">
     let out = a + x + lib.a + lib.b - 2;
     a = 2;
     arr[0] = 10;
@@ -12,7 +12,7 @@
     return out;
   </function>
 
-  <function name="add" access="public" args="int:a,int:b" return_type="int">
+  <function name="add" args="int:a,int:b" return_type="int">
     let out = helper(a) + b;
     arr.push(b);
     meta.bonus = meta.bonus + arr[2];

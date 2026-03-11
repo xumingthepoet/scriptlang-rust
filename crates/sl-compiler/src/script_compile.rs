@@ -3128,7 +3128,7 @@ mod script_compile_tests {
                             "main.xml",
                             r#"
     <!-- import x from x.xml -->
-    <module name="main" default_access="public">
+    <module name="main" export="script:main">
 <script name="main"><text>x</text></script>
 </module>
     "#,
@@ -3147,7 +3147,7 @@ mod script_compile_tests {
                             "main.xml",
                             r#"
     <!-- import x from x.xml -->
-    <module name="main" default_access="public">
+    <module name="main" export="script:main">
 <script name="main"><text>x</text></script>
 </module>
     "#,
@@ -3166,7 +3166,7 @@ mod script_compile_tests {
                             "main.xml",
                             r#"
     <!-- import x from x.xml -->
-    <module name="main" default_access="public">
+    <module name="main" export="script:main">
 <script name="main"><text>x</text></script>
 </module>
     "#,
@@ -3185,7 +3185,7 @@ mod script_compile_tests {
                             "main.xml",
                             r#"
     <!-- import x from x.xml -->
-    <module name="main" default_access="public">
+    <module name="main" export="script:main">
 <script name="main"><text>x</text></script>
 </module>
     "#,
@@ -3813,7 +3813,7 @@ mod script_compile_tests {
         let rich_script = map(&[(
             "main.xml",
             r#"
-    <module name="main" default_access="public">
+    <module name="main" export="script:main">
     <script name="main">
       <if when="true">
         <text>A</text>
@@ -3850,7 +3850,7 @@ mod script_compile_tests {
             (
                 "shared.xml",
                 r##"
-    <module name="shared" default_access="public">
+    <module name="shared" export="function:build;type:Obj">
       <type name="Obj">
         <field name="values" type="#{int[]}"/>
       </type>
@@ -3864,7 +3864,7 @@ mod script_compile_tests {
                 "main.xml",
                 r#"
 	    <!-- import shared from shared.xml -->
-	    <module name="main" default_access="public">
+	    <module name="main" export="script:main">
 	<script name="main">
 	      <temp name="x" type="shared.Obj"/>
 	    </script>
