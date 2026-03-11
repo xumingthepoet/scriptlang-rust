@@ -135,9 +135,6 @@ pub fn parse_alias_directives(source: &str) -> Vec<AliasDirective> {
                     .unwrap_or_default()
                     .to_string()
             });
-        if target_qualified_name.is_empty() || alias_name.is_empty() {
-            continue;
-        }
         directives.push(AliasDirective {
             target_qualified_name: target_qualified_name.to_string(),
             alias_name,
