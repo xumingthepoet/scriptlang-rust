@@ -467,6 +467,183 @@ fn enum_template_regex() -> &'static Regex {
     REGEX.get_or_init(|| Regex::new(r"\$\{([^{}]+)\}").expect("enum template regex must compile"))
 }
 
+fn is_expr_ident_start(ch: char) -> bool {
+    ch.is_ascii_alphabetic() || ch == '_'
+}
+
+fn is_expr_ident_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_' || ch == '.'
+}
+
+fn prev_non_whitespace_char(chars: &[char], index: usize) -> Option<char> {
+    if index == 0 {
+        return None;
+    }
+    let mut cursor = index;
+    while cursor > 0 {
+        cursor -= 1;
+        let ch = chars[cursor];
+        if !ch.is_whitespace() {
+            return Some(ch);
+        }
+    }
+    None
+}
+
+fn next_non_whitespace_char(chars: &[char], mut index: usize) -> Option<char> {
+    while index < chars.len() {
+        let ch = chars[index];
+        if !ch.is_whitespace() {
+            return Some(ch);
+        }
+        index += 1;
+    }
+    None
+}
+
+pub(crate) fn build_module_symbol_alias_rewrite_map(
+    visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
+    visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
+    blocked_names: &BTreeSet<String>,
+) -> BTreeMap<String, String> {
+    let mut map = BTreeMap::new();
+
+    for (alias, decl) in visible_module_vars {
+        if alias == &decl.qualified_name || blocked_names.contains(alias) {
+            continue;
+        }
+        map.entry(alias.clone())
+            .or_insert_with(|| decl.qualified_name.clone());
+    }
+
+    for (alias, decl) in visible_module_consts {
+        if alias == &decl.qualified_name || blocked_names.contains(alias) {
+            continue;
+        }
+        map.entry(alias.clone())
+            .or_insert_with(|| decl.qualified_name.clone());
+    }
+
+    map
+}
+
+pub(crate) fn rewrite_module_symbol_aliases_in_expression(
+    expr: &str,
+    alias_to_qualified: &BTreeMap<String, String>,
+) -> String {
+    if alias_to_qualified.is_empty() {
+        return expr.to_string();
+    }
+
+    let chars = expr.chars().collect::<Vec<_>>();
+    let mut out = String::with_capacity(expr.len());
+    let mut index = 0usize;
+    let mut brace_is_map_stack: Vec<bool> = Vec::new();
+
+    while index < chars.len() {
+        let ch = chars[index];
+        if ch == '"' || ch == '\'' {
+            out.push(ch);
+            index += 1;
+            while index < chars.len() {
+                let inner = chars[index];
+                out.push(inner);
+                index += 1;
+                if inner == '\\' && index < chars.len() {
+                    out.push(chars[index]);
+                    index += 1;
+                    continue;
+                }
+                if inner == ch {
+                    break;
+                }
+            }
+            continue;
+        }
+
+        if ch == '{' {
+            let is_map_literal = prev_non_whitespace_char(&chars, index) == Some('#');
+            brace_is_map_stack.push(is_map_literal);
+            out.push(ch);
+            index += 1;
+            continue;
+        }
+        if ch == '}' {
+            if !brace_is_map_stack.is_empty() {
+                brace_is_map_stack.pop();
+            }
+            out.push(ch);
+            index += 1;
+            continue;
+        }
+
+        if is_expr_ident_start(ch) {
+            let start = index;
+            index += 1;
+            while index < chars.len() && is_expr_ident_char(chars[index]) {
+                index += 1;
+            }
+            let token = chars[start..index].iter().collect::<String>();
+            let prev_char = prev_non_whitespace_char(&chars, start);
+            let next_char = next_non_whitespace_char(&chars, index);
+            let is_map_key = brace_is_map_stack.last().copied().unwrap_or(false)
+                && next_char == Some(':')
+                && matches!(prev_char, Some('{') | Some(','));
+            let is_script_or_function_literal = matches!(prev_char, Some('@') | Some('*'));
+            if !is_map_key && !is_script_or_function_literal {
+                if let Some(rewrite) = alias_to_qualified.get(&token) {
+                    out.push_str(rewrite);
+                    continue;
+                }
+                if let Some((root, rest)) = token.split_once('.') {
+                    if let Some(root_rewrite) = alias_to_qualified.get(root) {
+                        out.push_str(root_rewrite);
+                        out.push('.');
+                        out.push_str(rest);
+                        continue;
+                    }
+                }
+            }
+
+            out.push_str(&token);
+            continue;
+        }
+
+        out.push(ch);
+        index += 1;
+    }
+
+    out
+}
+
+pub(crate) fn rewrite_module_symbol_aliases_in_template(
+    template: &str,
+    alias_to_qualified: &BTreeMap<String, String>,
+) -> String {
+    if alias_to_qualified.is_empty() {
+        return template.to_string();
+    }
+    let mut out = String::new();
+    let mut last_index = 0usize;
+    for captures in enum_template_regex().captures_iter(template) {
+        let full = captures
+            .get(0)
+            .expect("capture group 0 must exist for each template capture");
+        let expr = captures
+            .get(1)
+            .expect("capture group 1 must exist for each template capture");
+        out.push_str(&template[last_index..full.start()]);
+        let rewritten =
+            rewrite_module_symbol_aliases_in_expression(expr.as_str(), alias_to_qualified);
+        out.push_str("${");
+        out.push_str(&rewritten);
+        out.push('}');
+        last_index = full.end();
+    }
+    out.push_str(&template[last_index..]);
+    out
+}
+
 pub(crate) fn rewrite_and_validate_enum_literals_in_expression(
     expr: &str,
     visible_types: &BTreeMap<String, ScriptType>,
@@ -990,6 +1167,76 @@ mod xml_utils_tests {
 
         let false_node = xml_element("text", &[("once", "false")], vec![xml_text("x")]);
         assert!(!parse_bool_attr(&false_node, "once", true).expect("false attr"));
+    }
+
+    #[test]
+    fn module_symbol_alias_rewrite_helpers_cover_expression_and_template_paths() {
+        let hp_decl = ModuleVarDecl {
+            namespace: "main".to_string(),
+            name: "hp".to_string(),
+            qualified_name: "main.hp".to_string(),
+            access: AccessLevel::Public,
+            r#type: ScriptType::Primitive {
+                name: "int".to_string(),
+            },
+            initial_value_expr: None,
+            location: SourceSpan::synthetic(),
+        };
+        let base_decl = ModuleConstDecl {
+            namespace: "main".to_string(),
+            name: "BASE".to_string(),
+            qualified_name: "main.BASE".to_string(),
+            access: AccessLevel::Public,
+            r#type: ScriptType::Primitive {
+                name: "int".to_string(),
+            },
+            initial_value_expr: None,
+            location: SourceSpan::synthetic(),
+        };
+        let visible_module_vars = BTreeMap::from([
+            ("hp".to_string(), hp_decl.clone()),
+            ("main.hp".to_string(), hp_decl),
+            (
+                "wallet".to_string(),
+                ModuleVarDecl {
+                    namespace: "main".to_string(),
+                    name: "wallet".to_string(),
+                    qualified_name: "main.wallet".to_string(),
+                    access: AccessLevel::Public,
+                    r#type: ScriptType::Map {
+                        key_type: MapKeyType::String,
+                        value_type: Box::new(ScriptType::Primitive {
+                            name: "int".to_string(),
+                        }),
+                    },
+                    initial_value_expr: None,
+                    location: SourceSpan::synthetic(),
+                },
+            ),
+        ]);
+        let visible_module_consts = BTreeMap::from([
+            ("base".to_string(), base_decl.clone()),
+            ("main.BASE".to_string(), base_decl),
+        ]);
+        let map = build_module_symbol_alias_rewrite_map(
+            &visible_module_vars,
+            &visible_module_consts,
+            &BTreeSet::new(),
+        );
+
+        let rewritten = rewrite_module_symbol_aliases_in_expression(
+            r#"hp + base + #{hp: hp, val: base} + "hp" + @main.next + *main.fn"#,
+            &map,
+        );
+        assert_eq!(
+            rewritten,
+            r#"main.hp + main.BASE + #{hp: main.hp, val: main.BASE} + "hp" + @main.next + *main.fn"#
+        );
+        let dotted = rewrite_module_symbol_aliases_in_expression("wallet.gold + base", &map);
+        assert_eq!(dotted, "main.wallet.gold + main.BASE");
+
+        let template = rewrite_module_symbol_aliases_in_template("hp=${hp},base=${base}", &map);
+        assert_eq!(template, "hp=${main.hp},base=${main.BASE}");
     }
 
     #[test]

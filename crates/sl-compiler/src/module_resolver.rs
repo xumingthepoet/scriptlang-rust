@@ -192,9 +192,48 @@ fn with_file_context(error: ScriptLangError, file_path: &str) -> ScriptLangError
     with_file_context_shared(error, file_path)
 }
 
+fn collect_namespace_module_symbol_aliases<'a>(
+    modules: impl Iterator<Item = &'a ModuleDeclarations>,
+) -> BTreeMap<String, BTreeMap<String, String>> {
+    let mut aliases = BTreeMap::new();
+    for module in modules {
+        for decl in &module.module_global_var_decls {
+            aliases
+                .entry(decl.namespace.clone())
+                .or_insert_with(BTreeMap::new)
+                .entry(decl.name.clone())
+                .or_insert_with(|| decl.qualified_name.clone());
+        }
+        for decl in &module.module_global_const_decls {
+            aliases
+                .entry(decl.namespace.clone())
+                .or_insert_with(BTreeMap::new)
+                .entry(decl.name.clone())
+                .or_insert_with(|| decl.qualified_name.clone());
+        }
+    }
+    aliases
+}
+
+fn namespace_alias_rewrite_map(
+    namespace_aliases_by_namespace: &BTreeMap<String, BTreeMap<String, String>>,
+    namespace: &str,
+    blocked_names: &BTreeSet<String>,
+) -> BTreeMap<String, String> {
+    let mut map = namespace_aliases_by_namespace
+        .get(namespace)
+        .cloned()
+        .unwrap_or_default();
+    for name in blocked_names {
+        map.remove(name);
+    }
+    map
+}
+
 fn normalize_module_initializer(
     expr: &Option<String>,
     resolved_type: &ScriptType,
+    alias_rewrite_map: &BTreeMap<String, String>,
     visible_types: &BTreeMap<String, ScriptType>,
     span: &SourceSpan,
 ) -> Result<Option<String>, ScriptLangError> {
@@ -221,8 +260,9 @@ fn normalize_module_initializer(
         validate_enum_map_initializer_keys_if_static(expr, type_name, members, span)?;
     }
 
+    let alias_rewritten = rewrite_module_symbol_aliases_in_expression(expr, alias_rewrite_map);
     Ok(Some(rewrite_and_validate_enum_literals_in_expression(
-        expr,
+        &alias_rewritten,
         visible_types,
         span,
     )?))
@@ -545,6 +585,9 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
             .expect("explicit alias type target should exist in resolved type map");
         local_visible_types.entry(alias.clone()).or_insert(ty);
     }
+    let namespace_aliases_by_namespace = collect_namespace_module_symbol_aliases(
+        reachable.iter().filter_map(|path| module_by_path.get(path)),
+    );
 
     let mut functions: BTreeMap<String, FunctionDecl> = BTreeMap::new();
     let mut function_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -608,8 +651,20 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
                 function_namespace,
                 &rb.location,
             )?;
+            let blocked_names = decl
+                .params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect::<BTreeSet<_>>();
+            let alias_rewrite_map = namespace_alias_rewrite_map(
+                &namespace_aliases_by_namespace,
+                function_namespace,
+                &blocked_names,
+            );
+            let alias_rewritten_code =
+                rewrite_module_symbol_aliases_in_expression(&decl.code, &alias_rewrite_map);
             let normalized_code = rewrite_and_validate_enum_literals_in_expression(
-                &decl.code,
+                &alias_rewritten_code,
                 &visible_types_in_scope,
                 &decl.location,
             )?;
@@ -692,9 +747,15 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
                     &decl.namespace,
                     &decl.location,
                 )?;
+                let alias_rewrite_map = namespace_alias_rewrite_map(
+                    &namespace_aliases_by_namespace,
+                    &decl.namespace,
+                    &BTreeSet::new(),
+                );
                 let initial_value_expr = normalize_module_initializer(
                     &decl.initial_value_expr,
                     &resolved_type,
+                    &alias_rewrite_map,
                     &visible_types_in_scope,
                     &decl.location,
                 )?;
@@ -766,9 +827,15 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
                     &decl.namespace,
                     &decl.location,
                 )?;
+                let alias_rewrite_map = namespace_alias_rewrite_map(
+                    &namespace_aliases_by_namespace,
+                    &decl.namespace,
+                    &BTreeSet::new(),
+                );
                 let initial_value_expr = normalize_module_initializer(
                     &decl.initial_value_expr,
                     &resolved_type,
+                    &alias_rewrite_map,
                     &visible_types_in_scope,
                     &decl.location,
                 )?;
@@ -1023,6 +1090,8 @@ pub(crate) fn collect_functions_for_bundle(
             .expect("resolved type aliases must point to resolved types");
         visible_types.insert(alias.clone(), ty);
     }
+    let namespace_aliases_by_namespace =
+        collect_namespace_module_symbol_aliases(module_by_path.values());
 
     let mut functions = BTreeMap::new();
     let mut public_functions = BTreeSet::new();
@@ -1065,8 +1134,20 @@ pub(crate) fn collect_functions_for_bundle(
                 function_namespace,
                 &decl.return_decl.location,
             )?;
+            let blocked_names = decl
+                .params
+                .iter()
+                .map(|param| param.name.clone())
+                .collect::<BTreeSet<_>>();
+            let alias_rewrite_map = namespace_alias_rewrite_map(
+                &namespace_aliases_by_namespace,
+                function_namespace,
+                &blocked_names,
+            );
+            let alias_rewritten_code =
+                rewrite_module_symbol_aliases_in_expression(&decl.code, &alias_rewrite_map);
             let normalized_code = rewrite_and_validate_enum_literals_in_expression(
-                &decl.code,
+                &alias_rewritten_code,
                 &visible_types,
                 &decl.location,
             )?;
@@ -1147,6 +1228,8 @@ pub(crate) fn collect_module_vars_for_bundle(
             .expect("resolved type aliases must point to resolved types");
         visible_types.insert(alias.clone(), ty);
     }
+    let namespace_aliases_by_namespace =
+        collect_namespace_module_symbol_aliases(module_by_path.values());
 
     let mut module_vars = BTreeMap::new();
     let mut init_order = Vec::new();
@@ -1165,9 +1248,15 @@ pub(crate) fn collect_module_vars_for_bundle(
             module_vars.insert(decl.qualified_name.clone(), {
                 let resolved_type =
                     resolve_type_expr(&decl.type_expr, &visible_types, &decl.location)?;
+                let alias_rewrite_map = namespace_alias_rewrite_map(
+                    &namespace_aliases_by_namespace,
+                    &decl.namespace,
+                    &BTreeSet::new(),
+                );
                 let initial_value_expr = normalize_module_initializer(
                     &decl.initial_value_expr,
                     &resolved_type,
+                    &alias_rewrite_map,
                     &visible_types,
                     &decl.location,
                 )?;
@@ -1244,6 +1333,8 @@ pub(crate) fn collect_module_consts_for_bundle(
             .expect("resolved type aliases must point to resolved types");
         visible_types.insert(alias.clone(), ty);
     }
+    let namespace_aliases_by_namespace =
+        collect_namespace_module_symbol_aliases(module_by_path.values());
 
     let mut module_consts = BTreeMap::new();
     let mut init_order = Vec::new();
@@ -1262,9 +1353,15 @@ pub(crate) fn collect_module_consts_for_bundle(
             module_consts.insert(decl.qualified_name.clone(), {
                 let resolved_type =
                     resolve_type_expr(&decl.type_expr, &visible_types, &decl.location)?;
+                let alias_rewrite_map = namespace_alias_rewrite_map(
+                    &namespace_aliases_by_namespace,
+                    &decl.namespace,
+                    &BTreeSet::new(),
+                );
                 let initial_value_expr = normalize_module_initializer(
                     &decl.initial_value_expr,
                     &resolved_type,
+                    &alias_rewrite_map,
                     &visible_types,
                     &decl.location,
                 )?;
@@ -4079,7 +4176,13 @@ mod module_resolver_tests {
         };
 
         // None expr with enum type should return error
-        let result = normalize_module_initializer(&None, &enum_type, &BTreeMap::new(), &span);
+        let result = normalize_module_initializer(
+            &None,
+            &enum_type,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &span,
+        );
         let error = result.expect_err("enum without init should fail");
         assert_eq!(error.code, "ENUM_INIT_REQUIRED");
     }
@@ -4098,6 +4201,7 @@ mod module_resolver_tests {
         let result = normalize_module_initializer(
             &Some("Status.Active".to_string()),
             &enum_type,
+            &BTreeMap::new(),
             &visible_types,
             &span,
         );
@@ -4121,6 +4225,7 @@ mod module_resolver_tests {
         let result = normalize_module_initializer(
             &Some("Status.Unknown".to_string()),
             &enum_type,
+            &BTreeMap::new(),
             &visible_types,
             &span,
         );
@@ -4142,6 +4247,7 @@ mod module_resolver_tests {
         let result = normalize_module_initializer(
             &Some("\"Active\"".to_string()),
             &enum_type,
+            &BTreeMap::new(),
             &visible_types,
             &span,
         );
@@ -4167,6 +4273,7 @@ mod module_resolver_tests {
         let result = normalize_module_initializer(
             &Some("${Status.Unknown}".to_string()),
             &int_type,
+            &BTreeMap::new(),
             &visible_types,
             &span,
         );
@@ -4191,6 +4298,7 @@ mod module_resolver_tests {
             &Some("#{Active: 1}".to_string()),
             &enum_key_map,
             &BTreeMap::new(),
+            &BTreeMap::new(),
             &span,
         )
         .expect("valid enum map initializer should pass");
@@ -4199,6 +4307,7 @@ mod module_resolver_tests {
         let invalid = normalize_module_initializer(
             &Some("#{Unknown: 1}".to_string()),
             &enum_key_map,
+            &BTreeMap::new(),
             &BTreeMap::new(),
             &span,
         )

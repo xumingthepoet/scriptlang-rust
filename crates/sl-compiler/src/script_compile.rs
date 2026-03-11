@@ -374,8 +374,18 @@ fn normalize_expression_literals(
     validate_script_literals_in_expression(expr, span, all_script_access, module_name)?;
     let normalized =
         normalize_and_validate_function_literals(expr, span, module_name, visible_functions)?;
+    let blocked_names = local_var_types
+        .keys()
+        .cloned()
+        .collect::<BTreeSet<String>>();
+    let module_aliases = build_module_symbol_alias_rewrite_map(
+        visible_module_vars,
+        visible_module_consts,
+        &blocked_names,
+    );
+    let alias_rewritten = rewrite_module_symbol_aliases_in_expression(&normalized, &module_aliases);
     let rewritten =
-        rewrite_and_validate_enum_literals_in_expression(&normalized, visible_types, span)?;
+        rewrite_and_validate_enum_literals_in_expression(&alias_rewritten, visible_types, span)?;
     validate_invoke_first_arg(
         &rewritten,
         span,
@@ -401,8 +411,21 @@ fn normalize_attribute_expression_literals(
     validate_script_literals_in_expression(expr, span, all_script_access, module_name)?;
     let normalized =
         normalize_and_validate_function_literals(expr, span, module_name, visible_functions)?;
-    let rewritten =
-        rewrite_and_validate_enum_literals_in_attr_expression(&normalized, visible_types, span)?;
+    let blocked_names = local_var_types
+        .keys()
+        .cloned()
+        .collect::<BTreeSet<String>>();
+    let module_aliases = build_module_symbol_alias_rewrite_map(
+        visible_module_vars,
+        visible_module_consts,
+        &blocked_names,
+    );
+    let alias_rewritten = rewrite_module_symbol_aliases_in_expression(&normalized, &module_aliases);
+    let rewritten = rewrite_and_validate_enum_literals_in_attr_expression(
+        &alias_rewritten,
+        visible_types,
+        span,
+    )?;
     validate_invoke_first_arg(
         &rewritten,
         span,
@@ -429,6 +452,16 @@ fn normalize_template_literals(
     validate_script_literals_in_expression(&rewritten, span, all_script_access, module_name)?;
     let rewritten =
         normalize_and_validate_function_literals(&rewritten, span, module_name, visible_functions)?;
+    let blocked_names = local_var_types
+        .keys()
+        .cloned()
+        .collect::<BTreeSet<String>>();
+    let module_aliases = build_module_symbol_alias_rewrite_map(
+        visible_module_vars,
+        visible_module_consts,
+        &blocked_names,
+    );
+    let rewritten = rewrite_module_symbol_aliases_in_template(&rewritten, &module_aliases);
     validate_invoke_first_arg(
         &rewritten,
         span,

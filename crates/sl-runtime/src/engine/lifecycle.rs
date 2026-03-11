@@ -118,12 +118,9 @@ pub struct ScriptLangEngine {
     pub(super) module_vars_value: BTreeMap<String, SlValue>,
     pub(super) module_vars_type: BTreeMap<String, ScriptType>,
     pub(super) module_consts_value: BTreeMap<String, SlValue>,
-    pub(super) module_consts_type: BTreeMap<String, ScriptType>,
     pub(super) visible_globals_by_script: HashMap<String, BTreeSet<String>>,
     pub(super) visible_module_by_script: HashMap<String, BTreeSet<String>>,
-    pub(super) module_global_alias_by_script: HashMap<String, BTreeMap<String, String>>,
     pub(super) visible_consts_by_script: HashMap<String, BTreeSet<String>>,
-    pub(super) module_const_alias_by_script: HashMap<String, BTreeMap<String, String>>,
     pub(super) visible_function_symbols_by_script: HashMap<String, BTreeMap<String, String>>,
     pub(super) invoke_all_functions: BTreeMap<String, FunctionDecl>,
     pub(super) invoke_public_functions: BTreeSet<String>,
@@ -164,9 +161,7 @@ impl ScriptLangEngine {
         let mut group_lookup: HashMap<String, GroupLookup> = HashMap::new();
         let mut visible_globals_by_script = HashMap::new();
         let mut visible_module_by_script = HashMap::new();
-        let mut module_global_alias_by_script = HashMap::new();
         let mut visible_consts_by_script = HashMap::new();
-        let mut module_const_alias_by_script = HashMap::new();
         let mut visible_function_symbols_by_script = HashMap::new();
 
         let mut invoke_all_functions = BTreeMap::new();
@@ -204,23 +199,17 @@ impl ScriptLangEngine {
                 script_name.clone(),
                 script.visible_globals.iter().cloned().collect(),
             );
-            let mut module_aliases = BTreeMap::new();
             let mut visible_module = BTreeSet::new();
-            for (public_name, decl) in &script.visible_module_vars {
-                module_aliases.insert(public_name.clone(), decl.qualified_name.clone());
+            for decl in script.visible_module_vars.values() {
                 visible_module.insert(decl.qualified_name.clone());
             }
             visible_module_by_script.insert(script_name.clone(), visible_module);
-            module_global_alias_by_script.insert(script_name.clone(), module_aliases);
 
-            let mut const_aliases = BTreeMap::new();
             let mut visible_consts = BTreeSet::new();
-            for (public_name, decl) in &script.visible_module_consts {
-                const_aliases.insert(public_name.clone(), decl.qualified_name.clone());
+            for decl in script.visible_module_consts.values() {
                 visible_consts.insert(decl.qualified_name.clone());
             }
             visible_consts_by_script.insert(script_name.clone(), visible_consts);
-            module_const_alias_by_script.insert(script_name.clone(), const_aliases);
 
             for function_name in script.visible_functions.keys() {
                 if host_functions
@@ -316,11 +305,6 @@ impl ScriptLangEngine {
             .iter()
             .map(|(qualified_name, decl)| (qualified_name.clone(), decl.r#type.clone()))
             .collect();
-        let module_consts_type = options
-            .module_const_declarations
-            .iter()
-            .map(|(qualified_name, decl)| (qualified_name.clone(), decl.r#type.clone()))
-            .collect();
         Ok(Self {
             scripts: options.scripts,
             host_functions,
@@ -336,12 +320,9 @@ impl ScriptLangEngine {
             module_vars_value: BTreeMap::new(),
             module_vars_type,
             module_consts_value: BTreeMap::new(),
-            module_consts_type,
             visible_globals_by_script,
             visible_module_by_script,
-            module_global_alias_by_script,
             visible_consts_by_script,
-            module_const_alias_by_script,
             visible_function_symbols_by_script,
             invoke_all_functions,
             invoke_public_functions,

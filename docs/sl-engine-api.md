@@ -102,6 +102,9 @@ assert!(scripts.contains_key("main.main"));
 - `scripts`
 - `entry_script`（显式指定或默认 `main.main`）
 
+编译产物约束（与 alias 相关）：
+- module `var/const` 的短名/显式 alias 在编译期预处理为限定名访问，运行期按限定名执行。
+
 ```rust
 use std::collections::BTreeMap;
 use sl_api::compile_project_from_xml_map;

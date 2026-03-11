@@ -201,7 +201,7 @@ impl ScriptLangEngine {
     pub(super) fn eval_module_global_initializer(
         &mut self,
         expr: &str,
-        module_name: &str,
+        _module_name: &str,
     ) -> Result<SlValue, ScriptLangError> {
         if !self.host_functions.names().is_empty() {
             return Err(ScriptLangError::new(
@@ -249,17 +249,6 @@ impl ScriptLangEngine {
             );
         }
 
-        for (alias, qualified_name) in self.collect_bundle_module_short_aliases(module_name) {
-            if let Some(value) = self.module_vars_value.get(&qualified_name) {
-                scope.push_dynamic(alias, slvalue_to_dynamic(value));
-            }
-        }
-        for (alias, qualified_name) in self.collect_bundle_module_const_short_aliases(module_name) {
-            if let Some(value) = self.module_consts_value.get(&qualified_name) {
-                scope.push_dynamic(alias, slvalue_to_dynamic(value));
-            }
-        }
-
         let mut global_snapshot = BTreeMap::new();
         for (name, value) in &self.global_data {
             global_snapshot.insert(name.clone(), value.clone());
@@ -302,7 +291,7 @@ impl ScriptLangEngine {
     pub(super) fn eval_module_const_initializer(
         &mut self,
         expr: &str,
-        module_name: &str,
+        _module_name: &str,
     ) -> Result<SlValue, ScriptLangError> {
         if !self.host_functions.names().is_empty() {
             return Err(ScriptLangError::new(
@@ -333,12 +322,6 @@ impl ScriptLangEngine {
                 module_namespace_symbol(namespace),
                 slvalue_to_dynamic(&SlValue::Map(values.clone())),
             );
-        }
-
-        for (alias, qualified_name) in self.collect_bundle_module_const_short_aliases(module_name) {
-            if let Some(value) = self.module_consts_value.get(&qualified_name) {
-                scope.push_dynamic(alias, slvalue_to_dynamic(value));
-            }
         }
 
         let mut global_snapshot = BTreeMap::new();
@@ -465,16 +448,6 @@ impl ScriptLangEngine {
             // namespace is always in required_function_namespaces (added at line 454-456)
             visible_consts.insert(decl.qualified_name.clone());
         }
-        let module_alias_map = self
-            .module_global_alias_by_script
-            .get(&script_name)
-            .cloned()
-            .unwrap_or_default();
-        let const_alias_map = self
-            .module_const_alias_by_script
-            .get(&script_name)
-            .cloned()
-            .unwrap_or_default();
         let qualified_rewrite_map = self.build_module_global_qualified_rewrite_map(&script_name);
 
         if !self.host_functions.names().is_empty() {
@@ -550,69 +523,9 @@ impl ScriptLangEngine {
             scope.push_dynamic(symbol, slvalue_to_dynamic(&SlValue::Map(values.clone())));
         }
 
-        let mut short_module_aliases = BTreeMap::new();
-        for (alias, qualified_name) in module_alias_map {
-            if alias.contains('.') || mutable_bindings.contains_key(&alias) {
-                continue;
-            }
-            if !visible_module.contains(&qualified_name) {
-                continue;
-            }
-
-            let value = self
-                .module_vars_value
-                .get(&qualified_name)
-                .cloned()
-                .ok_or_else(|| {
-                    ScriptLangError::new(
-                        "ENGINE_MODULE_GLOBAL_MISSING",
-                        format!("Module global \"{}\" is not initialized.", qualified_name),
-                    )
-                })?;
-            let declared_type = self.module_vars_type.get(&qualified_name);
-            scope.push_dynamic(
-                alias.clone(),
-                slvalue_to_dynamic_with_type(&value, declared_type),
-            );
-            short_module_aliases.insert(alias, (qualified_name, value));
-        }
-
-        let mut short_const_aliases = BTreeMap::new();
-        for (alias, qualified_name) in const_alias_map {
-            if alias.contains('.')
-                || mutable_bindings.contains_key(&alias)
-                || short_module_aliases.contains_key(&alias)
-            {
-                continue;
-            }
-            if !visible_consts.contains(&qualified_name) {
-                continue;
-            }
-
-            let value = self
-                .module_consts_value
-                .get(&qualified_name)
-                .cloned()
-                .ok_or_else(|| {
-                    ScriptLangError::new(
-                        "ENGINE_MODULE_CONST_MISSING",
-                        format!("Module const \"{}\" is not initialized.", qualified_name),
-                    )
-                })?;
-            let declared_type = self.module_consts_type.get(&qualified_name);
-            scope.push_dynamic(
-                alias.clone(),
-                slvalue_to_dynamic_with_type(&value, declared_type),
-            );
-            short_const_aliases.insert(alias, (qualified_name, value));
-        }
-
         let mut global_snapshot = BTreeMap::new();
         for name in visible_globals {
-            if mutable_bindings.contains_key(&name)
-                || short_module_aliases.contains_key(&name)
-                || short_const_aliases.contains_key(&name)
-            {
+            if mutable_bindings.contains_key(&name) {
                 continue;
             }
             let value = self
@@ -760,51 +673,6 @@ impl ScriptLangEngine {
             }
         }
 
-        for (alias, (qualified_name, before_value)) in short_module_aliases {
-            let after_dynamic = scope
-                .get_value::<Dynamic>(&alias)
-                .expect("scope should still contain short module alias");
-            let after = dynamic_to_slvalue(after_dynamic)?;
-            if after == before_value {
-                continue;
-            }
-            let declared_type = self.module_vars_type.get(&qualified_name).ok_or_else(|| {
-                ScriptLangError::new(
-                    "ENGINE_MODULE_GLOBAL_DECL_MISSING",
-                    format!(
-                        "Module global \"{}\" is visible but declaration is missing.",
-                        qualified_name
-                    ),
-                )
-            })?;
-            if !is_type_compatible(&after, declared_type) {
-                return Err(ScriptLangError::new(
-                    "ENGINE_TYPE_MISMATCH",
-                    format!(
-                        "Module global \"{}\" does not match declared type.",
-                        qualified_name
-                    ),
-                ));
-            }
-            self.module_vars_value.insert(qualified_name, after);
-        }
-
-        for (alias, (qualified_name, before_value)) in short_const_aliases {
-            let after_dynamic = scope
-                .get_value::<Dynamic>(&alias)
-                .expect("scope should still contain short module const alias");
-            let after = dynamic_to_slvalue(after_dynamic)?;
-            if after != before_value {
-                return Err(ScriptLangError::new(
-                    "ENGINE_CONST_READONLY",
-                    format!(
-                        "Module const \"{}\" is readonly and cannot be mutated.",
-                        qualified_name
-                    ),
-                ));
-            }
-        }
-
         run_result
     }
 
@@ -916,37 +784,7 @@ impl ScriptLangEngine {
             } else {
                 preprocessed
             };
-            let mut function_rewrite_map = self.build_module_global_rewrite_map_all();
-            if let Some((function_namespace, _)) = qualified_name.split_once('.') {
-                for (alias, local_qualified) in
-                    self.collect_bundle_module_short_aliases(function_namespace)
-                {
-                    if decl.params.iter().any(|param| param.name == alias) {
-                        continue;
-                    }
-                    let Some((namespace, field)) = local_qualified.split_once('.') else {
-                        continue;
-                    };
-                    function_rewrite_map.insert(
-                        alias,
-                        format!("{}.{}", module_namespace_symbol(namespace), field),
-                    );
-                }
-                for (alias, local_qualified) in
-                    self.collect_bundle_module_const_short_aliases(function_namespace)
-                {
-                    if decl.params.iter().any(|param| param.name == alias) {
-                        continue;
-                    }
-                    let Some((namespace, field)) = local_qualified.split_once('.') else {
-                        continue;
-                    };
-                    function_rewrite_map.insert(
-                        alias,
-                        format!("{}.{}", module_namespace_symbol(namespace), field),
-                    );
-                }
-            }
+            let function_rewrite_map = self.build_module_global_rewrite_map_all();
             let rewritten =
                 rewrite_module_global_qualified_access(&rewritten, &function_rewrite_map);
             out.push_str(&rewritten);
@@ -1154,6 +992,7 @@ impl ScriptLangEngine {
         out
     }
 
+    #[cfg(test)]
     pub(super) fn collect_bundle_module_short_aliases(
         &self,
         module_name: &str,
@@ -1175,6 +1014,7 @@ impl ScriptLangEngine {
             .collect()
     }
 
+    #[cfg(test)]
     pub(super) fn collect_bundle_module_const_short_aliases(
         &self,
         module_name: &str,
@@ -1309,7 +1149,7 @@ mod eval_tests {
         )]));
         engine.start("main.main", None).expect("start");
         let value = engine
-            .eval_module_global_initializer("base + main.base + hp", "main")
+            .eval_module_global_initializer("main.base + main.base + main.hp", "main")
             .expect("initializer should evaluate");
         assert_eq!(value, SlValue::Number(15.0));
     }
@@ -1755,10 +1595,17 @@ mod eval_tests {
         invalid_visible_module
             .visible_module_by_script
             .insert("main.main".to_string(), BTreeSet::from(["bad".to_string()]));
-        invalid_visible_module.module_global_alias_by_script.insert(
-            "main.main".to_string(),
-            BTreeMap::from([("hp".to_string(), "bad".to_string())]),
-        );
+        if let Some(script) = invalid_visible_module.scripts.get_mut("main.main") {
+            let mut bad_decl = script
+                .visible_module_vars
+                .get("shared.hp")
+                .cloned()
+                .expect("shared.hp should be visible");
+            bad_decl.qualified_name = "bad".to_string();
+            script
+                .visible_module_vars
+                .insert("hp".to_string(), bad_decl);
+        }
         invalid_visible_module.module_vars_value.clear();
         let error = invalid_visible_module
             .eval_expression("1")
@@ -1993,42 +1840,24 @@ mod eval_tests {
         alias_visibility_engine
             .start("main.main", None)
             .expect("start");
-        alias_visibility_engine
-            .module_global_alias_by_script
-            .insert(
-                "main.main".to_string(),
-                BTreeMap::from([
-                    ("ghost".to_string(), "ghost.hp".to_string()),
-                    ("hp".to_string(), "shared.hp".to_string()),
-                ]),
-            );
+        if let Some(script) = alias_visibility_engine.scripts.get_mut("main.main") {
+            let existing = script
+                .visible_module_vars
+                .get("shared.hp")
+                .cloned()
+                .expect("shared.hp should be visible");
+            script
+                .visible_module_vars
+                .insert("hp".to_string(), existing.clone());
+            let mut ghost = existing;
+            ghost.qualified_name = "ghost.hp".to_string();
+            script
+                .visible_module_vars
+                .insert("ghost".to_string(), ghost);
+        }
         let _ = alias_visibility_engine
-            .execute_rhai("hp + 1", true, "expression")
+            .execute_rhai("shared.hp + 1", true, "expression")
             .expect("eval should pass");
-
-        let mut short_decl_missing_engine = engine_from_sources(map(&[(
-            "main.script.xml",
-            r#"<script name="main"><text>ok</text></script>"#,
-        )]));
-        short_decl_missing_engine
-            .start("main.main", None)
-            .expect("start");
-        short_decl_missing_engine
-            .visible_module_by_script
-            .insert("main.main".to_string(), BTreeSet::from(["bad".to_string()]));
-        short_decl_missing_engine
-            .module_global_alias_by_script
-            .insert(
-                "main.main".to_string(),
-                BTreeMap::from([("hp".to_string(), "bad".to_string())]),
-            );
-        short_decl_missing_engine
-            .module_vars_value
-            .insert("bad".to_string(), SlValue::Number(1.0));
-        let error = short_decl_missing_engine
-            .execute_rhai("hp = hp + 1;", false, "code")
-            .expect_err("short alias missing decl should fail");
-        assert_eq!(error.code, "ENGINE_MODULE_GLOBAL_DECL_MISSING");
     }
 
     #[test]
@@ -2547,7 +2376,7 @@ mod eval_tests {
         // Need to start the engine first to initialize consts
         engine.start("main.main", None).expect("start");
         // Verify the base const works without our modification
-        let result_before = engine.eval_module_const_initializer("base + 1", "main");
+        let result_before = engine.eval_module_const_initializer("main.base + 1", "main");
         assert!(
             result_before.is_ok(),
             "base test should work before modification"
@@ -2559,7 +2388,7 @@ mod eval_tests {
             .module_consts_value
             .insert("invalid_no_dot".to_string(), SlValue::Number(42.0));
         // This should still work because the valid const should be processed
-        let result = engine.eval_module_const_initializer("base + 1", "main");
+        let result = engine.eval_module_const_initializer("main.base + 1", "main");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), SlValue::Number(8.0));
     }
@@ -2620,7 +2449,7 @@ mod eval_tests {
         // Need to start first to initialize globals
         engine.start("main.main", None).expect("start");
         // Verify it works before modification
-        let result_before = engine.eval_module_global_initializer("score + 1", "main");
+        let result_before = engine.eval_module_global_initializer("main.score + 1", "main");
         assert!(result_before.is_ok());
         assert_eq!(result_before.unwrap(), SlValue::Number(11.0));
 
@@ -2629,7 +2458,7 @@ mod eval_tests {
             .module_vars_value
             .insert("invalid_no_dot".to_string(), SlValue::Number(42.0));
         // Should still work because valid globals should be processed
-        let result = engine.eval_module_global_initializer("score + 1", "main");
+        let result = engine.eval_module_global_initializer("main.score + 1", "main");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), SlValue::Number(11.0));
     }
@@ -2647,7 +2476,7 @@ mod eval_tests {
         // Need to start first to initialize consts
         engine.start("main.main", None).expect("start");
         // Verify it works before modification
-        let result_before = engine.eval_module_global_initializer("BASE + 1", "main");
+        let result_before = engine.eval_module_global_initializer("main.BASE + 1", "main");
         assert!(result_before.is_ok());
         assert_eq!(result_before.unwrap(), SlValue::Number(11.0));
 
@@ -2656,7 +2485,7 @@ mod eval_tests {
             .module_consts_value
             .insert("invalid_no_dot".to_string(), SlValue::Number(99.0));
         // Should still work because valid consts should be processed
-        let result = engine.eval_module_global_initializer("BASE + 1", "main");
+        let result = engine.eval_module_global_initializer("main.BASE + 1", "main");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), SlValue::Number(11.0));
     }
@@ -2949,7 +2778,7 @@ mod eval_tests {
         )]));
         engine.start("main.main", None).expect("start");
         // This should work even though module has no consts
-        let result = engine.eval_module_global_initializer("score + 1", "main");
+        let result = engine.eval_module_global_initializer("main.score + 1", "main");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), SlValue::Number(11.0));
     }
@@ -2989,7 +2818,7 @@ mod eval_tests {
         // Note: We don't add "main.missing" to module_consts_value
 
         // Should still work because the missing const should be skipped
-        let result = engine.eval_module_global_initializer("score + 1", "main");
+        let result = engine.eval_module_global_initializer("main.score + 1", "main");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), SlValue::Number(11.0));
     }
@@ -3039,8 +2868,6 @@ mod eval_tests {
     pub(super) fn module_vars_value_missing_triggers_error_in_alias() {
         // Test lines 556-565: ENGINE_MODULE_GLOBAL_MISSING error for short aliases
         // When module_alias_map points to a qualified_name not in module_vars_value
-        use sl_core::types::{AccessLevel, ModuleVarDecl, ScriptType, SourceSpan};
-
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
             r#"<module name="main" default_access="public">
@@ -3054,10 +2881,14 @@ mod eval_tests {
         engine.module_vars_value.clear();
 
         // Set up a module alias that points to missing var
-        engine.module_global_alias_by_script.insert(
-            "main.main".to_string(),
-            std::collections::BTreeMap::from([("alias".to_string(), "main.score".to_string())]),
-        );
+        if let Some(script) = engine.scripts.get_mut("main.main") {
+            let decl = script
+                .visible_module_vars
+                .get("score")
+                .cloned()
+                .expect("score should be visible");
+            script.visible_module_vars.insert("alias".to_string(), decl);
+        }
 
         // Execute code - should trigger ENGINE_MODULE_GLOBAL_MISSING
         let result = engine.eval_expression("1");
@@ -3070,8 +2901,6 @@ mod eval_tests {
     pub(super) fn module_consts_value_missing_triggers_error_in_alias() {
         // Test lines 586-595: ENGINE_MODULE_CONST_MISSING error for short aliases
         // When const_alias_map points to a qualified_name not in module_consts_value
-        use sl_core::types::{AccessLevel, ModuleConstDecl, ScriptType, SourceSpan};
-
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
             r#"<module name="main" default_access="public">
@@ -3085,10 +2914,16 @@ mod eval_tests {
         engine.module_consts_value.clear();
 
         // Set up a const alias that points to missing const
-        engine.module_const_alias_by_script.insert(
-            "main.main".to_string(),
-            std::collections::BTreeMap::from([("alias".to_string(), "main.BASE".to_string())]),
-        );
+        if let Some(script) = engine.scripts.get_mut("main.main") {
+            let decl = script
+                .visible_module_consts
+                .get("BASE")
+                .cloned()
+                .expect("BASE should be visible");
+            script
+                .visible_module_consts
+                .insert("alias".to_string(), decl);
+        }
 
         // Execute code - should trigger ENGINE_MODULE_CONST_MISSING
         let result = engine.eval_expression("1");
@@ -3112,12 +2947,12 @@ mod eval_tests {
         engine.start("main.main", None).expect("start");
 
         // Test expression mode (line 631) - is_expression=true
-        let result = engine.eval_expression("score");
+        let result = engine.eval_expression("main.score");
         assert!(result.is_ok());
 
         // Test code block mode (line 636) - is_expression=false
         // Use run_code which passes is_expression=false
-        let result = engine.run_code("score + 1");
+        let result = engine.run_code("main.score + 1");
         assert!(result.is_ok());
     }
 

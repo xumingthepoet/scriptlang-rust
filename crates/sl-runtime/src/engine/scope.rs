@@ -24,10 +24,11 @@ impl ScriptLangEngine {
         alias: &str,
     ) -> Option<String> {
         let script_name = script_name?;
-        self.module_global_alias_by_script
-            .get(script_name)
-            .and_then(|aliases| aliases.get(alias))
-            .cloned()
+        let script = self.scripts.get(script_name)?;
+        script
+            .visible_module_vars
+            .get(alias)
+            .map(|decl| decl.qualified_name.clone())
     }
 
     pub(super) fn resolve_module_const_alias(
@@ -36,10 +37,11 @@ impl ScriptLangEngine {
         alias: &str,
     ) -> Option<String> {
         let script_name = script_name?;
-        self.module_const_alias_by_script
-            .get(script_name)
-            .and_then(|aliases| aliases.get(alias))
-            .cloned()
+        let script = self.scripts.get(script_name)?;
+        script
+            .visible_module_consts
+            .get(alias)
+            .map(|decl| decl.qualified_name.clone())
     }
 
     pub(super) fn read_variable(&self, name: &str) -> Result<SlValue, ScriptLangError> {
