@@ -1578,6 +1578,80 @@ mod lifecycle_tests {
     }
 
     #[test]
+    pub(super) fn enum_builtin_with_module_var_namespaced_enum_type() {
+        // 325:21 - Test that namespaced enum type (with '.') from module_var triggers the branch
+        // When type_name contains '.', rsplit_once returns Some and adds short alias
+        let files = map(&[
+            (
+                "shared.xml",
+                r#"
+    <module name="shared" default_access="public">
+      <enum name="Status">
+        <member name="Idle"/>
+        <member name="Run"/>
+      </enum>
+    </module>"#,
+            ),
+            (
+                "main.xml",
+                r#"
+    <module name="main" default_access="public">
+      <!-- import shared from shared.xml -->
+      <var name="current_status" type="shared.Status">shared.Status.Idle</var>
+      <script name="main">
+        <temp name="label" type="string">enum_to_string(current_status)</temp>
+        <temp name="members" type="string[]">all_enum_members("shared.Status")</temp>
+        <text>${label}:${members[0]},${members[1]}</text>
+      </script>
+    </module>"#,
+            ),
+        ]);
+        let mut engine = engine_from_sources(files);
+        engine.start("main.main", None).expect("start");
+        let output = engine.next_output().expect("next");
+        // "shared.Status" contains '.', so short alias "Status" should also be registered
+        // Verify short alias works by using "Status" instead of "shared.Status"
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "Idle:Idle,Run"));
+    }
+
+    #[test]
+    pub(super) fn enum_builtin_short_alias_works_for_namespaced_enum() {
+        // 325:21 - Test that short alias (without namespace) works for namespaced enum type
+        // When type_name contains '.', rsplit_once adds short alias entry
+        let files = map(&[
+            (
+                "shared.xml",
+                r#"
+    <module name="shared" default_access="public">
+      <enum name="Status">
+        <member name="Idle"/>
+        <member name="Run"/>
+      </enum>
+    </module>"#,
+            ),
+            (
+                "main.xml",
+                r#"
+    <module name="main" default_access="public">
+      <!-- import shared from shared.xml -->
+      <var name="current_status" type="shared.Status">shared.Status.Idle</var>
+      <script name="main">
+        <!-- Use short alias "Status" instead of "shared.Status" -->
+        <temp name="label" type="string">enum_to_string(current_status)</temp>
+        <temp name="members" type="string[]">all_enum_members("Status")</temp>
+        <text>${label}:${members[0]},${members[1]}</text>
+      </script>
+    </module>"#,
+            ),
+        ]);
+        let mut engine = engine_from_sources(files);
+        engine.start("main.main", None).expect("start");
+        let output = engine.next_output().expect("next");
+        // Short alias "Status" should work because 325:21 adds it
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "Idle:Idle,Run"));
+    }
+
+    #[test]
     pub(super) fn enum_builtin_with_object_type_containing_enum_field() {
         // 333:38, 334:25, 334:39, 334:46, 334:55, 335:25 - Test Object type with fields
         // When ScriptType::Object has fields, it iterates through them to collect enum members
