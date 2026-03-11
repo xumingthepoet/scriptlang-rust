@@ -279,7 +279,7 @@ mod pipeline_tests {
   <type name="Combatant">
     <field name="hp" type="int"/>
   </type>
-  <function name="boost" args="int:x" returnType="int">return x + 1;</function>
+  <function name="boost" args="int:x" return_type="int">return x + 1;</function>
   <var name="baseHp" type="int">40</var>
   <script name="main">
     <temp name="hero" type="Combatant">#{hp: baseHp}</temp>
@@ -431,7 +431,7 @@ mod pipeline_tests {
                 "shared/support/types.xml",
                 r#"
 <module name="shared" default_access="public">
-  <function name="boost" args="int:x" returnType="int">
+  <function name="boost" args="int:x" return_type="int">
     return x + 1;
   </function>
 </module>
@@ -650,7 +650,7 @@ mod pipeline_tests {
         let files = map(&[(
             "main.xml",
             r#"<module name="main" default_access="public">
-<function name="broken" args="Missing:x" returnType="int">return 1;</function>
+<function name="broken" args="Missing:x" return_type="int">return 1;</function>
 <script name="main"><text>Main</text></script>
 </module>"#,
         )]);
@@ -887,13 +887,13 @@ mod pipeline_tests {
             (
                 "a.xml",
                 r#"<module name="shared" default_access="public">
-<function name="foo" args="int:x" returnType="int">return x + 1;</function>
+<function name="foo" args="int:x" return_type="int">return x + 1;</function>
 </module>"#,
             ),
             (
                 "b.xml",
                 r#"<module name="shared" default_access="public">
-<function name="foo" args="int:y" returnType="int">return y + 2;</function>
+<function name="foo" args="int:y" return_type="int">return y + 2;</function>
 </module>"#,
             ),
             (

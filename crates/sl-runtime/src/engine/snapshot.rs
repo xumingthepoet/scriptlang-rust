@@ -58,12 +58,14 @@ impl ScriptLangEngine {
                 target_var,
                 prompt_text,
                 default_text,
+                max_length,
                 ..
             } => SnapshotPendingBoundary::Input {
                 node_id: node_id.clone(),
                 target_var: target_var.clone(),
                 prompt_text: prompt_text.clone(),
                 default_text: default_text.clone(),
+                max_length: *max_length,
             },
         };
 
@@ -239,6 +241,7 @@ impl ScriptLangEngine {
                 target_var,
                 prompt_text,
                 default_text,
+                max_length,
             } => {
                 let ScriptNode::Input { id, .. } = node else {
                     return Err(ScriptLangError::new(
@@ -259,6 +262,7 @@ impl ScriptLangEngine {
                     target_var,
                     prompt_text,
                     default_text,
+                    max_length,
                 }
             }
         });
@@ -383,7 +387,7 @@ mod snapshot_tests {
             r#"
     <script name="main">
       <temp name="heroName" type="string">"Traveler"</temp>
-      <input var="heroName" text="Name your hero"/>
+      <input var="heroName" text="Name your hero" max_length="5"/>
       <text>Hello ${heroName}</text>
     </script>
     "#,
@@ -397,6 +401,10 @@ mod snapshot_tests {
         let mut resumed = engine_from_sources(files);
         resumed.resume(snapshot).expect("resume");
         assert_eq!(output_kind(&resumed.next_output().expect("input")), "input");
+        let over_limit = resumed
+            .submit_input("TooLong")
+            .expect_err("overlong should fail after resume");
+        assert_eq!(over_limit.code, "ENGINE_INPUT_TOO_LONG");
         resumed.submit_input("Guild").expect("submit input");
         assert_eq!(output_kind(&resumed.next_output().expect("text")), "text");
     }
@@ -587,6 +595,7 @@ mod snapshot_tests {
             target_var: "name".to_string(),
             prompt_text: "p".to_string(),
             default_text: "d".to_string(),
+            max_length: None,
         };
         let mut resume_input = engine_from_sources(map(&[(
             "main.script.xml",
@@ -610,6 +619,7 @@ mod snapshot_tests {
             target_var: "name".to_string(),
             prompt_text: "name?".to_string(),
             default_text: String::new(),
+            max_length: None,
         };
         let mut resume_mismatch = engine_from_sources(map(&[(
             "main.script.xml",
@@ -631,6 +641,7 @@ mod snapshot_tests {
             target_var: "name".to_string(),
             prompt_text: "p".to_string(),
             default_text: "d".to_string(),
+            max_length: None,
         };
         let output = resume_mismatch.boundary_output(&pending);
         assert_eq!(output_kind(&output), "input");

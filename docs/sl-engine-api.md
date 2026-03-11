@@ -26,7 +26,7 @@
   - `Text { text, tag }`（`tag` 为可选元数据，供宿主扩展）
   - `Debug { text }`（调试输出事件，独立于 `Text`）
   - `Choices { items, prompt_text }`
-  - `Input { prompt_text, default_text }`
+  - `Input { prompt_text, default_text, max_length }`（`max_length` 为可选）
   - `End`
 
 ### 2.3 快照

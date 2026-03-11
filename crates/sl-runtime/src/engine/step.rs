@@ -40,6 +40,7 @@ enum PlannedNode {
         id: String,
         target_var: String,
         prompt_text: String,
+        max_length: Option<usize>,
     },
     Call {
         target_script: ScriptTarget,
@@ -134,11 +135,13 @@ impl ScriptLangEngine {
                 id,
                 target_var,
                 prompt_text,
+                max_length,
                 ..
             } => PlannedNode::Input {
                 id: id.clone(),
                 target_var: target_var.clone(),
                 prompt_text: prompt_text.clone(),
+                max_length: *max_length,
             },
             ScriptNode::Call {
                 target_script,
@@ -284,7 +287,8 @@ impl ScriptLangEngine {
                 id,
                 target_var,
                 prompt_text,
-            } => self.execute_input_node(top_frame_id, &id, &target_var, &prompt_text),
+                max_length,
+            } => self.execute_input_node(top_frame_id, &id, &target_var, &prompt_text, max_length),
             PlannedNode::Call {
                 target_script,
                 args,
@@ -439,6 +443,7 @@ impl ScriptLangEngine {
         node_id: &str,
         target_var: &str,
         prompt_text: &str,
+        max_length: Option<usize>,
     ) -> Result<Option<EngineOutput>, ScriptLangError> {
         let current = self.read_path(target_var)?;
         let SlValue::String(default_text) = current else {
@@ -454,11 +459,13 @@ impl ScriptLangEngine {
             target_var: target_var.to_string(),
             prompt_text: prompt_text.to_string(),
             default_text: default_text.clone(),
+            max_length,
         });
         self.waiting_choice = false;
         Ok(Some(EngineOutput::Input {
             prompt_text: prompt_text.to_string(),
             default_text,
+            max_length,
         }))
     }
 
@@ -1970,6 +1977,7 @@ mod step_tests {
             target_var: "name".to_string(),
             prompt_text: "p".to_string(),
             default_text: "d".to_string(),
+            max_length: None,
         };
         assert!(pending_choice_options_mut(&mut pending).is_none());
     }

@@ -1974,7 +1974,7 @@ mod module_resolver_tests {
             (
                 "shared.xml",
                 r#"<module name="shared" default_access="public">
-  <function name="add" args="int:a,int:b" returnType="int">
+  <function name="add" args="int:a,int:b" return_type="int">
     return a + b;
   </function>
 </module>"#,
@@ -2002,7 +2002,7 @@ mod module_resolver_tests {
             "shared.xml",
             r#"<module name="shared" default_access="public">
   <type name="Obj"><field name="value" type="int"/></type>
-  <function name="make" args="int:seed" returnType="Obj">
+  <function name="make" args="int:seed" return_type="Obj">
     return #{ value: seed };
   </function>
 </module>"#,
@@ -3712,7 +3712,7 @@ mod module_resolver_tests {
             "main.xml",
             r#"<module name="main" default_access="public">
 <enum name="Status"><member name="Active"/><member name="Inactive"/></enum>
-<function name="test" args="" returnType="int">return Status.Unknown;</function>
+<function name="test" args="" return_type="int">return Status.Unknown;</function>
 <script name="main"><text>test</text></script>
 </module>"#,
         )]);

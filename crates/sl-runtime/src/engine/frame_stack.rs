@@ -33,10 +33,12 @@ impl ScriptLangEngine {
             PendingBoundary::Input {
                 prompt_text,
                 default_text,
+                max_length,
                 ..
             } => EngineOutput::Input {
                 prompt_text: prompt_text.clone(),
                 default_text: default_text.clone(),
+                max_length: *max_length,
             },
         }
     }
@@ -249,7 +251,8 @@ mod frame_stack_tests {
         assert_eq!(
             output_kind(&EngineOutput::Input {
                 prompt_text: "p".to_string(),
-                default_text: "d".to_string()
+                default_text: "d".to_string(),
+                max_length: None,
             }),
             "input"
         );
@@ -259,6 +262,7 @@ mod frame_stack_tests {
             target_var: "name".to_string(),
             prompt_text: "p".to_string(),
             default_text: "d".to_string(),
+            max_length: None,
         })
         .is_none());
 
@@ -282,6 +286,7 @@ mod frame_stack_tests {
             target_var: "name".to_string(),
             prompt_text: "p".to_string(),
             default_text: "d".to_string(),
+            max_length: None,
         });
         let error = engine
             .submit_input("abc")

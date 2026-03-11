@@ -99,6 +99,7 @@ pub(crate) fn run_tui_line_mode_with_io(
             EngineOutput::Input {
                 prompt_text,
                 default_text,
+                ..
             } => {
                 println!();
                 println!("{}", prompt_text);

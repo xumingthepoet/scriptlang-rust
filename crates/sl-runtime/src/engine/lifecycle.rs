@@ -93,6 +93,7 @@ pub(super) enum PendingBoundary {
         target_var: String,
         prompt_text: String,
         default_text: String,
+        max_length: Option<usize>,
     },
 }
 
@@ -757,7 +758,7 @@ mod lifecycle_tests {
                 "shared.xml",
                 r#"
     <module name="shared" default_access="public">
-      <function name="addWithGameBonus" args="int:a1,int:a2" returnType="int">
+      <function name="addWithGameBonus" args="int:a1,int:a2" return_type="int">
         return a1 + a2;
       </function>
     </module>
@@ -793,7 +794,7 @@ mod lifecycle_tests {
             "main.xml",
             r#"
 <module name="main" default_access="public">
-  <function name="invoke" returnType="int">return 1;</function>
+  <function name="invoke" return_type="int">return 1;</function>
   <script name="main"><text>ok</text></script>
 </module>
 "#,
@@ -828,8 +829,8 @@ mod lifecycle_tests {
             "main.xml",
             r#"
     <module name="main" default_access="public">
-      <function name="foo-bar" returnType="int">return 1;</function>
-      <function name="foo_bar" returnType="int">return 2;</function>
+      <function name="foo-bar" return_type="int">return 1;</function>
+      <function name="foo_bar" return_type="int">return 2;</function>
       <script name="main"><text>Hello</text></script>
     </module>
     "#,
@@ -1079,7 +1080,7 @@ mod lifecycle_tests {
                 r#"
     <module name="shared" default_access="public">
       <var name="hp" type="int">1</var>
-      <function name="addWithGameBonus" args="int:a1,int:a2" returnType="int">
+      <function name="addWithGameBonus" args="int:a1,int:a2" return_type="int">
     return a1 + a2;
       </function>
     </module>
@@ -1273,7 +1274,8 @@ mod lifecycle_tests {
         assert_eq!(
             output_kind(&EngineOutput::Input {
                 prompt_text: "p".to_string(),
-                default_text: "d".to_string()
+                default_text: "d".to_string(),
+                max_length: None,
             }),
             "input"
         );

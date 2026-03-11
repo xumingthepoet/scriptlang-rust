@@ -6,7 +6,7 @@
 
   <var name="wallet" type="#{int}">#{gold: 5}</var>
 
-  <function name="boostCopy" args="#{int}:source,int:delta" returnType="#{int}">
+  <function name="boostCopy" args="#{int}:source,int:delta" return_type="#{int}">
     let out = source;
     out["hp"] = out["hp"] + delta;
     return out;

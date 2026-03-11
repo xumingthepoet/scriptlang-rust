@@ -258,6 +258,7 @@ fn run_replay_sequence(
             EngineOutput::Input {
                 prompt_text,
                 default_text,
+                ..
             } => {
                 lines.push(format!("INPUT: {}", prompt_text));
                 lines.push(format!("DEFAULT: {}", default_text));

@@ -166,14 +166,22 @@ impl ScriptLangEngine {
             ));
         };
 
-        let (frame_id, node_id, target_var, prompt_text, default_text) = match pending {
+        let (frame_id, node_id, target_var, prompt_text, default_text, max_length) = match pending {
             PendingBoundary::Input {
                 frame_id,
                 node_id,
                 target_var,
                 prompt_text,
                 default_text,
-            } => (frame_id, node_id, target_var, prompt_text, default_text),
+                max_length,
+            } => (
+                frame_id,
+                node_id,
+                target_var,
+                prompt_text,
+                default_text,
+                max_length,
+            ),
             other => {
                 self.pending_boundary = Some(other);
                 return Err(ScriptLangError::new(
@@ -190,6 +198,7 @@ impl ScriptLangEngine {
                 target_var,
                 prompt_text,
                 default_text,
+                max_length,
             });
             return Err(ScriptLangError::new(
                 "ENGINE_INPUT_FRAME_MISSING",
@@ -202,6 +211,23 @@ impl ScriptLangEngine {
         } else {
             text.to_string()
         };
+        if let Some(limit) = max_length {
+            let actual_len = normalized.chars().count();
+            if actual_len > limit {
+                self.pending_boundary = Some(PendingBoundary::Input {
+                    frame_id,
+                    node_id,
+                    target_var,
+                    prompt_text,
+                    default_text,
+                    max_length: Some(limit),
+                });
+                return Err(ScriptLangError::new(
+                    "ENGINE_INPUT_TOO_LONG",
+                    format!("Input length {} exceeds max_length {}.", actual_len, limit),
+                ));
+            }
+        }
 
         if let Err(error) = self.write_path(&target_var, SlValue::String(normalized)) {
             self.pending_boundary = Some(PendingBoundary::Input {
@@ -210,6 +236,7 @@ impl ScriptLangEngine {
                 target_var,
                 prompt_text,
                 default_text,
+                max_length,
             });
             return Err(error);
         }
@@ -295,7 +322,8 @@ mod boundary_tests {
         assert_eq!(
             output_kind(&EngineOutput::Input {
                 prompt_text: "p".to_string(),
-                default_text: "d".to_string()
+                default_text: "d".to_string(),
+                max_length: None,
             }),
             "input"
         );
@@ -308,7 +336,8 @@ mod boundary_tests {
                 node_id: "i".to_string(),
                 target_var: "v".to_string(),
                 prompt_text: "p".to_string(),
-                default_text: "d".to_string()
+                default_text: "d".to_string(),
+                max_length: None,
             })),
             "input"
         );
@@ -327,6 +356,7 @@ mod boundary_tests {
             target_var: "name".to_string(),
             prompt_text: "p".to_string(),
             default_text: "d".to_string(),
+            max_length: None,
         };
         assert!(pending_choice_options_mut(&mut input_pending).is_none());
         assert!(pending_choice_once_key(&input_pending).is_none());
@@ -431,6 +461,50 @@ mod boundary_tests {
     }
 
     #[test]
+    pub(super) fn submit_input_rejects_overlong_value_and_keeps_pending_boundary() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <temp name="heroName" type="string">""</temp>
+      <input var="heroName" text="Name your hero" max_length="3"/>
+      <text>Hello ${heroName}</text>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+        assert_eq!(output_kind(&engine.next_output().expect("input")), "input");
+        let error = engine
+            .submit_input("Guild")
+            .expect_err("overlong input should fail");
+        assert_eq!(error.code, "ENGINE_INPUT_TOO_LONG");
+        let pending_again = engine.next_output().expect("pending input should remain");
+        assert_eq!(output_kind(&pending_again), "input");
+    }
+
+    #[test]
+    pub(super) fn submit_input_rejects_overlong_default_after_blank_fallback() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"
+    <script name="main">
+      <temp name="heroName" type="string">"Traveler"</temp>
+      <input var="heroName" text="Name your hero" max_length="3"/>
+      <text>Hello ${heroName}</text>
+    </script>
+    "#,
+        )]));
+        engine.start("main", None).expect("start");
+        assert_eq!(output_kind(&engine.next_output().expect("input")), "input");
+        let error = engine
+            .submit_input("   ")
+            .expect_err("blank fallback should still validate max_length");
+        assert_eq!(error.code, "ENGINE_INPUT_TOO_LONG");
+        let pending_again = engine.next_output().expect("pending input should remain");
+        assert_eq!(output_kind(&pending_again), "input");
+    }
+
+    #[test]
     pub(super) fn submit_input_rejects_module_const_target() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
@@ -462,6 +536,7 @@ mod boundary_tests {
             target_var: "name".to_string(),
             prompt_text: "p".to_string(),
             default_text: "d".to_string(),
+            max_length: None,
         });
         let error = wrong_kind
             .choose(0)

@@ -686,7 +686,7 @@ mod tests {
             r#"
 <module name="battle" default_access="public">
   <var name="score" type="int">1</var>
-  <function name="boost" args="int:x" returnType="int">return x + 1;</function>
+  <function name="boost" args="int:x" return_type="int">return x + 1;</function>
   <script name="main">
     <temp name="cmd" type="string">""</temp>
     <input var="cmd" text="Go"/>
@@ -853,6 +853,7 @@ mod tests {
                 target_var: "x".to_string(),
                 prompt_text: "p".to_string(),
                 default_text: "d".to_string(),
+                max_length: None,
             },
             module_vars: BTreeMap::new(),
             once_state_by_script: BTreeMap::new(),
@@ -895,6 +896,7 @@ mod tests {
                     target_var: "x".to_string(),
                     prompt_text: "p".to_string(),
                     default_text: "d".to_string(),
+                    max_length: None,
                 },
                 module_vars: BTreeMap::new(),
                 once_state_by_script: BTreeMap::new(),

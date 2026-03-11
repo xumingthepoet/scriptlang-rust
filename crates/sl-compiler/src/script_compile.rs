@@ -1252,11 +1252,13 @@ pub(crate) fn compile_group_nodes(
                         child.location.clone(),
                     ));
                 }
+                let max_length = parse_input_max_length(child)?;
 
                 ScriptNode::Input {
                     id: builder.next_node_id("input"),
                     target_var: get_required_non_empty_attr(child, "var")?,
                     prompt_text: get_required_non_empty_attr(child, "text")?,
+                    max_length,
                     location: child.location.clone(),
                 }
             }
@@ -1646,11 +1648,35 @@ pub(crate) fn parse_function_return(
             node.location.clone(),
         ));
     }
-    let raw = get_required_non_empty_attr(node, "returnType")?;
+    if has_attr(node, "returnType") {
+        return Err(ScriptLangError::with_span(
+            "FUNCTION_RETURN_TYPE_ATTR_RENAMED",
+            "Attribute \"returnType\" has been removed; use \"return_type\".",
+            node.location.clone(),
+        ));
+    }
+    let raw = get_required_non_empty_attr(node, "return_type")?;
     Ok(ParsedFunctionReturnDecl {
         type_expr: parse_type_expr(&raw, &node.location)?,
         location: node.location.clone(),
     })
+}
+
+fn parse_input_max_length(node: &XmlElementNode) -> Result<Option<usize>, ScriptLangError> {
+    let Some(raw) = get_optional_attr(node, "max_length") else {
+        return Ok(None);
+    };
+    let parsed = raw.trim().parse::<usize>().map_err(|_| {
+        ScriptLangError::with_span(
+            "XML_INPUT_MAX_LENGTH_INVALID",
+            format!(
+                "Attribute \"max_length\" on <input> must be a non-negative integer, got \"{}\".",
+                raw
+            ),
+            node.location.clone(),
+        )
+    })?;
+    Ok(Some(parsed))
 }
 
 pub(crate) fn contains_return_statement(code: &str) -> bool {
@@ -1761,7 +1787,7 @@ mod script_compile_tests {
 
         let fn_node = xml_element(
             "function",
-            &[("name", "f"), ("args", "ref:int:a"), ("returnType", "int")],
+            &[("name", "f"), ("args", "ref:int:a"), ("return_type", "int")],
             vec![xml_text("return a;")],
         );
         let error = parse_function_declaration_node(&fn_node).expect_err("ref arg unsupported");
@@ -1775,10 +1801,22 @@ mod script_compile_tests {
         let error =
             parse_function_declaration_node(&fn_bad_return).expect_err("return attr invalid");
         assert_eq!(error.code, "FUNCTION_RETURN_ATTR_INVALID");
+        let fn_old_return_attr = xml_element(
+            "function",
+            &[("name", "f"), ("args", "int:a"), ("returnType", "int")],
+            vec![xml_text("return a;")],
+        );
+        let error = parse_function_declaration_node(&fn_old_return_attr)
+            .expect_err("old returnType attr should fail");
+        assert_eq!(error.code, "FUNCTION_RETURN_TYPE_ATTR_RENAMED");
 
         let fn_reserved_arg = xml_element(
             "function",
-            &[("name", "f"), ("args", "int:__sl_a"), ("returnType", "int")],
+            &[
+                ("name", "f"),
+                ("args", "int:__sl_a"),
+                ("return_type", "int"),
+            ],
             vec![xml_text("return 1;")],
         );
         let error =
@@ -1786,7 +1824,11 @@ mod script_compile_tests {
         assert_eq!(error.code, "NAME_RESERVED_PREFIX");
         let fn_keyword_arg = xml_element(
             "function",
-            &[("name", "f"), ("args", "int:shared"), ("returnType", "int")],
+            &[
+                ("name", "f"),
+                ("args", "int:shared"),
+                ("return_type", "int"),
+            ],
             vec![xml_text("return 1;")],
         );
         let error = parse_function_declaration_node(&fn_keyword_arg).expect_err("keyword arg name");
@@ -1794,7 +1836,7 @@ mod script_compile_tests {
 
         let fn_bad_arg_type = xml_element(
             "function",
-            &[("name", "f"), ("args", "#{ }:a"), ("returnType", "int")],
+            &[("name", "f"), ("args", "#{ }:a"), ("return_type", "int")],
             vec![xml_text("return 1;")],
         );
         let error =
@@ -1815,7 +1857,7 @@ mod script_compile_tests {
     fn parse_function_return_and_type_expr_success_paths_are_covered() {
         let function_node = xml_element(
             "function",
-            &[("name", "f"), ("returnType", "int")],
+            &[("name", "f"), ("return_type", "int")],
             vec![xml_text("return 1;")],
         );
         let parsed_return = parse_function_return(&function_node).expect("return should parse");
@@ -1826,7 +1868,7 @@ mod script_compile_tests {
         // Test non-primitive return types to cover the match branch
         let array_func = xml_element(
             "function",
-            &[("name", "f"), ("returnType", "int[]")],
+            &[("name", "f"), ("return_type", "int[]")],
             vec![xml_text("return [];")],
         );
         let _parsed_array = parse_function_return(&array_func).expect("array return should parse");
@@ -1848,7 +1890,7 @@ mod script_compile_tests {
         assert_eq!(error.code, "FUNCTION_RETURN_ATTR_INVALID");
         let keyword_return = xml_element(
             "function",
-            &[("name", "f"), ("returnType", "int:out")],
+            &[("name", "f"), ("return_type", "int:out")],
             vec![xml_text("return 1;")],
         );
         let error = parse_function_return(&keyword_return).expect_err("invalid return type syntax");
@@ -1856,7 +1898,7 @@ mod script_compile_tests {
 
         let invalid_return = xml_element(
             "function",
-            &[("name", "f"), ("returnType", "#{ }:out")],
+            &[("name", "f"), ("return_type", "#{ }:out")],
             vec![xml_text("return 1;")],
         );
         let error = parse_function_return(&invalid_return).expect_err("invalid return type");
@@ -3026,7 +3068,7 @@ mod script_compile_tests {
                     map(&[
                         (
                             "x.xml",
-                            "<module name=\"x\"><function name=\"f\" returnType=\"int\">return 1;</function><function name=\"f\" returnType=\"int\">return 2;</function></module>",
+                            "<module name=\"x\"><function name=\"f\" return_type=\"int\">return 1;</function><function name=\"f\" return_type=\"int\">return 2;</function></module>",
                         ),
                         (
                             "main.xml",
@@ -3151,6 +3193,30 @@ mod script_compile_tests {
                         "<script name=\"main\"><input var=\"x\" text=\"p\">x</input></script>",
                     )]),
                     "XML_INPUT_CONTENT_FORBIDDEN",
+                ),
+                (
+                    "input max_length negative invalid",
+                    map(&[(
+                        "main.xml",
+                        "<script name=\"main\"><input var=\"x\" text=\"p\" max_length=\"-1\"/></script>",
+                    )]),
+                    "XML_INPUT_MAX_LENGTH_INVALID",
+                ),
+                (
+                    "input max_length text invalid",
+                    map(&[(
+                        "main.xml",
+                        "<script name=\"main\"><input var=\"x\" text=\"p\" max_length=\"abc\"/></script>",
+                    )]),
+                    "XML_INPUT_MAX_LENGTH_INVALID",
+                ),
+                (
+                    "function returnType renamed",
+                    map(&[(
+                        "main.xml",
+                        "<module name=\"main\"><function name=\"f\" returnType=\"int\">return 1;</function></module>",
+                    )]),
+                    "FUNCTION_RETURN_TYPE_ATTR_RENAMED",
                 ),
                 (
                     "return ref unsupported",
@@ -3683,7 +3749,7 @@ mod script_compile_tests {
       <type name="Obj">
         <field name="values" type="#{int[]}"/>
       </type>
-      <function name="build" returnType="Obj">
+      <function name="build" return_type="Obj">
         return #{values: #{a: [1]}};
       </function>
     </module>
@@ -3799,6 +3865,7 @@ mod script_compile_tests {
             id: "i1".to_string(),
             target_var: "name".to_string(),
             prompt_text: "p".to_string(),
+            max_length: None,
             location: SourceSpan::synthetic(),
         };
         let input_id = node_id(&input_node);
@@ -3943,21 +4010,21 @@ mod script_compile_tests {
 
         let empty_fn_args = parse_function_args(&xml_element(
             "function",
-            &[("name", "f"), ("args", "   "), ("returnType", "int")],
+            &[("name", "f"), ("args", "   "), ("return_type", "int")],
             vec![xml_text("return 1;")],
         ))
         .expect("empty function args should be accepted");
         assert!(empty_fn_args.is_empty());
         let fn_args_bad_start = parse_function_args(&xml_element(
             "function",
-            &[("name", "f"), ("args", ":a"), ("returnType", "int")],
+            &[("name", "f"), ("args", ":a"), ("return_type", "int")],
             vec![xml_text("return 1;")],
         ))
         .expect_err("bad function args should fail");
         assert_eq!(fn_args_bad_start.code, "FUNCTION_ARGS_PARSE_ERROR");
         let fn_args_bad_end = parse_function_args(&xml_element(
             "function",
-            &[("name", "f"), ("args", "int:"), ("returnType", "int")],
+            &[("name", "f"), ("args", "int:"), ("return_type", "int")],
             vec![xml_text("return 1;")],
         ))
         .expect_err("bad function args should fail");
@@ -3967,7 +4034,7 @@ mod script_compile_tests {
             &[
                 ("name", "f"),
                 ("args", "int:a,int:a"),
-                ("returnType", "int"),
+                ("return_type", "int"),
             ],
             vec![xml_text("return 1;")],
         ))
@@ -3975,7 +4042,7 @@ mod script_compile_tests {
         assert_eq!(fn_args_dup.code, "FUNCTION_ARGS_DUPLICATE");
         let fn_args_no_colon = parse_function_args(&xml_element(
             "function",
-            &[("name", "f"), ("args", "int"), ("returnType", "int")],
+            &[("name", "f"), ("args", "int"), ("return_type", "int")],
             vec![xml_text("return 1;")],
         ))
         .expect_err("function arg without colon should fail");
@@ -3990,7 +4057,7 @@ mod script_compile_tests {
         assert_eq!(ret_attr_invalid.code, "FUNCTION_RETURN_ATTR_INVALID");
         let ret_bad_edge = parse_function_return(&xml_element(
             "function",
-            &[("name", "f"), ("returnType", "int:")],
+            &[("name", "f"), ("return_type", "int:")],
             vec![xml_text("x")],
         ))
         .expect_err("return parse should fail");

@@ -17,7 +17,7 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
     <member name="Idle"/>
     <member name="Run"/>
   </enum>
-  <function name="boost" args="int:x" returnType="int">
+  <function name="boost" args="int:x" return_type="int">
     return x + 1;
   </function>
   <var name="baseHp" type="int">100</var>
@@ -129,7 +129,7 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 
 ```xml
 <module name="shared" default_access="public">
-  <function name="boost" args="int:x" returnType="int">
+  <function name="boost" args="int:x" return_type="int">
     return x + 1;
   </function>
 </module>
@@ -388,12 +388,16 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 ## 6.11 `<input>`
 
 用途：请求宿主输入字符串并写入变量。  
-属性：`var`、`text`（必填）。  
+属性：`var`、`text`（必填），`max_length`（可选，非负整数）。  
 限制：不支持 `default` 属性，不允许子节点/内联文本。  
+补充：
+- `max_length` 按 Unicode 字符数量计数（实现口径：`chars().count()`）。
+- 宿主提交输入后，若长度超过 `max_length`，运行时返回 `ENGINE_INPUT_TOO_LONG`。
+- 用户输入空白时会回退到 `default_text`；回退后的值同样参与 `max_length` 校验。
 
 ```xml
 <temp name="heroName" type="string">"Traveler"</temp>
-<input var="heroName" text="请输入名字"/>
+<input var="heroName" text="请输入名字" max_length="16"/>
 <text>Hello ${heroName}</text>
 ```
 
@@ -562,16 +566,16 @@ module 相关规则与 `<call>` 相同：
 属性：
 - `name`（必填）
 - `args`（可选，`type:name`）
-- `return`（必填，`type:name`）
+- `return_type`（必填，类型表达式）
 
 限制：
 - module 函数 `args` 不支持 `ref:`
-- module 函数 `returnType` 不支持 `ref:`
+- module 函数 `return_type` 不支持 `ref:`
 - 函数体只能是内联代码文本，不允许子元素
 
 ```xml
 <module name="shared" default_access="public">
-  <function name="add" args="int:a,int:b" returnType="int">
+  <function name="add" args="int:a,int:b" return_type="int">
     return a + b;
   </function>
 </module>
@@ -581,7 +585,7 @@ module 相关规则与 `<call>` 相同：
 
 ```xml
 <module name="router" default_access="public">
-  <function name="pick" args="script:current" returnType="script">
+  <function name="pick" args="script:current" return_type="script">
     if current == @router.main {
       return @router.alt;
     }
@@ -594,7 +598,7 @@ module 相关规则与 `<call>` 相同：
 
 ```xml
 <module name="router" default_access="public">
-  <function name="pick" args="function:current" returnType="function">
+  <function name="pick" args="function:current" return_type="function">
     if current == *router.main {
       return *router.alt;
     }

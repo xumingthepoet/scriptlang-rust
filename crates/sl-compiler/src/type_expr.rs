@@ -746,7 +746,7 @@ mod type_expr_tests {
 
         let function_missing_name = parse_function_declaration_node(&xml_element(
             "function",
-            &[("returnType", "int")],
+            &[("return_type", "int")],
             vec![xml_text("return 1;")],
         ))
         .expect_err("function name should be required");
@@ -754,14 +754,14 @@ mod type_expr_tests {
 
         let function_reserved_name = parse_function_declaration_node(&xml_element(
             "function",
-            &[("name", "__sl_f"), ("returnType", "int")],
+            &[("name", "__sl_f"), ("return_type", "int")],
             vec![xml_text("return 1;")],
         ))
         .expect_err("function name cannot be reserved");
         assert_eq!(function_reserved_name.code, "NAME_RESERVED_PREFIX");
         let function_keyword_name = parse_function_declaration_node(&xml_element(
             "function",
-            &[("name", "shared"), ("returnType", "int")],
+            &[("name", "shared"), ("return_type", "int")],
             vec![xml_text("return 1;")],
         ))
         .expect_err("function name cannot be keyword");
@@ -769,7 +769,7 @@ mod type_expr_tests {
 
         let function_child_error = parse_function_declaration_node(&xml_element(
             "function",
-            &[("name", "f"), ("returnType", "int")],
+            &[("name", "f"), ("return_type", "int")],
             vec![XmlNode::Element(xml_element("x", &[], Vec::new()))],
         ))
         .expect_err("function code cannot contain child nodes");
@@ -810,7 +810,7 @@ mod type_expr_tests {
         let function_invalid_access = parse_function_declaration_node_with_namespace(
             &xml_element(
                 "function",
-                &[("name", "f"), ("access", "bad"), ("returnType", "int")],
+                &[("name", "f"), ("access", "bad"), ("return_type", "int")],
                 vec![xml_text("return 1;")],
             ),
             "module",
@@ -1087,7 +1087,7 @@ mod type_expr_tests {
         // Test FUNCTION_RETURN_STATEMENT_REQUIRED error path
         let fn_no_return = parse_function_declaration_node(&xml_element(
             "function",
-            &[("name", "f"), ("returnType", "int")],
+            &[("name", "f"), ("return_type", "int")],
             vec![xml_text("let x = 1;")],
         ))
         .expect_err("function without return statement should fail");

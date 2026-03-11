@@ -230,6 +230,8 @@ pub enum ScriptNode {
         id: String,
         target_var: String,
         prompt_text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_length: Option<usize>,
         location: SourceSpan,
     },
     Break {
@@ -361,6 +363,8 @@ pub enum PendingBoundary {
         target_var: String,
         prompt_text: String,
         default_text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_length: Option<usize>,
     },
 }
 
@@ -395,6 +399,8 @@ pub enum EngineOutput {
     Input {
         prompt_text: String,
         default_text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_length: Option<usize>,
     },
     End,
 }

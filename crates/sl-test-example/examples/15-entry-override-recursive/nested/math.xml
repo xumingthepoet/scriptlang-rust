@@ -1,5 +1,5 @@
 <module name="math" default_access="public">
-  <function name="label" args="string:name,int:level" returnType="string">
+  <function name="label" args="string:name,int:level" return_type="string">
     return name + "#" + level;
   </function>
 </module>

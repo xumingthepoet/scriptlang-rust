@@ -72,6 +72,7 @@ pub fn run_case(example_dir: &Path, case: &TestCase) -> Result<RunReport, SlTest
             sl_core::EngineOutput::Input {
                 prompt_text,
                 default_text,
+                ..
             } => {
                 observed_events.push(ExpectedEvent::Input {
                     prompt_text,

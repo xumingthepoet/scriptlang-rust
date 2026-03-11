@@ -4,7 +4,7 @@
     <field name="name" type="string"/>
     <field name="power" type="int"/>
   </type>
-  <function name="greet" args="string:name" returnType="string">
+  <function name="greet" args="string:name" return_type="string">
     return math.label(name, 2) + " @recursive";
   </function>
 </module>

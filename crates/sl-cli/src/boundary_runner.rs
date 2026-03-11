@@ -38,6 +38,7 @@ pub(crate) fn run_to_boundary(
             EngineOutput::Input {
                 prompt_text,
                 default_text,
+                ..
             } => {
                 return Ok(BoundaryResult {
                     event: BoundaryEvent::Input,
