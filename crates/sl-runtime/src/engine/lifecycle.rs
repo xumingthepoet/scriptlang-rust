@@ -145,8 +145,7 @@ pub struct ScriptLangEngine {
 
 impl ScriptLangEngine {
     pub fn new(options: ScriptLangEngineOptions) -> Result<Self, ScriptLangError> {
-        const RESERVED_HOST_BUILTINS: [&str; 4] =
-            ["random", "invoke", "enum_to_string", "all_enum_members"];
+        const RESERVED_HOST_BUILTINS: [&str; 3] = ["random", "invoke", "enum_to_string"];
         let host_functions: Arc<dyn HostFunctionRegistry> = options
             .host_functions
             .unwrap_or_else(|| Arc::new(EmptyHostFunctionRegistry::default()));
@@ -312,90 +311,6 @@ impl ScriptLangEngine {
             "enum_to_string",
             |value: ImmutableString| -> ImmutableString { value },
         );
-        fn collect_enum_members_from_type(
-            ty: &ScriptType,
-            out: &mut BTreeMap<String, Vec<String>>,
-        ) {
-            match ty {
-                ScriptType::Enum { type_name, members } => {
-                    out.entry(type_name.clone())
-                        .or_insert_with(|| members.clone());
-                    if let Some((_, short)) = type_name.rsplit_once('.') {
-                        out.entry(short.to_string())
-                            .or_insert_with(|| members.clone());
-                    }
-                }
-                ScriptType::Array { element_type } => {
-                    collect_enum_members_from_type(element_type, out);
-                }
-                ScriptType::Map { value_type, .. } => {
-                    collect_enum_members_from_type(value_type, out);
-                }
-                ScriptType::Object { fields, .. } => {
-                    for field_type in fields.values() {
-                        collect_enum_members_from_type(field_type, out);
-                    }
-                }
-                ScriptType::Primitive { .. } | ScriptType::Script | ScriptType::Function => {}
-            }
-        }
-
-        let mut enum_members_by_name: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        for script in options.scripts.values() {
-            for param in &script.params {
-                collect_enum_members_from_type(&param.r#type, &mut enum_members_by_name);
-            }
-            for group in script.groups.values() {
-                for node in &group.nodes {
-                    if let ScriptNode::Var { declaration, .. } = node {
-                        collect_enum_members_from_type(
-                            &declaration.r#type,
-                            &mut enum_members_by_name,
-                        );
-                    }
-                }
-            }
-            for function in script.visible_functions.values() {
-                for param in &function.params {
-                    collect_enum_members_from_type(&param.r#type, &mut enum_members_by_name);
-                }
-                collect_enum_members_from_type(
-                    &function.return_binding.r#type,
-                    &mut enum_members_by_name,
-                );
-            }
-            for decl in script.visible_module_vars.values() {
-                collect_enum_members_from_type(&decl.r#type, &mut enum_members_by_name);
-            }
-            for decl in script.visible_module_consts.values() {
-                collect_enum_members_from_type(&decl.r#type, &mut enum_members_by_name);
-            }
-        }
-        for decl in options.module_var_declarations.values() {
-            collect_enum_members_from_type(&decl.r#type, &mut enum_members_by_name);
-        }
-        for decl in options.module_const_declarations.values() {
-            collect_enum_members_from_type(&decl.r#type, &mut enum_members_by_name);
-        }
-        rhai_engine.register_fn(
-            "all_enum_members",
-            move |enum_name: ImmutableString| -> Result<Array, Box<EvalAltResult>> {
-                let Some(members) = enum_members_by_name.get(enum_name.as_str()) else {
-                    return Err(Box::new(EvalAltResult::ErrorRuntime(
-                        Dynamic::from(format!(
-                            "all_enum_members(enumName) unknown enum type \"{}\".",
-                            enum_name
-                        )),
-                        Position::NONE,
-                    )));
-                };
-                Ok(members
-                    .iter()
-                    .map(|member| Dynamic::from(member.clone()))
-                    .collect())
-            },
-        );
-
         let module_vars_type = options
             .module_var_declarations
             .iter()
@@ -716,35 +631,6 @@ mod lifecycle_tests {
     }
 
     #[test]
-    pub(super) fn new_rejects_reserved_host_function_name_all_enum_members() {
-        let files = map(&[(
-            "main.script.xml",
-            r#"<script name="main"><text>Hello</text></script>"#,
-        )]);
-        let compiled = compile_project_from_sources(files);
-        let result = ScriptLangEngine::new(ScriptLangEngineOptions {
-            scripts: compiled.scripts,
-            global_data: compiled.global_data,
-            module_var_declarations: compiled.module_var_declarations,
-            module_var_init_order: compiled.module_var_init_order,
-            module_const_declarations: compiled.module_const_declarations,
-            module_const_init_order: compiled.module_const_init_order,
-            host_functions: Some(Arc::new(TestRegistry {
-                names: vec!["all_enum_members".to_string()],
-            })),
-            random_seed: Some(1),
-            random_sequence: None,
-            random_sequence_index: None,
-            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
-        });
-        assert!(result.is_err());
-        let error = result
-            .err()
-            .expect("reserved all_enum_members name should fail");
-        assert_eq!(error.code, "ENGINE_HOST_FUNCTION_RESERVED");
-    }
-
-    #[test]
     pub(super) fn new_rejects_host_function_conflicting_with_module_function() {
         let files = map(&[
             (
@@ -891,8 +777,7 @@ mod lifecycle_tests {
       <script name="main">
         <temp name="state" type="State">State.Run</temp>
         <temp name="label" type="string">enum_to_string(state)</temp>
-        <temp name="members" type="string[]">all_enum_members("State")</temp>
-        <text>${label}:${members[0]},${members[1]}</text>
+        <text>${label}</text>
       </script>
     </module>
     "#,
@@ -900,7 +785,7 @@ mod lifecycle_tests {
         let mut engine = engine_from_sources(files);
         engine.start("main.main", None).expect("start");
         let output = engine.next_output().expect("next");
-        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "Run:Idle,Run"));
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "Run"));
     }
 
     #[test]
@@ -1510,190 +1395,5 @@ mod lifecycle_tests {
             .expect("should exist");
         assert_eq!(*uninit, SlValue::Number(0.0));
         assert_eq!(*init, SlValue::Number(42.0));
-    }
-
-    #[test]
-    pub(super) fn all_enum_members_unknown_enum_fails() {
-        // 383:28, 383:32 - Test error path when enum not found
-        let files = map(&[(
-            "main.script.xml",
-            r#"
-    <module name="main" default_access="public">
-      <enum name="State">
-        <member name="Idle"/>
-        <member name="Run"/>
-      </enum>
-      <script name="main">
-        <temp name="members" type="string[]">all_enum_members("NonExistent")</temp>
-        <text>${members}</text>
-      </script>
-    </module>
-    "#,
-        )]);
-        let mut engine = engine_from_sources(files);
-        engine
-            .start("main.main", None)
-            .expect("start should succeed");
-        let error = engine
-            .next_output()
-            .expect_err("all_enum_members with unknown enum should fail");
-        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
-        assert!(error.message.contains("unknown enum type"));
-    }
-
-    #[test]
-    pub(super) fn enum_builtin_with_namespaced_enum_type() {
-        // 325:21 - Test that namespaced enum type (with '.') is handled correctly
-        // When type_name contains '.', rsplit_once returns Some and adds short alias
-        let files = map(&[
-            (
-                "shared.xml",
-                r#"
-    <module name="shared" default_access="public">
-      <enum name="State">
-        <member name="Idle"/>
-        <member name="Run"/>
-      </enum>
-    </module>
-    "#,
-            ),
-            (
-                "main.xml",
-                r#"
-    <module name="main" default_access="public">
-      <!-- import shared from shared.xml -->
-      <script name="main">
-        <!-- Use namespaced enum type: shared.State -->
-        <temp name="state" type="shared.State">shared.State.Run</temp>
-        <temp name="label" type="string">enum_to_string(state)</temp>
-        <temp name="members" type="string[]">all_enum_members("shared.State")</temp>
-        <text>${label}:${members[0]},${members[1]}</text>
-      </script>
-    </module>
-    "#,
-            ),
-        ]);
-        let mut engine = engine_from_sources(files);
-        engine.start("main.main", None).expect("start");
-        let output = engine.next_output().expect("next");
-        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "Run:Idle,Run"));
-    }
-
-    #[test]
-    pub(super) fn enum_builtin_with_module_var_namespaced_enum_type() {
-        // 325:21 - Test that namespaced enum type (with '.') from module_var triggers the branch
-        // When type_name contains '.', rsplit_once returns Some and adds short alias
-        let files = map(&[
-            (
-                "shared.xml",
-                r#"
-    <module name="shared" default_access="public">
-      <enum name="Status">
-        <member name="Idle"/>
-        <member name="Run"/>
-      </enum>
-    </module>"#,
-            ),
-            (
-                "main.xml",
-                r#"
-    <module name="main" default_access="public">
-      <!-- import shared from shared.xml -->
-      <var name="current_status" type="shared.Status">shared.Status.Idle</var>
-      <script name="main">
-        <temp name="label" type="string">enum_to_string(current_status)</temp>
-        <temp name="members" type="string[]">all_enum_members("shared.Status")</temp>
-        <text>${label}:${members[0]},${members[1]}</text>
-      </script>
-    </module>"#,
-            ),
-        ]);
-        let mut engine = engine_from_sources(files);
-        engine.start("main.main", None).expect("start");
-        let output = engine.next_output().expect("next");
-        // "shared.Status" contains '.', so short alias "Status" should also be registered
-        // Verify short alias works by using "Status" instead of "shared.Status"
-        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "Idle:Idle,Run"));
-    }
-
-    #[test]
-    pub(super) fn enum_builtin_short_alias_works_for_namespaced_enum() {
-        // 325:21 - Test that short alias (without namespace) works for namespaced enum type
-        // When type_name contains '.', rsplit_once adds short alias entry
-        let files = map(&[
-            (
-                "shared.xml",
-                r#"
-    <module name="shared" default_access="public">
-      <enum name="Status">
-        <member name="Idle"/>
-        <member name="Run"/>
-      </enum>
-    </module>"#,
-            ),
-            (
-                "main.xml",
-                r#"
-    <module name="main" default_access="public">
-      <!-- import shared from shared.xml -->
-      <var name="current_status" type="shared.Status">shared.Status.Idle</var>
-      <script name="main">
-        <!-- Use short alias "Status" instead of "shared.Status" -->
-        <temp name="label" type="string">enum_to_string(current_status)</temp>
-        <temp name="members" type="string[]">all_enum_members("Status")</temp>
-        <text>${label}:${members[0]},${members[1]}</text>
-      </script>
-    </module>"#,
-            ),
-        ]);
-        let mut engine = engine_from_sources(files);
-        engine.start("main.main", None).expect("start");
-        let output = engine.next_output().expect("next");
-        // Short alias "Status" should work because 325:21 adds it
-        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "Idle:Idle,Run"));
-    }
-
-    #[test]
-    pub(super) fn enum_builtin_with_object_type_containing_enum_field() {
-        // 333:38, 334:25, 334:39, 334:46, 334:55, 335:25 - Test Object type with fields
-        // When ScriptType::Object has fields, it iterates through them to collect enum members
-        let files = map(&[
-            (
-                "shared.xml",
-                r#"
-    <module name="shared" default_access="public">
-      <enum name="Status">
-        <member name="Active"/>
-        <member name="Inactive"/>
-      </enum>
-      <type name="Player">
-        <field name="status" type="Status"/>
-        <field name="score" type="int"/>
-      </type>
-    </module>
-    "#,
-            ),
-            (
-                "main.xml",
-                r#"
-    <module name="main" default_access="public">
-      <!-- import shared from shared.xml -->
-      <script name="main">
-        <!-- Use Object type with enum field: shared.Player -->
-        <temp name="player" type="shared.Player">#{status: shared.Status.Active, score: 10}</temp>
-        <temp name="statusLabel" type="string">enum_to_string(player.status)</temp>
-        <temp name="allStatus" type="string[]">all_enum_members("shared.Status")</temp>
-        <text>${statusLabel}:${allStatus[0]},${allStatus[1]}</text>
-      </script>
-    </module>
-    "#,
-            ),
-        ]);
-        let mut engine = engine_from_sources(files);
-        engine.start("main.main", None).expect("start");
-        let output = engine.next_output().expect("next");
-        assert!(
-            matches!(output, EngineOutput::Text { text, .. } if text == "Active:Active,Inactive")
-        );
     }
 }

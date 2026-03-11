@@ -393,7 +393,6 @@ loop {
 4. 内建函数：
    - `random(n)`：`n > 0`
    - `enum_to_string(enumValue)`：返回枚举成员字符串
-   - `all_enum_members(enumName)`：返回该枚举的成员字符串数组  
 6. 传 `random_seed` 可保证可复现实验。  
 7. 若传 `random_sequence`，`random(n)` 会按序列返回 `value % n`，序列耗尽后固定返回 `0`。
 
