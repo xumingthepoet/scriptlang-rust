@@ -1,0 +1,7 @@
+<!-- import game from game.xml -->
+<!-- alias game.world_state as world_state -->
+<module name="evt" export="function:can">
+  <function name="can" return_type="boolean">
+    return world_state.day_count > 0;
+  </function>
+</module>

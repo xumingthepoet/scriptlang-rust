@@ -1,0 +1,20 @@
+<module name="bus" export="type:Listener;var:listeners;function:add,ping">
+  <type name="Listener">
+    <field name="condition_function" type="function"/>
+  </type>
+
+  <var name="listeners" type="Listener[]">[]</var>
+
+  <function name="add" args="function:f" return_type="boolean">
+    listeners.push(#{condition_function: f});
+    return true;
+  </function>
+
+  <function name="ping" return_type="boolean">
+    if listeners.len() == 0 {
+      return false;
+    }
+    let it = listeners[0];
+    return invoke(it.condition_function, []);
+  </function>
+</module>

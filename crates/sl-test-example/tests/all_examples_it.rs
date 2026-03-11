@@ -125,6 +125,11 @@ fn example_29_alias_directives_matches_testcase() {
 }
 
 #[test]
+fn example_30_invoke_function_alias_module_var_matches_testcase() {
+    assert_example("30-invoke-function-alias-module-var");
+}
+
+#[test]
 fn example_22_access_control_matches_testcase() {
     assert_example("22-access-control");
 }

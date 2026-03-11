@@ -1,0 +1,10 @@
+<!-- import bus from bus.xml -->
+<!-- import evt from evt.xml -->
+<module name="main" export="script:main">
+  <script name="main">
+    <code>bus.add(*evt.can);</code>
+    <if when="bus.ping()">
+      <text>ok</text>
+    </if>
+  </script>
+</module>

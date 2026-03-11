@@ -87,6 +87,145 @@ fn collect_called_tokens(source: &str) -> BTreeSet<String> {
     out
 }
 
+fn collect_top_level_let_bindings(source: &str) -> BTreeSet<String> {
+    fn is_ident_start(ch: char) -> bool {
+        ch.is_ascii_alphabetic() || ch == '_'
+    }
+    fn is_ident_char(ch: char) -> bool {
+        ch.is_ascii_alphanumeric() || ch == '_'
+    }
+    fn is_keyword_boundary(ch: Option<char>) -> bool {
+        ch.is_none_or(|value| !is_ident_char(value))
+    }
+
+    let chars = source.chars().collect::<Vec<_>>();
+    let mut out = BTreeSet::new();
+    let mut index = 0usize;
+    let mut quote: Option<char> = None;
+    let mut line_comment = false;
+    let mut block_comment = false;
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+
+    while index < chars.len() {
+        let ch = chars[index];
+
+        if line_comment {
+            if ch == '\n' {
+                line_comment = false;
+            }
+            index += 1;
+            continue;
+        }
+        if block_comment {
+            if ch == '*' && chars.get(index + 1) == Some(&'/') {
+                block_comment = false;
+                index += 2;
+                continue;
+            }
+            index += 1;
+            continue;
+        }
+        if let Some(active_quote) = quote {
+            if ch == '\\' && index + 1 < chars.len() {
+                index += 2;
+                continue;
+            }
+            if ch == active_quote {
+                quote = None;
+            }
+            index += 1;
+            continue;
+        }
+
+        if ch == '/' && chars.get(index + 1) == Some(&'/') {
+            line_comment = true;
+            index += 2;
+            continue;
+        }
+        if ch == '/' && chars.get(index + 1) == Some(&'*') {
+            block_comment = true;
+            index += 2;
+            continue;
+        }
+
+        match ch {
+            '\'' | '"' => {
+                quote = Some(ch);
+                index += 1;
+                continue;
+            }
+            '(' => {
+                paren_depth += 1;
+                index += 1;
+                continue;
+            }
+            ')' => {
+                paren_depth = paren_depth.saturating_sub(1);
+                index += 1;
+                continue;
+            }
+            '[' => {
+                bracket_depth += 1;
+                index += 1;
+                continue;
+            }
+            ']' => {
+                bracket_depth = bracket_depth.saturating_sub(1);
+                index += 1;
+                continue;
+            }
+            '{' => {
+                brace_depth += 1;
+                index += 1;
+                continue;
+            }
+            '}' => {
+                brace_depth = brace_depth.saturating_sub(1);
+                index += 1;
+                continue;
+            }
+            _ => {}
+        }
+
+        if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
+            let is_let = chars.get(index) == Some(&'l')
+                && chars.get(index + 1) == Some(&'e')
+                && chars.get(index + 2) == Some(&'t');
+            if is_let
+                && is_keyword_boundary(index.checked_sub(1).and_then(|i| chars.get(i).copied()))
+                && is_keyword_boundary(chars.get(index + 3).copied())
+            {
+                let mut cursor = index + 3;
+                while cursor < chars.len() && chars[cursor].is_whitespace() {
+                    cursor += 1;
+                }
+                if cursor < chars.len() && is_ident_start(chars[cursor]) {
+                    let start = cursor;
+                    cursor += 1;
+                    while cursor < chars.len() && is_ident_char(chars[cursor]) {
+                        cursor += 1;
+                    }
+                    let binding_name = chars[start..cursor].iter().collect::<String>();
+                    while cursor < chars.len() && chars[cursor].is_whitespace() {
+                        cursor += 1;
+                    }
+                    if chars.get(cursor) == Some(&'=') {
+                        out.insert(binding_name);
+                        index = cursor + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+
+        index += 1;
+    }
+
+    out
+}
+
 impl ScriptLangEngine {
     pub(super) fn create_script_root_scope(
         &self,
@@ -536,6 +675,7 @@ impl ScriptLangEngine {
             scope.push_dynamic(name, slvalue_to_dynamic(value));
         }
 
+        let mut code_let_bindings = BTreeSet::new();
         let source = {
             let prelude = self.get_or_build_module_prelude(&script_name, &function_symbol_map)?;
             let preprocessed = preprocess_scriptlang_rhai_input(script, context, mode)?;
@@ -545,6 +685,9 @@ impl ScriptLangEngine {
                 rewrite_function_calls_if_needed(&preprocessed, &call_rewrite_map);
             let rewritten_script =
                 rewrite_module_global_qualified_access(&rewritten_script, &qualified_rewrite_map);
+            if !is_expression {
+                code_let_bindings = collect_top_level_let_bindings(&rewritten_script);
+            }
             if is_expression {
                 if prelude.is_empty() {
                     format!("({})", rewritten_script)
@@ -604,6 +747,23 @@ impl ScriptLangEngine {
                 .expect("scope should still contain mutable bindings");
             let after = dynamic_to_slvalue(after_dynamic)?;
             self.write_variable(&name, after)?;
+        }
+
+        if !is_expression && !code_let_bindings.is_empty() {
+            let frame = self.frames.last_mut().ok_or_else(|| {
+                ScriptLangError::new("ENGINE_EVAL_NO_FRAME", "No runtime frame available.")
+            })?;
+            for name in code_let_bindings {
+                if mutable_bindings.contains_key(&name) {
+                    continue;
+                }
+                let Some(after_dynamic) = scope.get_value::<Dynamic>(&name) else {
+                    continue;
+                };
+                let after = dynamic_to_slvalue(after_dynamic)?;
+                frame.scope.insert(name.clone(), after);
+                frame.var_types.remove(&name);
+            }
         }
 
         for (namespace, symbol) in module_namespace_symbols {
@@ -1072,6 +1232,25 @@ mod eval_tests {
             .expect("should parse tagged invoke error");
         assert_eq!(parsed.code, "ENGINE_X");
         assert_eq!(parsed.message, "boom");
+    }
+
+    #[test]
+    pub(super) fn collect_top_level_let_bindings_ignores_nested_strings_and_comments() {
+        let source = r#"
+let a = 1;
+let b = "let fake = 2";
+if true {
+  let nested = 3;
+}
+// let line_comment = 4;
+/* let block_comment = 5; */
+"#;
+        let bindings = collect_top_level_let_bindings(source);
+        assert!(bindings.contains("a"));
+        assert!(bindings.contains("b"));
+        assert!(!bindings.contains("nested"));
+        assert!(!bindings.contains("line_comment"));
+        assert!(!bindings.contains("block_comment"));
     }
 
     #[test]
@@ -2634,6 +2813,64 @@ mod eval_tests {
     }
 
     #[test]
+    pub(super) fn invoke_supports_short_function_literal_forwarded_across_modules() {
+        let files = map(&[
+            (
+                "event_system.xml",
+                r#"
+<module name="event_system" export="function:always_true,set_condition,notify">
+  <function name="always_true" return_type="boolean">
+    return true;
+  </function>
+  <var name="stored_condition" type="function">*event_system.always_true</var>
+  <function name="set_condition" args="function:condition" return_type="boolean">
+    stored_condition = condition;
+    return true;
+  </function>
+  <function name="notify" return_type="boolean">
+    return invoke(stored_condition, []);
+  </function>
+</module>
+"#,
+            ),
+            (
+                "event_a.xml",
+                r#"
+<!-- import event_system from event_system.xml -->
+<module name="event_a" export="function:can_phase_3_fn;script:register">
+  <function name="can_phase_3_fn" return_type="boolean">
+    return true;
+  </function>
+  <script name="register">
+    <code>event_system.set_condition(*can_phase_3_fn);</code>
+    <return/>
+  </script>
+</module>
+"#,
+            ),
+            (
+                "app.xml",
+                r#"
+<!-- import event_system from event_system.xml -->
+<!-- import event_a from event_a.xml -->
+<module name="app" export="script:main">
+  <script name="main">
+    <call script="@event_a.register"/>
+    <if when="event_system.notify()">
+      <text>true</text>
+    </if>
+  </script>
+</module>
+"#,
+            ),
+        ]);
+        let mut engine = engine_from_sources(files);
+        engine.start("app.main", None).expect("start");
+        let output = engine.next_output().expect("text");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "true"));
+    }
+
+    #[test]
     pub(super) fn invoke_reports_private_missing_name_and_shape_errors() {
         let files = map(&[
             (
@@ -3115,6 +3352,23 @@ mod eval_tests {
         // The function should execute with parameter 'score' shadowing module var
         let output = engine.next_output().expect("output");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "5"));
+    }
+
+    #[test]
+    pub(super) fn code_let_binding_is_visible_to_following_text_expression() {
+        let files = map(&[(
+            "main.xml",
+            r#"<module name="main" export="script:main">
+  <script name="main">
+    <code>let ok = true;</code>
+    <text>${ok}</text>
+  </script>
+</module>"#,
+        )]);
+        let mut engine = engine_from_sources(files);
+        engine.start("main.main", None).expect("start");
+        let output = engine.next_output().expect("text");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "true"));
     }
 
     #[test]

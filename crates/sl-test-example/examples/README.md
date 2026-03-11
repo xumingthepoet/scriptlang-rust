@@ -40,6 +40,7 @@ This catalog keeps example intent explicit so examples can be refactored without
 | `27-dynamic-transfer-target` | dynamic script target for call/return |
 | `28-map-coverage` | map `#{K=>V}` + `#{V}` usage (string key + enum key + nested/array/ref/function/when) |
 | `29-alias-directives` | multi-module alias stress: type/var/const alias across arrays/maps/const/function/multi-script call chains |
+| `30-invoke-function-alias-module-var` | regression for `invoke(function, ...)` where function body reads explicit alias to imported module var |
 
 ## Notes
 - `26-enum-flow` intentionally covers enum member usage directly in XML attribute expressions (`args="ids.LocationId.A"`).

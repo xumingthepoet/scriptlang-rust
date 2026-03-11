@@ -309,6 +309,13 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 <code>hp = hp - 1;</code>
 ```
 
+`<code>` 顶层 `let` 声明会写回当前脚本变量作用域，可被后续节点读取：
+
+```xml
+<code>let ok = true;</code>
+<text>${ok}</text>
+```
+
 `script` 类型也可在 `<code>` 中赋值（值必须是 `@...` 脚本字面量）：
 
 ```xml

@@ -1,0 +1,6 @@
+<module name="game" export="type:WorldState;var:world_state">
+  <type name="WorldState">
+    <field name="day_count" type="int"/>
+  </type>
+  <var name="world_state" type="WorldState">#{day_count: 1}</var>
+</module>
