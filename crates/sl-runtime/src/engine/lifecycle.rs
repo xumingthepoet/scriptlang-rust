@@ -899,10 +899,7 @@ mod lifecycle_tests {
         let mut engine = engine_from_sources(files);
         engine.start("main.main", None).expect("start");
         let output = engine.next_output().expect("next");
-        match output {
-            EngineOutput::Text { text, .. } => assert_eq!(text, "Run:Idle,Run"),
-            other => panic!("expected text output, got {}", output_kind(&other)),
-        }
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "Run:Idle,Run"));
     }
 
     #[test]
