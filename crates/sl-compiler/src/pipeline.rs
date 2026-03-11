@@ -38,10 +38,6 @@ pub fn compile_project_bundle_from_xml_map(
             .or_insert_with(|| collect_reachable_imports(file_path, &sources));
         let script_roots = collect_source_scripts(source, file_path, &module_scripts_by_path);
         for script_decl in script_roots {
-            // This .map_err is a defensive safety net - all errors from resolve_visible_module_symbols
-            // are already caught by earlier bundle collection functions (collect_functions_for_bundle,
-            // collect_module_vars_for_bundle, collect_module_consts_for_bundle). The error path
-            // here would only trigger if those earlier checks were removed.
             let (visible_types, visible_functions, visible_module_vars, visible_module_consts) =
                 resolve_visible_module_symbols_with_aliases(
                     reachable,
@@ -49,7 +45,7 @@ pub fn compile_project_bundle_from_xml_map(
                     script_decl.module_name.as_deref(),
                     &source.alias_directives,
                 )
-                .expect("resolve_visible_module_symbols should not fail - duplicate checks already done in collect_*_for_bundle");
+                .map_err(|error| with_file_context(error, file_path))?;
             let ir = compile_script(CompileScriptOptions {
                 script_path: file_path,
                 root: &script_decl.root,
@@ -761,6 +757,77 @@ mod pipeline_tests {
                 .qualified_name,
             "shared.BASE"
         );
+    }
+
+    #[test]
+    fn compile_bundle_supports_explicit_type_aliases_in_type_positions() {
+        let files = map(&[
+            (
+                "ids.xml",
+                r#"
+<module name="ids" default_access="public">
+  <enum name="LocationId">
+    <member name="Home"/>
+  </enum>
+  <enum name="MessageKey">
+    <member name="Ping"/>
+  </enum>
+</module>
+"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<!-- import ids from ids.xml -->
+<!-- alias ids.LocationId -->
+<!-- alias ids.MessageKey -->
+<module name="main" default_access="public">
+  <type name="Pair">
+    <field name="loc" type="LocationId"/>
+    <field name="msg" type="MessageKey"/>
+  </type>
+  <function name="check" access="public" args="MessageKey:message_key,LocationId:location_id" return_type="boolean">
+    return message_key == MessageKey.Ping AND location_id == LocationId.Home;
+  </function>
+  <script name="main" access="public">
+    <text>ok</text>
+  </script>
+</module>
+"#,
+            ),
+        ]);
+
+        let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        assert!(bundle.scripts.contains_key("main.main"));
+    }
+
+    #[test]
+    fn compile_bundle_propagates_alias_resolution_errors_without_panicking() {
+        let files = map(&[
+            (
+                "shared.xml",
+                r#"
+<module name="shared" default_access="public">
+  <script name="main"><text>ok</text></script>
+</module>
+"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<!-- import shared from shared.xml -->
+<!-- alias shared.Missing -->
+<module name="main" default_access="public">
+  <script name="main"><text>ok</text></script>
+</module>
+"#,
+            ),
+        ]);
+
+        let error = compile_project_bundle_from_xml_map(&files)
+            .expect_err("unknown alias target should return a structured error");
+        assert_eq!(error.code, "ALIAS_TARGET_NOT_FOUND");
+        assert!(error.message.contains("main.xml"));
     }
 
     #[test]

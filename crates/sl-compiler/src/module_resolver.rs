@@ -464,6 +464,8 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
         .into_iter()
         .map(|(short, qualified)| (short, qualified[0].clone()))
         .collect::<BTreeMap<_, _>>();
+    let explicit_type_aliases =
+        collect_explicit_visible_type_aliases(alias_directives, &type_decls_map)?;
 
     let mut resolved_types: BTreeMap<String, ScriptType> = BTreeMap::new();
     let mut visiting = HashSet::new();
@@ -473,10 +475,17 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
             .split_once('.')
             .map(|(namespace, _)| namespace)
             .unwrap_or_default();
-        let aliases = namespace_type_aliases
+        let mut aliases = namespace_type_aliases
             .get(namespace)
             .cloned()
             .unwrap_or_default();
+        if local_module_name == Some(namespace) {
+            for (alias, qualified_name) in &explicit_type_aliases {
+                aliases
+                    .entry(alias.clone())
+                    .or_insert_with(|| qualified_name.clone());
+            }
+        }
         resolve_named_type_with_aliases(
             type_name,
             &type_decls_map,
@@ -494,6 +503,14 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
             .expect("resolved type aliases must point to resolved types");
         visible_types.insert(alias.clone(), ty);
     }
+    let mut local_visible_types = visible_types.clone();
+    for (alias, qualified_name) in &explicit_type_aliases {
+        let ty = resolved_types
+            .get(qualified_name)
+            .cloned()
+            .expect("explicit alias type target should exist in resolved type map");
+        local_visible_types.entry(alias.clone()).or_insert(ty);
+    }
 
     let mut functions: BTreeMap<String, FunctionDecl> = BTreeMap::new();
     let mut function_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -510,6 +527,11 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
             if !is_local && decl.access != AccessLevel::Public {
                 continue;
             }
+            let visible_types_in_scope = if is_local {
+                &local_visible_types
+            } else {
+                &visible_types
+            };
             if functions.contains_key(&decl.qualified_name) {
                 return Err(ScriptLangError::with_span(
                     "FUNCTION_DECL_DUPLICATE",
@@ -532,7 +554,7 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
                     name: param.name.clone(),
                     r#type: resolve_type_expr_in_namespace(
                         &param.type_expr,
-                        &visible_types,
+                        visible_types_in_scope,
                         function_namespace,
                         &param.location,
                     )?,
@@ -543,13 +565,13 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
             let rb = &decl.return_decl;
             let return_type = resolve_type_expr_in_namespace(
                 &rb.type_expr,
-                &visible_types,
+                visible_types_in_scope,
                 function_namespace,
                 &rb.location,
             )?;
             let normalized_code = rewrite_and_validate_enum_literals_in_expression(
                 &decl.code,
-                &visible_types,
+                visible_types_in_scope,
                 &decl.location,
             )?;
 
@@ -604,6 +626,11 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
             if !is_local && decl.access != AccessLevel::Public {
                 continue;
             }
+            let visible_types_in_scope = if is_local {
+                &local_visible_types
+            } else {
+                &visible_types
+            };
             if module_vars_qualified.contains_key(&decl.qualified_name) {
                 return Err(ScriptLangError::with_span(
                     "MODULE_GLOBAL_VAR_DUPLICATE",
@@ -617,14 +644,14 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
             module_vars_qualified.insert(decl.qualified_name.clone(), {
                 let resolved_type = resolve_type_expr_in_namespace(
                     &decl.type_expr,
-                    &visible_types,
+                    visible_types_in_scope,
                     &decl.namespace,
                     &decl.location,
                 )?;
                 let initial_value_expr = normalize_module_initializer(
                     &decl.initial_value_expr,
                     &resolved_type,
-                    &visible_types,
+                    visible_types_in_scope,
                     &decl.location,
                 )?;
                 ModuleVarDecl {
@@ -668,6 +695,11 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
             if !is_local && decl.access != AccessLevel::Public {
                 continue;
             }
+            let visible_types_in_scope = if is_local {
+                &local_visible_types
+            } else {
+                &visible_types
+            };
             if module_consts_qualified.contains_key(&decl.qualified_name) {
                 return Err(ScriptLangError::with_span(
                     "MODULE_GLOBAL_CONST_DUPLICATE",
@@ -681,14 +713,14 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
             module_consts_qualified.insert(decl.qualified_name.clone(), {
                 let resolved_type = resolve_type_expr_in_namespace(
                     &decl.type_expr,
-                    &visible_types,
+                    visible_types_in_scope,
                     &decl.namespace,
                     &decl.location,
                 )?;
                 let initial_value_expr = normalize_module_initializer(
                     &decl.initial_value_expr,
                     &resolved_type,
-                    &visible_types,
+                    visible_types_in_scope,
                     &decl.location,
                 )?;
                 ModuleConstDecl {
@@ -729,6 +761,36 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
     )?;
 
     Ok((visible_types, functions, module_vars, module_consts))
+}
+
+fn collect_explicit_visible_type_aliases(
+    alias_directives: &[AliasDirective],
+    type_decls_map: &BTreeMap<String, ParsedTypeDecl>,
+) -> Result<BTreeMap<String, String>, ScriptLangError> {
+    let mut explicit_alias_target_by_name = BTreeMap::new();
+
+    for directive in alias_directives {
+        let target = directive.target_qualified_name.as_str();
+        if !type_decls_map.contains_key(target) {
+            continue;
+        }
+        let alias = directive.alias_name.as_str();
+        if let Some(existing_target) = explicit_alias_target_by_name.get(alias) {
+            if existing_target == target {
+                continue;
+            }
+            return Err(ScriptLangError::new(
+                "ALIAS_NAME_CONFLICT",
+                format!(
+                    "Alias \"{}\" points to both \"{}\" and \"{}\".",
+                    alias, existing_target, target
+                ),
+            ));
+        }
+        explicit_alias_target_by_name.insert(alias.to_string(), target.to_string());
+    }
+
+    Ok(explicit_alias_target_by_name)
 }
 
 fn apply_explicit_alias_directives(
@@ -1892,6 +1954,112 @@ mod module_resolver_tests {
         )
         .expect_err("same alias to different targets should fail");
         assert_eq!(divergent_rebind.code, "ALIAS_NAME_CONFLICT");
+    }
+
+    #[test]
+    fn resolve_visible_module_symbols_with_aliases_resolves_local_type_positions() {
+        let span = SourceSpan::synthetic();
+        let modules = BTreeMap::from([
+            (
+                "ids.xml".to_string(),
+                ModuleDeclarations {
+                    type_decls: vec![
+                        ParsedTypeDecl {
+                            name: "LocationId".to_string(),
+                            qualified_name: "ids.LocationId".to_string(),
+                            access: AccessLevel::Public,
+                            fields: Vec::new(),
+                            enum_members: vec!["Home".to_string()],
+                            location: span.clone(),
+                        },
+                        ParsedTypeDecl {
+                            name: "MessageKey".to_string(),
+                            qualified_name: "ids.MessageKey".to_string(),
+                            access: AccessLevel::Public,
+                            fields: Vec::new(),
+                            enum_members: vec!["Ping".to_string()],
+                            location: span.clone(),
+                        },
+                    ],
+                    function_decls: Vec::new(),
+                    module_global_var_decls: Vec::new(),
+                    module_global_const_decls: Vec::new(),
+                },
+            ),
+            (
+                "main.xml".to_string(),
+                ModuleDeclarations {
+                    type_decls: vec![ParsedTypeDecl {
+                        name: "Pair".to_string(),
+                        qualified_name: "main.Pair".to_string(),
+                        access: AccessLevel::Public,
+                        fields: vec![
+                            ParsedTypeFieldDecl {
+                                name: "loc".to_string(),
+                                type_expr: ParsedTypeExpr::Custom("LocationId".to_string()),
+                                location: span.clone(),
+                            },
+                            ParsedTypeFieldDecl {
+                                name: "msg".to_string(),
+                                type_expr: ParsedTypeExpr::Custom("MessageKey".to_string()),
+                                location: span.clone(),
+                            },
+                        ],
+                        enum_members: Vec::new(),
+                        location: span.clone(),
+                    }],
+                    function_decls: vec![ParsedFunctionDecl {
+                        name: "check".to_string(),
+                        qualified_name: "main.check".to_string(),
+                        access: AccessLevel::Public,
+                        params: vec![
+                            ParsedFunctionParamDecl {
+                                name: "message_key".to_string(),
+                                type_expr: ParsedTypeExpr::Custom("MessageKey".to_string()),
+                                location: span.clone(),
+                            },
+                            ParsedFunctionParamDecl {
+                                name: "location_id".to_string(),
+                                type_expr: ParsedTypeExpr::Custom("LocationId".to_string()),
+                                location: span.clone(),
+                            },
+                        ],
+                        return_decl: ParsedFunctionReturnDecl {
+                            type_expr: ParsedTypeExpr::Primitive("boolean".to_string()),
+                            location: span.clone(),
+                        },
+                        code: "ret = message_key == MessageKey.Ping && location_id == LocationId.Home;".to_string(),
+                        location: span.clone(),
+                    }],
+                    module_global_var_decls: Vec::new(),
+                    module_global_const_decls: Vec::new(),
+                },
+            ),
+        ]);
+        let reachable = BTreeSet::from(["ids.xml".to_string(), "main.xml".to_string()]);
+        let aliases = vec![
+            AliasDirective {
+                target_qualified_name: "ids.LocationId".to_string(),
+                alias_name: "LocationId".to_string(),
+            },
+            AliasDirective {
+                target_qualified_name: "ids.MessageKey".to_string(),
+                alias_name: "MessageKey".to_string(),
+            },
+        ];
+
+        let (types, functions, _module_vars, _module_consts) =
+            resolve_visible_module_symbols_with_aliases(
+                &reachable,
+                &modules,
+                Some("main"),
+                &aliases,
+            )
+            .expect("type aliases should resolve in local type and function signatures");
+        assert!(types.contains_key("main.Pair"));
+        assert!(types.contains_key("LocationId"));
+        assert!(types.contains_key("MessageKey"));
+        assert!(functions.contains_key("main.check"));
     }
 
     #[test]
