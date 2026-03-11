@@ -1138,13 +1138,6 @@ fn apply_explicit_alias_directives(
     Ok(())
 }
 
-#[cfg(test)]
-pub(crate) fn collect_functions_for_bundle(
-    module_by_path: &BTreeMap<String, ModuleDeclarations>,
-) -> Result<(BTreeMap<String, FunctionDecl>, BTreeSet<String>), ScriptLangError> {
-    collect_functions_for_bundle_with_aliases(module_by_path, &BTreeMap::new())
-}
-
 pub(crate) fn collect_functions_for_bundle_with_aliases(
     module_by_path: &BTreeMap<String, ModuleDeclarations>,
     module_alias_directives_by_namespace: &BTreeMap<String, Vec<AliasDirective>>,
@@ -4172,7 +4165,7 @@ mod module_resolver_tests {
             module_global_const_decls: Vec::new(),
         };
         let module_by_path = BTreeMap::from([("a.xml".to_string(), module)]);
-        let error = collect_functions_for_bundle(&module_by_path)
+        let error = collect_functions_for_bundle_with_aliases(&module_by_path, &BTreeMap::new())
             .expect_err("unknown param type should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
     }
@@ -4199,7 +4192,7 @@ mod module_resolver_tests {
             module_global_const_decls: Vec::new(),
         };
         let module_by_path = BTreeMap::from([("a.xml".to_string(), module)]);
-        let error = collect_functions_for_bundle(&module_by_path)
+        let error = collect_functions_for_bundle_with_aliases(&module_by_path, &BTreeMap::new())
             .expect_err("unknown return type should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
     }
