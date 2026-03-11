@@ -21,6 +21,8 @@ pub fn compile_project_bundle_from_xml_map(
     }
     let module_by_path = parse_module_files(&sources)
         .expect("module parsing should match previously validated module parsing");
+    let module_alias_directives_by_namespace =
+        collect_module_alias_directives_by_namespace(&sources);
     let global_data = BTreeMap::new();
     let (invoke_all_functions, invoke_public_functions) =
         collect_functions_for_bundle(&module_by_path)?;
@@ -39,11 +41,12 @@ pub fn compile_project_bundle_from_xml_map(
         let script_roots = collect_source_scripts(source, file_path, &module_scripts_by_path);
         for script_decl in script_roots {
             let (visible_types, visible_functions, visible_module_vars, visible_module_consts) =
-                resolve_visible_module_symbols_with_aliases(
+                resolve_visible_module_symbols_with_aliases_and_module_scoped_type_aliases(
                     reachable,
                     &module_by_path,
                     script_decl.module_name.as_deref(),
                     &source.alias_directives,
+                    &module_alias_directives_by_namespace,
                 )
                 .map_err(|error| with_file_context(error, file_path))?;
             let ir = compile_script(CompileScriptOptions {
@@ -82,6 +85,28 @@ pub fn compile_project_bundle_from_xml_map(
         module_const_declarations,
         module_const_init_order,
     })
+}
+
+fn collect_module_alias_directives_by_namespace(
+    sources: &BTreeMap<String, SourceFile>,
+) -> BTreeMap<String, Vec<AliasDirective>> {
+    let mut directives_by_namespace = BTreeMap::new();
+    for source in sources.values() {
+        let Some(root) = source.xml_root.as_ref() else {
+            continue;
+        };
+        if root.name != "module" {
+            continue;
+        }
+        let Some(namespace) = root.attributes.get("name") else {
+            continue;
+        };
+        if source.alias_directives.is_empty() {
+            continue;
+        }
+        directives_by_namespace.insert(namespace.clone(), source.alias_directives.clone());
+    }
+    directives_by_namespace
 }
 
 #[derive(Clone)]
@@ -799,6 +824,49 @@ mod pipeline_tests {
 
         let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
         assert!(bundle.scripts.contains_key("main.main"));
+    }
+
+    #[test]
+    fn compile_bundle_keeps_alias_file_local_for_imported_module_type_resolution() {
+        let files = map(&[
+            (
+                "ids.xml",
+                r#"
+<module name="ids" default_access="public">
+  <enum name="LocationId">
+    <member name="Home"/>
+  </enum>
+</module>
+"#,
+            ),
+            (
+                "map_data.xml",
+                r#"
+<!-- import ids from ids.xml -->
+<!-- alias ids.LocationId -->
+<module name="map_data" default_access="public">
+  <type name="Node">
+    <field name="location_id" type="LocationId"/>
+  </type>
+</module>
+"#,
+            ),
+            (
+                "actions.xml",
+                r#"
+<!-- import ids from ids.xml -->
+<!-- import map_data from map_data.xml -->
+<module name="actions" default_access="public">
+  <script name="main" access="public" args="ids.LocationId:from_id">
+    <text>${from_id}</text>
+  </script>
+</module>
+"#,
+            ),
+        ]);
+
+        let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        assert!(bundle.scripts.contains_key("actions.main"));
     }
 
     #[test]

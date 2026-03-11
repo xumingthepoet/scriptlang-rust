@@ -413,14 +413,37 @@ pub(crate) fn resolve_visible_module_symbols(
     module_by_path: &BTreeMap<String, ModuleDeclarations>,
     local_module_name: Option<&str>,
 ) -> Result<VisibleModuleResolution, ScriptLangError> {
-    resolve_visible_module_symbols_with_aliases(reachable, module_by_path, local_module_name, &[])
+    resolve_visible_module_symbols_with_aliases_and_module_scoped_type_aliases(
+        reachable,
+        module_by_path,
+        local_module_name,
+        &[],
+        &BTreeMap::new(),
+    )
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_visible_module_symbols_with_aliases(
     reachable: &BTreeSet<String>,
     module_by_path: &BTreeMap<String, ModuleDeclarations>,
     local_module_name: Option<&str>,
     alias_directives: &[AliasDirective],
+) -> Result<VisibleModuleResolution, ScriptLangError> {
+    resolve_visible_module_symbols_with_aliases_and_module_scoped_type_aliases(
+        reachable,
+        module_by_path,
+        local_module_name,
+        alias_directives,
+        &BTreeMap::new(),
+    )
+}
+
+pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type_aliases(
+    reachable: &BTreeSet<String>,
+    module_by_path: &BTreeMap<String, ModuleDeclarations>,
+    local_module_name: Option<&str>,
+    alias_directives: &[AliasDirective],
+    module_alias_directives_by_namespace: &BTreeMap<String, Vec<AliasDirective>>,
 ) -> Result<VisibleModuleResolution, ScriptLangError> {
     let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
     let mut local_type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -466,6 +489,10 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
         .collect::<BTreeMap<_, _>>();
     let explicit_type_aliases =
         collect_explicit_visible_type_aliases(alias_directives, &type_decls_map)?;
+    let module_scoped_explicit_type_aliases = collect_module_explicit_visible_type_aliases(
+        module_alias_directives_by_namespace,
+        &type_decls_map,
+    )?;
 
     let mut resolved_types: BTreeMap<String, ScriptType> = BTreeMap::new();
     let mut visiting = HashSet::new();
@@ -479,6 +506,13 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
             .get(namespace)
             .cloned()
             .unwrap_or_default();
+        if let Some(module_scoped_aliases) = module_scoped_explicit_type_aliases.get(namespace) {
+            for (alias, qualified_name) in module_scoped_aliases {
+                aliases
+                    .entry(alias.clone())
+                    .or_insert_with(|| qualified_name.clone());
+            }
+        }
         if local_module_name == Some(namespace) {
             for (alias, qualified_name) in &explicit_type_aliases {
                 aliases
@@ -527,11 +561,6 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
             if !is_local && decl.access != AccessLevel::Public {
                 continue;
             }
-            let visible_types_in_scope = if is_local {
-                &local_visible_types
-            } else {
-                &visible_types
-            };
             if functions.contains_key(&decl.qualified_name) {
                 return Err(ScriptLangError::with_span(
                     "FUNCTION_DECL_DUPLICATE",
@@ -547,6 +576,16 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
                 .split_once('.')
                 .map(|(namespace, _)| namespace)
                 .unwrap_or_default();
+            let visible_types_base = if is_local {
+                &local_visible_types
+            } else {
+                &visible_types
+            };
+            let visible_types_in_scope = visible_types_with_namespace_type_aliases(
+                visible_types_base,
+                &resolved_types,
+                module_scoped_explicit_type_aliases.get(function_namespace),
+            );
 
             let mut params = Vec::new();
             for param in &decl.params {
@@ -554,7 +593,7 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
                     name: param.name.clone(),
                     r#type: resolve_type_expr_in_namespace(
                         &param.type_expr,
-                        visible_types_in_scope,
+                        &visible_types_in_scope,
                         function_namespace,
                         &param.location,
                     )?,
@@ -565,13 +604,13 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
             let rb = &decl.return_decl;
             let return_type = resolve_type_expr_in_namespace(
                 &rb.type_expr,
-                visible_types_in_scope,
+                &visible_types_in_scope,
                 function_namespace,
                 &rb.location,
             )?;
             let normalized_code = rewrite_and_validate_enum_literals_in_expression(
                 &decl.code,
-                visible_types_in_scope,
+                &visible_types_in_scope,
                 &decl.location,
             )?;
 
@@ -626,11 +665,16 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
             if !is_local && decl.access != AccessLevel::Public {
                 continue;
             }
-            let visible_types_in_scope = if is_local {
+            let visible_types_base = if is_local {
                 &local_visible_types
             } else {
                 &visible_types
             };
+            let visible_types_in_scope = visible_types_with_namespace_type_aliases(
+                visible_types_base,
+                &resolved_types,
+                module_scoped_explicit_type_aliases.get(decl.namespace.as_str()),
+            );
             if module_vars_qualified.contains_key(&decl.qualified_name) {
                 return Err(ScriptLangError::with_span(
                     "MODULE_GLOBAL_VAR_DUPLICATE",
@@ -644,14 +688,14 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
             module_vars_qualified.insert(decl.qualified_name.clone(), {
                 let resolved_type = resolve_type_expr_in_namespace(
                     &decl.type_expr,
-                    visible_types_in_scope,
+                    &visible_types_in_scope,
                     &decl.namespace,
                     &decl.location,
                 )?;
                 let initial_value_expr = normalize_module_initializer(
                     &decl.initial_value_expr,
                     &resolved_type,
-                    visible_types_in_scope,
+                    &visible_types_in_scope,
                     &decl.location,
                 )?;
                 ModuleVarDecl {
@@ -695,11 +739,16 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
             if !is_local && decl.access != AccessLevel::Public {
                 continue;
             }
-            let visible_types_in_scope = if is_local {
+            let visible_types_base = if is_local {
                 &local_visible_types
             } else {
                 &visible_types
             };
+            let visible_types_in_scope = visible_types_with_namespace_type_aliases(
+                visible_types_base,
+                &resolved_types,
+                module_scoped_explicit_type_aliases.get(decl.namespace.as_str()),
+            );
             if module_consts_qualified.contains_key(&decl.qualified_name) {
                 return Err(ScriptLangError::with_span(
                     "MODULE_GLOBAL_CONST_DUPLICATE",
@@ -713,14 +762,14 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
             module_consts_qualified.insert(decl.qualified_name.clone(), {
                 let resolved_type = resolve_type_expr_in_namespace(
                     &decl.type_expr,
-                    visible_types_in_scope,
+                    &visible_types_in_scope,
                     &decl.namespace,
                     &decl.location,
                 )?;
                 let initial_value_expr = normalize_module_initializer(
                     &decl.initial_value_expr,
                     &resolved_type,
-                    visible_types_in_scope,
+                    &visible_types_in_scope,
                     &decl.location,
                 )?;
                 ModuleConstDecl {
@@ -761,6 +810,41 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases(
     )?;
 
     Ok((visible_types, functions, module_vars, module_consts))
+}
+
+fn collect_module_explicit_visible_type_aliases(
+    module_alias_directives_by_namespace: &BTreeMap<String, Vec<AliasDirective>>,
+    type_decls_map: &BTreeMap<String, ParsedTypeDecl>,
+) -> Result<BTreeMap<String, BTreeMap<String, String>>, ScriptLangError> {
+    let mut aliases_by_namespace = BTreeMap::new();
+    for (namespace, directives) in module_alias_directives_by_namespace {
+        let aliases = collect_explicit_visible_type_aliases(directives, type_decls_map)?;
+        if aliases.is_empty() {
+            continue;
+        }
+        aliases_by_namespace.insert(namespace.clone(), aliases);
+    }
+    Ok(aliases_by_namespace)
+}
+
+fn visible_types_with_namespace_type_aliases(
+    base_visible_types: &BTreeMap<String, ScriptType>,
+    resolved_types: &BTreeMap<String, ScriptType>,
+    namespace_alias_targets: Option<&BTreeMap<String, String>>,
+) -> BTreeMap<String, ScriptType> {
+    let Some(namespace_alias_targets) = namespace_alias_targets else {
+        return base_visible_types.clone();
+    };
+    let mut scoped = base_visible_types.clone();
+    for (alias, qualified_name) in namespace_alias_targets {
+        let Some(resolved_type) = resolved_types.get(qualified_name) else {
+            continue;
+        };
+        scoped
+            .entry(alias.clone())
+            .or_insert_with(|| resolved_type.clone());
+    }
+    scoped
 }
 
 fn collect_explicit_visible_type_aliases(
