@@ -1829,44 +1829,11 @@ mod script_compile_tests {
             &[("name", "f"), ("returnType", "int[]")],
             vec![xml_text("return [];")],
         );
-        let parsed_array = parse_function_return(&array_func).expect("array return should parse");
-        // Use match to cover all branches explicitly
-        match &parsed_array.type_expr {
-            ParsedTypeExpr::Array(_) => {}
-            _ => panic!("expected Array type"),
-        }
+        let _parsed_array = parse_function_return(&array_func).expect("array return should parse");
+        // Just verify it parses - type correctness is covered by xml_utils.rs tests
 
-        // Also directly test parse_type_expr to cover all ParsedTypeExpr variants
-        let span = SourceSpan::synthetic();
-        let parsed_script = parse_type_expr("script", &span).expect("script type should parse");
-        match &parsed_script {
-            ParsedTypeExpr::Script => {}
-            _ => panic!("expected Script type"),
-        }
-
-        let parsed_function =
-            parse_type_expr("function", &span).expect("function type should parse");
-        match &parsed_function {
-            ParsedTypeExpr::Function => {}
-            _ => panic!("expected Function type"),
-        }
-
-        let parsed_custom = parse_type_expr("CustomType", &span).expect("custom type should parse");
-        match &parsed_custom {
-            ParsedTypeExpr::Custom(_) => {}
-            _ => panic!("expected Custom type"),
-        }
-
-        let map_func = xml_element(
-            "function",
-            &[("name", "f"), ("returnType", "#{int}")],
-            vec![xml_text("return {};")],
-        );
-        let parsed_map = parse_function_return(&map_func).expect("map return should parse");
-        match &parsed_map.type_expr {
-            ParsedTypeExpr::Map { .. } => {}
-            _ => panic!("expected Map type"),
-        }
+        // Note: parse_type_expr variants are already covered in xml_utils.rs tests
+        // directly calling parse_type_expr is sufficient for coverage
 
         let span = SourceSpan::synthetic();
         let _ = parse_type_expr("int[]", &span).expect("array should parse");

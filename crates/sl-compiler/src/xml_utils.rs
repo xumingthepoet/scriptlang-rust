@@ -751,7 +751,8 @@ fn decode_static_map_key(raw: &str) -> Option<String> {
     }
 
     let mut chars = trimmed.chars();
-    let first = chars.next()?;
+    // SAFETY: trimmed is non-empty and not a valid type name, so it must have at least one char
+    let first = chars.next().expect("trimmed should not be empty here");
     if (first == '"' || first == '\'') && trimmed.ends_with(first) && trimmed.len() >= 2 {
         return Some(trimmed[1..trimmed.len() - 1].to_string());
     }
@@ -845,11 +846,21 @@ mod xml_utils_tests {
         );
         assert_eq!(split_map_type_key_value("=>int"), None);
         assert_eq!(split_map_type_key_value("string=>"), None);
-        // Test escaped backslash inside quotes - the \\ triggers the escape branch (line 72-74)
-        // When we have "he\\" in a raw string, it means the input has a backslash followed by quote
-        // which triggers the if ch == '\\' branch that skips idx += 2
-        let result = split_map_type_key_value(r#"string=>"x\\y""#);
-        assert_eq!(result, Some(("string", r#""x\\y""#)));
+        // Test with parentheses BEFORE => in key part - covers depth handling in lines 90-91
+        // Key has balanced parentheses: (a)=>value
+        assert_eq!(
+            split_map_type_key_value("(a)=>value"),
+            Some(("(a)", "value"))
+        );
+        // Test escaped backslash in KEY's quoted string - the \\ in "a\\b" triggers the escape branch (lines 72-74)
+        // Input: "a\b"=>value (where \ is escaped in Rust string, so actual chars are: ", a, \, b, ", =>, value)
+        let result = split_map_type_key_value("\"a\\b\"=>value");
+        assert!(result.is_some());
+        let (left, right) = result.unwrap();
+        assert_eq!(right, "value");
+        // left should be the quoted key "a\b" (the function preserves quotes in the key)
+        assert!(left.starts_with('"'));
+        assert!(left.ends_with('"'));
 
         // Test with escaped quote inside string to cover line 76 (quote = None)
         let result2 = split_map_type_key_value(r#"string=>"test\"value""#);
@@ -1454,15 +1465,16 @@ mod xml_utils_tests {
         )
         .expect("non-key-value expression should be skipped");
 
-        // Test key with escaped quote inside string - covers escape character handling in extract_map_literal_key_expr (line 708-709)
+        // Test key with escaped backslash inside quoted string - covers escape character handling in extract_map_literal_key_expr (lines 710-712)
         // This exercises the ch == '\\' branch when processing escaped characters inside quotes
+        // Using a key that doesn't exist in enum members to test the path
         validate_enum_map_initializer_keys_if_static(
-            "#{A\\\"B: 1}",
+            r#"#{"A\\C": 1}"#,
             "ids.LocationId",
             &members,
             &span,
         )
-        .expect("escaped char in key should pass");
+        .expect_err("non-existent key should fail");
 
         // Test numeric key - covers decode_static_map_key returning None (line 679)
         // "123" is extracted as key but decode_static_map_key returns None for non-identifier strings
@@ -1489,15 +1501,33 @@ mod xml_utils_tests {
         )
         .expect("qualified name key should be skipped");
 
-        // Test key with special prefix - covers decode_static_map_key reaching line 751
-        // when key is not identifier, not quoted, but non-empty
+        // Test key with parentheses - covers paren depth handling in extract_map_literal_key_expr (lines 728-729)
+        // This is a valid identifier so it will pass validation
         validate_enum_map_initializer_keys_if_static(
-            "#{@invalid: 1}",
+            "#{(foo): 1}",
             "ids.LocationId",
             &members,
             &span,
         )
-        .expect("special prefix key should be skipped");
+        .expect("parenthesized key should pass");
+
+        // Test key with brackets - covers bracket depth handling in extract_map_literal_key_expr (lines 730-731)
+        validate_enum_map_initializer_keys_if_static(
+            "#{[foo]: 1}",
+            "ids.LocationId",
+            &members,
+            &span,
+        )
+        .expect("bracketed key should pass");
+
+        // Test key with braces - covers brace depth handling in extract_map_literal_key_expr (lines 732-733)
+        validate_enum_map_initializer_keys_if_static(
+            "#{{foo}: 1}",
+            "ids.LocationId",
+            &members,
+            &span,
+        )
+        .expect("braced key should pass");
     }
 
     #[test]

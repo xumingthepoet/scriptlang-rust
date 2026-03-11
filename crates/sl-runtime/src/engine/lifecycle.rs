@@ -1538,4 +1538,86 @@ mod lifecycle_tests {
         assert_eq!(error.code, "ENGINE_EVAL_ERROR");
         assert!(error.message.contains("unknown enum type"));
     }
+
+    #[test]
+    pub(super) fn enum_builtin_with_namespaced_enum_type() {
+        // 325:21 - Test that namespaced enum type (with '.') is handled correctly
+        // When type_name contains '.', rsplit_once returns Some and adds short alias
+        let files = map(&[
+            (
+                "shared.xml",
+                r#"
+    <module name="shared" default_access="public">
+      <enum name="State">
+        <member name="Idle"/>
+        <member name="Run"/>
+      </enum>
+    </module>
+    "#,
+            ),
+            (
+                "main.xml",
+                r#"
+    <module name="main" default_access="public">
+      <!-- import shared from shared.xml -->
+      <script name="main">
+        <!-- Use namespaced enum type: shared.State -->
+        <temp name="state" type="shared.State">shared.State.Run</temp>
+        <temp name="label" type="string">enum_to_string(state)</temp>
+        <temp name="members" type="string[]">all_enum_members("shared.State")</temp>
+        <text>${label}:${members[0]},${members[1]}</text>
+      </script>
+    </module>
+    "#,
+            ),
+        ]);
+        let mut engine = engine_from_sources(files);
+        engine.start("main.main", None).expect("start");
+        let output = engine.next_output().expect("next");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "Run:Idle,Run"));
+    }
+
+    #[test]
+    pub(super) fn enum_builtin_with_object_type_containing_enum_field() {
+        // 333:38, 334:25, 334:39, 334:46, 334:55, 335:25 - Test Object type with fields
+        // When ScriptType::Object has fields, it iterates through them to collect enum members
+        let files = map(&[
+            (
+                "shared.xml",
+                r#"
+    <module name="shared" default_access="public">
+      <enum name="Status">
+        <member name="Active"/>
+        <member name="Inactive"/>
+      </enum>
+      <type name="Player">
+        <field name="status" type="Status"/>
+        <field name="score" type="int"/>
+      </type>
+    </module>
+    "#,
+            ),
+            (
+                "main.xml",
+                r#"
+    <module name="main" default_access="public">
+      <!-- import shared from shared.xml -->
+      <script name="main">
+        <!-- Use Object type with enum field: shared.Player -->
+        <temp name="player" type="shared.Player">#{status: shared.Status.Active, score: 10}</temp>
+        <temp name="statusLabel" type="string">enum_to_string(player.status)</temp>
+        <temp name="allStatus" type="string[]">all_enum_members("shared.Status")</temp>
+        <text>${statusLabel}:${allStatus[0]},${allStatus[1]}</text>
+      </script>
+    </module>
+    "#,
+            ),
+        ]);
+        let mut engine = engine_from_sources(files);
+        engine.start("main.main", None).expect("start");
+        let output = engine.next_output().expect("next");
+        assert!(
+            matches!(output, EngineOutput::Text { text, .. } if text == "Active:Active,Inactive")
+        );
+    }
 }

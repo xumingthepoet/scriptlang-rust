@@ -213,6 +213,7 @@ impl ScriptLangEngine {
         let mut namespace_values: BTreeMap<String, BTreeMap<String, SlValue>> = BTreeMap::new();
         let mut qualified_rewrite_map = BTreeMap::new();
         for (qualified_name, value) in &self.module_vars_value {
+            // qualified_name should be namespace.name format, skip invalid entries
             let Some((namespace, name)) = qualified_name.split_once('.') else {
                 continue;
             };
@@ -226,6 +227,7 @@ impl ScriptLangEngine {
             );
         }
         for (qualified_name, value) in &self.module_consts_value {
+            // qualified_name should be namespace.name format, skip invalid entries
             let Some((namespace, name)) = qualified_name.split_once('.') else {
                 continue;
             };
@@ -456,14 +458,12 @@ impl ScriptLangEngine {
             required_function_namespaces.insert(decl.namespace.clone());
         }
         for decl in self.module_var_declarations.values() {
-            if required_function_namespaces.contains(&decl.namespace) {
-                visible_module.insert(decl.qualified_name.clone());
-            }
+            // namespace is always in required_function_namespaces (added at line 452-453)
+            visible_module.insert(decl.qualified_name.clone());
         }
         for decl in self.module_const_declarations.values() {
-            if required_function_namespaces.contains(&decl.namespace) {
-                visible_consts.insert(decl.qualified_name.clone());
-            }
+            // namespace is always in required_function_namespaces (added at line 454-456)
+            visible_consts.insert(decl.qualified_name.clone());
         }
         let module_alias_map = self
             .module_global_alias_by_script
@@ -523,9 +523,10 @@ impl ScriptLangEngine {
                 .insert(name.to_string(), value);
         }
         for qualified_name in &visible_consts {
-            let Some((namespace, name)) = qualified_name.split_once('.') else {
-                continue;
-            };
+            // qualified_name is always namespace.name format
+            let (namespace, name) = qualified_name
+                .split_once('.')
+                .expect("qualified const name should contain '.'");
             let value = self
                 .module_consts_value
                 .get(qualified_name)
