@@ -57,7 +57,7 @@
     - 运行时 map 仍是字符串 key（`BTreeMap<String, SlValue>`）
   - 可作为“离线编译后运行”的稳定输入
 
-### 2.6 enum / function 运行约束（V1）
+### 2.6 enum / function 运行约束
 
 - enum 在结构化声明位点必须显式给 `Type.Member`（如 `<temp>/<var>/<const>`）。
 - `Type.Member` 在编译期会重写为对应 member 名字符串。

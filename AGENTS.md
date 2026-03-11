@@ -19,7 +19,9 @@
 - 用户不会阅读 `AGENTS.md` / `KNOWLEDGE.md`；所有指导 agent 协作、流程、约束的内容只能写在这两处，不能暴露到 `README.md` 或 `docs/*`。
 - 语法细节只放在 `docs/scriptlang-syntax.md`。
 - Rust API / artifact / snapshot 契约只放在 `docs/sl-engine-api.md`。
-- CLI 参数与输出协议只放在 `docs/sl-cli-usage.md`。
+- CLI 参数与输出协议按工具拆分到各自主文档：
+  - `sl-cli` 只放在 `docs/sl-cli-usage.md`
+  - `sl-lint` 只放在 `docs/sl-lint-usage.md`
 - 同一规则只能有一个“主文档”；其他文档只允许链接，不做重复定义。
 - 若行为规则发生变更，先更新对应“主文档”；非主文档只保留链接，不复制规则正文。
 - 写文档时优先使用白名单表述（明确“支持什么”），避免面向历史格式的黑名单叙述。
@@ -34,6 +36,7 @@
 - `crates/sl-runtime`: 执行引擎（`next`/`choose`/`submit_input`/`snapshot`/`resume`）。
 - `crates/sl-api`: 面向宿主的高层 API（create/compile/resume 等）。
 - `crates/sl-cli`: 命令行入口（`agent start/choose/input/replay/compile`）。
+- `crates/sl-lint`: 独立 lint 工具（静态质量检查）。
 
 ### 依赖方向（必须保持）
 1. `sl-core` 为最底层，不依赖其他业务 crate。
@@ -47,7 +50,14 @@
 - 对宿主/用户推荐且稳定的入口只有：
   - `sl-api`（库）
   - `sl-cli`（命令行）
+  - `sl-lint`（命令行）
 - 其余 crate（`sl-core/sl-parser/sl-compiler/sl-runtime/sl-test-example`）属于内部实现细节，不作为直接集成入口。
+
+## 版本兼容策略（强约束）
+- 当前阶段默认**不考虑旧版本兼容**，包括实现代码、重构方案与 Plan/设计文档。
+- 新需求若与旧行为冲突，直接以新行为为准，并**完整删除旧实现**（包括旧分支、旧入口、旧测试、旧文档中的旧规则描述），不保留“兼容桥接层”或“过渡开关”。
+- 禁止在代码、注释、提交说明、Plan 文档中使用 `V1/V2`、`新老并存`、`双轨兼容` 这类过渡性表述；直接描述“当前唯一生效方案”。
+- 若用户明确要求保留兼容层，才可例外；未明确要求时一律按“删除旧实现”执行。
 
 ## 开发流程
 1. 先确认修改落在哪一层（parser/compiler/runtime/api/cli），避免跨层耦合。
@@ -59,6 +69,7 @@
 7. 每次代码改动后都要根据变更影响同步更新相关文档（如 `README.md`、设计说明、接口说明等）。
 8. 仅当发现“可复用、可执行、可避免未来重复踩坑”的长期知识时，再更新 `KNOWLEDGE.md`（不要把每次改动流水账写进去）。
 9. 新增或改造示例时，优先做“组合覆盖”示例（一次体现多个已支持能力），并鼓励使用贴近真实流程的相对复杂案例，不只给最小片段。
+10. 需求涉及语义替换时，直接替换并清理旧实现，不做兼容保留；相关计划与文档只写最终方案，不写分代迁移话术。
 
 ## 完成定义（DoD）
 - 变更位于正确分层，未破坏 crate 边界。
