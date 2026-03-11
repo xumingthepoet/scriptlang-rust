@@ -870,6 +870,54 @@ mod pipeline_tests {
     }
 
     #[test]
+    fn compile_bundle_resolves_imported_public_const_with_local_short_array_type() {
+        let files = map(&[
+            (
+                "ids.xml",
+                r#"
+<module name="ids" default_access="public">
+  <enum name="LocationId">
+    <member name="Home"/>
+  </enum>
+</module>
+"#,
+            ),
+            (
+                "map_data.xml",
+                r#"
+<!-- import ids from ids.xml -->
+<!-- alias ids.LocationId -->
+<module name="map_data" default_access="public">
+  <type name="Node">
+    <field name="location_id" type="LocationId"/>
+  </type>
+  <const name="nodes" type="Node[]">[
+    #{location_id: LocationId.Home}
+  ]</const>
+</module>
+"#,
+            ),
+            (
+                "app.xml",
+                r#"
+<!-- import map_data from map_data.xml -->
+<module name="app" default_access="public">
+  <script name="main" access="public">
+    <text>ok</text>
+  </script>
+</module>
+"#,
+            ),
+        ]);
+
+        let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        assert!(bundle.scripts.contains_key("app.main"));
+        assert!(bundle
+            .module_const_declarations
+            .contains_key("map_data.nodes"));
+    }
+
+    #[test]
     fn compile_bundle_propagates_alias_resolution_errors_without_panicking() {
         let files = map(&[
             (

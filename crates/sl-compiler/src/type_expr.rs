@@ -237,6 +237,30 @@ pub(crate) fn resolve_type_expr_in_namespace(
                 resolve_type_expr(expr, resolved_types, span)
             }
         }
+        ParsedTypeExpr::Array(element_type) => Ok(ScriptType::Array {
+            element_type: Box::new(resolve_type_expr_in_namespace(
+                element_type,
+                resolved_types,
+                namespace,
+                span,
+            )?),
+        }),
+        ParsedTypeExpr::Map {
+            key_type,
+            value_type,
+        } => {
+            let resolved_key =
+                resolve_type_expr_in_namespace(key_type, resolved_types, namespace, span)?;
+            Ok(ScriptType::Map {
+                key_type: resolve_map_key_type(&resolved_key, span)?,
+                value_type: Box::new(resolve_type_expr_in_namespace(
+                    value_type,
+                    resolved_types,
+                    namespace,
+                    span,
+                )?),
+            })
+        }
         _ => resolve_type_expr(expr, resolved_types, span),
     }
 }
@@ -818,6 +842,33 @@ mod type_expr_tests {
         )
         .expect_err("invalid access should fail");
         assert_eq!(function_invalid_access.code, "XML_ACCESS_INVALID");
+    }
+
+    #[test]
+    fn resolve_type_expr_in_namespace_recursively_qualifies_nested_custom_types() {
+        let span = SourceSpan::synthetic();
+        let resolved_types = BTreeMap::from([(
+            "map_data.Node".to_string(),
+            ScriptType::Object {
+                type_name: "map_data.Node".to_string(),
+                fields: BTreeMap::new(),
+            },
+        )]);
+
+        let array_expr =
+            ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Custom("Node".to_string())));
+        let array_ty =
+            resolve_type_expr_in_namespace(&array_expr, &resolved_types, "map_data", &span)
+                .expect("array of local short type should resolve");
+        assert_eq!(script_type_kind(&array_ty), "array");
+
+        let map_expr = ParsedTypeExpr::Map {
+            key_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+            value_type: Box::new(ParsedTypeExpr::Custom("Node".to_string())),
+        };
+        let map_ty = resolve_type_expr_in_namespace(&map_expr, &resolved_types, "map_data", &span)
+            .expect("map value of local short type should resolve");
+        assert_eq!(script_type_kind(&map_ty), "map");
     }
 
     #[test]
