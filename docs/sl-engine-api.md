@@ -6,6 +6,7 @@
 
 ## 1. 分层与推荐入口
 
+- 架构总览（crate 分层、依赖方向、编译运行数据流）见 [`../ARCHITECTURE.md`](../ARCHITECTURE.md)。
 - 推荐入口：`crates/sl-api`
   - 负责 `xml -> compile artifact -> engine start/resume` 的一站式流程。
 - 底层入口：`crates/sl-runtime`

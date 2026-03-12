@@ -868,6 +868,42 @@ mod macro_expand_tests {
         .expect_err("missing type on temp-input should fail");
         assert_eq!(error.code, "XML_MISSING_ATTR");
 
+        // Test empty name attribute (covers 123:57)
+        let temp_input_empty_name = xml_element(
+            "temp-input",
+            &[("name", ""), ("type", "string"), ("text", "Name your hero")],
+            Vec::new(),
+        );
+        let error = expand_element_with_macros(
+            &temp_input_empty_name,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect_err("empty name on temp-input should fail");
+        assert_eq!(error.code, "XML_EMPTY_ATTR");
+
+        // Test reserved name on temp-input (covers 124:94)
+        let temp_input_reserved_name = xml_element(
+            "temp-input",
+            &[
+                ("name", "__reserved"),
+                ("type", "string"),
+                ("text", "Name your hero"),
+            ],
+            Vec::new(),
+        );
+        let error = expand_element_with_macros(
+            &temp_input_reserved_name,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect_err("reserved name on temp-input should fail");
+        assert_eq!(error.code, "NAME_RESERVED_PREFIX");
+
         let temp_input_bad_type = xml_element(
             "temp-input",
             &[
@@ -981,5 +1017,68 @@ mod macro_expand_tests {
 
         let chosen = next_for_first_flag_var_name(&mut context);
         assert!(chosen.starts_with(FOR_FIRST_TEMP_VAR_PREFIX));
+    }
+
+    #[test]
+    fn for_macro_empty_temps_attribute_fails() {
+        let for_node = xml_element(
+            "for",
+            &[("temps", ""), ("condition", "true"), ("iteration", "i = i + 1")],
+            Vec::new(),
+        );
+        let error = expand_element_with_macros(
+            &for_node,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect_err("empty temps should fail");
+        assert_eq!(error.code, "XML_EMPTY_ATTR");
+    }
+
+    #[test]
+    fn for_macro_missing_iteration_attribute_fails() {
+        let for_node = xml_element(
+            "for",
+            &[("temps", "i:int:0"), ("condition", "true")],
+            Vec::new(),
+        );
+        let error = expand_element_with_macros(
+            &for_node,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect_err("missing iteration should fail");
+        assert_eq!(error.code, "XML_MISSING_ATTR");
+    }
+
+    #[test]
+    fn parse_for_temps_empty_string_fails() {
+        let node = xml_element("for", &[("temps", "")], Vec::new());
+        let error = parse_for_temps_decls("", &node).expect_err("empty temps string should fail");
+        assert_eq!(error.code, "XML_FOR_TEMPS_INVALID");
+    }
+
+    #[test]
+    fn for_macro_child_expansion_propagates_error() {
+        // Test that expand_children error propagation is covered (34:64)
+        // Create a for with an empty temps which will fail during child expansion
+        let for_node = xml_element(
+            "for",
+            &[("temps", ""), ("condition", "true"), ("iteration", "i = i + 1")],
+            Vec::new(),
+        );
+        let error = expand_element_with_macros(
+            &for_node,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect_err("empty temps should fail");
+        assert_eq!(error.code, "XML_EMPTY_ATTR");
     }
 }
