@@ -1,0 +1,18 @@
+<!-- import secret from secret.xml -->
+<module name="relay" export="function:cache_private,get_private_ref,get_public_ref">
+  <var name="stored" type="function">*secret.open</var>
+
+  <function name="cache_private" return_type="boolean">
+    stored = secret.issue_private_ref();
+    return true;
+  </function>
+
+  <function name="get_private_ref" return_type="function">
+    return stored;
+  </function>
+
+  <function name="get_public_ref" return_type="function">
+    let fn_ref = *secret.open;
+    return fn_ref;
+  </function>
+</module>

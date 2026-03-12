@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "sl-tool-case",
+  "entryScript": "app.main",
+  "actions": [],
+  "expectedEvents": [
+    { "kind": "text", "text": "12-5" },
+    { "kind": "end" }
+  ]
+}

@@ -1,0 +1,12 @@
+<!-- import relay from relay.xml -->
+<module name="app" export="script:main">
+  <script name="main">
+    <temp name="fnRef" type="function">*relay.get_private_ref</temp>
+    <code>relay.cache_private(); fnRef = relay.get_private_ref();</code>
+    <temp name="privateValue" type="int">invoke(fnRef, [2])</temp>
+    <code>fnRef = relay.get_public_ref();</code>
+    <temp name="publicValue" type="int">invoke(fnRef, [2, 3])</temp>
+    <text>${privateValue}-${publicValue}</text>
+    <end/>
+  </script>
+</module>
