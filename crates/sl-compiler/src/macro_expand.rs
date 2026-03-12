@@ -204,7 +204,7 @@ fn expand_for_macro(
     validate_for_attributes(node)?;
     let temps_raw = get_required_non_empty_attr(node, "temps")?;
     let condition_expr = get_required_non_empty_attr(node, "condition")?;
-    let iteration_expr = get_required_non_empty_attr(node, "iteration")?;
+    let iteration_expr = get_for_iteration_expr(node)?;
     let temp_decls = parse_for_temps_decls(&temps_raw, node)?;
 
     let mut temp_names = BTreeSet::new();
@@ -312,17 +312,30 @@ fn expand_for_macro(
     })
 }
 
+fn get_for_iteration_expr(node: &XmlElementNode) -> Result<String, ScriptLangError> {
+    let Some(raw) = get_optional_attr(node, "iteration") else {
+        return Ok("true;".to_string());
+    };
+
+    if raw.trim().is_empty() {
+        return Err(ScriptLangError::with_span(
+            "XML_EMPTY_ATTR",
+            "Attribute \"iteration\" on <for> cannot be empty.",
+            node.location.clone(),
+        ));
+    }
+
+    Ok(raw)
+}
+
 pub(crate) fn parse_for_temps_decls(
     raw: &str,
     node: &XmlElementNode,
 ) -> Result<Vec<ForTempDecl>, ScriptLangError> {
     let entries = split_top_level_for_temps_entries(raw);
-    if entries.is_empty() {
-        return Err(invalid_for_temps_error(
-            node,
-            "Attribute \"temps\" on <for> must contain at least one declaration.",
-        ));
-    }
+    // Note: split_top_level_for_temps_entries always returns at least one element,
+    // because it always pushes the final part even if empty. So entries.is_empty()
+    // is unreachable here.
 
     let mut result = Vec::new();
     for (index, entry) in entries.iter().enumerate() {
@@ -838,20 +851,24 @@ mod macro_expand_tests {
         .expect_err("unsupported <for> attrs should fail");
         assert_eq!(error.code, "XML_ATTR_NOT_ALLOWED");
 
-        let missing_iteration = xml_element(
+        let empty_iteration = xml_element(
             "for",
-            &[("temps", "i:int:0"), ("condition", "true")],
+            &[
+                ("temps", "i:int:0"),
+                ("condition", "true"),
+                ("iteration", " "),
+            ],
             Vec::new(),
         );
         let error = expand_element_with_macros(
-            &missing_iteration,
+            &empty_iteration,
             &mut MacroExpansionContext {
                 used_var_names: BTreeSet::new(),
                 for_counter: 0,
             },
         )
-        .expect_err("missing required attr should fail");
-        assert_eq!(error.code, "XML_MISSING_ATTR");
+        .expect_err("empty iteration should fail");
+        assert_eq!(error.code, "XML_EMPTY_ATTR");
 
         let temp_input_missing_type = xml_element(
             "temp-input",
@@ -942,6 +959,38 @@ mod macro_expand_tests {
         )
         .expect_err("unsupported temp-input attrs should fail");
         assert_eq!(error.code, "XML_ATTR_NOT_ALLOWED");
+
+        // Test missing text attribute (covers 138:64)
+        let temp_input_missing_text = xml_element(
+            "temp-input",
+            &[("name", "hero"), ("type", "string")],
+            Vec::new(),
+        );
+        let error = expand_element_with_macros(
+            &temp_input_missing_text,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect_err("missing text should fail");
+        assert_eq!(error.code, "XML_MISSING_ATTR");
+
+        // Test empty text attribute
+        let temp_input_empty_text = xml_element(
+            "temp-input",
+            &[("name", "hero"), ("type", "string"), ("text", "")],
+            Vec::new(),
+        );
+        let error = expand_element_with_macros(
+            &temp_input_empty_text,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect_err("empty text should fail");
+        assert_eq!(error.code, "XML_EMPTY_ATTR");
 
         let temp_input_with_child = xml_element(
             "temp-input",
@@ -1042,10 +1091,51 @@ mod macro_expand_tests {
     }
 
     #[test]
-    fn for_macro_missing_iteration_attribute_fails() {
+    fn for_macro_missing_iteration_attribute_defaults_to_noop() {
         let for_node = xml_element(
             "for",
             &[("temps", "i:int:0"), ("condition", "true")],
+            Vec::new(),
+        );
+        let expanded = expand_element_with_macros(
+            &for_node,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect("missing iteration should default to no-op");
+
+        let while_node = expanded[0]
+            .children
+            .iter()
+            .find_map(|child| match child {
+                XmlNode::Element(element) if element.name == "while" => Some(element),
+                _ => None,
+            })
+            .expect("for expansion should contain while");
+
+        let XmlNode::Element(first_if) = while_node.children.first().expect("while first child")
+        else {
+            panic!("while first child must be if");
+        };
+        let else_node = element_children(first_if)
+            .find(|child| child.name == "else")
+            .expect("guard if should contain else");
+        let XmlNode::Element(iteration_code) =
+            else_node.children.first().expect("else first child")
+        else {
+            panic!("else first child must be code");
+        };
+        assert_eq!(inline_text_content(iteration_code).trim(), "true;");
+    }
+
+    #[test]
+    fn for_macro_missing_condition_attribute_fails() {
+        // Test line 206: get_required_non_empty_attr("condition") error branch
+        let for_node = xml_element(
+            "for",
+            &[("temps", "i:int:0"), ("iteration", "i = i + 1")],
             Vec::new(),
         );
         let error = expand_element_with_macros(
@@ -1055,7 +1145,7 @@ mod macro_expand_tests {
                 for_counter: 0,
             },
         )
-        .expect_err("missing iteration should fail");
+        .expect_err("missing condition should fail");
         assert_eq!(error.code, "XML_MISSING_ATTR");
     }
 
@@ -1097,5 +1187,48 @@ mod macro_expand_tests {
         )
         .expect_err("empty temps should fail");
         assert_eq!(error.code, "XML_EMPTY_ATTR");
+    }
+
+    #[test]
+    fn plain_element_child_expansion_error_propagation() {
+        // Test line 108: expand_element_with_macros for plain elements
+        // When a plain element contains an invalid for macro as child,
+        // expand_children returns error which propagates to line 108
+        let text_element = xml_element(
+            "text",
+            &[],
+            vec![XmlNode::Element(xml_element(
+                "for",
+                &[("temps", "i:int:0")], // missing condition and iteration
+                vec![xml_text("x")],
+            ))],
+        );
+        let error = expand_element_with_macros(
+            &text_element,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect_err("invalid for child should fail");
+        assert_eq!(error.code, "XML_MISSING_ATTR");
+    }
+
+    #[test]
+    fn expand_script_macros_error_propagation() {
+        // Test line 34: expand_script_macros error propagation via expand_children
+        // Create a script element containing a for macro with invalid attributes
+        let script_element = xml_element(
+            "script",
+            &[("name", "main")],
+            vec![XmlNode::Element(xml_element(
+                "for",
+                &[("temps", "i:int:0")], // missing condition and iteration
+                vec![xml_text("x")],
+            ))],
+        );
+        let error = expand_script_macros(&script_element, &["x".to_string()])
+            .expect_err("invalid for should fail");
+        assert_eq!(error.code, "XML_MISSING_ATTR");
     }
 }

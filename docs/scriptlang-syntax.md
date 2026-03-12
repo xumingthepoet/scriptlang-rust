@@ -398,9 +398,9 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 ## 6.7 `<for>`
 
 用途：循环语法糖（编译期展开为 `group + temp + while`）。  
-属性：`temps`、`condition`、`iteration`（均必填）。  
+属性：`temps`、`condition`（必填），`iteration`（可选）。  
 `temps` 格式：`name:type:init;name2:type2:init2;`（每项必须是 `name:type:init`，允许尾分号）。  
-语义：`iteration` 在每轮开始时执行，但第一次进入循环不执行。  
+语义：`iteration` 在每轮开始时执行，但第一次进入循环不执行；省略时等价 no-op。  
 在 `<for>` 体内命中 `<continue/>` 后，下一轮开始仍会先执行 `iteration`。  
 说明：`<loop>` 已移除。  
 

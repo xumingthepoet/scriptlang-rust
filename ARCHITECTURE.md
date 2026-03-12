@@ -47,44 +47,39 @@ Required direction:
 
 ## Architecture Diagram
 
-```text
-+-----------------------------+
-| Host Application            |
-+-------------+---------------+
-              |
-   +----------+-----------+-----------------------------+
-   |                      |                             |
-   v                      v                             v
-+--+------------------+  +---------------------------+  +---------------------------+
-| sl-api (library)    |  | sl-cli                    |  | sl-lint                   |
-+--+------------------+  +-------------+-------------+  +-------------+-------------+
-   |                                   |                             |
-   |                                   v                             v
-   |                        +----------+----------+        +---------+----------+
-   |                        | sl-api              |        | sl-compiler        |
-   |                        +----------+----------+        +---------+----------+
-   |                                   |                             |
-   +----------------------+------------+-----------------------------+
-                          |
-          +---------------+----------------+
-          |                                |
-          v                                v
-+---------+----------+           +---------+----------+
-| sl-runtime         |           | sl-compiler        |
-+---------+----------+           +---------+----------+
-          |                                |
-          v                                v
-+---------+----------+           +---------+----------+
-| sl-core            |<----------| sl-parser          |
-+--------------------+           +--------------------+
+```mermaid
+flowchart LR
+    Host["Host Application"]
+    API["sl-api"]
+    CLI["sl-cli"]
+    Lint["sl-lint"]
+    Compiler["sl-compiler"]
+    Parser["sl-parser"]
+    Runtime["sl-runtime"]
+    Core["sl-core"]
+    Examples["sl-test-example"]
 
-+-----------------------------+
-| sl-test-example             |
-+-------------+---------------+
-              |
-              +--> sl-api
-              +--> sl-runtime
-              +--> sl-core
+    Host --> API
+    Host --> CLI
+    Host --> Lint
+
+    CLI --> API
+    API --> Compiler
+    API --> Runtime
+    API --> Core
+
+    Lint --> Compiler
+    Lint --> Parser
+    Lint --> Core
+
+    Compiler --> Parser
+    Compiler --> Core
+    Parser --> Core
+    Runtime --> Core
+
+    Examples --> API
+    Examples --> Runtime
+    Examples --> Core
 ```
 
 ## Compile and Run Flow
@@ -100,37 +95,14 @@ Key APIs:
 
 `create_engine_from_xml` remains a convenience wrapper over `compile -> artifact -> run`.
 
-```text
-+-----------------------------+
-| XML Sources                 |
-+-------------+---------------+
-              |
-              v
-+-------------+---------------+
-| sl-parser                   |
-+-------------+---------------+
-              |
-              v
-+-------------+---------------+
-| sl-compiler                 |
-+-------------+---------------+
-              |
-              v
-+-------------+---------------+
-| CompiledProjectArtifact     |
-+-------------+---------------+
-              |
-              v
-+-------------+---------------+
-| sl-runtime Engine           |
-+-------------+---------------+
-              |
-      +-------+-------+
-      |               |
-      v               v
-+-----+--------+  +---+------------+
-| Snapshot     |  | EngineOutput   |
-+--------------+  +----------------+
+```mermaid
+flowchart TD
+    Sources["XML Sources"] --> Parse["sl-parser"]
+    Parse --> Compile["sl-compiler"]
+    Compile --> Artifact["CompiledProjectArtifact"]
+    Artifact --> Engine["sl-runtime Engine"]
+    Engine --> Snapshot["Snapshot"]
+    Engine --> Output["EngineOutput"]
 ```
 
 ## Internal Module Layout
