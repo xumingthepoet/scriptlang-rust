@@ -2093,7 +2093,7 @@ mod step_tests {
 
         let mut fallover_text_error = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><choice text="Pick"><option text="${bad +}" fall_over="true"><text>F</text></option></choice></script>"#,
+            r#"<script name="main"><choice text="Pick"><option text="${unknown_fn()}" fall_over="true"><text>F</text></option></choice></script>"#,
         )]));
         fallover_text_error.start("main", None).expect("start");
         let error = fallover_text_error
@@ -2103,7 +2103,7 @@ mod step_tests {
 
         let mut regular_text_error = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><choice text="Pick"><option text="${bad +}"><text>A</text></option></choice></script>"#,
+            r#"<script name="main"><choice text="Pick"><option text="${unknown_fn()}"><text>A</text></option></choice></script>"#,
         )]));
         regular_text_error.start("main", None).expect("start");
         let error = regular_text_error
@@ -2113,7 +2113,7 @@ mod step_tests {
 
         let mut dynamic_array_eval_error = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><choice text="Pick"><dynamic-options array="bad +" item="it"><option text="${it}"><text>x</text></option></dynamic-options></choice></script>"#,
+            r#"<script name="main"><choice text="Pick"><dynamic-options array="unknown_fn()" item="it"><option text="${it}"><text>x</text></option></dynamic-options></choice></script>"#,
         )]));
         dynamic_array_eval_error.start("main", None).expect("start");
         let error = dynamic_array_eval_error
@@ -2123,7 +2123,7 @@ mod step_tests {
 
         let mut dynamic_when_error = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><temp name="arr" type="int[]">[1]</temp><choice text="Pick"><dynamic-options array="arr" item="it"><option text="${it}" when="bad +"><text>x</text></option></dynamic-options></choice></script>"#,
+            r#"<script name="main"><temp name="arr" type="int[]">[1]</temp><choice text="Pick"><dynamic-options array="arr" item="it"><option text="${it}" when="unknown_fn()"><text>x</text></option></dynamic-options></choice></script>"#,
         )]));
         dynamic_when_error.start("main", None).expect("start");
         let error = dynamic_when_error
@@ -2133,7 +2133,7 @@ mod step_tests {
 
         let mut dynamic_text_error = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><temp name="arr" type="int[]">[1]</temp><choice text="Pick"><dynamic-options array="arr" item="it"><option text="${bad +}"><text>x</text></option></dynamic-options></choice></script>"#,
+            r#"<script name="main"><temp name="arr" type="int[]">[1]</temp><choice text="Pick"><dynamic-options array="arr" item="it"><option text="${unknown_fn()}"><text>x</text></option></dynamic-options></choice></script>"#,
         )]));
         dynamic_text_error.start("main", None).expect("start");
         let error = dynamic_text_error
@@ -2143,7 +2143,7 @@ mod step_tests {
 
         let mut prompt_error = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><choice text="${bad +}"><option text="A"><text>A</text></option></choice></script>"#,
+            r#"<script name="main"><choice text="${unknown_fn()}"><option text="A"><text>A</text></option></choice></script>"#,
         )]));
         prompt_error.start("main", None).expect("start");
         let error = prompt_error

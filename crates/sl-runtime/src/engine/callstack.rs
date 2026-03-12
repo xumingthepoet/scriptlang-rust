@@ -1383,7 +1383,7 @@ mod callstack_tests {
                 r#"
     <!-- import callee from callee.xml -->
     <script name="main">
-      <call script="@callee.callee" args="ref:missing.path"/>
+      <call script="@callee.callee" args="ref:missing"/>
     </script>
     "#,
             ),
@@ -1404,7 +1404,7 @@ mod callstack_tests {
                 r#"
     <!-- import callee from callee.xml -->
     <script name="main">
-      <call script="@callee.callee" args="unknown +"/>
+      <call script="@callee.callee" args="unknown_fn()"/>
     </script>
     "#,
             ),
@@ -1478,7 +1478,7 @@ mod callstack_tests {
         let mut return_arg_eval_error = engine_from_sources(map(&[
             (
                 "main.script.xml",
-                r#"<script name="main"><goto script="@next.next" args="bad +"/></script>"#,
+                r#"<script name="main"><goto script="@next.next" args="unknown_fn()"/></script>"#,
             ),
             (
                 "next.script.xml",

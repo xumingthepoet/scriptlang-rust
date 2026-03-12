@@ -523,7 +523,7 @@ mod macro_expand_tests {
             r#"
     <module name="main" export="script:main">
     <script name="main">
-      <for temps="i:int:0" condition="i &lt; 2" iteration="i = i + 1;">
+      <for temps="i:int:0" condition="i LT 2" iteration="i = i + 1;">
         <text>${i}</text>
       </for>
     </script>

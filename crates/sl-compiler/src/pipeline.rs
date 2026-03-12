@@ -1161,41 +1161,41 @@ mod pipeline_tests {
 
         let private_import = map(&[
             (
-                "shared.xml",
-                r#"<module name="shared"><var name="hp" type="int">1</var></module>"#,
+                "lib.xml",
+                r#"<module name="lib"><var name="hp" type="int">1</var></module>"#,
             ),
             (
                 "main.xml",
                 r#"
-<!-- import shared from shared.xml -->
+<!-- import lib from lib.xml -->
 <module name="main" export="script:main">
-<script name="main"><text>${shared.hp}</text></script>
+<script name="main"><text>${lib.hp}</text></script>
 </module>
 "#,
             ),
         ]);
         let private_bundle = compile_project_bundle_from_xml_map(&private_import).expect("compile");
         let private_main = private_bundle.scripts.get("main.main").expect("main");
-        assert!(!private_main.visible_module_vars.contains_key("shared.hp"));
+        assert!(!private_main.visible_module_vars.contains_key("lib.hp"));
 
         let public_import = map(&[
             (
-                "shared.xml",
-                r#"<module name="shared" export="var:hp"><var name="hp" type="int">1</var></module>"#,
+                "lib.xml",
+                r#"<module name="lib" export="var:hp"><var name="hp" type="int">1</var></module>"#,
             ),
             (
                 "main.xml",
                 r#"
-<!-- import shared from shared.xml -->
+<!-- import lib from lib.xml -->
 <module name="main" export="script:main">
-<script name="main"><text>${shared.hp}</text></script>
+<script name="main"><text>${lib.hp}</text></script>
 </module>
 "#,
             ),
         ]);
         let public_bundle = compile_project_bundle_from_xml_map(&public_import).expect("compile");
         let public_main = public_bundle.scripts.get("main.main").expect("main");
-        assert!(public_main.visible_module_vars.contains_key("shared.hp"));
+        assert!(public_main.visible_module_vars.contains_key("lib.hp"));
     }
 
     #[test]

@@ -11,10 +11,8 @@ use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
 use crate::helpers::rhai_bridge::{
-    dynamic_to_slvalue, module_namespace_symbol, preprocess_scriptlang_rhai_input,
-    replace_module_global_symbol, rewrite_function_calls, rewrite_module_global_qualified_access,
-    rhai_function_symbol, slvalue_to_dynamic, slvalue_to_dynamic_with_type,
-    slvalue_to_rhai_literal, slvalue_to_text, RhaiInputMode,
+    dynamic_to_slvalue, slvalue_to_dynamic, slvalue_to_dynamic_with_type, slvalue_to_rhai_literal,
+    slvalue_to_text,
 };
 use crate::helpers::value_path::{assign_nested_path, parse_ref_path};
 use regex::Regex;
@@ -25,8 +23,9 @@ use rng::next_random_bounded;
 #[cfg(test)]
 use rng::{next_random_bounded_with, next_random_u32};
 use sl_core::{
-    default_value_from_type, is_type_compatible, AccessLevel, ChoiceEntry, ChoiceItem,
-    ContinuationFrame, ContinueTarget, EngineOutput, ModuleConstDecl, ModuleVarDecl,
+    default_value_from_type, is_type_compatible, module_namespace_symbol, rewrite_function_calls,
+    rewrite_module_global_qualified_access, rhai_function_symbol, AccessLevel, ChoiceEntry,
+    ChoiceItem, ContinuationFrame, ContinueTarget, EngineOutput, ModuleConstDecl, ModuleVarDecl,
     PendingBoundary, PendingDynamicChoiceBinding, ScriptIr, ScriptKind, ScriptLangError,
     ScriptNode, ScriptTarget, ScriptType, SlValue, Snapshot, SnapshotCompletion, SnapshotFrame,
 };

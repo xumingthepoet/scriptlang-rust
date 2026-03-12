@@ -297,12 +297,7 @@ impl ScriptLangEngine {
                 .get(1)
                 .expect("capture group 1 must exist for each regex capture");
             output.push_str(&template[last_index..full.start()]);
-            let value = self.execute_rhai_with_mode(
-                expr.as_str(),
-                true,
-                "text interpolation",
-                RhaiInputMode::TextInterpolationExpr,
-            )?;
+            let value = self.execute_rhai(expr.as_str(), true, "text interpolation")?;
             output.push_str(&slvalue_to_text(&value));
             last_index = full.end();
         }
@@ -334,7 +329,7 @@ impl ScriptLangEngine {
         expr: &str,
         context: &str,
     ) -> Result<SlValue, ScriptLangError> {
-        self.execute_rhai_with_mode(expr, true, context, RhaiInputMode::CodeBlock)
+        self.execute_rhai(expr, true, context)
     }
 
     pub(super) fn eval_module_global_initializer(
@@ -394,20 +389,12 @@ impl ScriptLangEngine {
             scope.push_dynamic(name.clone(), slvalue_to_dynamic(value));
         }
 
-        let preprocessed =
-            preprocess_scriptlang_rhai_input(expr, "initializer", RhaiInputMode::CodeBlock)?;
-        let rewritten =
-            rewrite_module_global_qualified_access(&preprocessed, &qualified_rewrite_map);
-        let result = self
-            .rhai_engine
-            .eval_with_scope::<Dynamic>(&mut scope, &format!("({})", rewritten))
-            .map_err(|error| {
-                ScriptLangError::new(
-                    "ENGINE_EVAL_ERROR",
-                    format!("Module global initializer eval failed: {}", error),
-                )
-            })
-            .and_then(dynamic_to_slvalue);
+        let rewritten = rewrite_module_global_qualified_access(expr, &qualified_rewrite_map);
+        let result = self.eval_rhai_source_with_cache(
+            &mut scope,
+            &format!("({})", rewritten),
+            "Module global initializer eval failed",
+        );
         for (name, before) in global_snapshot {
             let after_dynamic = scope
                 .get_value::<Dynamic>(&name)
@@ -469,20 +456,12 @@ impl ScriptLangEngine {
             scope.push_dynamic(name.clone(), slvalue_to_dynamic(value));
         }
 
-        let preprocessed =
-            preprocess_scriptlang_rhai_input(expr, "initializer", RhaiInputMode::CodeBlock)?;
-        let rewritten =
-            rewrite_module_global_qualified_access(&preprocessed, &qualified_rewrite_map);
-        let result = self
-            .rhai_engine
-            .eval_with_scope::<Dynamic>(&mut scope, &format!("({})", rewritten))
-            .map_err(|error| {
-                ScriptLangError::new(
-                    "ENGINE_EVAL_ERROR",
-                    format!("Module const initializer eval failed: {}", error),
-                )
-            })
-            .and_then(dynamic_to_slvalue);
+        let rewritten = rewrite_module_global_qualified_access(expr, &qualified_rewrite_map);
+        let result = self.eval_rhai_source_with_cache(
+            &mut scope,
+            &format!("({})", rewritten),
+            "Module const initializer eval failed",
+        );
 
         for (name, before) in global_snapshot {
             let after_dynamic = scope
@@ -503,18 +482,79 @@ impl ScriptLangEngine {
         result
     }
 
+    fn get_or_compile_rhai_ast(
+        &mut self,
+        source: &str,
+        context: &str,
+    ) -> Result<&rhai::AST, ScriptLangError> {
+        if !self.rhai_ast_cache.contains_key(source) {
+            let ast = self.rhai_engine.compile(source).map_err(|error| {
+                ScriptLangError::new(
+                    "ENGINE_EVAL_ERROR",
+                    format!("{}: compile failed: {}", context, error),
+                )
+            })?;
+            self.rhai_ast_cache.insert(source.to_string(), ast);
+            #[cfg(test)]
+            {
+                self.rhai_compile_count += 1;
+            }
+        }
+        Ok(self
+            .rhai_ast_cache
+            .get(source)
+            .expect("compiled Rhai AST should be cached"))
+    }
+
+    fn eval_rhai_source_with_cache(
+        &mut self,
+        scope: &mut Scope<'_>,
+        source: &str,
+        context: &str,
+    ) -> Result<SlValue, ScriptLangError> {
+        let ast = self.get_or_compile_rhai_ast(source, context)?.clone();
+        self.rhai_engine
+            .eval_ast_with_scope::<Dynamic>(scope, &ast)
+            .map_err(|error| {
+                map_rhai_error(
+                    "ENGINE_EVAL_ERROR",
+                    format!("{}: {}", context, error),
+                    error,
+                )
+            })
+            .and_then(dynamic_to_slvalue)
+    }
+
+    fn run_rhai_source_with_cache(
+        &mut self,
+        scope: &mut Scope<'_>,
+        source: &str,
+        context: &str,
+    ) -> Result<(), ScriptLangError> {
+        let ast = self.get_or_compile_rhai_ast(source, context)?.clone();
+        self.rhai_engine
+            .run_ast_with_scope(scope, &ast)
+            .map_err(|error| {
+                map_rhai_error(
+                    "ENGINE_EVAL_ERROR",
+                    format!("{}: {}", context, error),
+                    error,
+                )
+            })
+    }
+
+    #[cfg(test)]
+    pub(super) fn rhai_compile_count(&self) -> usize {
+        self.rhai_compile_count
+    }
+
     pub(super) fn execute_rhai(
         &mut self,
         script: &str,
         is_expression: bool,
         context: &str,
     ) -> Result<SlValue, ScriptLangError> {
-        let mode = if is_expression {
-            RhaiInputMode::AttributeExpr
-        } else {
-            RhaiInputMode::CodeBlock
-        };
-        self.execute_rhai_with_mode(script, is_expression, context, mode)
+        self.execute_rhai_with_mode(script, is_expression, context)
     }
 
     pub(super) fn execute_rhai_with_mode(
@@ -522,7 +562,6 @@ impl ScriptLangEngine {
         script: &str,
         is_expression: bool,
         context: &str,
-        mode: RhaiInputMode,
     ) -> Result<SlValue, ScriptLangError> {
         let script_name = self.resolve_current_script_name().unwrap_or_default();
         let function_symbol_map = self
@@ -678,11 +717,9 @@ impl ScriptLangEngine {
         let mut code_let_bindings = BTreeSet::new();
         let source = {
             let prelude = self.get_or_build_module_prelude(&script_name, &function_symbol_map)?;
-            let preprocessed = preprocess_scriptlang_rhai_input(script, context, mode)?;
             let mut call_rewrite_map = function_symbol_map.clone();
             call_rewrite_map.insert("invoke".to_string(), "invoke".to_string());
-            let rewritten_script =
-                rewrite_function_calls_if_needed(&preprocessed, &call_rewrite_map);
+            let rewritten_script = rewrite_function_calls_if_needed(script, &call_rewrite_map);
             let rewritten_script =
                 rewrite_module_global_qualified_access(&rewritten_script, &qualified_rewrite_map);
             if !is_expression {
@@ -696,27 +733,18 @@ impl ScriptLangEngine {
         };
 
         let run_result = if is_expression {
-            self.rhai_engine
-                .eval_with_scope::<Dynamic>(&mut scope, &source)
-                .map_err(|error| {
-                    map_rhai_error(
-                        "ENGINE_EVAL_ERROR",
-                        format!("Expression eval failed: {}", error),
-                        error,
-                    )
-                })
-                .and_then(dynamic_to_slvalue)
+            self.eval_rhai_source_with_cache(
+                &mut scope,
+                &source,
+                &format!("{} expression eval failed", context),
+            )
         } else {
-            self.rhai_engine
-                .run_with_scope(&mut scope, &source)
-                .map_err(|error| {
-                    map_rhai_error(
-                        "ENGINE_EVAL_ERROR",
-                        format!("Code eval failed: {}", error),
-                        error,
-                    )
-                })
-                .map(|_| SlValue::Bool(true))
+            self.run_rhai_source_with_cache(
+                &mut scope,
+                &source,
+                &format!("{} code eval failed", context),
+            )
+            .map(|_| SlValue::Bool(true))
         };
 
         for (name, before) in global_snapshot {
@@ -926,17 +954,12 @@ impl ScriptLangEngine {
                 }
             }
 
-            let preprocessed = preprocess_scriptlang_rhai_input(
-                &decl.code,
-                "function body",
-                RhaiInputMode::CodeBlock,
-            )?;
-            let rewritten = if preprocessed.contains('(') {
+            let rewritten = if decl.code.contains('(') {
                 let mut call_rewrite_map = self.invoke_body_symbol_map(qualified_name);
                 call_rewrite_map.insert("invoke".to_string(), "invoke".to_string());
-                rewrite_function_calls_if_needed(&preprocessed, &call_rewrite_map)
+                rewrite_function_calls_if_needed(&decl.code, &call_rewrite_map)
             } else {
-                preprocessed
+                decl.code.clone()
             };
             let function_rewrite_map = self.build_module_global_rewrite_map_all();
             let rewritten =
@@ -1307,6 +1330,30 @@ let public = 3;
     }
 
     #[test]
+    pub(super) fn execute_rhai_reuses_ast_cache_for_same_source() {
+        let mut engine = engine_from_sources(map(&[(
+            "main.xml",
+            r#"<module name="main" export="script:main">
+  <script name="main">
+    <text>ok</text>
+  </script>
+</module>"#,
+        )]));
+        engine.start("main.main", None).expect("start");
+
+        let before = engine.rhai_compile_count();
+        let first = engine.eval_expression("1 + 2").expect("first eval");
+        let after_first = engine.rhai_compile_count();
+        let second = engine.eval_expression("1 + 2").expect("second eval");
+        let after_second = engine.rhai_compile_count();
+
+        assert_eq!(first, SlValue::Number(3.0));
+        assert_eq!(second, SlValue::Number(3.0));
+        assert_eq!(after_first, before + 1);
+        assert_eq!(after_second, after_first);
+    }
+
+    #[test]
     pub(super) fn global_data_is_readonly_during_code_execution() {
         let mut engine = engine_from_sources_with_global_data(
             map(&[(
@@ -1583,35 +1630,32 @@ let public = 3;
         let output = supported.next_output().expect("text");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "Win"));
 
-        let mut legacy_compare = engine_from_sources(map(&[(
+        let legacy_compare_error = sl_compiler::compile_project_bundle_from_xml_map(&map(&[(
             "main.script.xml",
             r#"<script name="main"><if when="hp &lt; 10"><text>x</text></if></script>"#,
-        )]));
-        legacy_compare.start("main", None).expect("start");
-        let error = legacy_compare
-            .next_output()
-            .expect_err("legacy lt should fail");
-        assert_eq!(error.code, "RHAI_PREPROCESS_FORBIDDEN_LT");
+        )]))
+        .expect_err("legacy lt should fail at compile time");
+        assert_eq!(
+            legacy_compare_error.code,
+            "XML_RHAI_PREPROCESS_FORBIDDEN_LT"
+        );
 
-        let mut legacy_logic = engine_from_sources(map(&[(
+        let legacy_logic_error = sl_compiler::compile_project_bundle_from_xml_map(&map(&[(
             "main.script.xml",
             r#"<script name="main"><temp name="hp" type="int">1</temp><if when="hp > 0 &amp;&amp; true"><text>x</text></if></script>"#,
-        )]));
-        legacy_logic.start("main", None).expect("start");
-        let error = legacy_logic
-            .next_output()
-            .expect_err("legacy and should fail");
-        assert_eq!(error.code, "RHAI_PREPROCESS_FORBIDDEN_AND");
+        )]))
+        .expect_err("legacy and should fail at compile time");
+        assert_eq!(legacy_logic_error.code, "XML_RHAI_PREPROCESS_FORBIDDEN_AND");
 
-        let mut legacy_quote = engine_from_sources(map(&[(
+        let legacy_quote_error = sl_compiler::compile_project_bundle_from_xml_map(&map(&[(
             "main.script.xml",
             r#"<script name="main"><temp name="name" type="string">"Rin"</temp><if when="name == &quot;Rin&quot;"><text>x</text></if></script>"#,
-        )]));
-        legacy_quote.start("main", None).expect("start");
-        let error = legacy_quote
-            .next_output()
-            .expect_err("attribute double quote string should fail");
-        assert_eq!(error.code, "RHAI_PREPROCESS_FORBIDDEN_DOUBLE_QUOTE");
+        )]))
+        .expect_err("attribute double quote string should fail at compile time");
+        assert_eq!(
+            legacy_quote_error.code,
+            "XML_RHAI_PREPROCESS_FORBIDDEN_DOUBLE_QUOTE"
+        );
     }
 
     #[test]
@@ -1624,21 +1668,21 @@ let public = 3;
         let output = supported.next_output().expect("text");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "true"));
 
-        let mut forbidden = engine_from_sources(map(&[(
+        let forbidden_error = sl_compiler::compile_project_bundle_from_xml_map(&map(&[(
             "main.script.xml",
             r#"<script name="main"><temp name="name" type="string">"Rin"</temp><text>${name == 'Rin'}</text></script>"#,
-        )]));
-        forbidden.start("main", None).expect("start");
-        let error = forbidden
-            .next_output()
-            .expect_err("single quote in text interpolation should fail");
-        assert_eq!(error.code, "RHAI_PREPROCESS_FORBIDDEN_SINGLE_QUOTE");
+        )]))
+        .expect_err("single quote in text interpolation should fail at compile time");
+        assert_eq!(
+            forbidden_error.code,
+            "XML_RHAI_PREPROCESS_FORBIDDEN_SINGLE_QUOTE"
+        );
     }
 
     #[test]
     pub(super) fn scriptlang_expr_preprocessing_rejects_initializer_and_function_body_legacy_syntax(
     ) {
-        let bad_initializer = map(&[
+        let bad_initializer_error = sl_compiler::compile_project_bundle_from_xml_map(&map(&[
             (
                 "shared.xml",
                 r#"<module name="shared" export="var:hp"><var name="hp" type="int">1 &lt;= 1</var></module>"#,
@@ -1647,15 +1691,15 @@ let public = 3;
                 "main.script.xml",
                 r#"<script name="main"><text>ok</text></script>"#,
             ),
-        ]);
-        let mut bad_initializer_engine = engine_from_sources(bad_initializer);
-        let error = bad_initializer_engine
-            .start("main.main", None)
-            .expect_err("legacy initializer syntax should fail");
-        assert_eq!(error.code, "RHAI_PREPROCESS_FORBIDDEN_LTE");
-        assert!(error.message.contains("initializer"));
+        ]))
+        .expect_err("legacy initializer syntax should fail at compile time");
+        assert_eq!(
+            bad_initializer_error.code,
+            "XML_RHAI_PREPROCESS_FORBIDDEN_LTE"
+        );
+        assert!(bad_initializer_error.message.contains("initializer"));
 
-        let bad_function = map(&[
+        let bad_function_error = sl_compiler::compile_project_bundle_from_xml_map(&map(&[
             (
                 "shared.xml",
                 r#"<module name="shared" export="function:bad"><function name="bad" return_type="string">return 'bad';</function></module>"#,
@@ -1670,18 +1714,13 @@ let public = 3;
 </script>
 "#,
             ),
-        ]);
-        let bad_function_engine = engine_from_sources(bad_function);
-        let function_symbol_map = bad_function_engine
-            .visible_function_symbols_by_script
-            .get("main.main")
-            .cloned()
-            .expect("function symbols");
-        let error = bad_function_engine
-            .build_module_prelude("main.main", &function_symbol_map)
-            .expect_err("legacy function body syntax should fail");
-        assert_eq!(error.code, "RHAI_PREPROCESS_FORBIDDEN_SINGLE_QUOTE");
-        assert!(error.message.contains("function body"));
+        ]))
+        .expect_err("legacy function body syntax should fail at compile time");
+        assert_eq!(
+            bad_function_error.code,
+            "XML_RHAI_PREPROCESS_FORBIDDEN_SINGLE_QUOTE"
+        );
+        assert!(bad_function_error.message.contains("function body"));
     }
 
     #[test]
@@ -1755,7 +1794,7 @@ let public = 3;
         let bad_initializer = map(&[
             (
                 "shared.xml",
-                r#"<module name="shared" export="var:hp"><var name="hp" type="int">unknown +</var></module>"#,
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">unknown_fn()</var></module>"#,
             ),
             (
                 "main.script.xml",
@@ -1775,7 +1814,7 @@ let public = 3;
             map(&[
                 (
                     "shared.xml",
-                    r#"<module name="shared" export="var:hp"><var name="hp" type="int">{ game = 1; 1 }</var></module>"#,
+                    r#"<module name="shared" export="var:hp"><var name="hp" type="int">game.remove("hp")</var></module>"#,
                 ),
                 (
                     "main.script.xml",
@@ -2637,13 +2676,10 @@ let public = 3;
         )]));
         engine.start("main.main", None).expect("start");
 
-        // Try to evaluate an expression with single quote - should fail with preprocess error
+        // Try to evaluate an expression with single quote - should fail at Rhai compile/eval stage
         let result = engine.eval_module_const_initializer("'invalid'", "main");
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().code,
-            "RHAI_PREPROCESS_FORBIDDEN_SINGLE_QUOTE"
-        );
+        assert_eq!(result.unwrap_err().code, "ENGINE_EVAL_ERROR");
     }
 
     #[test]
@@ -3192,13 +3228,10 @@ let public = 3;
         )]));
         engine.start("main.main", None).expect("start");
 
-        // Try to evaluate an expression with single quote - should fail with preprocess error
+        // Try to evaluate an expression with single quote - should fail at Rhai compile/eval stage
         let result = engine.eval_module_global_initializer("'invalid'", "main");
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().code,
-            "RHAI_PREPROCESS_FORBIDDEN_SINGLE_QUOTE"
-        );
+        assert_eq!(result.unwrap_err().code, "ENGINE_EVAL_ERROR");
     }
 
     #[test]

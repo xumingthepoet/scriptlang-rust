@@ -762,6 +762,7 @@ name = "sl-compiler"
 version = "0.1.0"
 dependencies = [
  "regex",
+ "rhai",
  "serde_json",
  "sl-core",
  "sl-parser",
@@ -771,6 +772,7 @@ dependencies = [
 name = "sl-core"
 version = "0.1.0"
 dependencies = [
+ "regex",
  "serde",
  "serde_json",
  "thiserror",

@@ -48,6 +48,9 @@
 - 统一错误类型：`ScriptLangError`
   - 字段：`code`, `message`, `span`
   - 宿主侧建议以 `code` 做稳定分支处理。
+- 错误阶段分层：
+  - 编译期错误：`XML_*`（含 `XML_RHAI_*`，用于 Rhai 预处理/语法静态校验）。
+  - 运行期错误：`ENGINE_*`（用于动态执行阶段错误）。
 
 ### 2.5 编译产物
 
@@ -61,6 +64,7 @@
   - map 类型使用 `ScriptType::Map { key_type, value_type }`：
     - `key_type` 支持 string 或 enum 元信息
     - 运行时 map 仍是字符串 key（`BTreeMap<String, SlValue>`）
+  - Rhai 相关字段在产物中保存“规范化后的源码字符串”（不是 AST 二进制）
   - 可作为“离线编译后运行”的稳定输入
 
 ### 2.6 enum / function 运行约束
@@ -86,7 +90,7 @@
 1. `XML module sources -> CompiledProjectArtifact`
 2. `CompiledProjectArtifact -> Engine start/resume`
 
-这样可以在“运行前”尽早暴露编译错误，并支持产物缓存、分发和复用。
+这样可以在“运行前”尽早暴露编译错误（包括 `XML_RHAI_*`），并支持产物缓存、分发和复用。
 
 ## 3.1 `compile_scripts_from_xml_map`
 
@@ -393,6 +397,10 @@ loop {
   - pending boundary 与当前脚本节点是否一致
 - `<var>` 值会随 snapshot 持久化并恢复。
 - `<const>` 不写入 snapshot；`resume` 后按声明重建，仍保持只读。
+- 运行期 Rhai AST 缓存是进程内内存缓存：
+  - 不写入 artifact；
+  - 不写入 snapshot；
+  - `start/resume` 不主动清空。
 
 建议流程：
 1. `next_output()` 得到 `Choices/Input`

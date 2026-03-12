@@ -47,6 +47,131 @@ fn template_expr_regex() -> &'static Regex {
     REGEX.get_or_init(|| Regex::new(r"\$\{([^{}]+)\}").expect("template expression regex"))
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum RhaiCompileTarget {
+    Expression,
+    CodeBlock,
+}
+
+fn map_rhai_preprocess_error_to_compile(
+    error: ScriptLangError,
+    span: &SourceSpan,
+) -> ScriptLangError {
+    let code = if error.code.starts_with("RHAI_PREPROCESS_") {
+        format!("XML_{}", error.code)
+    } else {
+        "XML_RHAI_PREPROCESS".to_string()
+    };
+    ScriptLangError::with_span(code, error.message, span.clone())
+}
+
+fn compile_rhai_source_for_target(
+    source: &str,
+    span: &SourceSpan,
+    context: &str,
+    target: RhaiCompileTarget,
+) -> Result<(), ScriptLangError> {
+    let engine = rhai::Engine::new();
+    let result = match target {
+        RhaiCompileTarget::Expression => engine.compile_expression(source).map(|_| ()),
+        RhaiCompileTarget::CodeBlock => engine.compile(source).map(|_| ()),
+    };
+    result.map_err(|error| {
+        ScriptLangError::with_span(
+            "XML_RHAI_SYNTAX_INVALID",
+            format!("Invalid Rhai {}: {}", context, error),
+            span.clone(),
+        )
+    })
+}
+
+pub(crate) fn preprocess_and_compile_rhai_source(
+    source: &str,
+    span: &SourceSpan,
+    context: &str,
+    input_mode: RhaiInputMode,
+    target: RhaiCompileTarget,
+    runtime_function_symbol_map: Option<&BTreeMap<String, String>>,
+    runtime_module_global_rewrite_map: Option<&BTreeMap<String, String>>,
+) -> Result<String, ScriptLangError> {
+    let preprocessed = preprocess_scriptlang_rhai_input(source, context, input_mode)
+        .map_err(|error| map_rhai_preprocess_error_to_compile(error, span))?;
+    let source_for_compile = runtime_function_symbol_map
+        .map(|rewrite_map| rewrite_function_calls(&preprocessed, rewrite_map))
+        .unwrap_or_else(|| preprocessed.clone());
+    let source_for_compile = runtime_module_global_rewrite_map
+        .map(|rewrite_map| rewrite_module_global_qualified_access(&source_for_compile, rewrite_map))
+        .unwrap_or(source_for_compile);
+    compile_rhai_source_for_target(&source_for_compile, span, context, target)?;
+    Ok(preprocessed)
+}
+
+fn preprocess_and_compile_template_expressions(
+    template: &str,
+    span: &SourceSpan,
+    runtime_function_symbol_map: &BTreeMap<String, String>,
+    runtime_module_global_rewrite_map: &BTreeMap<String, String>,
+) -> Result<String, ScriptLangError> {
+    let mut out = String::with_capacity(template.len());
+    let mut last_index = 0usize;
+    for captures in template_expr_regex().captures_iter(template) {
+        let full = captures
+            .get(0)
+            .expect("capture group 0 must exist for each template capture");
+        let expr = captures
+            .get(1)
+            .expect("capture group 1 must exist for each template capture");
+        out.push_str(&template[last_index..full.start()]);
+        let preprocessed = preprocess_and_compile_rhai_source(
+            expr.as_str(),
+            span,
+            "text interpolation expression",
+            RhaiInputMode::TextInterpolationExpr,
+            RhaiCompileTarget::Expression,
+            Some(runtime_function_symbol_map),
+            Some(runtime_module_global_rewrite_map),
+        )?;
+        out.push_str("${");
+        out.push_str(&preprocessed);
+        out.push('}');
+        last_index = full.end();
+    }
+    out.push_str(&template[last_index..]);
+    Ok(out)
+}
+
+fn build_runtime_module_global_rewrite_map(
+    visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
+    visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
+) -> BTreeMap<String, String> {
+    let mut map = BTreeMap::new();
+    for qualified_name in visible_module_vars
+        .values()
+        .map(|decl| decl.qualified_name.as_str())
+        .chain(
+            visible_module_consts
+                .values()
+                .map(|decl| decl.qualified_name.as_str()),
+        )
+    {
+        let Some((namespace, name)) = qualified_name.split_once('.') else {
+            continue;
+        };
+        map.entry(qualified_name.to_string())
+            .or_insert_with(|| format!("{}.{}", module_namespace_symbol(namespace), name));
+    }
+    map
+}
+
+fn build_runtime_function_symbol_map(
+    visible_functions: &BTreeMap<String, FunctionDecl>,
+) -> BTreeMap<String, String> {
+    visible_functions
+        .keys()
+        .map(|name| (name.clone(), rhai_function_symbol(name)))
+        .collect()
+}
+
 fn is_identifier_char(ch: Option<char>) -> bool {
     ch.is_some_and(|value| value.is_ascii_alphanumeric() || value == '_')
 }
@@ -584,6 +709,8 @@ fn validate_invoke_first_arg(
 fn normalize_expression_literals(
     expr: &str,
     span: &SourceSpan,
+    rhai_context: &str,
+    rhai_compile_target: RhaiCompileTarget,
     all_script_access: &BTreeMap<String, AccessLevel>,
     module_name: Option<&str>,
     current_script_name: Option<&str>,
@@ -629,7 +756,18 @@ fn normalize_expression_literals(
         visible_module_vars,
         visible_module_consts,
     )?;
-    Ok(rewritten)
+    let runtime_module_global_rewrite_map =
+        build_runtime_module_global_rewrite_map(visible_module_vars, visible_module_consts);
+    let runtime_function_symbol_map = build_runtime_function_symbol_map(visible_functions);
+    preprocess_and_compile_rhai_source(
+        &rewritten,
+        span,
+        rhai_context,
+        RhaiInputMode::CodeBlock,
+        rhai_compile_target,
+        Some(&runtime_function_symbol_map),
+        Some(&runtime_module_global_rewrite_map),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -684,7 +822,18 @@ fn normalize_attribute_expression_literals(
         visible_module_vars,
         visible_module_consts,
     )?;
-    Ok(rewritten)
+    let runtime_module_global_rewrite_map =
+        build_runtime_module_global_rewrite_map(visible_module_vars, visible_module_consts);
+    let runtime_function_symbol_map = build_runtime_function_symbol_map(visible_functions);
+    preprocess_and_compile_rhai_source(
+        &rewritten,
+        span,
+        "attribute expression",
+        RhaiInputMode::AttributeExpr,
+        RhaiCompileTarget::Expression,
+        Some(&runtime_function_symbol_map),
+        Some(&runtime_module_global_rewrite_map),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -728,7 +877,15 @@ fn normalize_template_literals(
         visible_module_vars,
         visible_module_consts,
     )?;
-    Ok(rewritten)
+    let runtime_module_global_rewrite_map =
+        build_runtime_module_global_rewrite_map(visible_module_vars, visible_module_consts);
+    let runtime_function_symbol_map = build_runtime_function_symbol_map(visible_functions);
+    preprocess_and_compile_template_expressions(
+        &rewritten,
+        span,
+        &runtime_function_symbol_map,
+        &runtime_module_global_rewrite_map,
+    )
 }
 
 fn parse_script_target_attr(
@@ -1075,9 +1232,15 @@ pub(crate) fn compile_group_nodes(
             "temp" => {
                 let mut declaration = parse_var_declaration(child, visible_types)?;
                 if let Some(expr) = declaration.initial_value_expr.as_mut() {
+                    let raw_expr_quoted = {
+                        let trimmed = expr.trim_start();
+                        trimmed.starts_with('"') || trimmed.starts_with('\'')
+                    };
                     *expr = normalize_expression_literals(
                         expr,
                         &child.location,
+                        "var initializer expression",
+                        RhaiCompileTarget::Expression,
                         all_script_access,
                         module_name,
                         current_script_name,
@@ -1087,20 +1250,14 @@ pub(crate) fn compile_group_nodes(
                         visible_module_vars,
                         visible_module_consts,
                     )?;
-                    if matches!(declaration.r#type, ScriptType::Script)
-                        && (expr.trim_start().starts_with('"')
-                            || expr.trim_start().starts_with('\''))
-                    {
+                    if matches!(declaration.r#type, ScriptType::Script) && raw_expr_quoted {
                         return Err(ScriptLangError::with_span(
                             "XML_SCRIPT_ASSIGN_STRING_FORBIDDEN",
                             "script type does not accept plain string literal; use @module.script.",
                             child.location.clone(),
                         ));
                     }
-                    if matches!(declaration.r#type, ScriptType::Function)
-                        && (expr.trim_start().starts_with('"')
-                            || expr.trim_start().starts_with('\''))
-                    {
+                    if matches!(declaration.r#type, ScriptType::Function) && raw_expr_quoted {
                         return Err(ScriptLangError::with_span(
                             "XML_FUNCTION_ASSIGN_STRING_FORBIDDEN",
                             "function type does not accept plain string literal; use *module.function.",
@@ -1164,6 +1321,8 @@ pub(crate) fn compile_group_nodes(
                 let code = normalize_expression_literals(
                     &parse_inline_required(child)?,
                     &child.location,
+                    "code block",
+                    RhaiCompileTarget::CodeBlock,
                     all_script_access,
                     module_name,
                     current_script_name,
@@ -1402,7 +1561,18 @@ pub(crate) fn compile_group_nodes(
                             });
                         }
                         "dynamic-options" => {
-                            let array_expr = get_required_non_empty_attr(choice_child, "array")?;
+                            let array_expr = normalize_attribute_expression_literals(
+                                &get_required_non_empty_attr(choice_child, "array")?,
+                                &choice_child.location,
+                                all_script_access,
+                                module_name,
+                                current_script_name,
+                                visible_types,
+                                visible_functions,
+                                local_var_types,
+                                visible_module_vars,
+                                visible_module_consts,
+                            )?;
                             let item_name = get_required_non_empty_attr(choice_child, "item")?;
                             let index_name = get_optional_attr(choice_child, "index");
                             assert_decl_name_not_reserved_or_rhai_keyword(
@@ -1630,18 +1800,20 @@ pub(crate) fn compile_group_nodes(
                     parse_args(get_optional_attr(child, "args"))?
                         .into_iter()
                         .map(|mut arg| {
-                            arg.value_expr = normalize_attribute_expression_literals(
-                                &arg.value_expr,
-                                &child.location,
-                                all_script_access,
-                                module_name,
-                                current_script_name,
-                                visible_types,
-                                visible_functions,
-                                local_var_types,
-                                visible_module_vars,
-                                visible_module_consts,
-                            )?;
+                            if !arg.is_ref {
+                                arg.value_expr = normalize_attribute_expression_literals(
+                                    &arg.value_expr,
+                                    &child.location,
+                                    all_script_access,
+                                    module_name,
+                                    current_script_name,
+                                    visible_types,
+                                    visible_functions,
+                                    local_var_types,
+                                    visible_module_vars,
+                                    visible_module_consts,
+                                )?;
+                            }
                             Ok::<_, ScriptLangError>(arg)
                         })
                         .collect::<Result<Vec<_>, _>>()?
@@ -1659,18 +1831,20 @@ pub(crate) fn compile_group_nodes(
                 let args = parse_args(get_optional_attr(child, "args"))?
                     .into_iter()
                     .map(|mut arg| {
-                        arg.value_expr = normalize_attribute_expression_literals(
-                            &arg.value_expr,
-                            &child.location,
-                            all_script_access,
-                            module_name,
-                            current_script_name,
-                            visible_types,
-                            visible_functions,
-                            local_var_types,
-                            visible_module_vars,
-                            visible_module_consts,
-                        )?;
+                        if !arg.is_ref {
+                            arg.value_expr = normalize_attribute_expression_literals(
+                                &arg.value_expr,
+                                &child.location,
+                                all_script_access,
+                                module_name,
+                                current_script_name,
+                                visible_types,
+                                visible_functions,
+                                local_var_types,
+                                visible_module_vars,
+                                visible_module_consts,
+                            )?;
+                        }
                         Ok::<_, ScriptLangError>(arg)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -2776,6 +2950,8 @@ mod script_compile_tests {
         let normalized_expr = normalize_expression_literals(
             "target = *add; step = @next; invoke(fnRef, [1]);",
             &span,
+            "test code block",
+            RhaiCompileTarget::CodeBlock,
             &all_script_access,
             Some("main"),
             Some("main.main"),
@@ -2800,6 +2976,8 @@ mod script_compile_tests {
         let invoke_error = normalize_expression_literals(
             "invoke(fnRef, [1])",
             &span,
+            "test expression",
+            RhaiCompileTarget::Expression,
             &all_script_access,
             Some("main"),
             Some("main.main"),
@@ -2816,6 +2994,8 @@ mod script_compile_tests {
         let missing_fn_error = normalize_expression_literals(
             "*missing.func",
             &span,
+            "test expression",
+            RhaiCompileTarget::Expression,
             &all_script_access,
             Some("main"),
             Some("main.main"),
@@ -2841,6 +3021,8 @@ mod script_compile_tests {
         let enum_error = normalize_expression_literals(
             "Status.Invalid",
             &span,
+            "test expression",
+            RhaiCompileTarget::Expression,
             &all_script_access,
             Some("main"),
             Some("main.main"),
@@ -2886,6 +3068,8 @@ mod script_compile_tests {
         let script_macro_expr = normalize_expression_literals(
             "__script__",
             &span,
+            "test expression",
+            RhaiCompileTarget::Expression,
             &all_script_access,
             Some("main"),
             Some("main.main"),
@@ -2901,6 +3085,8 @@ mod script_compile_tests {
         let quoted_script_macro_expr = normalize_expression_literals(
             "\"__script__\"",
             &span,
+            "test expression",
+            RhaiCompileTarget::Expression,
             &all_script_access,
             Some("main"),
             Some("main.main"),
@@ -2918,6 +3104,8 @@ mod script_compile_tests {
         let escaped_string = normalize_expression_literals(
             "\"test\\nvalue\"", // string with escaped newline
             &span,
+            "test expression",
+            RhaiCompileTarget::Expression,
             &all_script_access,
             Some("main"),
             Some("main.main"),
@@ -2934,6 +3122,8 @@ mod script_compile_tests {
         let backslash_end = normalize_expression_literals(
             "\"test\\\\\"",
             &span,
+            "test expression",
+            RhaiCompileTarget::Expression,
             &all_script_access,
             Some("main"),
             Some("main.main"),
@@ -2958,8 +3148,8 @@ mod script_compile_tests {
             &BTreeMap::new(),
             &BTreeMap::new(),
         )
-        .expect("script macro in attribute expression should use single quotes");
-        assert_eq!(script_macro_attr, "'main.main'");
+        .expect("script macro in attribute expression should normalize as Rhai source");
+        assert_eq!(script_macro_attr, "\"main.main\"");
 
         let script_macro_template = normalize_template_literals(
             "expr=${__script__}; raw=__script__",
@@ -2984,6 +3174,8 @@ mod script_compile_tests {
         let script_macro_adjacent_to_identifier = normalize_expression_literals(
             "prefix__script__suffix",
             &span,
+            "test expression",
+            RhaiCompileTarget::Expression,
             &all_script_access,
             Some("main"),
             Some("main.main"),
@@ -3002,8 +3194,10 @@ mod script_compile_tests {
 
         // Test __script__ at start of string with non-identifier after
         let script_macro_at_start = normalize_expression_literals(
-            "__script__:main",
+            "__script__ + main",
             &span,
+            "test expression",
+            RhaiCompileTarget::Expression,
             &all_script_access,
             Some("main"),
             Some("main.main"),
@@ -3014,12 +3208,14 @@ mod script_compile_tests {
             &BTreeMap::new(),
         )
         .expect("__script__ at start should be replaced");
-        assert_eq!(script_macro_at_start, "\"main.main\":main");
+        assert_eq!(script_macro_at_start, "\"main.main\" + main");
 
         // Test __script__ at end of string with non-identifier before
         let script_macro_at_end = normalize_expression_literals(
-            "main:__script__",
+            "main + __script__",
             &span,
+            "test expression",
+            RhaiCompileTarget::Expression,
             &all_script_access,
             Some("main"),
             Some("main.main"),
@@ -3030,7 +3226,7 @@ mod script_compile_tests {
             &BTreeMap::new(),
         )
         .expect("__script__ at end should be replaced");
-        assert_eq!(script_macro_at_end, "main:\"main.main\"");
+        assert_eq!(script_macro_at_end, "main + \"main.main\"");
 
         // Test line 403: normalize_and_validate_function_literals error in attr
         let missing_fn_attr_error = normalize_attribute_expression_literals(
@@ -5323,7 +5519,7 @@ mod script_compile_tests {
     }
 
     #[test]
-    fn enum_literals_in_attribute_expressions_are_rewritten_with_single_quotes() {
+    fn enum_literals_in_attribute_expressions_are_normalized_for_rhai() {
         let root = parse_xml_document(
             r#"
 <script name="main">
@@ -5364,23 +5560,23 @@ mod script_compile_tests {
         assert!(
             root_group.nodes.iter().any(|node| matches!(
                 node,
-                ScriptNode::If { when_expr, .. } if when_expr == "'A' == 'A'"
+                ScriptNode::If { when_expr, .. } if when_expr == "\"A\" == \"A\""
             )),
-            "if when expression should rewrite enum literal using single quotes"
+            "if when expression should rewrite enum literal into normalized Rhai source"
         );
         assert!(
             root_group.nodes.iter().any(|node| matches!(
                 node,
-                ScriptNode::Call { args, .. } if args.first().map(|arg| arg.value_expr.as_str()) == Some("'A'")
+                ScriptNode::Call { args, .. } if args.first().map(|arg| arg.value_expr.as_str()) == Some("\"A\"")
             )),
-            "call arg should rewrite enum literal using single quotes"
+            "call arg should rewrite enum literal into normalized Rhai source"
         );
         assert!(
             root_group.nodes.iter().any(|node| matches!(
                 node,
-                ScriptNode::Goto { args, .. } if args.first().map(|arg| arg.value_expr.as_str()) == Some("'A'")
+                ScriptNode::Goto { args, .. } if args.first().map(|arg| arg.value_expr.as_str()) == Some("\"A\"")
             )),
-            "goto arg should rewrite enum literal using single quotes"
+            "goto arg should rewrite enum literal into normalized Rhai source"
         );
     }
 

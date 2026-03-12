@@ -61,7 +61,7 @@
   2) 有 `(` 时先提取源码中真实被调用的 token，只对命中函数名做重写。  
   同时在 prelude 构建中延迟 `invoke_body_symbol_map`，仅当 function body 含调用时才计算。
 - 证据：本地探针中 `functions=120 + with_temp=true` 的首轮耗时由约 `17.5s` 降到约 `176ms`；`functions=10, steps=100` 由约 `1.56s` 降到约 `294ms`。
-- 剩余瓶颈：当前 `execute_rhai_with_mode` 仍是“构造源码字符串 -> Rhai 解析执行”的模式，循环中大量唯一表达式时仍有显著解析成本。后续优先考虑 AST 缓存（按最终 source 缓存 AST，改用 `eval_ast_with_scope/run_ast_with_scope`）。
+- 更新（2026-03-13）：运行期已切到“按最终源码 key 的 AST 缓存 + `eval_ast_with_scope/run_ast_with_scope`”，不再每次直接走字符串解析执行；若后续回退为字符串直跑，会重新放大高频路径延迟。
 
 ### 2026-03-12 — 失败模式 — 短函数引用归一化需覆盖 module function body 双路径
 - 发现：`*short_fn` 若仅在 script/module-var/module-const 初始化时归一化，而遗漏 `<function>` 代码体，会在跨模块转发后以原始短名进入 runtime，触发 `ENGINE_INVOKE_TARGET_NOT_FOUND`。
@@ -76,3 +76,15 @@
 - 细节：`crates/sl-runtime/src/engine/eval.rs` 的 `build_module_prelude` 中，`invoke` 分发统一按 `invoke_all_functions` 生成；`module.func(...)` 静态调用可见性仍由可见函数符号映射约束，不随 `invoke` 变更。
 - 失败模式：若把 `invoke` 回退为“仅 public 可调”，会重新出现“合法获得 private 引用但 invoke 失败”的行为回归。
 - 如何验证：回归场景使用三模块链路（source -> relay -> app），由 source 公共函数返回 private 引用，app 侧 `invoke(fnRef, [...])` 必须成功，同时 `app` 里直接 `source.hidden(...)` 仍应失败。
+
+### 2026-03-13 — 架构决策 — Rhai 采用“编译期规范化源码 + 运行期 AST 缓存”两段式
+- 发现：Rhai 规则若由 runtime/compile 分别实现，会产生规则漂移、错误时机不稳定和重复解析成本。
+- 细节：当前长期约束如下：
+  - 预处理规则统一下沉在 `crates/sl-core/src/rhai.rs`，`sl-compiler` 与 `sl-runtime` 共用，不允许再复制一套。
+  - `sl-compiler` 必须在各 Rhai 上下文先“预处理 + 语法编译检查”，并把规范化后的源码写入 artifact。
+  - `sl-runtime` 只负责执行期转换与动态错误处理，执行路径使用 AST 缓存（按最终执行源码 key）。
+  - AST 缓存只存在进程内内存，不写入 artifact/snapshot。
+- 失败模式：若绕过 compile 前移（例如在 runtime 再做可确定语法校验），会出现同一输入在不同入口报错时机不一致，并且首轮性能回退。
+- 如何验证：
+  - 非法 LT/LTE/AND、单双引号或 Rhai 语法错误，应在 `compile_*` 阶段返回 `XML_RHAI_*`。
+  - 同源码重复执行时，runtime 的 Rhai 编译计数应保持一次命中（可用 `rhai_compile_count` 探针断言）。

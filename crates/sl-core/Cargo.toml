@@ -6,6 +6,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+regex.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 

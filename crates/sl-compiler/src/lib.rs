@@ -5,11 +5,13 @@ pub(crate) use std::sync::OnceLock;
 pub(crate) use regex::Regex;
 pub(crate) use serde_json::Value as JsonValue;
 pub(crate) use sl_core::{
-    default_value_from_type, AccessLevel, CallArgument, ChoiceEntry, ChoiceOption,
-    CompiledProjectArtifact, ContinueTarget, DynamicChoiceBlock, DynamicChoiceTemplate,
-    FunctionDecl, FunctionParam, FunctionReturn, ImplicitGroup, MapKeyType, ModuleConstDecl,
-    ModuleVarDecl, ScriptIr, ScriptKind, ScriptLangError, ScriptNode, ScriptParam, ScriptTarget,
-    ScriptType, SlValue, SourceSpan, VarDeclaration, COMPILED_PROJECT_SCHEMA,
+    default_value_from_type, module_namespace_symbol, preprocess_scriptlang_rhai_input,
+    rewrite_function_calls, rewrite_module_global_qualified_access, rhai_function_symbol,
+    AccessLevel, CallArgument, ChoiceEntry, ChoiceOption, CompiledProjectArtifact, ContinueTarget,
+    DynamicChoiceBlock, DynamicChoiceTemplate, FunctionDecl, FunctionParam, FunctionReturn,
+    ImplicitGroup, MapKeyType, ModuleConstDecl, ModuleVarDecl, RhaiInputMode, ScriptIr, ScriptKind,
+    ScriptLangError, ScriptNode, ScriptParam, ScriptTarget, ScriptType, SlValue, SourceSpan,
+    VarDeclaration, COMPILED_PROJECT_SCHEMA,
 };
 pub(crate) use sl_parser::{
     parse_alias_directives, parse_import_directives, parse_xml_document,

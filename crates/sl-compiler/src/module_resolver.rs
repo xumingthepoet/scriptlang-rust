@@ -524,6 +524,20 @@ fn namespace_alias_rewrite_map(
     map
 }
 
+fn runtime_module_global_rewrite_map_from_targets<'a>(
+    targets: impl Iterator<Item = &'a str>,
+) -> BTreeMap<String, String> {
+    let mut map = BTreeMap::new();
+    for qualified_name in targets {
+        let Some((namespace, name)) = qualified_name.split_once('.') else {
+            continue;
+        };
+        map.entry(qualified_name.to_string())
+            .or_insert_with(|| format!("{}.{}", module_namespace_symbol(namespace), name));
+    }
+    map
+}
+
 fn normalize_module_initializer(
     expr: &Option<String>,
     resolved_type: &ScriptType,
@@ -569,11 +583,25 @@ fn normalize_module_initializer(
         Some(module_name),
         visible_functions,
     )?;
-    Ok(Some(rewrite_and_validate_enum_literals_in_expression(
-        &function_rewritten,
-        visible_types,
+    let rewritten =
+        rewrite_and_validate_enum_literals_in_expression(&function_rewritten, visible_types, span)?;
+    let runtime_rewrite_map = runtime_module_global_rewrite_map_from_targets(
+        alias_rewrite_map.values().map(String::as_str),
+    );
+    let runtime_function_symbol_map = visible_functions
+        .keys()
+        .map(|name| (name.clone(), rhai_function_symbol(name)))
+        .collect::<BTreeMap<_, _>>();
+    let preprocessed = preprocess_and_compile_rhai_source(
+        &rewritten,
         span,
-    )?))
+        "module initializer expression",
+        RhaiInputMode::CodeBlock,
+        RhaiCompileTarget::Expression,
+        Some(&runtime_function_symbol_map),
+        Some(&runtime_rewrite_map),
+    )?;
+    Ok(Some(preprocessed))
 }
 
 pub(crate) fn parse_module_var_declaration(
@@ -1004,6 +1032,36 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
                 &function_rewritten_code,
                 &visible_types_in_scope,
                 &decl.location,
+            )?;
+            let runtime_rewrite_map = runtime_module_global_rewrite_map_from_targets(
+                namespace_aliases_by_namespace
+                    .get(function_namespace)
+                    .into_iter()
+                    .flat_map(|map| map.values().map(String::as_str)),
+            );
+            let mut runtime_function_symbol_map = visible_function_names
+                .iter()
+                .map(|name| (name.clone(), rhai_function_symbol(name)))
+                .collect::<BTreeMap<_, _>>();
+            for qualified_name in visible_function_names.iter() {
+                let Some((namespace, short_name)) = qualified_name.split_once('.') else {
+                    continue;
+                };
+                if namespace != function_namespace {
+                    continue;
+                }
+                runtime_function_symbol_map
+                    .entry(short_name.to_string())
+                    .or_insert_with(|| rhai_function_symbol(qualified_name));
+            }
+            let normalized_code = preprocess_and_compile_rhai_source(
+                &normalized_code,
+                &decl.location,
+                "function body",
+                RhaiInputMode::CodeBlock,
+                RhaiCompileTarget::CodeBlock,
+                Some(&runtime_function_symbol_map),
+                Some(&runtime_rewrite_map),
             )?;
 
             functions.insert(
@@ -1528,6 +1586,36 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
                 &function_rewritten_code,
                 &visible_types,
                 &decl.location,
+            )?;
+            let runtime_rewrite_map = runtime_module_global_rewrite_map_from_targets(
+                namespace_aliases_by_namespace
+                    .get(function_namespace)
+                    .into_iter()
+                    .flat_map(|map| map.values().map(String::as_str)),
+            );
+            let mut runtime_function_symbol_map = visible_function_names
+                .iter()
+                .map(|name| (name.clone(), rhai_function_symbol(name)))
+                .collect::<BTreeMap<_, _>>();
+            for qualified_name in visible_function_names.iter() {
+                let Some((namespace, short_name)) = qualified_name.split_once('.') else {
+                    continue;
+                };
+                if namespace != function_namespace {
+                    continue;
+                }
+                runtime_function_symbol_map
+                    .entry(short_name.to_string())
+                    .or_insert_with(|| rhai_function_symbol(qualified_name));
+            }
+            let normalized_code = preprocess_and_compile_rhai_source(
+                &normalized_code,
+                &decl.location,
+                "function body",
+                RhaiInputMode::CodeBlock,
+                RhaiCompileTarget::CodeBlock,
+                Some(&runtime_function_symbol_map),
+                Some(&runtime_rewrite_map),
             )?;
 
             functions.insert(
@@ -2680,7 +2768,7 @@ mod module_resolver_tests {
                             type_expr: ParsedTypeExpr::Primitive("boolean".to_string()),
                             location: span.clone(),
                         },
-                        code: "ret = message_key == MessageKey.Ping && location_id == LocationId.Home;".to_string(),
+                        code: "ret = message_key == MessageKey.Ping AND location_id == LocationId.Home;".to_string(),
                         location: span.clone(),
                     }],
                     module_global_var_decls: Vec::new(),

@@ -137,6 +137,9 @@ pub struct ScriptLangEngine {
     pub(super) invoke_all_functions: BTreeMap<String, FunctionDecl>,
     pub(super) invoke_function_symbols: BTreeMap<String, String>,
     pub(super) module_prelude_by_script: HashMap<String, String>,
+    pub(super) rhai_ast_cache: HashMap<String, rhai::AST>,
+    #[cfg(test)]
+    pub(super) rhai_compile_count: usize,
     pub(super) initial_random_seed: u32,
     pub(super) initial_random_sequence: Option<Vec<u32>>,
     pub(super) rhai_engine: Engine,
@@ -366,6 +369,9 @@ impl ScriptLangEngine {
             invoke_all_functions,
             invoke_function_symbols,
             module_prelude_by_script: HashMap::new(),
+            rhai_ast_cache: HashMap::new(),
+            #[cfg(test)]
+            rhai_compile_count: 0,
             initial_random_seed,
             initial_random_sequence,
             rhai_engine,
