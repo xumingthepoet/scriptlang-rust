@@ -1023,7 +1023,11 @@ mod macro_expand_tests {
     fn for_macro_empty_temps_attribute_fails() {
         let for_node = xml_element(
             "for",
-            &[("temps", ""), ("condition", "true"), ("iteration", "i = i + 1")],
+            &[
+                ("temps", ""),
+                ("condition", "true"),
+                ("iteration", "i = i + 1"),
+            ],
             Vec::new(),
         );
         let error = expand_element_with_macros(
@@ -1063,12 +1067,25 @@ mod macro_expand_tests {
     }
 
     #[test]
+    fn parse_for_temps_missing_type_fails() {
+        // Test line 370: temps entry missing type (name::init)
+        let node = xml_element("for", &[("temps", "")], Vec::new());
+        let error =
+            parse_for_temps_decls("x::0", &node).expect_err("temps entry missing type should fail");
+        assert_eq!(error.code, "XML_FOR_TEMPS_INVALID");
+    }
+
+    #[test]
     fn for_macro_child_expansion_propagates_error() {
         // Test that expand_children error propagation is covered (34:64)
         // Create a for with an empty temps which will fail during child expansion
         let for_node = xml_element(
             "for",
-            &[("temps", ""), ("condition", "true"), ("iteration", "i = i + 1")],
+            &[
+                ("temps", ""),
+                ("condition", "true"),
+                ("iteration", "i = i + 1"),
+            ],
             Vec::new(),
         );
         let error = expand_element_with_macros(
