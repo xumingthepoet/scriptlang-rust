@@ -11,5 +11,6 @@
     <code>hp = hp - 1;</code>
   </while>
   <text>hp=${hp}</text>
+  <end/>
 </script>
 </module>

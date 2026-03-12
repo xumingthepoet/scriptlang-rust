@@ -8,5 +8,6 @@
   <call script="@battle.battle"/>
   <text>main.local.after=${hp}</text>
   <text>main.global.after=${shared.hp}</text>
+  <end/>
 </script>
 </module>

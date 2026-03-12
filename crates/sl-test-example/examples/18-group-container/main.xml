@@ -8,5 +8,6 @@
     <temp name="title" type="string">"Mage"</temp>
     <text>In group: ${title}</text>
   </group>
+  <end/>
 </script>
 </module>

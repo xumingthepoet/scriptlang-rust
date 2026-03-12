@@ -388,7 +388,7 @@ mod agent_tests {
         write_file(
             &root.join("main.xml"),
             r#"<module name="main" export="script:main">
-<script name="main"><debug>dbg=${1+1}</debug><text>ok</text></script>
+<script name="main"><debug>dbg=${1+1}</debug><text>ok</text><end/></script>
 </module>"#,
         );
         let scenario = load_source_by_scripts_dir(root.to_string_lossy().as_ref(), "main.main")
@@ -419,6 +419,7 @@ mod agent_tests {
   <temp name="name" type="string">"Traveler"</temp>
   <input var="name" text="Name"/>
   <text>${name}</text>
+  <end/>
 </script>
 </module>"#,
         );

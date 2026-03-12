@@ -415,6 +415,7 @@ mod scope_tests {
     <temp name="same" type="int">2</temp>
     <text>${same}</text>
   </group>
+  <end/>
 </script>
 "#,
         )]));

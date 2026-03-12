@@ -199,6 +199,7 @@ pub(crate) mod cli_test_support {
   <text>Scenario 01: text + code</text>
   <code>count = count + 1;</code>
   <text>count=${count}</text>
+  <end/>
 </script>
 </module>"#,
                 );
@@ -212,6 +213,7 @@ pub(crate) mod cli_test_support {
   <choice text="Pick">
     <option text="A"><text>A</text></option>
   </choice>
+  <end/>
 </script>
 </module>"#,
                 );
@@ -225,6 +227,7 @@ pub(crate) mod cli_test_support {
   <temp name="name" type="string">"Traveler"</temp>
   <input var="name" text="Name"/>
   <text>${name}</text>
+  <end/>
 </script>
 </module>"#,
                 );

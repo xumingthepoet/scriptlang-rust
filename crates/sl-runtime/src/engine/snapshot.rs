@@ -360,6 +360,7 @@ mod snapshot_tests {
           <option text="Stop"><code>n = 0;</code></option>
         </choice>
       </while>
+      <end/>
     </script>
     "#,
         )]);

@@ -3,6 +3,7 @@
 <script name="main">
   <call script="@hidden"/>
   <call script="@shared.show"/>
+  <end/>
 </script>
 <script name="hidden" kind="call">
   <text>private sibling ok</text>

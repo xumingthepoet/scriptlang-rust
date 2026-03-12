@@ -15,5 +15,6 @@
       </choice>
     </while>
     <text>done</text>
+    <end/>
   </script>
 </module>

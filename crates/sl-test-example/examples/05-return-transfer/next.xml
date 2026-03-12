@@ -1,5 +1,6 @@
 <module name="next" export="script:next">
 <script name="next">
   <text>arrived</text>
+  <end/>
 </script>
 </module>

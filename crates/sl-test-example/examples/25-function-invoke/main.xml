@@ -16,5 +16,6 @@
     <code>value = main.from_code(3);</code>
     <code>value = invoke(addFn, [value]);</code>
     <text>${value}</text>
+    <end/>
   </script>
 </module>

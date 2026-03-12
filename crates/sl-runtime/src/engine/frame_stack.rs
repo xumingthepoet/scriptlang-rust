@@ -149,8 +149,14 @@ impl ScriptLangEngine {
         }
 
         let Some(continuation) = frame.return_continuation else {
-            self.end_execution();
-            return Ok(());
+            let (script_name, _) = self.lookup_group(&frame.group_id)?;
+            return Err(ScriptLangError::new(
+                "ENGINE_EXPLICIT_END_REQUIRED",
+                format!(
+                    "Script \"{}\" reached natural end. Goto scripts must terminate with explicit <end/>.",
+                    script_name
+                ),
+            ));
         };
 
         let Some(resume_index) = self.find_frame_index(continuation.resume_frame_id) else {

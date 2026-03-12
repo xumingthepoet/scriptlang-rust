@@ -2,5 +2,6 @@
 <module name="main" export="script:main">
 <script name="main">
   <text>Main entry ${shared.greet("main")}</text>
+  <end/>
 </script>
 </module>

@@ -4,5 +4,6 @@
     <temp name="fnRef" type="function">*shared.add</temp>
     <temp name="value" type="int">invoke(fnRef, [3, 4])</temp>
     <text>${value}</text>
+    <end/>
   </script>
 </module>

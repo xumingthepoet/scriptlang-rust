@@ -8,5 +8,6 @@
   <code>guildName = guildName + " Mk2";</code>
   <input var="guildName" text="Name your guild"/>
   <text>Guild: ${guildName}</text>
+  <end/>
 </script>
 </module>

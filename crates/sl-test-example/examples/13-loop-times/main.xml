@@ -11,5 +11,6 @@
   </loop>
 
   <text>done-${i}</text>
+  <end/>
 </script>
 </module>

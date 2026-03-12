@@ -12,5 +12,6 @@
     <text>tick-${i}</text>
   </while>
   <text>done-${i}</text>
+  <end/>
 </script>
 </module>

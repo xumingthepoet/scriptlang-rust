@@ -2,5 +2,6 @@
 <module name="target" export="script:route">
   <script name="route" args="ids.LocationId:loc">
     <text>tag=${loc}</text>
+    <end/>
   </script>
 </module>

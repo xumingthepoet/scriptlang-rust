@@ -5,5 +5,6 @@
   <text>before hp=${hp}</text>
   <call script="@buff.buff" args="3,ref:hp"/>
   <text>after hp=${hp}</text>
+  <end/>
 </script>
 </module>

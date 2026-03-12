@@ -3,5 +3,6 @@
 <script name="alt" args="string:name">
   <temp name="who" type="string">name</temp>
   <text>Alt entry ${shared.greet(who)}</text>
+  <end/>
 </script>
 </module>

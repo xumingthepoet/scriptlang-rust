@@ -6,5 +6,6 @@
     <if when="bus.ping()">
       <text>ok</text>
     </if>
+    <end/>
   </script>
 </module>

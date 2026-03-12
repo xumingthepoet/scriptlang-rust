@@ -23,12 +23,16 @@
 
 ### 2.2 运行输出
 
+`next_output()` 返回的是同级事件流，宿主按事件类型分支处理：
+- `Text` / `Choices` / `Input` / `End`（以及可选的 `Debug`）
+- `End` 表示本次运行终止（由脚本显式 `<end/>` 触发）
+
 - `EngineOutput`（来自 `sl-core`）：
   - `Text { text, tag }`（`tag` 为可选元数据，供宿主扩展）
   - `Debug { text }`（调试输出事件，独立于 `Text`）
   - `Choices { items, prompt_text }`
   - `Input { prompt_text, default_text, max_length }`（`max_length` 为可选）
-  - `End`
+  - `End`（终结事件；收到后停止驱动）
 
 ### 2.3 快照
 
@@ -398,7 +402,8 @@ loop {
 1. `create_engine_from_xml` 会自动 `start`。  
 2. `compile_project_from_xml_map(..., None)` 默认入口脚本必须是 `main.main`。  
 3. `choose(index)` / `submit_input(text)` 必须在对应 pending boundary 下调用。  
-4. 内建函数：
+4. 收到 `EngineOutput::End` 后，本轮流程结束，不再继续 `choose/submit_input`。  
+5. 内建函数：
    - `random(n)`：`n > 0`
    - `enum_to_string(enumValue)`：返回枚举成员字符串
    - `is_call_kind_script(scriptRef)`：若 `scriptRef` 指向 `kind="call"` 脚本，返回 `true`

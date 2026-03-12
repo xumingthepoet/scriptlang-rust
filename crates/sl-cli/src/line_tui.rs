@@ -242,6 +242,7 @@ mod line_tui_tests {
   <temp name="name" type="string">"Traveler"</temp>
   <input var="name" text="Name"/>
   <text>${name}</text>
+  <end/>
 </script>
 </module>"#,
         );
@@ -272,6 +273,7 @@ mod line_tui_tests {
   <choice text="Pick">
     <option text="A"><text>A</text></option>
   </choice>
+  <end/>
 </script>
 </module>"#,
         );
@@ -315,6 +317,7 @@ mod line_tui_tests {
   <temp name="name" type="string">"Traveler"</temp>
   <input var="name" text="Name"/>
   <text>${name}</text>
+  <end/>
 </script>
 </module>"#,
         );
@@ -377,6 +380,7 @@ mod line_tui_tests {
   <choice text="Pick">
     <option text="A"><text>A</text></option>
   </choice>
+  <end/>
 </script>
 </module>"#,
         );

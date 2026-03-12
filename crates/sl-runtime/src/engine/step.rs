@@ -619,7 +619,7 @@ mod step_tests {
     pub(super) fn next_text_and_end() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><text>Hello</text></script>"#,
+            r#"<script name="main"><text>Hello</text><end/></script>"#,
         )]));
         engine.start("main", None).expect("start");
 
@@ -639,6 +639,7 @@ mod step_tests {
   <temp name="hp" type="int">2</temp>
   <debug>dbg hp=${hp}</debug>
   <text>text hp=${hp}</text>
+  <end/>
 </script>
 "#,
         )]));
@@ -718,6 +719,7 @@ mod step_tests {
   <input var="name" text="Name"/>
   <call script="@next.next"/>
   <text>done ${name}</text>
+  <end/>
 </script>
 "#,
             ),
@@ -772,6 +774,7 @@ mod step_tests {
   <call script="@battle.battle"/>
   <text>main.local.after=${hp}</text>
   <text>main.global.after=${shared.hp}</text>
+  <end/>
 </script>
 "#,
             ),
@@ -817,6 +820,7 @@ mod step_tests {
   <temp name="name" type="string">""</temp>
   <input var="name" text="Name"/>
   <text>done</text>
+  <end/>
 </script>"#,
         )]));
         engine.start("main", None).expect("start");
@@ -1129,6 +1133,11 @@ mod step_tests {
             .last_mut()
             .expect("engine should have frame");
         frame.scope.insert("id0".to_string(), SlValue::Number(9.0));
+        frame.return_continuation = Some(ContinuationFrame {
+            resume_frame_id: 999,
+            next_node_index: 1,
+            ref_bindings: BTreeMap::from([("id0".to_string(), "target".to_string())]),
+        });
         with_choice
             .finish_frame(frame_id)
             .expect("finish should write ref and update continuation");
@@ -1623,6 +1632,7 @@ mod step_tests {
         <text>tick-${i}</text>
       </while>
       <text>done-${i}</text>
+      <end/>
     </script>
     "#,
         )]));
@@ -1662,6 +1672,7 @@ mod step_tests {
         <text once="true">only once</text>
         <text>every time</text>
       </while>
+      <end/>
     </script>
     "#,
         )]));

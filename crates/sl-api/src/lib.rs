@@ -829,6 +829,7 @@ mod tests {
 <module name="main" export="script:main">
 <script name="main">
   <temp name="x" type="int">1</temp>
+  <end/>
 </script>
 </module>
 "#,

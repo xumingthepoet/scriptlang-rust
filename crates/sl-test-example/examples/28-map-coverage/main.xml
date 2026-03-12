@@ -62,5 +62,6 @@
 
     <code>slots["line"].push(3);</code>
     <text>slot3=${slots["line"][2]}</text>
+    <end/>
   </script>
 </module>

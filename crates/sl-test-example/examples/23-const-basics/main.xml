@@ -6,5 +6,6 @@
   <script name="main">
     <text>base=${baseHp}</text>
     <text>max=${maxHp}</text>
+    <end/>
   </script>
 </module>

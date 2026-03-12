@@ -19,6 +19,7 @@
     <call script="@main.emit_report" args="nodes,distance_map"/>
     <call script="@calc.show_total" args="nodes,distance_map"/>
     <call script="@templates.echo_seed"/>
+    <end/>
   </script>
 
   <script name="boost_home" kind="call" args="ref:#{LocationId=>int}:distance_map">
