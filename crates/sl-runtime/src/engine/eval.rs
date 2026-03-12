@@ -2876,7 +2876,8 @@ let public = 3;
     }
 
     #[test]
-    pub(super) fn invoke_supports_short_function_literal_forwarded_across_modules() {
+    pub(super) fn invoke_supports_short_function_literal_forwarded_across_modules_via_function_body(
+    ) {
         let files = map(&[
             (
                 "event_system.xml",
@@ -2900,14 +2901,13 @@ let public = 3;
                 "event_a.xml",
                 r#"
 <!-- import event_system from event_system.xml -->
-<module name="event_a" export="function:can_phase_3_fn;script:register">
-  <function name="can_phase_3_fn" return_type="boolean">
+<module name="event_a" export="function:register,can_phase_2_fn">
+  <function name="can_phase_2_fn" return_type="boolean">
     return true;
   </function>
-  <script name="register" kind="call">
-    <code>event_system.set_condition(*can_phase_3_fn);</code>
-    <return/>
-  </script>
+  <function name="register" return_type="boolean">
+    return event_system.set_condition(*can_phase_2_fn);
+  </function>
 </module>
 "#,
             ),
@@ -2918,10 +2918,11 @@ let public = 3;
 <!-- import event_a from event_a.xml -->
 <module name="app" export="script:main">
   <script name="main">
-    <call script="@event_a.register"/>
+    <code>event_a.register();</code>
     <if when="event_system.notify()">
       <text>true</text>
     </if>
+    <end/>
   </script>
 </module>
 "#,

@@ -62,3 +62,11 @@
   同时在 prelude 构建中延迟 `invoke_body_symbol_map`，仅当 function body 含调用时才计算。
 - 证据：本地探针中 `functions=120 + with_temp=true` 的首轮耗时由约 `17.5s` 降到约 `176ms`；`functions=10, steps=100` 由约 `1.56s` 降到约 `294ms`。
 - 剩余瓶颈：当前 `execute_rhai_with_mode` 仍是“构造源码字符串 -> Rhai 解析执行”的模式，循环中大量唯一表达式时仍有显著解析成本。后续优先考虑 AST 缓存（按最终 source 缓存 AST，改用 `eval_ast_with_scope/run_ast_with_scope`）。
+
+### 2026-03-12 — 失败模式 — 短函数引用归一化需覆盖 module function body 双路径
+- 发现：`*short_fn` 若仅在 script/module-var/module-const 初始化时归一化，而遗漏 `<function>` 代码体，会在跨模块转发后以原始短名进入 runtime，触发 `ENGINE_INVOKE_TARGET_NOT_FOUND`。
+- 细节：`crates/sl-compiler/src/module_resolver.rs` 的两个函数收集入口都必须执行函数字面量归一化：  
+  1) `resolve_visible_module_symbols_with_aliases_and_module_scoped_type_aliases`（运行期可见符号路径）  
+  2) `collect_functions_for_bundle_with_aliases`（artifact/bundle 路径）  
+  同时先收集完整可见函数名集合，再做归一化校验，避免前向引用被误判为 not found。
+- 证据：最小复现为 `<function> return event_system.set_condition(*can_phase_2_fn); </function>`，修复前 `invoke(stored_condition, [])` 报 `Invoke target not found.*can_phase_2_fn`。

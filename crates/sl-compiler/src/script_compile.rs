@@ -379,6 +379,31 @@ pub(crate) fn normalize_and_validate_function_literals(
     module_name: Option<&str>,
     visible_functions: &BTreeMap<String, FunctionDecl>,
 ) -> Result<String, ScriptLangError> {
+    normalize_and_validate_function_literals_with_lookup(expr, span, module_name, |qualified| {
+        visible_functions.contains_key(qualified)
+    })
+}
+
+pub(crate) fn normalize_and_validate_function_literals_with_names(
+    expr: &str,
+    span: &SourceSpan,
+    module_name: Option<&str>,
+    visible_function_names: &BTreeSet<String>,
+) -> Result<String, ScriptLangError> {
+    normalize_and_validate_function_literals_with_lookup(expr, span, module_name, |qualified| {
+        visible_function_names.contains(qualified)
+    })
+}
+
+fn normalize_and_validate_function_literals_with_lookup<F>(
+    expr: &str,
+    span: &SourceSpan,
+    module_name: Option<&str>,
+    mut has_visible_function: F,
+) -> Result<String, ScriptLangError>
+where
+    F: FnMut(&str) -> bool,
+{
     let chars = expr.chars().collect::<Vec<_>>();
     let mut out = String::with_capacity(expr.len());
     let mut index = 0usize;
@@ -387,7 +412,7 @@ pub(crate) fn normalize_and_validate_function_literals(
         if is_function_literal_start(&chars, index) {
             if let Some((literal_name, next_index)) = parse_function_literal_name(&chars, index) {
                 let qualified = qualify_function_literal_name(&literal_name, module_name, span)?;
-                if !visible_functions.contains_key(&qualified) {
+                if !has_visible_function(&qualified) {
                     return Err(ScriptLangError::with_span(
                         "XML_FUNCTION_LITERAL_NOT_FOUND",
                         format!(

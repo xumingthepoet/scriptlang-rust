@@ -895,6 +895,31 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
         &module_scoped_explicit_symbol_aliases,
     )?;
 
+    let mut visible_function_names = BTreeSet::new();
+    for path in reachable {
+        let Some(module) = module_by_path.get(path) else {
+            continue;
+        };
+        for decl in &module.function_decls {
+            let is_local = local_module_name.is_some_and(|module_name| {
+                decl.qualified_name.starts_with(&format!("{module_name}."))
+            });
+            if !is_local && decl.access != AccessLevel::Public {
+                continue;
+            }
+            if !visible_function_names.insert(decl.qualified_name.clone()) {
+                return Err(ScriptLangError::with_span(
+                    "FUNCTION_DECL_DUPLICATE",
+                    format!(
+                        "Duplicate function declaration \"{}\".",
+                        decl.qualified_name
+                    ),
+                    decl.location.clone(),
+                ));
+            }
+        }
+    }
+
     let mut functions: BTreeMap<String, FunctionDecl> = BTreeMap::new();
     let mut function_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
 
@@ -975,8 +1000,14 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
                 Some(function_namespace),
                 None,
             )?;
-            let normalized_code = rewrite_and_validate_enum_literals_in_expression(
+            let function_rewritten_code = normalize_and_validate_function_literals_with_names(
                 &script_rewritten_code,
+                &decl.location,
+                Some(function_namespace),
+                &visible_function_names,
+            )?;
+            let normalized_code = rewrite_and_validate_enum_literals_in_expression(
+                &function_rewritten_code,
                 &visible_types_in_scope,
                 &decl.location,
             )?;
@@ -1419,6 +1450,22 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
         &module_scoped_explicit_symbol_aliases,
     )?;
 
+    let mut visible_function_names = BTreeSet::new();
+    for module in module_by_path.values() {
+        for decl in &module.function_decls {
+            if !visible_function_names.insert(decl.qualified_name.clone()) {
+                return Err(ScriptLangError::with_span(
+                    "FUNCTION_DECL_DUPLICATE",
+                    format!(
+                        "Duplicate function declaration \"{}\".",
+                        decl.qualified_name
+                    ),
+                    decl.location.clone(),
+                ));
+            }
+        }
+    }
+
     let mut functions = BTreeMap::new();
     let mut public_functions = BTreeSet::new();
     for module in module_by_path.values() {
@@ -1478,8 +1525,14 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
                 Some(function_namespace),
                 None,
             )?;
-            let normalized_code = rewrite_and_validate_enum_literals_in_expression(
+            let function_rewritten_code = normalize_and_validate_function_literals_with_names(
                 &script_rewritten_code,
+                &decl.location,
+                Some(function_namespace),
+                &visible_function_names,
+            )?;
+            let normalized_code = rewrite_and_validate_enum_literals_in_expression(
+                &function_rewritten_code,
                 &visible_types,
                 &decl.location,
             )?;

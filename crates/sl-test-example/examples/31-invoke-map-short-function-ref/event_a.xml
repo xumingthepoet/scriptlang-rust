@@ -1,5 +1,5 @@
 <!-- import event_system from event_system.xml -->
-<module name="event_a" export="function:can_phase_2_fn,can_phase_3_fn;script:register">
+<module name="event_a" export="function:can_phase_2_fn,can_phase_3_fn,register_by_map,register_direct">
   <enum name="Phase">
     <member name="P2"/>
     <member name="P3"/>
@@ -18,12 +18,11 @@
     return true;
   </function>
 
-  <script name="register" kind="call">
-    <temp name="cond_fn" type="function">*event_system.always_true</temp>
-    <code>
-      cond_fn = condition_map[event_a.Phase.P3];
-      event_system.set_condition(cond_fn);
-    </code>
-    <return/>
-  </script>
+  <function name="register_by_map" return_type="boolean">
+    return event_system.set_condition(condition_map[event_a.Phase.P2]);
+  </function>
+
+  <function name="register_direct" return_type="boolean">
+    return event_system.set_condition(*can_phase_3_fn);
+  </function>
 </module>

@@ -3,7 +3,7 @@
   "entryScript": "app.main",
   "actions": [],
   "expectedEvents": [
-    { "kind": "text", "text": "true" },
+    { "kind": "text", "text": "false-true" },
     { "kind": "end" }
   ]
 }

@@ -41,7 +41,7 @@ This catalog keeps example intent explicit so examples can be refactored without
 | `28-map-coverage` | map `#{K=>V}` + `#{V}` usage (string key + enum key + nested/array/ref/function/when) |
 | `29-alias-directives` | multi-module alias stress: type/var/const alias across arrays/maps/const/function/multi-script call chains |
 | `30-invoke-function-alias-module-var` | regression for `invoke(function, ...)` where function body reads explicit alias to imported module var |
-| `31-invoke-map-short-function-ref` | regression for enum-key map storing short `*function` refs that are later passed to `invoke(...)` |
+| `31-invoke-map-short-function-ref` | regression for short `*function` refs forwarded via enum-key map and function-body direct forwarding before `invoke(...)` |
 | `32-temp-input-macro` | `temp-input` macro for `string temp + input` with blank fallback and max_length |
 | `33-script-context-macro` | compile-time `__script__` context macro in expression/template across scripts |
 
