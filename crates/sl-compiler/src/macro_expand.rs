@@ -666,6 +666,74 @@ mod macro_expand_tests {
     }
 
     #[test]
+    fn for_temps_parser_handles_nested_brackets() {
+        // Test that temps parser correctly handles nested parentheses, brackets, and braces
+        // This covers the match branches in top_level_delimiter_positions and
+        // split_top_level_for_temps_entries
+        let host = xml_element(
+            "for",
+            &[
+                // Single entry with parentheses in init expression
+                ("temps", "fn:int:get_value(i)"),
+                ("condition", "true"),
+                ("iteration", "i = i + 1;"),
+            ],
+            Vec::new(),
+        );
+        let parsed = parse_for_temps_decls(
+            host.attributes
+                .get("temps")
+                .expect("temps attr should exist"),
+            &host,
+        )
+        .expect("nested brackets should parse");
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].name, "fn");
+        assert_eq!(parsed[0].type_expr, "int");
+        assert_eq!(parsed[0].init_expr, "get_value(i)");
+
+        // Test with array brackets in init
+        let host2 = xml_element(
+            "for",
+            &[
+                ("temps", "arr:string:[1,2,3]"),
+                ("condition", "true"),
+                ("iteration", "i = i + 1;"),
+            ],
+            Vec::new(),
+        );
+        let parsed2 = parse_for_temps_decls(
+            host2
+                .attributes
+                .get("temps")
+                .expect("temps attr should exist"),
+            &host2,
+        )
+        .expect("array brackets should parse");
+        assert_eq!(parsed2[0].init_expr, "[1,2,3]");
+
+        // Test with map braces in init
+        let host3 = xml_element(
+            "for",
+            &[
+                ("temps", "map:#{string=>int}:#{'a': 1}"),
+                ("condition", "true"),
+                ("iteration", "i = i + 1;"),
+            ],
+            Vec::new(),
+        );
+        let parsed3 = parse_for_temps_decls(
+            host3
+                .attributes
+                .get("temps")
+                .expect("temps attr should exist"),
+            &host3,
+        )
+        .expect("map braces should parse");
+        assert_eq!(parsed3[0].init_expr, "#{'a': 1}");
+    }
+
+    #[test]
     fn temp_input_macro_expands_to_temp_then_input() {
         let node = xml_element(
             "temp-input",

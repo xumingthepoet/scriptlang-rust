@@ -2926,6 +2926,39 @@ mod script_compile_tests {
         .expect("quoted script macro text should remain literal");
         assert_eq!(quoted_script_macro_expr, "\"__script__\"");
 
+        // Test escape characters in quoted strings
+        // This covers the escape character handling in rewrite_script_context_macro_in_expression
+        let escaped_string = normalize_expression_literals(
+            "\"test\\nvalue\"", // string with escaped newline
+            &span,
+            &all_script_access,
+            Some("main"),
+            Some("main.main"),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("escaped characters in string should be preserved");
+        assert_eq!(escaped_string, "\"test\\nvalue\"");
+
+        // Test string ending with backslash (edge case for index + 1 < chars.len())
+        let backslash_end = normalize_expression_literals(
+            "\"test\\\\\"",
+            &span,
+            &all_script_access,
+            Some("main"),
+            Some("main.main"),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("string ending with backslash should be preserved");
+        assert_eq!(backslash_end, "\"test\\\\\"");
+
         let script_macro_attr = normalize_attribute_expression_literals(
             "__script__",
             &span,
@@ -2958,6 +2991,59 @@ mod script_compile_tests {
             script_macro_template,
             "expr=${\"main.main\"}; raw=__script__"
         );
+
+        // Test __script__ with identifier chars before and after (should NOT be replaced)
+        // This covers the is_identifier_char branches in rewrite_script_context_macro_in_expression
+        let script_macro_adjacent_to_identifier = normalize_expression_literals(
+            "prefix__script__suffix",
+            &span,
+            &all_script_access,
+            Some("main"),
+            Some("main.main"),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("__script__ adjacent to identifiers should NOT be replaced");
+        // prefix__script__suffix - the __script__ is part of identifier, should remain as-is
+        assert_eq!(
+            script_macro_adjacent_to_identifier,
+            "prefix__script__suffix"
+        );
+
+        // Test __script__ at start of string with non-identifier after
+        let script_macro_at_start = normalize_expression_literals(
+            "__script__:main",
+            &span,
+            &all_script_access,
+            Some("main"),
+            Some("main.main"),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("__script__ at start should be replaced");
+        assert_eq!(script_macro_at_start, "\"main.main\":main");
+
+        // Test __script__ at end of string with non-identifier before
+        let script_macro_at_end = normalize_expression_literals(
+            "main:__script__",
+            &span,
+            &all_script_access,
+            Some("main"),
+            Some("main.main"),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("__script__ at end should be replaced");
+        assert_eq!(script_macro_at_end, "main:\"main.main\"");
 
         // Test line 403: normalize_and_validate_function_literals error in attr
         let missing_fn_attr_error = normalize_attribute_expression_literals(

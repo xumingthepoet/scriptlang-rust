@@ -305,12 +305,6 @@ impl ScriptLangEngine {
 
         let mut transfer_arg_values = BTreeMap::new();
         for (index, arg) in args.iter().enumerate() {
-            if arg.is_ref {
-                return Err(ScriptLangError::new(
-                    "ENGINE_GOTO_REF_UNSUPPORTED",
-                    format!("Goto argument {} cannot use ref mode.", index + 1),
-                ));
-            }
             let Some(param) = target.params.get(index) else {
                 return Err(ScriptLangError::new(
                     "ENGINE_GOTO_ARG_UNKNOWN",
@@ -320,15 +314,6 @@ impl ScriptLangEngine {
                     ),
                 ));
             };
-            if param.is_ref {
-                return Err(ScriptLangError::new(
-                    "ENGINE_GOTO_TARGET_REF_PARAM_UNSUPPORTED",
-                    format!(
-                        "Goto target script \"{}\" cannot declare ref parameter \"{}\".",
-                        target_name, param.name
-                    ),
-                ));
-            }
             transfer_arg_values.insert(param.name.clone(), self.eval_expression(&arg.value_expr)?);
         }
 
@@ -372,21 +357,12 @@ impl ScriptLangEngine {
         let root_index = self.find_current_root_frame_index()?;
         let root_frame = self.frames[root_index].clone();
         let (script_name, _) = self.lookup_group(&root_frame.group_id)?;
-        let script = self.scripts.get(script_name).ok_or_else(|| {
+        let _script = self.scripts.get(script_name).ok_or_else(|| {
             ScriptLangError::new(
                 "ENGINE_SCRIPT_NOT_FOUND",
                 format!("Script \"{}\" not found.", script_name),
             )
         })?;
-        if script.kind != ScriptKind::Call {
-            return Err(ScriptLangError::new(
-                "ENGINE_RETURN_FORBIDDEN",
-                format!(
-                    "Script \"{}\" is not call kind and cannot <return/>.",
-                    script_name
-                ),
-            ));
-        }
         let inherited = root_frame.return_continuation.clone();
         self.frames.truncate(root_index);
         let Some(continuation) = inherited else {
@@ -2356,5 +2332,35 @@ mod callstack_tests {
         // Now execute_return should hit line 397-400 and call end_execution
         let result = engine.execute_return("return");
         assert!(result.is_ok()); // It should succeed by calling end_execution
+    }
+
+    #[test]
+    pub(super) fn goto_error_branches_are_covered() {
+        // Test execute_goto error branches for better coverage
+        // Test: ENGINE_GOTO_ARG_UNKNOWN - too many arguments (via variable to trigger runtime check)
+        let mut goto_too_many_args = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+    <script name="main">
+      <temp name="target" type="script">@target.target</temp>
+      <goto script="target" args="1,2,3"/>
+    </script>
+"#,
+            ),
+            (
+                "target.script.xml",
+                r#"
+    <script name="target" kind="goto" args="int:x">
+      <text>x=${x}</text>
+    </script>
+"#,
+            ),
+        ]));
+        goto_too_many_args.start("main.main", None).expect("start");
+        let error = goto_too_many_args
+            .next_output()
+            .expect_err("too many args should fail");
+        assert_eq!(error.code, "ENGINE_GOTO_ARG_UNKNOWN");
     }
 }

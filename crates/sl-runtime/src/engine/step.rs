@@ -2270,4 +2270,43 @@ mod step_tests {
             .expect_err("continue choice without context should fail");
         assert_eq!(error.code, "ENGINE_CHOICE_CONTINUE_TARGET_MISSING");
     }
+
+    #[test]
+    pub(super) fn planned_node_return_branch_is_covered() {
+        // Test PlannedNode::Return branch in execute_planned_node
+        let mut engine = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+<script name="main">
+  <call script="@callee.callee"/>
+  <text>after call</text>
+  <end/>
+</script>
+"#,
+            ),
+            (
+                "callee.script.xml",
+                r#"
+<script name="callee" kind="call">
+  <text>callee text</text>
+  <return/>
+</script>
+"#,
+            ),
+        ]));
+        engine.start("main.main", None).expect("start");
+
+        let mut outputs = Vec::new();
+        loop {
+            let output = engine.next_output().expect("next_output");
+            if matches!(output, EngineOutput::End) {
+                break;
+            }
+            outputs.push(output);
+        }
+
+        // Should have: callee text, after call
+        assert!(outputs.len() >= 2);
+    }
 }
