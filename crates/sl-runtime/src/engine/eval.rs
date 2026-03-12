@@ -991,7 +991,8 @@ impl ScriptLangEngine {
         out.push_str("if type_of(args) != \"array\" {\n");
         out.push_str("throw \"__sl_err:ENGINE_INVOKE_ARGS_NOT_ARRAY:invoke(name, [args]) requires args to be an array.\";\n");
         out.push_str("}\n");
-        for qualified_name in &self.invoke_public_functions {
+        let _ = &self.invoke_public_functions;
+        for qualified_name in self.invoke_all_functions.keys() {
             let Some(decl) = self.invoke_all_functions.get(qualified_name) else {
                 continue;
             };
@@ -1054,16 +1055,6 @@ impl ScriptLangEngine {
                     }
                 }
             }
-        }
-        for qualified_name in self.invoke_all_functions.keys() {
-            if self.invoke_public_functions.contains(qualified_name) {
-                continue;
-            }
-            out.push_str("if name == \"*");
-            out.push_str(qualified_name);
-            out.push_str("\" {\n");
-            out.push_str("throw \"__sl_err:ENGINE_INVOKE_ACCESS_DENIED:Invoke target is private and cannot be called.\";\n");
-            out.push_str("}\n");
         }
         out.push_str(
             "throw \"__sl_err:ENGINE_INVOKE_TARGET_NOT_FOUND:Invoke target not found.\" + name;\n",
@@ -2935,15 +2926,66 @@ let public = 3;
     }
 
     #[test]
-    pub(super) fn invoke_reports_private_missing_name_and_shape_errors() {
+    pub(super) fn invoke_supports_private_reference_capability_across_modules() {
+        let files = map(&[
+            (
+                "secret.xml",
+                r#"
+<module name="secret" export="function:issue_ref">
+  <function name="hidden" args="int:a" return_type="int">
+    return a + 10;
+  </function>
+  <function name="issue_ref" return_type="function">
+    let fn_ref = *hidden;
+    return fn_ref;
+  </function>
+</module>
+"#,
+            ),
+            (
+                "relay.xml",
+                r#"
+<!-- import secret from secret.xml -->
+<module name="relay" export="function:stash,get">
+  <var name="stored" type="function">*secret.issue_ref</var>
+  <function name="stash" return_type="boolean">
+    stored = secret.issue_ref();
+    return true;
+  </function>
+  <function name="get" return_type="function">
+    return stored;
+  </function>
+</module>
+"#,
+            ),
+            (
+                "app.xml",
+                r#"
+<!-- import relay from relay.xml -->
+<module name="app" export="script:main">
+  <script name="main">
+    <temp name="fnRef" type="function">*relay.get</temp>
+    <code>relay.stash(); fnRef = relay.get();</code>
+    <temp name="value" type="int">invoke(fnRef, [2])</temp>
+    <text>${value}</text>
+  </script>
+</module>
+"#,
+            ),
+        ]);
+        let mut engine = engine_from_sources(files);
+        engine.start("app.main", None).expect("start");
+        let output = engine.next_output().expect("text");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "12"));
+    }
+
+    #[test]
+    pub(super) fn invoke_reports_missing_name_and_shape_errors() {
         let files = map(&[
             (
                 "shared.xml",
                 r#"
 <module name="shared" export="function:add">
-  <function name="hidden" args="int:a" return_type="int">
-    return a + 1;
-  </function>
   <function name="add" args="int:a,int:b" return_type="int">
     return a + b;
   </function>
@@ -2954,13 +2996,7 @@ let public = 3;
                 "main.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<module name="main" export="script:private_call,missing_call,bad_name,bad_args_shape,bad_arity">
-  <script name="private_call">
-    <temp name="fnRef" type="function">*shared.add</temp>
-    <code>fnRef = "*" + "shared.hidden";</code>
-    <temp name="x" type="int">invoke(fnRef, [1])</temp>
-    <text>${x}</text>
-  </script>
+<module name="main" export="script:missing_call,bad_name,bad_args_shape,bad_arity">
   <script name="missing_call">
     <temp name="fnRef" type="function">*shared.add</temp>
     <code>fnRef = "*" + "shared.missing";</code>
@@ -2987,15 +3023,6 @@ let public = 3;
 "#,
             ),
         ]);
-        let mut private_engine = engine_from_sources(files.clone());
-        private_engine
-            .start("main.private_call", None)
-            .expect("start private");
-        let private_error = private_engine
-            .next_output()
-            .expect_err("private invoke should fail");
-        assert_eq!(private_error.code, "ENGINE_INVOKE_ACCESS_DENIED");
-
         let mut missing_engine = engine_from_sources(files.clone());
         missing_engine
             .start("main.missing_call", None)
@@ -3031,6 +3058,43 @@ let public = 3;
             .next_output()
             .expect_err("bad arity should fail");
         assert_eq!(bad_arity_error.code, "ENGINE_INVOKE_ARG_COUNT_MISMATCH");
+    }
+
+    #[test]
+    pub(super) fn static_call_to_imported_private_function_still_fails() {
+        let files = map(&[
+            (
+                "secret.xml",
+                r#"
+<module name="secret" export="function:open">
+  <function name="hidden" args="int:x" return_type="int">
+    return x + 1;
+  </function>
+  <function name="open" args="int:x" return_type="int">
+    return x + 2;
+  </function>
+</module>
+"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<!-- import secret from secret.xml -->
+<module name="main" export="script:main">
+  <script name="main">
+    <code>let x = secret.hidden(1);</code>
+    <text>${x}</text>
+  </script>
+</module>
+"#,
+            ),
+        ]);
+        let mut engine = engine_from_sources(files);
+        engine.start("main.main", None).expect("start");
+        let error = engine
+            .next_output()
+            .expect_err("private static call should fail");
+        assert_eq!(error.code, "ENGINE_EVAL_ERROR");
     }
 
     #[test]

@@ -70,3 +70,9 @@
   2) `collect_functions_for_bundle_with_aliases`（artifact/bundle 路径）  
   同时先收集完整可见函数名集合，再做归一化校验，避免前向引用被误判为 not found。
 - 证据：最小复现为 `<function> return event_system.set_condition(*can_phase_2_fn); </function>`，修复前 `invoke(stored_condition, [])` 报 `Invoke target not found.*can_phase_2_fn`。
+
+### 2026-03-12 — 架构决策 — `invoke(fnVar, args)` 采用“引用能力”语义
+- 发现：动态调用阶段若再次做“调用方可见性”校验，会破坏 `function` 作为一等值跨模块转发后的可调用性。
+- 细节：`crates/sl-runtime/src/engine/eval.rs` 的 `build_module_prelude` 中，`invoke` 分发必须按 `invoke_all_functions` 生成，不再按 `invoke_public_functions` 过滤；`module.func(...)` 静态调用可见性仍由可见函数符号映射约束，不随 `invoke` 变更。
+- 失败模式：若把 `invoke` 回退为“仅 public 可调”，会重新出现“合法获得 private 引用但 invoke 失败”的行为回归。
+- 如何验证：回归场景使用三模块链路（source -> relay -> app），由 source 公共函数返回 private 引用，app 侧 `invoke(fnRef, [...])` 必须成功，同时 `app` 里直接 `source.hidden(...)` 仍应失败。

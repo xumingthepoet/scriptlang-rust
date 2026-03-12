@@ -44,6 +44,7 @@ This catalog keeps example intent explicit so examples can be refactored without
 | `31-invoke-map-short-function-ref` | regression for short `*function` refs forwarded via enum-key map and function-body direct forwarding before `invoke(...)` |
 | `32-temp-input-macro` | `temp-input` macro for `string temp + input` with blank fallback and max_length |
 | `33-script-context-macro` | compile-time `__script__` context macro in expression/template across scripts |
+| `34-invoke-private-capability` | capability semantics: private `function` reference can be invoked after legal cross-module forwarding |
 
 ## Notes
 - `26-enum-flow` intentionally covers enum member usage directly in XML attribute expressions (`args="ids.LocationId.A"`).

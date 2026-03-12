@@ -901,12 +901,6 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
             continue;
         };
         for decl in &module.function_decls {
-            let is_local = local_module_name.is_some_and(|module_name| {
-                decl.qualified_name.starts_with(&format!("{module_name}."))
-            });
-            if !is_local && decl.access != AccessLevel::Public {
-                continue;
-            }
             if !visible_function_names.insert(decl.qualified_name.clone()) {
                 return Err(ScriptLangError::with_span(
                     "FUNCTION_DECL_DUPLICATE",
