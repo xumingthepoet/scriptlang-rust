@@ -4341,6 +4341,74 @@ mod script_compile_tests {
             .expect_err("short literal without module should fail");
         assert_eq!(no_module_error.code, "XML_SCRIPT_TARGET_INVALID");
 
+        // Test parse_script_literal_name error paths (lines 94-96, 108-110)
+        // First char not alphabetic or underscore: "@1abc", "@!abc"
+        assert!(
+            parse_script_literal_name(&"@1abc".chars().collect::<Vec<_>>(), 0).is_none(),
+            "digit first char should return None"
+        );
+        assert!(
+            parse_script_literal_name(&"@!abc".chars().collect::<Vec<_>>(), 0).is_none(),
+            "special char first should return None"
+        );
+        // Dot followed by non-alphanumeric: "@main.", "@main.!abc"
+        assert!(
+            parse_script_literal_name(&"@main.".chars().collect::<Vec<_>>(), 0).is_none(),
+            "dot at end should return None"
+        );
+        assert!(
+            parse_script_literal_name(&"@main.!abc".chars().collect::<Vec<_>>(), 0).is_none(),
+            "dot followed by special char should return None"
+        );
+
+        // Test line 94: @ at end of string (no chars after @)
+        assert!(
+            parse_script_literal_name(&"@".chars().collect::<Vec<_>>(), 0).is_none(),
+            "@ at end should return None"
+        );
+
+        // Test line 172: @ followed by invalid script name (not at boundary)
+        // "@abc" at word boundary - parse succeeds but invalid chars after @
+        let invalid_at_boundary = normalize_and_validate_script_literals_in_expression(
+            "x = @1abc;", // @ followed by digit (invalid start)
+            &span,
+            Some("main"),
+            None,
+        )
+        .expect("@ followed by digit should be processed");
+        // @ should stay as-is because it's not a valid script literal start
+        assert!(
+            invalid_at_boundary.contains("@1abc"),
+            "@ with digit should stay raw"
+        );
+
+        // Test string escape sequences (lines 145-147) and invalid @ suffix (line 172)
+        // String with escape sequence: "hello\"world"
+        let with_escape = normalize_and_validate_script_literals_in_expression(
+            r#"msg = "hello\"world";"#,
+            &span,
+            Some("main"),
+            None,
+        )
+        .expect("string with escape should be processed");
+        assert!(
+            with_escape.contains(r#"hello\"world"#),
+            "escape should be preserved"
+        );
+
+        // String with @ at end that's not a script literal
+        let at_in_string = normalize_and_validate_script_literals_in_expression(
+            r#"msg = "hello@";"#,
+            &span,
+            Some("main"),
+            None,
+        )
+        .expect("@ in string should stay as-is");
+        assert!(
+            at_in_string.contains(r#""hello@""#),
+            "@ in string should be preserved"
+        );
+
         let access_map = BTreeMap::from([
             ("main.next".to_string(), AccessLevel::Public),
             ("shared.hidden".to_string(), AccessLevel::Private),

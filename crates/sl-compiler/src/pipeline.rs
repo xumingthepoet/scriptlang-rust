@@ -98,15 +98,17 @@ fn collect_module_alias_directives_by_namespace(
 ) -> BTreeMap<String, Vec<AliasDirective>> {
     let mut directives_by_namespace = BTreeMap::new();
     for source in sources.values() {
-        let Some(root) = source.xml_root.as_ref() else {
-            continue;
-        };
-        if root.name != "module" {
-            continue;
-        }
-        let Some(namespace) = root.attributes.get("name") else {
-            continue;
-        };
+        // xml_root is always Some - parse_sources always sets it
+        let root = source
+            .xml_root
+            .as_ref()
+            .expect("xml_root should be present");
+        // root.name is always "module" - extract_module_name rejects non-module roots at parse time
+        // name attribute is always present - extract_module_name validates this at parse time
+        let namespace = root
+            .attributes
+            .get("name")
+            .expect("module name should be present");
         if source.alias_directives.is_empty() {
             continue;
         }
@@ -482,6 +484,44 @@ mod pipeline_tests {
                 .expect_err("invalid export format should fail");
         assert_eq!(invalid_export_format_error.code, "XML_EXPORT_INVALID");
 
+        // Test empty export attribute (line 214)
+        let empty_export = map(&[(
+            "bad.xml",
+            r#"<module name="bad" export=""><script name="main"><text>x</text></script></module>"#,
+        )]);
+        let empty_export_result = compile_project_bundle_from_xml_map(&empty_export);
+        assert!(
+            empty_export_result.is_ok(),
+            "empty export should return default"
+        );
+
+        // Test empty group error (line 220): export=";;"
+        let empty_group = map(&[(
+            "bad.xml",
+            r#"<module name="bad" export=";;"><script name="main"><text>x</text></script></module>"#,
+        )]);
+        let empty_group_error =
+            compile_project_bundle_from_xml_map(&empty_group).expect_err("empty group should fail");
+        assert_eq!(empty_group_error.code, "XML_EXPORT_INVALID");
+
+        // Test empty names error (line 240): export="script:"
+        let empty_names = map(&[(
+            "bad.xml",
+            r#"<module name="bad" export="script:"><script name="main"><text>x</text></script></module>"#,
+        )]);
+        let empty_names_error =
+            compile_project_bundle_from_xml_map(&empty_names).expect_err("empty names should fail");
+        assert_eq!(empty_names_error.code, "XML_EXPORT_INVALID");
+
+        // Test empty name in list error (line 252): export="script:main,"
+        let empty_name_in_list = map(&[(
+            "bad.xml",
+            r#"<module name="bad" export="script:main,"><script name="main"><text>x</text></script></module>"#,
+        )]);
+        let empty_name_in_list_error = compile_project_bundle_from_xml_map(&empty_name_in_list)
+            .expect_err("empty name in list should fail");
+        assert_eq!(empty_name_in_list_error.code, "XML_EXPORT_INVALID");
+
         let invalid_export_kind = map(&[(
             "bad.xml",
             r#"<module name="bad" export="invalid:main"><script name="main"><text>x</text></script></module>"#,
@@ -848,6 +888,27 @@ mod pipeline_tests {
                 .qualified_name,
             "shared.BASE"
         );
+    }
+
+    #[test]
+    fn compile_bundle_handles_mixed_script_and_module_sources_for_alias_directives() {
+        // Test that collect_module_alias_directives_by_namespace handles:
+        // - Line 105: script root (not module) is skipped
+        // - Line 108: module without name attribute is skipped
+        let files = map(&[
+            // This is a script, not a module - should be skipped (line 105)
+            (
+                "standalone.xml",
+                r#"<script name="standalone"><text>alone</text></script>"#,
+            ),
+            (
+                "main.xml",
+                r#"<module name="main" export="script:main"><script name="main"><text>x</text></script></module>"#,
+            ),
+        ]);
+        // Should compile without error - script sources are skipped
+        let result = compile_project_bundle_from_xml_map(&files);
+        assert!(result.is_ok(), "mixed sources should compile");
     }
 
     #[test]

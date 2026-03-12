@@ -74,7 +74,8 @@ impl ScriptLangEngine {
         let Some((module_name, local_name)) = name.split_once('.') else {
             return false;
         };
-        if module_name.is_empty() || local_name.is_empty() || local_name.contains('.') {
+        // Empty check is handled by is_script_name_segment
+        if local_name.contains('.') {
             return false;
         }
         Self::is_script_name_segment(module_name) && Self::is_script_name_segment(local_name)
@@ -1688,6 +1689,153 @@ mod callstack_tests {
             .resolve_target_script(&var("dst"), "ERR", "err")
             .expect_err("short variable target should fail");
         assert_eq!(error.code, "ENGINE_TARGET_VAR_TYPE");
+    }
+
+    #[test]
+    pub(super) fn resolve_target_script_variable_rejects_invalid_qualified_names() {
+        // Test empty module name (".script")
+        let mut engine1 = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><temp name="dst" type="string">""</temp></script>"#,
+        )]));
+        engine1.start("main.main", None).expect("start");
+        let group_id = engine1.frames.last().expect("frame").group_id.clone();
+        engine1.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::from([("dst".to_string(), SlValue::String("@.script".to_string()))]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
+        }];
+        let error1 = engine1
+            .resolve_target_script(&var("dst"), "ERR", "err")
+            .expect_err("empty module name should fail");
+        assert_eq!(error1.code, "ENGINE_TARGET_VAR_TYPE");
+
+        // Test empty local name ("module.")
+        let mut engine2 = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><temp name="dst" type="string">""</temp></script>"#,
+        )]));
+        engine2.start("main.main", None).expect("start");
+        let group_id = engine2.frames.last().expect("frame").group_id.clone();
+        engine2.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::from([("dst".to_string(), SlValue::String("@module.".to_string()))]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
+        }];
+        let error2 = engine2
+            .resolve_target_script(&var("dst"), "ERR", "err")
+            .expect_err("empty local name should fail");
+        assert_eq!(error2.code, "ENGINE_TARGET_VAR_TYPE");
+
+        // Test local name with dot ("module.script.nested")
+        let mut engine3 = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><temp name="dst" type="string">""</temp></script>"#,
+        )]));
+        engine3.start("main.main", None).expect("start");
+        let group_id = engine3.frames.last().expect("frame").group_id.clone();
+        engine3.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::from([(
+                "dst".to_string(),
+                SlValue::String("@module.script.nested".to_string()),
+            )]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
+        }];
+        let error3 = engine3
+            .resolve_target_script(&var("dst"), "ERR", "err")
+            .expect_err("local name with dot should fail");
+        assert_eq!(error3.code, "ENGINE_TARGET_VAR_TYPE");
+
+        // Test invalid first character in module name (digit)
+        let mut engine4 = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><temp name="dst" type="string">""</temp></script>"#,
+        )]));
+        engine4.start("main.main", None).expect("start");
+        let group_id = engine4.frames.last().expect("frame").group_id.clone();
+        engine4.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::from([(
+                "dst".to_string(),
+                SlValue::String("@123test.script".to_string()),
+            )]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
+        }];
+        let error4 = engine4
+            .resolve_target_script(&var("dst"), "ERR", "err")
+            .expect_err("digit first char should fail");
+        assert_eq!(error4.code, "ENGINE_TARGET_VAR_TYPE");
+
+        // Test valid qualified script name with hyphen in segment (triggers is_script_name_segment success path at line 70)
+        let mut engine5 = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><temp name="dst" type="string">""</temp></script>"#,
+        )]));
+        engine5.start("main.main", None).expect("start");
+        let group_id = engine5.frames.last().expect("frame").group_id.clone();
+        engine5.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::from([(
+                "dst".to_string(),
+                SlValue::String("@my-module.my-script".to_string()),
+            )]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
+        }];
+        let result = engine5
+            .resolve_target_script(&var("dst"), "ERR", "err")
+            .expect("valid qualified name with hyphen should succeed");
+        assert_eq!(result, "my-module.my-script");
+
+        // Test invalid character in segment (triggers is_script_name_segment failure path at line 70)
+        let mut engine6 = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><temp name="dst" type="string">""</temp></script>"#,
+        )]));
+        engine6.start("main.main", None).expect("start");
+        let group_id = engine6.frames.last().expect("frame").group_id.clone();
+        engine6.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::from([(
+                "dst".to_string(),
+                SlValue::String("@module.invalid$name".to_string()),
+            )]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
+        }];
+        let error5 = engine6
+            .resolve_target_script(&var("dst"), "ERR", "err")
+            .expect_err("invalid character in segment should fail");
+        assert_eq!(error5.code, "ENGINE_TARGET_VAR_TYPE");
     }
 
     #[test]

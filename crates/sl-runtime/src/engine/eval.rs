@@ -689,13 +689,7 @@ impl ScriptLangEngine {
                 code_let_bindings = collect_top_level_let_bindings(&rewritten_script);
             }
             if is_expression {
-                if prelude.is_empty() {
-                    format!("({})", rewritten_script)
-                } else {
-                    format!("{}\n({})", prelude, rewritten_script)
-                }
-            } else if prelude.is_empty() {
-                rewritten_script
+                format!("{}\n({})", prelude, rewritten_script)
             } else {
                 format!("{}\n{}", prelude, rewritten_script)
             }
@@ -1251,6 +1245,75 @@ if true {
         assert!(!bindings.contains("nested"));
         assert!(!bindings.contains("line_comment"));
         assert!(!bindings.contains("block_comment"));
+    }
+
+    #[test]
+    pub(super) fn collect_top_level_let_bindings_handles_escaped_chars_in_strings() {
+        // Test lines 131-133: escape char handling and quote termination in strings
+        let source = r#"
+let a = 1;
+let b = "test\\\"escaped";
+let c = "end";
+let d = "nested \" inner ";
+"#;
+        let bindings = collect_top_level_let_bindings(source);
+        assert!(bindings.contains("a"));
+        assert!(bindings.contains("b"));
+        assert!(bindings.contains("c"));
+        assert!(bindings.contains("d"));
+    }
+
+    #[test]
+    pub(super) fn collect_top_level_let_bindings_handles_let_without_assignment() {
+        // Test lines 218-219: let keyword followed by non-identifier (no '=')
+        // This covers the case when 'let' appears in string but is not a real binding
+        let source = r#"
+let a = 1;
+let notabinding;
+let b = 2;
+"#;
+        let bindings = collect_top_level_let_bindings(source);
+        assert!(bindings.contains("a"));
+        assert!(bindings.contains("b"));
+        // "notabinding" should NOT be included because there's no '='
+        assert!(!bindings.contains("notabinding"));
+
+        // Test line 92: identifier starting with underscore
+        let source_with_underscore = r#"
+let _private = 1;
+let _temp = 2;
+let public = 3;
+"#;
+        let bindings = collect_top_level_let_bindings(source_with_underscore);
+        assert!(
+            bindings.contains("_private"),
+            "underscore identifier should be captured"
+        );
+        assert!(
+            bindings.contains("_temp"),
+            "underscore identifier should be captured"
+        );
+        assert!(
+            bindings.contains("public"),
+            "normal identifier should be captured"
+        );
+
+        // Test line 219: let at start of source without '='
+        let source_at_start = "let x";
+        let bindings = collect_top_level_let_bindings(source_at_start);
+        assert!(
+            !bindings.contains("x"),
+            "let without '=' at start should not be captured"
+        );
+
+        // Test line 219: let followed by non-identifier start char (digit)
+        // This covers the branch where is_ident_start returns false
+        let source_digit = "let 123 = 1;";
+        let bindings_digit = collect_top_level_let_bindings(source_digit);
+        assert!(
+            bindings_digit.is_empty(),
+            "let followed by digit should not be captured"
+        );
     }
 
     #[test]

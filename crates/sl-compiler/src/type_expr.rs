@@ -890,6 +890,65 @@ mod type_expr_tests {
     }
 
     #[test]
+    fn resolve_type_expr_in_namespace_rejects_invalid_map_key() {
+        let span = SourceSpan::synthetic();
+        let resolved_types = BTreeMap::new();
+
+        // Test invalid map key type (int) through resolve_type_expr_in_namespace
+        let map_expr = ParsedTypeExpr::Map {
+            key_type: Box::new(ParsedTypeExpr::Primitive("int".to_string())),
+            value_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+        };
+        let error = resolve_type_expr_in_namespace(&map_expr, &resolved_types, "test", &span)
+            .expect_err("map with int key should be rejected");
+        assert_eq!(error.code, "TYPE_MAP_KEY_UNSUPPORTED");
+    }
+
+    #[test]
+    fn resolve_type_expr_in_namespace_rejects_unknown_custom_type_in_array() {
+        let span = SourceSpan::synthetic();
+        // Empty resolved_types so the Custom type lookup fails
+        let resolved_types = BTreeMap::new();
+
+        // Array with unknown custom element type - triggers error path at line 246
+        let array_expr =
+            ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Custom("UnknownType".to_string())));
+        let error = resolve_type_expr_in_namespace(&array_expr, &resolved_types, "test", &span)
+            .expect_err("array with unknown type should fail");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
+
+    #[test]
+    fn resolve_type_expr_in_namespace_rejects_unknown_custom_type_in_map_key() {
+        let span = SourceSpan::synthetic();
+        let resolved_types = BTreeMap::new();
+
+        // Map with unknown custom key type - triggers error path at line 253
+        let map_expr = ParsedTypeExpr::Map {
+            key_type: Box::new(ParsedTypeExpr::Custom("UnknownKeyType".to_string())),
+            value_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+        };
+        let error = resolve_type_expr_in_namespace(&map_expr, &resolved_types, "test", &span)
+            .expect_err("map with unknown key type should fail");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
+
+    #[test]
+    fn resolve_type_expr_in_namespace_rejects_unknown_custom_type_in_map_value() {
+        let span = SourceSpan::synthetic();
+        let resolved_types = BTreeMap::new();
+
+        // Map with unknown custom value type - triggers error path at line 261
+        let map_expr = ParsedTypeExpr::Map {
+            key_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+            value_type: Box::new(ParsedTypeExpr::Custom("UnknownValueType".to_string())),
+        };
+        let error = resolve_type_expr_in_namespace(&map_expr, &resolved_types, "test", &span)
+            .expect_err("map with unknown value type should fail");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
+
+    #[test]
     fn parse_enum_declaration_covers_various_error_paths() {
         // Test invalid child element under enum
         let enum_invalid_child = parse_enum_declaration_node_with_namespace(

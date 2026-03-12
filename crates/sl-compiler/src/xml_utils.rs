@@ -1210,11 +1210,99 @@ mod xml_utils_tests {
             rewritten,
             r#"main.hp + main.BASE + #{hp: main.hp, val: main.BASE} + "hp" + @main.next + *main.fn"#
         );
+
+        // Test escape sequences in strings (lines 530-533)
+        let with_escape =
+            rewrite_module_symbol_aliases_in_expression(r#"msg = "hello\"world" + base"#, &map);
+        assert!(
+            with_escape.contains(r#"hello\"world"#),
+            "escape sequence should be preserved"
+        );
+        let with_double_escape =
+            rewrite_module_symbol_aliases_in_expression(r#"msg = "path\\to\\file" + base"#, &map);
+        assert!(
+            with_double_escape.contains(r#"path\\to\\file"#),
+            "double escape should be preserved"
+        );
+
+        // Test prev_non_whitespace_char returning None (line 468) - whitespace before '{'
+        let whitespace_before_brace =
+            rewrite_module_symbol_aliases_in_expression("   #{key: value}", &map);
+        assert!(
+            whitespace_before_brace.contains("#{key"),
+            "whitespace before map literal should be preserved"
+        );
+
+        // Test prev_non_whitespace_char with index 0 (line 468)
+        // When identifier is at start of expression, index==0 triggers None
+        let identifier_at_start = rewrite_module_symbol_aliases_in_expression("hp", &map);
+        assert!(
+            identifier_at_start.contains("main.hp"),
+            "identifier at start should rewrite"
+        );
+
+        // Test brace_is_map_stack pop (line 552) - nested braces
+        let nested_map =
+            rewrite_module_symbol_aliases_in_expression(r#"outer #{a: 1, inner #{b: 2}}"#, &map);
+        assert!(
+            nested_map.contains("inner #{b: 2}"),
+            "nested map should be preserved"
+        );
+
+        // Test map key detection (line 569) - prev_char is '{' or ','
+        let map_with_key =
+            rewrite_module_symbol_aliases_in_expression(r#"#{name: "test", count: 5}"#, &map);
+        assert!(
+            map_with_key.contains("name") && map_with_key.contains("count"),
+            "map keys should be preserved"
+        );
+
+        // Test map key detection false branch (line 569:20) - prev_char is NOT '{' or ','
+        // This triggers when: in map, followed by ':', but prev is whitespace/other
+        let map_with_whitespace_key =
+            rewrite_module_symbol_aliases_in_expression(r#"#{foo bar: 1, baz: 2}"#, &map);
+        assert!(
+            map_with_whitespace_key.contains("foo bar"),
+            "map key with whitespace prefix should not be treated as map key"
+        );
+
+        // Test brace_is_map_stack pop (line 552) - closing brace when stack is non-empty
+        // This is already covered by nested_map above, but let's make it explicit
+        let explicit_nested = rewrite_module_symbol_aliases_in_expression(r#"a#{b c#{d e}}"#, &map);
+        assert!(
+            explicit_nested.contains("c#{d e}"),
+            "nested braces should preserve inner structure"
+        );
+
+        // Additional test for line 552: ensure closing brace triggers pop when stack has items
+        // Simple nested braces without map syntax
+        let simple_nested = rewrite_module_symbol_aliases_in_expression("outer{inner{x}}", &map);
+        assert!(
+            simple_nested.contains("inner{x}"),
+            "simple nested braces should work"
+        );
+
+        // Test prev_non_whitespace_char returning None (line 468) - index > 0 but all whitespace before
+        // This happens when identifier has whitespace before it but not at start of string
+        let with_leading_whitespace = rewrite_module_symbol_aliases_in_expression("   hp", &map);
+        assert!(
+            with_leading_whitespace.contains("main.hp"),
+            "identifier after leading whitespace should be rewritten"
+        );
+
         let dotted = rewrite_module_symbol_aliases_in_expression("wallet.gold + base", &map);
         assert_eq!(dotted, "main.wallet.gold + main.BASE");
 
         let template = rewrite_module_symbol_aliases_in_template("hp=${hp},base=${base}", &map);
         assert_eq!(template, "hp=${main.hp},base=${main.BASE}");
+
+        // Test brace_is_map_stack with unmatched closing brace (line 552)
+        // When '}' appears but brace stack is empty, it should still push the char
+        let unmatched_brace = rewrite_module_symbol_aliases_in_expression("}#{a: 1}", &map);
+        assert!(
+            unmatched_brace.starts_with('}'),
+            "unmatched closing brace should be preserved"
+        );
     }
 
     #[test]

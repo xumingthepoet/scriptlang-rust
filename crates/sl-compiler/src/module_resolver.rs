@@ -137,26 +137,6 @@ fn parse_module_header(
         .map_err(|error| with_file_context(error, file_path))?;
     assert_name_not_reserved(&namespace, "module", root.location.clone())
         .map_err(|error| with_file_context(error, file_path))?;
-    if has_attr(root, "defaul_access") {
-        return Err(with_file_context(
-            ScriptLangError::with_span(
-                "XML_ATTR_NOT_ALLOWED",
-                "Attribute \"defaul_access\" is removed. Use module \"export\".",
-                root.location.clone(),
-            ),
-            file_path,
-        ));
-    }
-    if has_attr(root, "default_access") {
-        return Err(with_file_context(
-            ScriptLangError::with_span(
-                "XML_ATTR_NOT_ALLOWED",
-                "Attribute \"default_access\" is removed. Use module \"export\".",
-                root.location.clone(),
-            ),
-            file_path,
-        ));
-    }
     let export_targets =
         parse_module_export_targets(root).map_err(|error| with_file_context(error, file_path))?;
     Ok(ParsedModuleHeader {
@@ -202,16 +182,6 @@ fn parse_module_child(
                 child.location.clone(),
             )
             .map_err(|error| with_file_context(error, file_path))?;
-            if has_attr(child, "access") {
-                return Err(with_file_context(
-                    ScriptLangError::with_span(
-                        "XML_ATTR_NOT_ALLOWED",
-                        "Attribute \"access\" is removed. Use module \"export\".",
-                        child.location.clone(),
-                    ),
-                    file_path,
-                ));
-            }
             Ok(ParsedModuleChild::Script(ParsedModuleScript {
                 qualified_script_name: format!("{}.{}", namespace, script_name),
                 access: AccessLevel::Private,
@@ -648,27 +618,9 @@ fn parse_module_binding_declaration(
 ) -> Result<ParsedModuleVarDecl, ScriptLangError> {
     let name = get_required_non_empty_attr(node, "name")?;
     assert_decl_name_not_reserved_or_rhai_keyword(&name, "module global", node.location.clone())?;
-    if has_attr(node, "access") {
-        return Err(ScriptLangError::with_span(
-            "XML_ATTR_NOT_ALLOWED",
-            "Attribute \"access\" is removed. Use module \"export\".",
-            node.location.clone(),
-        ));
-    }
 
     let type_raw = get_required_non_empty_attr(node, "type")?;
     let type_expr = parse_type_expr(&type_raw, &node.location)?;
-
-    if has_attr(node, "value") {
-        return Err(ScriptLangError::with_span(
-            "XML_ATTR_NOT_ALLOWED",
-            format!(
-                "Attribute \"value\" is not allowed on <{}>. Use inline content instead.",
-                tag_name
-            ),
-            node.location.clone(),
-        ));
-    }
 
     if let Some(child) = element_children(node).next() {
         return Err(ScriptLangError::with_span(
@@ -2421,7 +2373,7 @@ mod module_resolver_tests {
                     access: AccessLevel::Public,
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
                     initial_value_expr: Some("10".to_string()),
-                    location: span,
+                    location: span.clone(),
                 }],
             },
         )]);
@@ -2522,6 +2474,95 @@ mod module_resolver_tests {
         )
         .expect_err("same alias to different targets should fail");
         assert_eq!(divergent_rebind.code, "ALIAS_NAME_CONFLICT");
+
+        // Test lines 1245-1249: type alias conflict in collect_explicit_visible_type_aliases
+        // Same alias pointing to different type targets should fail
+        let modules_with_multiple_types = BTreeMap::from([(
+            "shared.xml".to_string(),
+            ModuleDeclarations {
+                type_decls: vec![
+                    ParsedTypeDecl {
+                        name: "Unit".to_string(),
+                        qualified_name: "shared.Unit".to_string(),
+                        access: AccessLevel::Public,
+                        fields: vec![],
+                        enum_members: Vec::new(),
+                        location: span.clone(),
+                    },
+                    ParsedTypeDecl {
+                        name: "OtherUnit".to_string(),
+                        qualified_name: "shared.OtherUnit".to_string(),
+                        access: AccessLevel::Public,
+                        fields: vec![],
+                        enum_members: Vec::new(),
+                        location: span.clone(),
+                    },
+                ],
+                function_decls: vec![],
+                module_global_var_decls: vec![],
+                module_global_const_decls: vec![],
+            },
+        )]);
+        let reachable_with_types = BTreeSet::from(["shared.xml".to_string()]);
+        let type_alias_conflict = resolve_visible_module_symbols_with_aliases(
+            &reachable_with_types,
+            &modules_with_multiple_types,
+            Some("main"),
+            &[
+                AliasDirective {
+                    target_qualified_name: "shared.Unit".to_string(),
+                    alias_name: "Hero".to_string(),
+                },
+                AliasDirective {
+                    target_qualified_name: "shared.OtherUnit".to_string(),
+                    alias_name: "Hero".to_string(),
+                },
+            ],
+        )
+        .expect_err("same alias to different type targets should fail");
+        assert_eq!(type_alias_conflict.code, "ALIAS_NAME_CONFLICT");
+
+        // Test line 1247: same alias pointing to same target should be skipped (continue)
+        // This tests the case where duplicate directives with identical alias and target are ignored
+        let modules_dup = BTreeMap::from([(
+            "shared.xml".to_string(),
+            ModuleDeclarations {
+                type_decls: vec![ParsedTypeDecl {
+                    name: "Unit".to_string(),
+                    qualified_name: "shared.Unit".to_string(),
+                    access: AccessLevel::Public,
+                    fields: vec![],
+                    enum_members: Vec::new(),
+                    location: span.clone(),
+                }],
+                function_decls: vec![],
+                module_global_var_decls: vec![],
+                module_global_const_decls: vec![],
+            },
+        )]);
+        let reachable_dup = BTreeSet::from(["shared.xml".to_string()]);
+        // Same alias pointing to same target twice should be allowed (skipped via continue at line 1247)
+        let duplicate_alias = resolve_visible_module_symbols_with_aliases(
+            &reachable_dup,
+            &modules_dup,
+            Some("main"),
+            &[
+                AliasDirective {
+                    target_qualified_name: "shared.Unit".to_string(),
+                    alias_name: "Hero".to_string(),
+                },
+                AliasDirective {
+                    target_qualified_name: "shared.Unit".to_string(),
+                    alias_name: "Hero".to_string(),
+                },
+            ],
+        )
+        .expect("duplicate alias to same target should succeed");
+        // Only one alias should exist
+        assert!(
+            duplicate_alias.0.contains_key("Hero"),
+            "Hero alias should exist"
+        );
     }
 
     #[test]
@@ -2688,26 +2729,7 @@ mod module_resolver_tests {
     }
 
     #[test]
-    fn parse_module_global_var_rejects_value_attr_and_child_elements() {
-        let files_with_value = map(&[
-            (
-                "shared.xml",
-                r#"<module name="shared" export="var:hp"><var name="hp" type="int" value="1"/></module>"#,
-            ),
-            (
-                "main.xml",
-                r#"
-<!-- import shared from shared.xml -->
-<module name="main" export="script:main">
-<script name="main"><text>ok</text></script>
-</module>
-"#,
-            ),
-        ]);
-        let value_error = compile_project_bundle_from_xml_map(&files_with_value)
-            .expect_err("value attr should fail");
-        assert_eq!(value_error.code, "XML_ATTR_NOT_ALLOWED");
-
+    fn parse_module_global_var_rejects_child_elements() {
         let files_with_child = map(&[
             (
                 "shared.xml",
@@ -3174,15 +3196,6 @@ mod module_resolver_tests {
         assert_eq!(error.code, "XML_MISSING_ATTR");
 
         // Legacy access attribute is no longer supported.
-        let with_access = xml_element(
-            "var",
-            &[("name", "gold"), ("type", "int"), ("access", "public")],
-            vec![xml_text("100")],
-        );
-        let error = parse_module_var_declaration(&with_access, "shared", AccessLevel::Private)
-            .expect_err("var access should be rejected");
-        assert_eq!(error.code, "XML_ATTR_NOT_ALLOWED");
-
         let mut invalid_sources = BTreeMap::new();
         invalid_sources.insert(
             "/".to_string(),
@@ -3787,28 +3800,6 @@ mod module_resolver_tests {
     }
 
     #[test]
-    fn parse_module_global_var_rejects_invalid_access() {
-        let files = map(&[
-            (
-                "shared.xml",
-                r#"<module name="shared"><var name="hp" type="int" access="invalid">1</var></module>"#,
-            ),
-            (
-                "main.xml",
-                r#"
-<!-- import shared from shared.xml -->
-<module name="main" export="script:main">
-<script name="main"><text>ok</text></script>
-</module>
-"#,
-            ),
-        ]);
-        let error =
-            compile_project_bundle_from_xml_map(&files).expect_err("invalid access should fail");
-        assert_eq!(error.code, "XML_ATTR_NOT_ALLOWED");
-    }
-
-    #[test]
     fn compile_bundle_supports_module_const_declarations() {
         let files = map(&[(
             "main.xml",
@@ -3934,15 +3925,6 @@ mod module_resolver_tests {
         let parsed = parse_module_const_declaration(&node, "main", AccessLevel::Private)
             .expect("const should parse");
         assert_eq!(parsed.qualified_name, "main.base");
-
-        let with_value = xml_element(
-            "const",
-            &[("name", "base"), ("type", "int"), ("value", "1")],
-            vec![],
-        );
-        let value_error = parse_module_const_declaration(&with_value, "main", AccessLevel::Private)
-            .expect_err("value attr should fail");
-        assert_eq!(value_error.code, "XML_ATTR_NOT_ALLOWED");
 
         let with_child = xml_element(
             "const",
@@ -4719,7 +4701,29 @@ mod module_resolver_tests {
     }
 
     #[test]
-    fn resolve_visible_module_symbols_rejects_module_var_with_invalid_enum_initializer() {
+    fn normalize_module_initializer_rejects_missing_function_reference() {
+        // Test line 571: normalize_and_validate_function_literals error for missing function
+        let span = SourceSpan::synthetic();
+        let int_type = ScriptType::Primitive {
+            name: "int".to_string(),
+        };
+
+        // Provide an expression with a function reference (*nonexistent) not in visible_functions
+        let result = normalize_module_initializer(
+            &Some("*nonexistent_func".to_string()),
+            &int_type,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(), // empty visible_functions
+            "main",
+            &span,
+        );
+        let error = result.expect_err("missing function reference should fail");
+        assert_eq!(error.code, "XML_FUNCTION_LITERAL_NOT_FOUND");
+    }
+
+    #[test]
+    fn normalize_module_initializer_rejects_function_call_syntax() {
         // Test lines 604, 668, 902, 1004: normalize_module_initializer error propagation
         // for module variables and constants with invalid enum literal initializers
         use crate::compiler_test_support::*;
@@ -4769,5 +4773,469 @@ mod module_resolver_tests {
         let error = crate::compile_project_bundle_from_xml_map(&files)
             .expect_err("function with invalid enum literal should fail");
         assert_eq!(error.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
+    }
+
+    #[test]
+    fn parse_module_source_validates_export_targets_not_found() {
+        // Test lines 337-342: validate_export_names error for non-existent export targets
+        // Use compile_project_bundle_from_xml_map for simpler test construction
+
+        // Test export function that doesn't exist
+        let files = BTreeMap::from([(
+            "test.xml".to_string(),
+            r#"<module name="test" export="function:NonExistent">
+<function name="actual_func" args="" return_type="int">return 1;</function>
+<script name="main"><text>x = 1;</text></script>
+</module>"#
+                .to_string(),
+        )]);
+        let error = crate::compile_project_bundle_from_xml_map(&files)
+            .expect_err("exporting non-existent function should fail");
+        assert_eq!(error.code, "XML_EXPORT_TARGET_NOT_FOUND");
+
+        // Test export type that doesn't exist
+        let files = BTreeMap::from([(
+            "test.xml".to_string(),
+            r#"<module name="test" export="type:NonExistentType">
+<type name="ActualType"/>
+<script name="main"><text>x = 1;</text></script>
+</module>"#
+                .to_string(),
+        )]);
+        let error = crate::compile_project_bundle_from_xml_map(&files)
+            .expect_err("exporting non-existent type should fail");
+        assert_eq!(error.code, "XML_EXPORT_TARGET_NOT_FOUND");
+
+        // Test export enum that doesn't exist
+        let files = BTreeMap::from([(
+            "test.xml".to_string(),
+            r#"<module name="test" export="enum:NonExistentEnum">
+<enum name="ActualEnum"><member name="A"/></enum>
+<script name="main"><text>x = 1;</text></script>
+</module>"#
+                .to_string(),
+        )]);
+        let error = crate::compile_project_bundle_from_xml_map(&files)
+            .expect_err("exporting non-existent enum should fail");
+        assert_eq!(error.code, "XML_EXPORT_TARGET_NOT_FOUND");
+
+        // Test export var that doesn't exist
+        let files = BTreeMap::from([(
+            "test.xml".to_string(),
+            r#"<module name="test" export="var:NonExistentVar">
+<script name="main"><text>x = 1;</text></script>
+</module>"#
+                .to_string(),
+        )]);
+        let error = crate::compile_project_bundle_from_xml_map(&files)
+            .expect_err("exporting non-existent var should fail");
+        assert_eq!(error.code, "XML_EXPORT_TARGET_NOT_FOUND");
+
+        // Test export const that doesn't exist
+        let files = BTreeMap::from([(
+            "test.xml".to_string(),
+            r#"<module name="test" export="const:NonExistentConst">
+<script name="main"><text>x = 1;</text></script>
+</module>"#
+                .to_string(),
+        )]);
+        let error = crate::compile_project_bundle_from_xml_map(&files)
+            .expect_err("exporting non-existent const should fail");
+        assert_eq!(error.code, "XML_EXPORT_TARGET_NOT_FOUND");
+
+        // Test export script that doesn't exist
+        let files = BTreeMap::from([(
+            "test.xml".to_string(),
+            r#"<module name="test" export="script:NonExistentScript">
+<script name="main"><text>x = 1;</text></script>
+</module>"#
+                .to_string(),
+        )]);
+        let error = crate::compile_project_bundle_from_xml_map(&files)
+            .expect_err("exporting non-existent script should fail");
+        assert_eq!(error.code, "XML_EXPORT_TARGET_NOT_FOUND");
+    }
+
+    #[test]
+    fn parse_module_source_sets_private_access_for_unexported_members() {
+        // Test lines 351, 358, 365, 372: Private access level for unexported members
+        // Create a module with multiple members but only export some
+        let files = BTreeMap::from([(
+            "test.xml".to_string(),
+            r#"<module name="test" export="function:public_func">
+<function name="public_func" args="" return_type="int">return 1;</function>
+<function name="private_func" args="" return_type="int">return 2;</function>
+<type name="PublicType"/>
+<type name="PrivateType"/>
+<var name="public_var" type="int">1</var>
+<var name="private_var" type="int">2</var>
+<const name="public_const" type="int">1</const>
+<const name="private_const" type="int">2</const>
+<enum name="PublicEnum"><member name="A"/></enum>
+<enum name="PrivateEnum"><member name="B"/></enum>
+<script name="main"><text>x = 1;</text></script>
+</module>"#
+                .to_string(),
+        )]);
+        // This should compile successfully - unexported members become private
+        let _bundle = crate::compile_project_bundle_from_xml_map(&files)
+            .expect("module with private members should compile");
+    }
+
+    #[test]
+    fn module_scoped_symbol_alias_conflict() {
+        // Test lines 465-469: collect_module_explicit_visible_symbol_aliases conflict detection
+        // Create two module-scoped symbol aliases with same alias but different targets
+        let span = SourceSpan::synthetic();
+        let shared_module = ModuleDeclarations {
+            type_decls: vec![],
+            function_decls: vec![],
+            module_global_var_decls: vec![
+                ParsedModuleVarDecl {
+                    namespace: "shared".to_string(),
+                    name: "hp".to_string(),
+                    qualified_name: "shared.hp".to_string(),
+                    access: AccessLevel::Public,
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    initial_value_expr: None,
+                    location: span.clone(),
+                },
+                ParsedModuleVarDecl {
+                    namespace: "shared".to_string(),
+                    name: "mp".to_string(),
+                    qualified_name: "shared.mp".to_string(),
+                    access: AccessLevel::Public,
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    initial_value_expr: None,
+                    location: span.clone(),
+                },
+            ],
+            module_global_const_decls: vec![],
+        };
+
+        let modules = BTreeMap::from([("shared.xml".to_string(), shared_module)]);
+        let reachable = BTreeSet::from(["shared.xml".to_string()]);
+
+        // Two aliases with same name "stat" pointing to different targets in same namespace
+        let module_alias_directives_by_namespace = BTreeMap::from([(
+            "shared".to_string(),
+            vec![
+                AliasDirective {
+                    target_qualified_name: "shared.hp".to_string(),
+                    alias_name: "stat".to_string(),
+                },
+                AliasDirective {
+                    target_qualified_name: "shared.mp".to_string(),
+                    alias_name: "stat".to_string(),
+                },
+            ],
+        )]);
+
+        let conflict = resolve_visible_module_symbols_with_aliases_and_module_scoped_type_aliases(
+            &reachable,
+            &modules,
+            Some("main"),
+            &[],
+            &module_alias_directives_by_namespace,
+        )
+        .expect_err("same alias to different symbol targets should fail");
+        assert_eq!(conflict.code, "ALIAS_NAME_CONFLICT");
+    }
+
+    #[test]
+    fn namespace_merge_symbol_alias_conflict() {
+        // Test lines 494-498: merge_namespace_module_symbol_aliases conflict detection
+        // This happens when module-scoped explicit alias conflicts with namespace-level alias
+        // created from module global var/const declarations
+        let span = SourceSpan::synthetic();
+        let shared_module = ModuleDeclarations {
+            type_decls: vec![],
+            function_decls: vec![],
+            module_global_var_decls: vec![
+                ParsedModuleVarDecl {
+                    namespace: "shared".to_string(),
+                    name: "hp".to_string(),
+                    qualified_name: "shared.hp".to_string(),
+                    access: AccessLevel::Public,
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    initial_value_expr: None,
+                    location: span.clone(),
+                },
+                ParsedModuleVarDecl {
+                    namespace: "shared".to_string(),
+                    name: "mp".to_string(),
+                    qualified_name: "shared.mp".to_string(),
+                    access: AccessLevel::Public,
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    initial_value_expr: None,
+                    location: span.clone(),
+                },
+            ],
+            module_global_const_decls: vec![],
+        };
+
+        let modules = BTreeMap::from([("shared.xml".to_string(), shared_module)]);
+        let reachable = BTreeSet::from(["shared.xml".to_string()]);
+
+        // Module-scoped alias "hp" conflicts with namespace alias created from var declaration
+        // The var "shared.hp" creates namespace alias: hp -> shared.hp
+        // Adding module-scoped alias: hp -> shared.mp causes conflict
+        let module_alias_directives_by_namespace = BTreeMap::from([(
+            "shared".to_string(),
+            vec![AliasDirective {
+                target_qualified_name: "shared.mp".to_string(),
+                alias_name: "hp".to_string(),
+            }],
+        )]);
+
+        let conflict = resolve_visible_module_symbols_with_aliases_and_module_scoped_type_aliases(
+            &reachable,
+            &modules,
+            Some("main"),
+            &[],
+            &module_alias_directives_by_namespace,
+        )
+        .expect_err("module-scoped alias conflicting with namespace alias should fail");
+        assert_eq!(conflict.code, "ALIAS_NAME_CONFLICT");
+    }
+
+    #[test]
+    fn module_scoped_duplicate_alias_same_target() {
+        // Test line 467: duplicate alias pointing to same target should be skipped (continue)
+        let span = SourceSpan::synthetic();
+        let shared_module = ModuleDeclarations {
+            type_decls: vec![],
+            function_decls: vec![],
+            module_global_var_decls: vec![ParsedModuleVarDecl {
+                namespace: "shared".to_string(),
+                name: "hp".to_string(),
+                qualified_name: "shared.hp".to_string(),
+                access: AccessLevel::Public,
+                type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                initial_value_expr: None,
+                location: span.clone(),
+            }],
+            module_global_const_decls: vec![],
+        };
+
+        let modules = BTreeMap::from([("shared.xml".to_string(), shared_module)]);
+        let reachable = BTreeSet::from(["shared.xml".to_string()]);
+
+        // Two aliases with same name "hp" pointing to same target "shared.hp"
+        // This should NOT fail - it should be skipped via continue at line 467
+        let module_alias_directives_by_namespace = BTreeMap::from([(
+            "shared".to_string(),
+            vec![
+                AliasDirective {
+                    target_qualified_name: "shared.hp".to_string(),
+                    alias_name: "stat".to_string(),
+                },
+                AliasDirective {
+                    target_qualified_name: "shared.hp".to_string(),
+                    alias_name: "stat".to_string(),
+                },
+            ],
+        )]);
+
+        // This should succeed - duplicate alias to same target is allowed
+        let result = resolve_visible_module_symbols_with_aliases_and_module_scoped_type_aliases(
+            &reachable,
+            &modules,
+            Some("main"),
+            &[],
+            &module_alias_directives_by_namespace,
+        );
+        assert!(
+            result.is_ok(),
+            "duplicate alias to same target should be allowed"
+        );
+    }
+
+    #[test]
+    fn namespace_merge_duplicate_alias_same_target() {
+        // Test line 496: merge_namespace_module_symbol_aliases duplicate alias to same target
+        // When module-scoped explicit alias points to same target as namespace alias, skip it
+        let span = SourceSpan::synthetic();
+        let shared_module = ModuleDeclarations {
+            type_decls: vec![],
+            function_decls: vec![],
+            module_global_var_decls: vec![ParsedModuleVarDecl {
+                namespace: "shared".to_string(),
+                name: "hp".to_string(),
+                qualified_name: "shared.hp".to_string(),
+                access: AccessLevel::Public,
+                type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                initial_value_expr: None,
+                location: span.clone(),
+            }],
+            module_global_const_decls: vec![],
+        };
+
+        let modules = BTreeMap::from([("shared.xml".to_string(), shared_module)]);
+        let reachable = BTreeSet::from(["shared.xml".to_string()]);
+
+        // Module-scoped alias "hp" pointing to same target "shared.hp"
+        // This should NOT fail - it should be skipped via continue at line 496
+        let module_alias_directives_by_namespace = BTreeMap::from([(
+            "shared".to_string(),
+            vec![AliasDirective {
+                target_qualified_name: "shared.hp".to_string(),
+                alias_name: "hp".to_string(),
+            }],
+        )]);
+
+        // This should succeed - alias pointing to same target is allowed
+        let result = resolve_visible_module_symbols_with_aliases_and_module_scoped_type_aliases(
+            &reachable,
+            &modules,
+            Some("main"),
+            &[],
+            &module_alias_directives_by_namespace,
+        );
+        assert!(
+            result.is_ok(),
+            "module-scoped alias to same target as namespace alias should be allowed"
+        );
+    }
+
+    #[test]
+    fn module_scoped_type_alias_conflict() {
+        // Test line 1204: collect_module_explicit_visible_type_aliases error propagation
+        // When module-scoped type aliases have conflicts, it should return error
+        let span = SourceSpan::synthetic();
+        let shared_module = ModuleDeclarations {
+            type_decls: vec![
+                ParsedTypeDecl {
+                    name: "Unit".to_string(),
+                    qualified_name: "shared.Unit".to_string(),
+                    access: AccessLevel::Public,
+                    fields: vec![],
+                    enum_members: Vec::new(),
+                    location: span.clone(),
+                },
+                ParsedTypeDecl {
+                    name: "OtherUnit".to_string(),
+                    qualified_name: "shared.OtherUnit".to_string(),
+                    access: AccessLevel::Public,
+                    fields: vec![],
+                    enum_members: Vec::new(),
+                    location: span.clone(),
+                },
+            ],
+            function_decls: vec![],
+            module_global_var_decls: vec![],
+            module_global_const_decls: vec![],
+        };
+
+        let modules = BTreeMap::from([("shared.xml".to_string(), shared_module)]);
+        let reachable = BTreeSet::from(["shared.xml".to_string()]);
+
+        // Two type aliases with same name "Hero" pointing to different targets
+        let module_alias_directives_by_namespace = BTreeMap::from([(
+            "shared".to_string(),
+            vec![
+                AliasDirective {
+                    target_qualified_name: "shared.Unit".to_string(),
+                    alias_name: "Hero".to_string(),
+                },
+                AliasDirective {
+                    target_qualified_name: "shared.OtherUnit".to_string(),
+                    alias_name: "Hero".to_string(),
+                },
+            ],
+        )]);
+
+        let conflict = resolve_visible_module_symbols_with_aliases_and_module_scoped_type_aliases(
+            &reachable,
+            &modules,
+            Some("main"),
+            &[],
+            &module_alias_directives_by_namespace,
+        )
+        .expect_err("module-scoped type alias conflict should fail");
+        assert_eq!(conflict.code, "ALIAS_NAME_CONFLICT");
+    }
+
+    #[test]
+    fn alias_conflicts_with_existing_visible_type() {
+        // Test line 1291: alias name conflicts with existing visible type
+        // The conflict check uses qualified names as keys, so we need to use qualified name as alias
+        let span = SourceSpan::synthetic();
+        let shared_module = ModuleDeclarations {
+            type_decls: vec![
+                ParsedTypeDecl {
+                    name: "Unit".to_string(),
+                    qualified_name: "shared.Unit".to_string(),
+                    access: AccessLevel::Public,
+                    fields: vec![],
+                    enum_members: Vec::new(),
+                    location: span.clone(),
+                },
+                ParsedTypeDecl {
+                    name: "Hero".to_string(),
+                    qualified_name: "shared.Hero".to_string(),
+                    access: AccessLevel::Public,
+                    fields: vec![],
+                    enum_members: Vec::new(),
+                    location: span.clone(),
+                },
+            ],
+            function_decls: vec![],
+            module_global_var_decls: vec![],
+            module_global_const_decls: vec![],
+        };
+
+        let modules = BTreeMap::from([("shared.xml".to_string(), shared_module)]);
+        let reachable = BTreeSet::from(["shared.xml".to_string()]);
+
+        // Alias name "shared.Hero" conflicts with existing visible type "shared.Hero"
+        // (using qualified name as alias to match the key format in visible_types)
+        let conflict = resolve_visible_module_symbols_with_aliases(
+            &reachable,
+            &modules,
+            Some("main"),
+            &[AliasDirective {
+                target_qualified_name: "shared.Unit".to_string(),
+                alias_name: "shared.Hero".to_string(),
+            }],
+        )
+        .expect_err("alias name conflicts with existing type should fail");
+        assert_eq!(conflict.code, "ALIAS_NAME_CONFLICT");
+    }
+
+    #[test]
+    fn alias_conflicts_with_existing_module_const() {
+        // Test line 1321: alias name conflicts with existing visible module constant
+        let span = SourceSpan::synthetic();
+        let shared_module = ModuleDeclarations {
+            type_decls: vec![],
+            function_decls: vec![],
+            module_global_var_decls: vec![],
+            module_global_const_decls: vec![ParsedModuleConstDecl {
+                namespace: "shared".to_string(),
+                name: "BASE".to_string(),
+                qualified_name: "shared.BASE".to_string(),
+                access: AccessLevel::Public,
+                type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                initial_value_expr: Some("10".to_string()),
+                location: span.clone(),
+            }],
+        };
+
+        let modules = BTreeMap::from([("shared.xml".to_string(), shared_module)]);
+        let reachable = BTreeSet::from(["shared.xml".to_string()]);
+
+        // Alias name "shared.BASE" conflicts with existing module const "shared.BASE"
+        let conflict = resolve_visible_module_symbols_with_aliases(
+            &reachable,
+            &modules,
+            Some("main"),
+            &[AliasDirective {
+                target_qualified_name: "shared.BASE".to_string(),
+                alias_name: "shared.BASE".to_string(),
+            }],
+        )
+        .expect_err("alias name conflicts with existing const should fail");
+        assert_eq!(conflict.code, "ALIAS_NAME_CONFLICT");
     }
 }

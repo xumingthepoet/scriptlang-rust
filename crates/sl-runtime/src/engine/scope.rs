@@ -693,6 +693,14 @@ mod scope_tests {
         assert!(engine.resolve_current_script_name().is_none());
         assert!(engine.resolve_module_global_alias(None, "hp").is_none());
 
+        // Test alias resolution with Some(script_name) but script not in map
+        assert!(engine
+            .resolve_module_global_alias(Some("nonexistent"), "hp")
+            .is_none());
+        assert!(engine
+            .resolve_module_const_alias(Some("nonexistent"), "CONST")
+            .is_none());
+
         let error = engine
             .read_path("missing.value")
             .expect_err("missing root read should fail");
