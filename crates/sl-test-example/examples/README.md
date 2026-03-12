@@ -43,6 +43,7 @@ This catalog keeps example intent explicit so examples can be refactored without
 | `30-invoke-function-alias-module-var` | regression for `invoke(function, ...)` where function body reads explicit alias to imported module var |
 | `31-invoke-map-short-function-ref` | regression for enum-key map storing short `*function` refs that are later passed to `invoke(...)` |
 | `32-temp-input-macro` | `temp-input` macro for `string temp + input` with blank fallback and max_length |
+| `33-script-context-macro` | compile-time `__script__` context macro in expression/template across scripts |
 
 ## Notes
 - `26-enum-flow` intentionally covers enum member usage directly in XML attribute expressions (`args="ids.LocationId.A"`).

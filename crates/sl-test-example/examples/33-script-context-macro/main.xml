@@ -1,0 +1,14 @@
+<module name="main" export="script:main">
+  <script name="main">
+    <text>${__script__}</text>
+    <goto script="@next"/>
+  </script>
+
+  <script name="next">
+    <temp name="sid" type="string">__script__</temp>
+    <if when="__script__ == 'main.next'">
+      <text>${sid}</text>
+    </if>
+    <end/>
+  </script>
+</module>

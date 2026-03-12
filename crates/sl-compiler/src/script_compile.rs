@@ -42,6 +42,124 @@ fn function_ref_var_regex() -> &'static Regex {
     REGEX.get_or_init(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").expect("function ref var regex"))
 }
 
+fn template_expr_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r"\$\{([^{}]+)\}").expect("template expression regex"))
+}
+
+fn is_identifier_char(ch: Option<char>) -> bool {
+    ch.is_some_and(|value| value.is_ascii_alphanumeric() || value == '_')
+}
+
+#[derive(Clone, Copy)]
+enum ScriptMacroQuoteStyle {
+    Single,
+    Double,
+}
+
+fn script_name_literal(script_name: &str, quote_style: ScriptMacroQuoteStyle) -> String {
+    match quote_style {
+        ScriptMacroQuoteStyle::Single => {
+            format!(
+                "'{}'",
+                script_name.replace('\\', "\\\\").replace('\'', "\\'")
+            )
+        }
+        ScriptMacroQuoteStyle::Double => {
+            format!(
+                "\"{}\"",
+                script_name.replace('\\', "\\\\").replace('"', "\\\"")
+            )
+        }
+    }
+}
+
+fn rewrite_script_context_macro_in_expression(
+    expr: &str,
+    script_name: Option<&str>,
+    quote_style: ScriptMacroQuoteStyle,
+) -> String {
+    let Some(script_name) = script_name else {
+        return expr.to_string();
+    };
+    let replacement = script_name_literal(script_name, quote_style);
+    let target_chars = "__script__".chars().collect::<Vec<_>>();
+    let chars = expr.chars().collect::<Vec<_>>();
+    let mut out = String::with_capacity(expr.len() + 8);
+    let mut index = 0usize;
+    let mut quote: Option<char> = None;
+
+    while index < chars.len() {
+        let ch = chars[index];
+        if let Some(active_quote) = quote {
+            out.push(ch);
+            if ch == '\\' && index + 1 < chars.len() {
+                index += 1;
+                out.push(chars[index]);
+            } else if ch == active_quote {
+                quote = None;
+            }
+            index += 1;
+            continue;
+        }
+
+        if ch == '\'' || ch == '"' {
+            quote = Some(ch);
+            out.push(ch);
+            index += 1;
+            continue;
+        }
+
+        if index + target_chars.len() <= chars.len()
+            && chars[index..index + target_chars.len()] == target_chars[..]
+            && !is_identifier_char(if index == 0 {
+                None
+            } else {
+                Some(chars[index - 1])
+            })
+            && !is_identifier_char(chars.get(index + target_chars.len()).copied())
+        {
+            out.push_str(&replacement);
+            index += target_chars.len();
+            continue;
+        }
+
+        out.push(ch);
+        index += 1;
+    }
+
+    out
+}
+
+fn rewrite_script_context_macro_in_template(template: &str, script_name: Option<&str>) -> String {
+    if script_name.is_none() {
+        return template.to_string();
+    }
+
+    let mut out = String::with_capacity(template.len());
+    let mut last_index = 0usize;
+    for captures in template_expr_regex().captures_iter(template) {
+        let full = captures
+            .get(0)
+            .expect("capture group 0 must exist for each template capture");
+        let expr = captures
+            .get(1)
+            .expect("capture group 1 must exist for each template capture");
+        out.push_str(&template[last_index..full.start()]);
+        let rewritten = rewrite_script_context_macro_in_expression(
+            expr.as_str(),
+            script_name,
+            ScriptMacroQuoteStyle::Double,
+        );
+        out.push_str("${");
+        out.push_str(&rewritten);
+        out.push('}');
+        last_index = full.end();
+    }
+    out.push_str(&template[last_index..]);
+    out
+}
+
 fn qualify_script_literal_name(
     literal_name: &str,
     module_name: Option<&str>,
@@ -443,14 +561,20 @@ fn normalize_expression_literals(
     span: &SourceSpan,
     all_script_access: &BTreeMap<String, AccessLevel>,
     module_name: Option<&str>,
+    current_script_name: Option<&str>,
     visible_types: &BTreeMap<String, ScriptType>,
     visible_functions: &BTreeMap<String, FunctionDecl>,
     local_var_types: &BTreeMap<String, ScriptType>,
     visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
     visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
 ) -> Result<String, ScriptLangError> {
-    let script_rewritten = normalize_and_validate_script_literals_in_expression(
+    let macro_rewritten = rewrite_script_context_macro_in_expression(
         expr,
+        current_script_name,
+        ScriptMacroQuoteStyle::Double,
+    );
+    let script_rewritten = normalize_and_validate_script_literals_in_expression(
+        &macro_rewritten,
         span,
         module_name,
         Some(all_script_access),
@@ -489,14 +613,20 @@ fn normalize_attribute_expression_literals(
     span: &SourceSpan,
     all_script_access: &BTreeMap<String, AccessLevel>,
     module_name: Option<&str>,
+    current_script_name: Option<&str>,
     visible_types: &BTreeMap<String, ScriptType>,
     visible_functions: &BTreeMap<String, FunctionDecl>,
     local_var_types: &BTreeMap<String, ScriptType>,
     visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
     visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
 ) -> Result<String, ScriptLangError> {
-    let script_rewritten = normalize_and_validate_script_literals_in_expression(
+    let macro_rewritten = rewrite_script_context_macro_in_expression(
         expr,
+        current_script_name,
+        ScriptMacroQuoteStyle::Single,
+    );
+    let script_rewritten = normalize_and_validate_script_literals_in_expression(
+        &macro_rewritten,
         span,
         module_name,
         Some(all_script_access),
@@ -538,13 +668,16 @@ fn normalize_template_literals(
     span: &SourceSpan,
     all_script_access: &BTreeMap<String, AccessLevel>,
     module_name: Option<&str>,
+    current_script_name: Option<&str>,
     visible_types: &BTreeMap<String, ScriptType>,
     visible_functions: &BTreeMap<String, FunctionDecl>,
     local_var_types: &BTreeMap<String, ScriptType>,
     visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
     visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
 ) -> Result<String, ScriptLangError> {
-    let rewritten = rewrite_and_validate_enum_literals_in_template(template, visible_types, span)?;
+    let macro_rewritten = rewrite_script_context_macro_in_template(template, current_script_name);
+    let rewritten =
+        rewrite_and_validate_enum_literals_in_template(&macro_rewritten, visible_types, span)?;
     let rewritten = normalize_and_validate_script_literals_in_expression(
         &rewritten,
         span,
@@ -714,6 +847,7 @@ pub(crate) fn compile_script(
         visible_module_consts,
         all_script_access,
         module_name,
+        Some(script_name.as_str()),
         &visible_var_types,
         CompileGroupMode::new(0, false).with_script_kind(script_kind),
     )?;
@@ -758,6 +892,7 @@ pub(crate) fn compile_group(
         &BTreeMap::new(),
         &BTreeMap::new(),
         None,
+        None,
         visible_var_types,
         mode,
     )
@@ -775,6 +910,7 @@ fn compile_group_with_context(
     visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
     all_script_access: &BTreeMap<String, AccessLevel>,
     module_name: Option<&str>,
+    current_script_name: Option<&str>,
     visible_var_types: &BTreeMap<String, ScriptType>,
     mode: CompileGroupMode,
 ) -> Result<(), ScriptLangError> {
@@ -801,6 +937,7 @@ fn compile_group_with_context(
         visible_module_consts,
         all_script_access,
         module_name,
+        current_script_name,
         &mut local_var_types,
         mode,
         &mut nodes,
@@ -826,6 +963,7 @@ fn compile_child_group(
     visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
     all_script_access: &BTreeMap<String, AccessLevel>,
     module_name: Option<&str>,
+    current_script_name: Option<&str>,
     local_var_types: &mut BTreeMap<String, ScriptType>,
     mode: CompileGroupMode,
 ) -> Result<(), ScriptLangError> {
@@ -840,6 +978,7 @@ fn compile_child_group(
         visible_module_consts,
         all_script_access,
         module_name,
+        current_script_name,
         local_var_types,
         mode,
     )
@@ -856,6 +995,7 @@ pub(crate) fn compile_group_nodes(
     visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
     all_script_access: &BTreeMap<String, AccessLevel>,
     module_name: Option<&str>,
+    current_script_name: Option<&str>,
     local_var_types: &mut BTreeMap<String, ScriptType>,
     mode: CompileGroupMode,
     nodes: &mut Vec<ScriptNode>,
@@ -885,6 +1025,7 @@ pub(crate) fn compile_group_nodes(
                     visible_module_consts,
                     all_script_access,
                     module_name,
+                    current_script_name,
                     local_var_types,
                     CompileGroupMode::new(mode.while_depth, false)
                         .with_script_kind(mode.script_kind),
@@ -916,6 +1057,7 @@ pub(crate) fn compile_group_nodes(
                         &child.location,
                         all_script_access,
                         module_name,
+                        current_script_name,
                         visible_types,
                         visible_functions,
                         local_var_types,
@@ -957,6 +1099,7 @@ pub(crate) fn compile_group_nodes(
                     &child.location,
                     all_script_access,
                     module_name,
+                    current_script_name,
                     visible_types,
                     visible_functions,
                     local_var_types,
@@ -984,6 +1127,7 @@ pub(crate) fn compile_group_nodes(
                         &child.location,
                         all_script_access,
                         module_name,
+                        current_script_name,
                         visible_types,
                         visible_functions,
                         local_var_types,
@@ -999,6 +1143,7 @@ pub(crate) fn compile_group_nodes(
                     &child.location,
                     all_script_access,
                     module_name,
+                    current_script_name,
                     visible_types,
                     visible_functions,
                     local_var_types,
@@ -1044,6 +1189,7 @@ pub(crate) fn compile_group_nodes(
                     visible_module_consts,
                     all_script_access,
                     module_name,
+                    current_script_name,
                     local_var_types,
                     group_mode,
                 );
@@ -1061,6 +1207,7 @@ pub(crate) fn compile_group_nodes(
                         visible_module_consts,
                         all_script_access,
                         module_name,
+                        current_script_name,
                         local_var_types,
                         group_mode,
                     );
@@ -1085,6 +1232,7 @@ pub(crate) fn compile_group_nodes(
                             &child.location,
                             all_script_access,
                             module_name,
+                            current_script_name,
                             visible_types,
                             visible_functions,
                             local_var_types,
@@ -1112,6 +1260,7 @@ pub(crate) fn compile_group_nodes(
                     visible_module_consts,
                     all_script_access,
                     module_name,
+                    current_script_name,
                     local_var_types,
                     while_mode,
                 );
@@ -1124,6 +1273,7 @@ pub(crate) fn compile_group_nodes(
                             &child.location,
                             all_script_access,
                             module_name,
+                            current_script_name,
                             visible_types,
                             visible_functions,
                             local_var_types,
@@ -1141,6 +1291,7 @@ pub(crate) fn compile_group_nodes(
                     &child.location,
                     all_script_access,
                     module_name,
+                    current_script_name,
                     visible_types,
                     visible_functions,
                     local_var_types,
@@ -1163,6 +1314,7 @@ pub(crate) fn compile_group_nodes(
                                         &choice_child.location,
                                         all_script_access,
                                         module_name,
+                                        current_script_name,
                                         visible_types,
                                         visible_functions,
                                         local_var_types,
@@ -1197,6 +1349,7 @@ pub(crate) fn compile_group_nodes(
                                 visible_module_consts,
                                 all_script_access,
                                 module_name,
+                                current_script_name,
                                 local_var_types,
                                 option_mode,
                             );
@@ -1210,6 +1363,7 @@ pub(crate) fn compile_group_nodes(
                                         &choice_child.location,
                                         all_script_access,
                                         module_name,
+                                        current_script_name,
                                         visible_types,
                                         visible_functions,
                                         local_var_types,
@@ -1289,6 +1443,7 @@ pub(crate) fn compile_group_nodes(
                                 visible_module_consts,
                                 all_script_access,
                                 module_name,
+                                current_script_name,
                                 local_var_types,
                                 option_mode,
                             );
@@ -1306,6 +1461,7 @@ pub(crate) fn compile_group_nodes(
                                             &template_option.location,
                                             all_script_access,
                                             module_name,
+                                            current_script_name,
                                             visible_types,
                                             visible_functions,
                                             local_var_types,
@@ -1322,6 +1478,7 @@ pub(crate) fn compile_group_nodes(
                                                         &template_option.location,
                                                         all_script_access,
                                                         module_name,
+                                                        current_script_name,
                                                         visible_types,
                                                         visible_functions,
                                                         local_var_types,
@@ -1455,6 +1612,7 @@ pub(crate) fn compile_group_nodes(
                                 &child.location,
                                 all_script_access,
                                 module_name,
+                                current_script_name,
                                 visible_types,
                                 visible_functions,
                                 local_var_types,
@@ -1483,6 +1641,7 @@ pub(crate) fn compile_group_nodes(
                             &child.location,
                             all_script_access,
                             module_name,
+                            current_script_name,
                             visible_types,
                             visible_functions,
                             local_var_types,
@@ -2607,6 +2766,7 @@ mod script_compile_tests {
             &span,
             &all_script_access,
             Some("main"),
+            Some("main.main"),
             &BTreeMap::new(),
             &visible_functions,
             &local_var_types,
@@ -2630,6 +2790,7 @@ mod script_compile_tests {
             &span,
             &all_script_access,
             Some("main"),
+            Some("main.main"),
             &BTreeMap::new(),
             &BTreeMap::new(),
             &non_function_vars,
@@ -2645,6 +2806,7 @@ mod script_compile_tests {
             &span,
             &all_script_access,
             Some("main"),
+            Some("main.main"),
             &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -2669,6 +2831,7 @@ mod script_compile_tests {
             &span,
             &all_script_access,
             Some("main"),
+            Some("main.main"),
             &visible_types,
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -2683,6 +2846,7 @@ mod script_compile_tests {
             &span,
             &all_script_access,
             Some("main"),
+            Some("main.main"),
             &BTreeMap::new(),
             &visible_functions,
             &local_var_types,
@@ -2697,6 +2861,7 @@ mod script_compile_tests {
             &span,
             &all_script_access,
             Some("main"),
+            Some("main.main"),
             &BTreeMap::new(),
             &visible_functions,
             &local_var_types,
@@ -2706,12 +2871,76 @@ mod script_compile_tests {
         .expect("normalize template should pass");
         assert!(normalized_template.contains("invoke(fnRef, [1])"));
 
+        let script_macro_expr = normalize_expression_literals(
+            "__script__",
+            &span,
+            &all_script_access,
+            Some("main"),
+            Some("main.main"),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("script macro in expression should expand");
+        assert_eq!(script_macro_expr, "\"main.main\"");
+
+        let quoted_script_macro_expr = normalize_expression_literals(
+            "\"__script__\"",
+            &span,
+            &all_script_access,
+            Some("main"),
+            Some("main.main"),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("quoted script macro text should remain literal");
+        assert_eq!(quoted_script_macro_expr, "\"__script__\"");
+
+        let script_macro_attr = normalize_attribute_expression_literals(
+            "__script__",
+            &span,
+            &all_script_access,
+            Some("main"),
+            Some("main.main"),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("script macro in attribute expression should use single quotes");
+        assert_eq!(script_macro_attr, "'main.main'");
+
+        let script_macro_template = normalize_template_literals(
+            "expr=${__script__}; raw=__script__",
+            &span,
+            &all_script_access,
+            Some("main"),
+            Some("main.main"),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("script macro in template should expand only inside capture");
+        assert_eq!(
+            script_macro_template,
+            "expr=${\"main.main\"}; raw=__script__"
+        );
+
         // Test line 403: normalize_and_validate_function_literals error in attr
         let missing_fn_attr_error = normalize_attribute_expression_literals(
             "*missing.func",
             &span,
             &all_script_access,
             Some("main"),
+            Some("main.main"),
             &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -2727,6 +2956,7 @@ mod script_compile_tests {
             &span,
             &all_script_access,
             Some("main"),
+            Some("main.main"),
             &visible_types,
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -2742,6 +2972,7 @@ mod script_compile_tests {
             &span,
             &all_script_access,
             Some("main"),
+            Some("main.main"),
             &BTreeMap::new(),
             &BTreeMap::new(),
             &non_function_vars,
@@ -2757,6 +2988,7 @@ mod script_compile_tests {
             &span,
             &all_script_access,
             Some("main"),
+            Some("main.main"),
             &BTreeMap::new(),
             &BTreeMap::new(),
             &BTreeMap::new(),
@@ -2775,6 +3007,7 @@ mod script_compile_tests {
             &span,
             &all_script_access,
             Some("main"),
+            Some("main.main"),
             &BTreeMap::new(),
             &BTreeMap::new(),
             &non_function_vars,

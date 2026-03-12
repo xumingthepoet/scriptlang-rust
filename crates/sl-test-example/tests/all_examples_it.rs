@@ -140,6 +140,11 @@ fn example_32_temp_input_macro_matches_testcase() {
 }
 
 #[test]
+fn example_33_script_context_macro_matches_testcase() {
+    assert_example("33-script-context-macro");
+}
+
+#[test]
 fn example_22_access_control_matches_testcase() {
     assert_example("22-access-control");
 }
