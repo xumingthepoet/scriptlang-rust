@@ -991,7 +991,6 @@ impl ScriptLangEngine {
         out.push_str("if type_of(args) != \"array\" {\n");
         out.push_str("throw \"__sl_err:ENGINE_INVOKE_ARGS_NOT_ARRAY:invoke(name, [args]) requires args to be an array.\";\n");
         out.push_str("}\n");
-        let _ = &self.invoke_public_functions;
         for qualified_name in self.invoke_all_functions.keys() {
             let Some(decl) = self.invoke_all_functions.get(qualified_name) else {
                 continue;

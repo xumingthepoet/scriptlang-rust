@@ -135,7 +135,6 @@ pub struct ScriptLangEngine {
     pub(super) visible_consts_by_script: HashMap<String, BTreeSet<String>>,
     pub(super) visible_function_symbols_by_script: HashMap<String, BTreeMap<String, String>>,
     pub(super) invoke_all_functions: BTreeMap<String, FunctionDecl>,
-    pub(super) invoke_public_functions: BTreeSet<String>,
     pub(super) invoke_function_symbols: BTreeMap<String, String>,
     pub(super) module_prelude_by_script: HashMap<String, String>,
     pub(super) initial_random_seed: u32,
@@ -183,7 +182,6 @@ impl ScriptLangEngine {
         let mut visible_function_symbols_by_script = HashMap::new();
 
         let mut invoke_all_functions = BTreeMap::new();
-        let mut invoke_public_functions = BTreeSet::new();
         let mut invoke_function_symbols = BTreeMap::new();
 
         for (script_name, script) in &options.scripts {
@@ -268,7 +266,6 @@ impl ScriptLangEngine {
                     invoke_all_functions.insert(qualified_name.clone(), decl.clone());
                 }
             }
-            invoke_public_functions.extend(script.invoke_public_functions.iter().cloned());
         }
         for qualified_name in invoke_all_functions.keys() {
             let symbol = rhai_function_symbol(qualified_name);
@@ -367,7 +364,6 @@ impl ScriptLangEngine {
             visible_consts_by_script,
             visible_function_symbols_by_script,
             invoke_all_functions,
-            invoke_public_functions,
             invoke_function_symbols,
             module_prelude_by_script: HashMap::new(),
             initial_random_seed,

@@ -2148,7 +2148,6 @@ mod callstack_tests {
             visible_module_consts: Default::default(),
             visible_globals: vec![],
             invoke_all_functions: Default::default(),
-            invoke_public_functions: Default::default(),
         };
 
         // Directly call validate - should hit line 20 because module_name is None
@@ -2212,7 +2211,6 @@ mod callstack_tests {
             visible_module_consts: Default::default(),
             visible_globals: vec![],
             invoke_all_functions: Default::default(),
-            invoke_public_functions: Default::default(),
         };
 
         // Now resolve_current_module_name() should return None (because main is not in scripts)
@@ -2362,5 +2360,135 @@ mod callstack_tests {
             .next_output()
             .expect_err("too many args should fail");
         assert_eq!(error.code, "ENGINE_GOTO_ARG_UNKNOWN");
+    }
+
+    #[test]
+    pub(super) fn execute_goto_without_root_frame() {
+        // Test execute_goto when find_current_root_frame_index returns error (line 284)
+        // This requires having frames but none with script_root = true
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>x</text></script>"#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        // Get the root group_id
+        let group_id = engine
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+
+        // Replace frames with a non-root frame to trigger ENGINE_ROOT_FRAME error
+        engine.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: false, // Not a root frame!
+            return_continuation: None,
+            var_types: BTreeMap::new(),
+        }];
+
+        let error = engine
+            .execute_goto(&lit("target"), &[])
+            .expect_err("goto without root frame should fail");
+        assert_eq!(error.code, "ENGINE_ROOT_FRAME");
+    }
+
+    #[test]
+    pub(super) fn execute_return_lookup_group_error() {
+        // Test execute_return when lookup_group returns error (line 359)
+        // Need frames with script_root=true but group_lookup doesn't have the group_id
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>x</text></script>"#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        // Get the root group_id
+        let group_id = engine
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+
+        // Clear group_lookup to trigger lookup_group error
+        engine.group_lookup.clear();
+
+        // Set up a root frame with the missing group_id
+        engine.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id, // This group_id is no longer in group_lookup
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::new(),
+        }];
+
+        let error = engine
+            .execute_return("return")
+            .expect_err("return with missing group should fail");
+        assert_eq!(error.code, "ENGINE_GROUP_NOT_FOUND");
+    }
+
+    #[test]
+    pub(super) fn execute_return_script_not_found() {
+        // Test execute_return when script is not found after lookup_group succeeds (lines 360-365)
+        // Need group_lookup to have the entry pointing to a missing script
+        use super::lifecycle::GroupLookup;
+
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>x</text></script>"#,
+        )]));
+        engine.start("main", None).expect("start");
+
+        // Get the root group_id
+        let group_id = engine
+            .scripts
+            .get("main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+
+        // Modify group_lookup to point to a non-existent script
+        // First get the existing lookup entry
+        let existing_lookup = engine.group_lookup.get(&group_id).cloned();
+        assert!(
+            existing_lookup.is_some(),
+            "group_lookup should have the group"
+        );
+
+        // Replace with a lookup pointing to a non-existent script
+        engine.group_lookup.insert(
+            group_id.clone(),
+            GroupLookup {
+                script_name: "non_existent_script".to_string(),
+                group_id: group_id.clone(),
+            },
+        );
+
+        // Set up a root frame
+        engine.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::new(),
+        }];
+
+        let error = engine
+            .execute_return("return")
+            .expect_err("return with missing script should fail");
+        assert_eq!(error.code, "ENGINE_SCRIPT_NOT_FOUND");
     }
 }

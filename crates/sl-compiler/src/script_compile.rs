@@ -821,7 +821,6 @@ pub(crate) fn compile_script(
         visible_module_consts,
         all_script_access,
         invoke_all_functions,
-        invoke_public_functions,
     } = options;
     if root.name != "script" {
         return Err(ScriptLangError::with_span(
@@ -892,7 +891,6 @@ pub(crate) fn compile_script(
         visible_module_vars: visible_module_vars.clone(),
         visible_module_consts: visible_module_consts.clone(),
         invoke_all_functions: invoke_all_functions.clone(),
-        invoke_public_functions: invoke_public_functions.clone(),
     })
 }
 
@@ -2275,7 +2273,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("empty kind should fail");
         assert_eq!(error.code, "XML_SCRIPT_KIND_INVALID");
@@ -2297,7 +2294,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         });
         // Explicit goto kind should compile successfully
         assert!(result.is_ok());
@@ -2319,7 +2315,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("invalid kind should fail");
         assert_eq!(error.code, "XML_SCRIPT_KIND_INVALID");
@@ -2342,7 +2337,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("goto in call script should fail");
         assert_eq!(error.code, "XML_CALL_SCRIPT_GOTO_FORBIDDEN");
@@ -2363,7 +2357,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("return in goto script should fail");
         assert_eq!(error.code, "XML_GOTO_SCRIPT_RETURN_FORBIDDEN");
@@ -2384,7 +2377,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("end in call script should fail");
         assert_eq!(error.code, "XML_CALL_SCRIPT_END_FORBIDDEN");
@@ -2406,7 +2398,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("return with content should fail");
         assert_eq!(error.code, "XML_RETURN_CONTENT_FORBIDDEN");
@@ -2427,7 +2418,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("end with attr should fail");
         assert_eq!(error.code, "XML_END_ATTR_NOT_ALLOWED");
@@ -2448,7 +2438,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("end with content should fail");
         assert_eq!(error.code, "XML_END_CONTENT_FORBIDDEN");
@@ -2471,7 +2460,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("ref args in goto script should fail");
         assert_eq!(error.code, "SCRIPT_GOTO_ARGS_REF_UNSUPPORTED");
@@ -2492,7 +2480,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("empty script attr should fail");
         assert_eq!(error.code, "XML_EMPTY_ATTR");
@@ -3189,7 +3176,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("function temp with string should fail");
         assert_eq!(error.code, "XML_FUNCTION_ASSIGN_STRING_FORBIDDEN");
@@ -4396,7 +4382,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("compile_script should require script root");
         assert_eq!(compile_root_error.code, "XML_ROOT_INVALID");
@@ -4414,7 +4399,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("compile_script should require script name");
         assert_eq!(missing_name_error.code, "XML_MISSING_ATTR");
@@ -4432,7 +4416,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("compile_script should reject reserved name");
         assert_eq!(reserved_name_error.code, "NAME_RESERVED_PREFIX");
@@ -4449,7 +4432,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("compile_script should reject keyword name");
         assert_eq!(keyword_name_error.code, "NAME_RHAI_KEYWORD_RESERVED");
@@ -4475,7 +4457,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &BTreeMap::new(),
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         })
         .expect_err("compile_script should reject reserved var names");
         assert_eq!(reserved_var_error.code, "NAME_RESERVED_PREFIX");
@@ -4497,7 +4478,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &no_module_scripts,
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         })
         .expect("compile without module name");
         let root_group = no_module_ir
@@ -4986,7 +4966,6 @@ mod script_compile_tests {
                 visible_module_consts: &BTreeMap::new(),
                 all_script_access: &known_scripts,
                 invoke_all_functions: &BTreeMap::new(),
-                invoke_public_functions: &BTreeSet::new(),
             })
             .expect_err("compile should fail");
             assert_eq!(error.code, expected_code);
@@ -5032,7 +5011,6 @@ mod script_compile_tests {
                 visible_module_consts: &BTreeMap::new(),
                 all_script_access: &all_scripts,
                 invoke_all_functions: &BTreeMap::new(),
-                invoke_public_functions: &BTreeSet::new(),
             })
             .expect_err("compile should fail");
             assert_eq!(error.code, expected_code);
@@ -5334,7 +5312,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &all_scripts,
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         })
         .expect("compile should pass");
 
@@ -5378,7 +5355,6 @@ mod script_compile_tests {
             visible_module_consts: &BTreeMap::new(),
             all_script_access: &all_scripts,
             invoke_all_functions: &BTreeMap::new(),
-            invoke_public_functions: &BTreeSet::new(),
         })
         .expect("compile should pass");
         let root_group = compiled
@@ -5425,7 +5401,6 @@ mod script_compile_tests {
                 visible_module_consts: &BTreeMap::new(),
                 all_script_access: &known_scripts,
                 invoke_all_functions: &BTreeMap::new(),
-                invoke_public_functions: &BTreeSet::new(),
             })
             .expect_err("compile should fail");
             assert_eq!(error.code, expected_code);
@@ -5504,7 +5479,6 @@ mod script_compile_tests {
                 visible_module_consts: &BTreeMap::new(),
                 all_script_access: &known_scripts,
                 invoke_all_functions: &BTreeMap::new(),
-                invoke_public_functions: &BTreeSet::new(),
             })
             .expect_err("compile should fail");
             assert_eq!(error.code, expected_code);
@@ -5532,7 +5506,6 @@ mod script_compile_tests {
                 visible_module_consts: &BTreeMap::new(),
                 all_script_access: &known_scripts,
                 invoke_all_functions: &BTreeMap::new(),
-                invoke_public_functions: &BTreeSet::new(),
             })
             .expect("compile should succeed");
         };

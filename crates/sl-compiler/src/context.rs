@@ -139,7 +139,6 @@ pub(crate) struct CompileScriptOptions<'a> {
     pub(crate) visible_module_consts: &'a BTreeMap<String, ModuleConstDecl>,
     pub(crate) all_script_access: &'a BTreeMap<String, AccessLevel>,
     pub(crate) invoke_all_functions: &'a BTreeMap<String, FunctionDecl>,
-    pub(crate) invoke_public_functions: &'a BTreeSet<String>,
 }
 
 pub(crate) type VisibleTypeMap = BTreeMap<String, ScriptType>;

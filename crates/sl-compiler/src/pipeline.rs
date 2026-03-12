@@ -24,11 +24,10 @@ pub fn compile_project_bundle_from_xml_map(
     let module_alias_directives_by_namespace =
         collect_module_alias_directives_by_namespace(&sources);
     let global_data = BTreeMap::new();
-    let (invoke_all_functions, invoke_public_functions) =
-        collect_functions_for_bundle_with_aliases(
-            &module_by_path,
-            &module_alias_directives_by_namespace,
-        )?;
+    let invoke_all_functions = collect_functions_for_bundle_with_aliases(
+        &module_by_path,
+        &module_alias_directives_by_namespace,
+    )?;
     let (module_var_declarations, module_var_init_order) =
         collect_module_vars_for_bundle(&module_by_path, &invoke_all_functions)?;
     let (module_const_declarations, module_const_init_order) = collect_module_consts_for_bundle(
@@ -67,7 +66,6 @@ pub fn compile_project_bundle_from_xml_map(
                 visible_module_consts: &visible_module_consts,
                 all_script_access: &all_script_access,
                 invoke_all_functions: &invoke_all_functions,
-                invoke_public_functions: &invoke_public_functions,
             })
             .map_err(|error| with_file_context(error, file_path))?;
             if scripts.contains_key(&ir.script_name) {

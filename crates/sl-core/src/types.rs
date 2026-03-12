@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -311,8 +311,6 @@ pub struct ScriptIr {
     pub visible_module_consts: BTreeMap<String, ModuleConstDecl>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub invoke_all_functions: BTreeMap<String, FunctionDecl>,
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pub invoke_public_functions: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

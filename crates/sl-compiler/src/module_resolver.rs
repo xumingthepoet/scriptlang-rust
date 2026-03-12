@@ -1381,7 +1381,7 @@ fn apply_explicit_alias_directives(
 pub(crate) fn collect_functions_for_bundle_with_aliases(
     module_by_path: &BTreeMap<String, ModuleDeclarations>,
     module_alias_directives_by_namespace: &BTreeMap<String, Vec<AliasDirective>>,
-) -> Result<(BTreeMap<String, FunctionDecl>, BTreeSet<String>), ScriptLangError> {
+) -> Result<BTreeMap<String, FunctionDecl>, ScriptLangError> {
     let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
     let mut type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for module in module_by_path.values() {
@@ -1461,7 +1461,6 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
     }
 
     let mut functions = BTreeMap::new();
-    let mut public_functions = BTreeSet::new();
     for module in module_by_path.values() {
         for decl in &module.function_decls {
             if functions.contains_key(&decl.qualified_name) {
@@ -1544,13 +1543,10 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
                     location: decl.location.clone(),
                 },
             );
-            if decl.access == AccessLevel::Public {
-                public_functions.insert(decl.qualified_name.clone());
-            }
         }
     }
 
-    Ok((functions, public_functions))
+    Ok(functions)
 }
 
 pub(crate) fn collect_module_vars_for_bundle(
