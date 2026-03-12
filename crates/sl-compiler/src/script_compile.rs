@@ -3871,6 +3871,14 @@ mod script_compile_tests {
                     )]),
                     "TYPE_PARSE_ERROR",
                 ),
+                (
+                    "for macro expansion error",
+                    map(&[(
+                        "main.xml",
+                        "<script name=\"main\"><for temps=\"i:int:0\"><text>x</text></for></script>",
+                    )]),
+                    "XML_MISSING_ATTR",
+                ),
             ];
 
         for (name, files, expected_code) in cases {
