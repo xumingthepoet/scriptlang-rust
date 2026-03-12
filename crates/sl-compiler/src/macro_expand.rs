@@ -535,9 +535,14 @@ mod macro_expand_tests {
         let main = result.scripts.get("main.main").expect("main script");
         let root = main.groups.get(&main.root_group_id).expect("root group");
 
-        let ScriptNode::If { then_group_id, .. } = root.nodes.first().expect("group node") else {
-            panic!("for should compile into a scoped group");
-        };
+        let then_group_id = root
+            .nodes
+            .iter()
+            .find_map(|node| match node {
+                ScriptNode::If { then_group_id, .. } => Some(then_group_id.as_str()),
+                _ => None,
+            })
+            .expect("for should compile into a scoped group");
         let for_group = main.groups.get(then_group_id).expect("for group");
         let var_count = for_group
             .nodes
@@ -595,10 +600,14 @@ mod macro_expand_tests {
                 _ => None,
             })
             .expect("for should contain while");
-        let first_child = while_node.children.first().expect("while first child");
-        let XmlNode::Element(if_node) = first_child else {
-            panic!("while first child must be if");
-        };
+        let if_node = while_node
+            .children
+            .iter()
+            .find_map(|entry| match entry {
+                XmlNode::Element(element) if element.name == "if" => Some(element),
+                _ => None,
+            })
+            .expect("while first child must be if");
         assert_eq!(if_node.name, "if");
         let else_node = if_node
             .children
@@ -608,10 +617,14 @@ mod macro_expand_tests {
                 _ => None,
             })
             .expect("if should contain else branch");
-        let iteration_code = else_node.children.first().expect("else first child");
-        let XmlNode::Element(code_node) = iteration_code else {
-            panic!("else first child must be code");
-        };
+        let code_node = else_node
+            .children
+            .iter()
+            .find_map(|entry| match entry {
+                XmlNode::Element(element) if element.name == "code" => Some(element),
+                _ => None,
+            })
+            .expect("else first child must be code");
         assert_eq!(code_node.name, "code");
         let iteration_text = inline_text_content(code_node);
         assert_eq!(iteration_text.trim(), "i = i + 1;");
@@ -731,6 +744,29 @@ mod macro_expand_tests {
         )
         .expect("map braces should parse");
         assert_eq!(parsed3[0].init_expr, "#{'a': 1}");
+    }
+
+    #[test]
+    fn for_temps_parser_handles_unbalanced_closing_tokens_without_underflow() {
+        let host = xml_element(
+            "for",
+            &[
+                ("temps", "a:string:value)]};b:int:2"),
+                ("condition", "true"),
+                ("iteration", "a = a + 1;"),
+            ],
+            Vec::new(),
+        );
+        let parsed = parse_for_temps_decls(
+            host.attributes
+                .get("temps")
+                .expect("temps attr should exist"),
+            &host,
+        )
+        .expect("unbalanced closing tokens should not break parser");
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].init_expr, "value)]}");
+        assert_eq!(parsed[1].init_expr, "2");
     }
 
     #[test]
@@ -1183,18 +1219,25 @@ mod macro_expand_tests {
             })
             .expect("for expansion should contain while");
 
-        let XmlNode::Element(first_if) = while_node.children.first().expect("while first child")
-        else {
-            panic!("while first child must be if");
-        };
+        let first_if = while_node
+            .children
+            .iter()
+            .find_map(|entry| match entry {
+                XmlNode::Element(element) if element.name == "if" => Some(element),
+                _ => None,
+            })
+            .expect("while first child must be if");
         let else_node = element_children(first_if)
             .find(|child| child.name == "else")
             .expect("guard if should contain else");
-        let XmlNode::Element(iteration_code) =
-            else_node.children.first().expect("else first child")
-        else {
-            panic!("else first child must be code");
-        };
+        let iteration_code = else_node
+            .children
+            .iter()
+            .find_map(|entry| match entry {
+                XmlNode::Element(element) if element.name == "code" => Some(element),
+                _ => None,
+            })
+            .expect("else first child must be code");
         assert_eq!(inline_text_content(iteration_code).trim(), "true;");
     }
 
