@@ -27,8 +27,8 @@ use rng::{next_random_bounded_with, next_random_u32};
 use sl_core::{
     default_value_from_type, is_type_compatible, AccessLevel, ChoiceEntry, ChoiceItem,
     ContinuationFrame, ContinueTarget, EngineOutput, ModuleConstDecl, ModuleVarDecl,
-    PendingBoundary, PendingDynamicChoiceBinding, ScriptIr, ScriptLangError, ScriptNode,
-    ScriptTarget, ScriptType, SlValue, Snapshot, SnapshotCompletion, SnapshotFrame,
+    PendingBoundary, PendingDynamicChoiceBinding, ScriptIr, ScriptKind, ScriptLangError,
+    ScriptNode, ScriptTarget, ScriptType, SlValue, Snapshot, SnapshotCompletion, SnapshotFrame,
 };
 
 mod boundary;

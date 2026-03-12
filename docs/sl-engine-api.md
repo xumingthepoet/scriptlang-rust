@@ -2,6 +2,7 @@
 
 本文档面向宿主开发者，说明如何通过 `sl-api` / `sl-runtime` 在 Rust 中完成 ScriptLang 的编译、执行、存档和读档。
 - 语言层已引入 `script` 类型与 `@...` 脚本字面量；宿主 API 的 `entry_script` 入参/产物字段保持不变，仍使用限定名字符串（如 `main.main`）。
+- `entry_script` 必须指向 `kind="goto"` 脚本；`kind="call"` 脚本不能作为宿主入口。
 
 ## 1. 分层与推荐入口
 
@@ -102,6 +103,9 @@ assert!(scripts.contains_key("main.main"));
 - `scripts`
 - `entry_script`（显式指定或默认 `main.main`）
 
+入口约束：
+- `entry_script` 必须是 `goto` 型脚本；否则编译/创建引擎阶段会报错。
+
 编译产物约束（与 alias 相关）：
 - module `var/const` 的短名/显式 alias 在编译期预处理为限定名访问，运行期按限定名执行。
 - `script` 字面量短名（如 `@next`）在编译期补全为限定名（如 `@main.next`）；运行期不再对 script 目标做模块前缀补全。
@@ -126,7 +130,7 @@ assert_eq!(project.entry_script, "main.main");
 
 参数：`CreateEngineFromXmlOptions`
 - `scripts_xml`: 源文件映射
-- `entry_script`: 可选；缺省自动解析
+- `entry_script`: 可选；缺省自动解析（且必须是 `goto` 型）
 - `entry_args`: 入口脚本参数（`BTreeMap<String, SlValue>`）
 - `host_functions`: 宿主函数注册表（当前 runtime 构建暂不支持真正调用）
 - `random_seed`: 随机种子（决定 `random(n)` 序列）
@@ -340,7 +344,7 @@ assert_eq!(artifact.schema_version, loaded.schema_version);
 
 主要公开方法：
 - `ScriptLangEngine::new(options)`
-- `start(entry_script_name, entry_args)`
+- `start(entry_script_name, entry_args)`（`entry_script_name` 必须是 `goto` 型）
 - `next_output()`
 - `choose(index)`
 - `submit_input(text)`
@@ -397,6 +401,9 @@ loop {
 4. 内建函数：
    - `random(n)`：`n > 0`
    - `enum_to_string(enumValue)`：返回枚举成员字符串
+   - `is_call_kind_script(scriptRef)`：若 `scriptRef` 指向 `kind="call"` 脚本，返回 `true`
+   - `is_goto_kind_script(scriptRef)`：若 `scriptRef` 指向 `kind="goto"` 脚本，返回 `true`
+   - `scriptRef` 可传脚本变量或脚本字面量（如 `@main.next`）；未命中脚本时返回 `false`
 6. 传 `random_seed` 可保证可复现实验。  
 7. 若传 `random_sequence`，`random(n)` 会按序列返回 `value % n`，序列耗尽后固定返回 `0`。
 

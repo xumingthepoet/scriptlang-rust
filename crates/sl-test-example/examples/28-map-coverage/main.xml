@@ -12,7 +12,7 @@
     return out;
   </function>
 
-  <script name="boostByRef" args="ref:#{int}:stats">
+  <script name="boostByRef" kind="call" args="ref:#{int}:stats">
     <code>stats["hp"] = stats["hp"] + 5;</code>
     <return/>
   </script>

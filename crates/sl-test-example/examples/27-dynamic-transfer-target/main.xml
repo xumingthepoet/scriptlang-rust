@@ -1,13 +1,13 @@
 <!-- import middle from middle.xml -->
-<module name="main" export="script:main;function:pickCallTarget">
-  <function name="pickCallTarget" return_type="script">
+<module name="main" export="script:main;function:pickGotoTarget">
+  <function name="pickGotoTarget" return_type="script">
     return @middle.middle;
   </function>
 
   <script name="main">
-    <temp name="callTarget" type="script">@main.main</temp>
-    <code>callTarget = pickCallTarget();</code>
+    <temp name="gotoTarget" type="script">@main.main</temp>
+    <code>gotoTarget = pickGotoTarget();</code>
     <text>before</text>
-    <call script="callTarget"/>
+    <goto script="gotoTarget"/>
   </script>
 </module>

@@ -21,17 +21,17 @@
     <call script="@templates.echo_seed"/>
   </script>
 
-  <script name="boost_home" args="ref:#{LocationId=>int}:distance_map">
+  <script name="boost_home" kind="call" args="ref:#{LocationId=>int}:distance_map">
     <code>distance_map[LocationId.Home] = distance_map[LocationId.Home] + 3;</code>
     <return/>
   </script>
 
-  <script name="append_port" args="ref:Node[]:nodes">
+  <script name="append_port" kind="call" args="ref:Node[]:nodes">
     <code>nodes.push(#{id: LocationId.Port, terrain: ids.Terrain.Sea, coord: #{x: 9, y: 1}});</code>
     <return/>
   </script>
 
-  <script name="emit_report" args="Node[]:nodes,#{LocationId=>int}:distance_map">
+  <script name="emit_report" kind="call" args="Node[]:nodes,#{LocationId=>int}:distance_map">
     <text>nodes=${nodes.len}</text>
     <text>home=${distance_map[LocationId.Home]}</text>
     <text>port=${calc.distanceOf(distance_map, LocationId.Port)}</text>

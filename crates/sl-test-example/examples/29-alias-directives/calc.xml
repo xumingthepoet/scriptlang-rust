@@ -14,7 +14,7 @@
     return total;
   </function>
 
-  <script name="show_total" args="templates.RouteNode[]:nodes,#{LocationId=>int}:distance_map">
+  <script name="show_total" kind="call" args="templates.RouteNode[]:nodes,#{LocationId=>int}:distance_map">
     <text>total=${totalNodeDistance(nodes, distance_map)}</text>
   </script>
 </module>

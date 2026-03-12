@@ -105,6 +105,18 @@ pub(super) struct GroupLookup {
 
 pub(super) type ScopeInit = (BTreeMap<String, SlValue>, BTreeMap<String, ScriptType>);
 
+fn normalize_script_builtin_arg(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let normalized = trimmed.strip_prefix('@').unwrap_or(trimmed).trim();
+    if normalized.is_empty() {
+        return None;
+    }
+    Some(normalized.to_string())
+}
+
 pub struct ScriptLangEngine {
     pub(super) scripts: BTreeMap<String, ScriptIr>,
     pub(super) host_functions: Arc<dyn HostFunctionRegistry>,
@@ -142,7 +154,13 @@ pub struct ScriptLangEngine {
 
 impl ScriptLangEngine {
     pub fn new(options: ScriptLangEngineOptions) -> Result<Self, ScriptLangError> {
-        const RESERVED_HOST_BUILTINS: [&str; 3] = ["random", "invoke", "enum_to_string"];
+        const RESERVED_HOST_BUILTINS: [&str; 5] = [
+            "random",
+            "invoke",
+            "enum_to_string",
+            "is_call_kind_script",
+            "is_goto_kind_script",
+        ];
         let host_functions: Arc<dyn HostFunctionRegistry> = options
             .host_functions
             .unwrap_or_else(|| Arc::new(EmptyHostFunctionRegistry::default()));
@@ -256,6 +274,16 @@ impl ScriptLangEngine {
             let symbol = rhai_function_symbol(qualified_name);
             invoke_function_symbols.insert(qualified_name.clone(), symbol);
         }
+        let call_kind_scripts = options
+            .scripts
+            .iter()
+            .filter_map(|(name, script)| (script.kind == ScriptKind::Call).then_some(name.clone()))
+            .collect::<BTreeSet<_>>();
+        let goto_kind_scripts = options
+            .scripts
+            .iter()
+            .filter_map(|(name, script)| (script.kind == ScriptKind::Goto).then_some(name.clone()))
+            .collect::<BTreeSet<_>>();
         let initial_random_seed = options.random_seed.unwrap_or(1);
         let initial_random_sequence = options.random_sequence.clone();
         let random_sequence_index = options.random_sequence_index.unwrap_or(0);
@@ -299,6 +327,20 @@ impl ScriptLangEngine {
         rhai_engine.register_fn(
             "enum_to_string",
             |value: ImmutableString| -> ImmutableString { value },
+        );
+        rhai_engine.register_fn(
+            "is_call_kind_script",
+            move |script_ref: ImmutableString| -> bool {
+                normalize_script_builtin_arg(script_ref.as_ref())
+                    .is_some_and(|script_name| call_kind_scripts.contains(&script_name))
+            },
+        );
+        rhai_engine.register_fn(
+            "is_goto_kind_script",
+            move |script_ref: ImmutableString| -> bool {
+                normalize_script_builtin_arg(script_ref.as_ref())
+                    .is_some_and(|script_name| goto_kind_scripts.contains(&script_name))
+            },
         );
         let module_vars_type = options
             .module_var_declarations
@@ -388,6 +430,12 @@ impl ScriptLangEngine {
                     "Entry script \"{}\" is private and cannot be started by host.",
                     entry_script_name
                 ),
+            ));
+        }
+        if script.kind != ScriptKind::Goto {
+            return Err(ScriptLangError::new(
+                "ENGINE_ENTRY_SCRIPT_KIND",
+                format!("Entry script \"{}\" must be goto kind.", entry_script_name),
             ));
         }
         let root_group_id = script.root_group_id.clone();
@@ -612,6 +660,64 @@ mod lifecycle_tests {
     }
 
     #[test]
+    pub(super) fn new_rejects_reserved_host_function_name_is_call_kind_script() {
+        let files = map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]);
+        let compiled = compile_project_from_sources(files);
+        let result = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_data: compiled.global_data,
+            module_var_declarations: compiled.module_var_declarations,
+            module_var_init_order: compiled.module_var_init_order,
+            module_const_declarations: compiled.module_const_declarations,
+            module_const_init_order: compiled.module_const_init_order,
+            host_functions: Some(Arc::new(TestRegistry {
+                names: vec!["is_call_kind_script".to_string()],
+            })),
+            random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        });
+        assert!(result.is_err());
+        let error = result
+            .err()
+            .expect("reserved is_call_kind_script name should fail");
+        assert_eq!(error.code, "ENGINE_HOST_FUNCTION_RESERVED");
+    }
+
+    #[test]
+    pub(super) fn new_rejects_reserved_host_function_name_is_goto_kind_script() {
+        let files = map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]);
+        let compiled = compile_project_from_sources(files);
+        let result = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_data: compiled.global_data,
+            module_var_declarations: compiled.module_var_declarations,
+            module_var_init_order: compiled.module_var_init_order,
+            module_const_declarations: compiled.module_const_declarations,
+            module_const_init_order: compiled.module_const_init_order,
+            host_functions: Some(Arc::new(TestRegistry {
+                names: vec!["is_goto_kind_script".to_string()],
+            })),
+            random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: Some(DEFAULT_COMPILER_VERSION.to_string()),
+        });
+        assert!(result.is_err());
+        let error = result
+            .err()
+            .expect("reserved is_goto_kind_script name should fail");
+        assert_eq!(error.code, "ENGINE_HOST_FUNCTION_RESERVED");
+    }
+
+    #[test]
     pub(super) fn new_rejects_host_function_conflicting_with_module_function() {
         let files = map(&[
             (
@@ -767,6 +873,36 @@ mod lifecycle_tests {
         engine.start("main.main", None).expect("start");
         let output = engine.next_output().expect("next");
         assert!(matches!(output, EngineOutput::Text { text, .. } if text == "Run"));
+    }
+
+    #[test]
+    pub(super) fn script_kind_builtin_functions_are_available() {
+        let files = map(&[(
+            "main.xml",
+            r#"
+    <module name="main" export="script:main,callee,next">
+      <script name="main">
+        <temp name="callRef" type="script">@main.callee</temp>
+        <temp name="gotoRef" type="script">@main.next</temp>
+        <temp name="a" type="boolean">is_call_kind_script(callRef)</temp>
+        <temp name="b" type="boolean">is_goto_kind_script(gotoRef)</temp>
+        <temp name="c" type="boolean">is_call_kind_script(@main.next)</temp>
+        <temp name="d" type="boolean">is_goto_kind_script(@main.callee)</temp>
+        <temp name="e" type="boolean">is_call_kind_script("bad")</temp>
+        <text>${a},${b},${c},${d},${e}</text>
+      </script>
+      <script name="callee" kind="call"><return/></script>
+      <script name="next"><end/></script>
+    </module>
+    "#,
+        )]);
+        let mut engine = engine_from_sources(files);
+        engine.start("main.main", None).expect("start");
+        let output = engine.next_output().expect("next");
+        assert!(matches!(
+            output,
+            EngineOutput::Text { text, .. } if text == "true,true,false,false,false"
+        ));
     }
 
     #[test]

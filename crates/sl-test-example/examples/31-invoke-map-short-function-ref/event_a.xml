@@ -18,7 +18,7 @@
     return true;
   </function>
 
-  <script name="register">
+  <script name="register" kind="call">
     <temp name="cond_fn" type="function">*event_system.always_true</temp>
     <code>
       cond_fn = condition_map[event_a.Phase.P3];

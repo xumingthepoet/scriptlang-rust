@@ -159,7 +159,7 @@ mod control_flow_tests {
                 r#"
 <script name="main">
   <temp name="nextScript" type="script">@next.next</temp>
-  <return script="nextScript" args="1,2"/>
+  <goto script="nextScript" args="1,2"/>
 </script>
 "#,
             ),
@@ -172,7 +172,7 @@ mod control_flow_tests {
         let error = return_arg_unknown
             .next_output()
             .expect_err("extra return arg should fail");
-        assert_eq!(error.code, "ENGINE_RETURN_ARG_UNKNOWN");
+        assert_eq!(error.code, "ENGINE_GOTO_ARG_UNKNOWN");
     }
 
     #[test]

@@ -465,7 +465,7 @@ mod scope_tests {
             ),
             (
                 "callee.script.xml",
-                r#"<script name="callee"><return/></script>"#,
+                r#"<script name="callee" kind="call"><return/></script>"#,
             ),
         ]));
         engine.start("main.main", None).expect("start");
@@ -485,7 +485,7 @@ mod scope_tests {
             ),
             (
                 "callee.script.xml",
-                r#"<script name="callee" args="int:x"><return/></script>"#,
+                r#"<script name="callee" kind="call" args="int:x"><return/></script>"#,
             ),
         ]));
         engine.start("main.main", None).expect("start");

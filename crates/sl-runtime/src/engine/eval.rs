@@ -2904,7 +2904,7 @@ let public = 3;
   <function name="can_phase_3_fn" return_type="boolean">
     return true;
   </function>
-  <script name="register">
+  <script name="register" kind="call">
     <code>event_system.set_condition(*can_phase_3_fn);</code>
     <return/>
   </script>

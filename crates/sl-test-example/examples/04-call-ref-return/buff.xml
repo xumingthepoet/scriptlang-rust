@@ -1,5 +1,5 @@
 <module name="buff" export="script:buff">
-<script name="buff" args="int:amount,ref:int:target">
+<script name="buff" kind="call" args="int:amount,ref:int:target">
   <code>target = target + amount;</code>
   <return/>
 </script>

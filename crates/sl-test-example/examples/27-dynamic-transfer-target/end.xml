@@ -1,5 +1,6 @@
 <module name="end" export="script:end">
   <script name="end">
     <text>after</text>
+    <end/>
   </script>
 </module>

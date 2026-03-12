@@ -81,7 +81,7 @@ pub fn compile_project_bundle_from_xml_map(
             scripts.insert(ir.script_name.clone(), ir);
         }
     }
-    validate_static_script_call_arg_counts(&scripts)?;
+    validate_static_literal_script_target_rules(&scripts)?;
 
     Ok(CompileProjectBundleResult {
         scripts,
@@ -155,7 +155,7 @@ fn collect_source_scripts(
     }
 }
 
-fn validate_static_script_call_arg_counts(
+fn validate_static_literal_script_target_rules(
     scripts: &BTreeMap<String, ScriptIr>,
 ) -> Result<(), ScriptLangError> {
     for script in scripts.values() {
@@ -176,9 +176,17 @@ fn validate_static_script_call_arg_counts(
                             "SCRIPT_CALL_ARGS_COUNT_MISMATCH",
                             "call",
                         )?;
+                        validate_single_literal_target_script_kind(
+                            scripts,
+                            script_name,
+                            ScriptKind::Call,
+                            location,
+                            "SCRIPT_CALL_TARGET_KIND_MISMATCH",
+                            "call",
+                        )?;
                     }
-                    ScriptNode::Return {
-                        target_script: Some(ScriptTarget::Literal { script_name }),
+                    ScriptNode::Goto {
+                        target_script: ScriptTarget::Literal { script_name },
                         args,
                         location,
                         ..
@@ -188,14 +196,50 @@ fn validate_static_script_call_arg_counts(
                             script_name,
                             args.len(),
                             location,
-                            "SCRIPT_RETURN_ARGS_COUNT_MISMATCH",
-                            "return",
+                            "SCRIPT_GOTO_ARGS_COUNT_MISMATCH",
+                            "goto",
+                        )?;
+                        validate_single_literal_target_script_kind(
+                            scripts,
+                            script_name,
+                            ScriptKind::Goto,
+                            location,
+                            "SCRIPT_GOTO_TARGET_KIND_MISMATCH",
+                            "goto",
                         )?;
                     }
                     _ => {}
                 }
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_single_literal_target_script_kind(
+    scripts: &BTreeMap<String, ScriptIr>,
+    target_script_name: &str,
+    expected_kind: ScriptKind,
+    location: &SourceSpan,
+    error_code: &str,
+    label: &str,
+) -> Result<(), ScriptLangError> {
+    let target = scripts
+        .get(target_script_name)
+        .expect("target script must exist");
+    if target.kind != expected_kind {
+        let expected_kind_label = match expected_kind {
+            ScriptKind::Call => "call",
+            ScriptKind::Goto => "goto",
+        };
+        return Err(ScriptLangError::with_span(
+            error_code,
+            format!(
+                "{} target script \"{}\" must be {} kind.",
+                label, target_script_name, expected_kind_label
+            ),
+            location.clone(),
+        ));
     }
     Ok(())
 }
@@ -273,7 +317,7 @@ mod pipeline_tests {
                 r#"
 <!-- import shared from shared.xml -->
 <module name="battle" export="script:battle">
-<script name="battle">
+<script name="battle" kind="call">
   <text>battle.hp=${shared.hp}</text>
 </script>
 </module>
@@ -315,7 +359,7 @@ mod pipeline_tests {
     <temp name="hero" type="Combatant">#{hp: baseHp}</temp>
     <call script="@next"/>
   </script>
-  <script name="next">
+  <script name="next" kind="call">
     <text>${boost(hero.hp)}</text>
   </script>
 </module>
@@ -402,7 +446,7 @@ mod pipeline_tests {
         let files = map(&[
             (
                 "callee.xml",
-                r#"<module name="callee" export="script:callee"><script name="callee" args="int:x"><return/></script></module>"#,
+                r#"<module name="callee" export="script:callee"><script name="callee" kind="call" args="int:x"><return/></script></module>"#,
             ),
             (
                 "main.xml",
@@ -416,7 +460,7 @@ mod pipeline_tests {
     }
 
     #[test]
-    fn compile_bundle_rejects_literal_return_when_arg_count_mismatch() {
+    fn compile_bundle_rejects_literal_goto_when_arg_count_mismatch() {
         let files = map(&[
             (
                 "next.xml",
@@ -424,13 +468,47 @@ mod pipeline_tests {
             ),
             (
                 "main.xml",
-                r#"<module name="main" export="script:main"><script name="main"><return script="@next.next"/></script></module>"#,
+                r#"<module name="main" export="script:main"><script name="main"><goto script="@next.next"/></script></module>"#,
             ),
         ]);
 
-        let error = compile_project_bundle_from_xml_map(&files)
-            .expect_err("return missing arg should fail");
-        assert_eq!(error.code, "SCRIPT_RETURN_ARGS_COUNT_MISMATCH");
+        let error =
+            compile_project_bundle_from_xml_map(&files).expect_err("goto missing arg should fail");
+        assert_eq!(error.code, "SCRIPT_GOTO_ARGS_COUNT_MISMATCH");
+    }
+
+    #[test]
+    fn compile_bundle_rejects_literal_call_when_target_is_goto_script() {
+        let files = map(&[
+            (
+                "callee.xml",
+                r#"<module name="callee" export="script:callee"><script name="callee"><text>x</text></script></module>"#,
+            ),
+            (
+                "main.xml",
+                r#"<module name="main" export="script:main"><script name="main"><call script="@callee.callee"/></script></module>"#,
+            ),
+        ]);
+        let error =
+            compile_project_bundle_from_xml_map(&files).expect_err("call target kind should fail");
+        assert_eq!(error.code, "SCRIPT_CALL_TARGET_KIND_MISMATCH");
+    }
+
+    #[test]
+    fn compile_bundle_rejects_literal_goto_when_target_is_call_script() {
+        let files = map(&[
+            (
+                "next.xml",
+                r#"<module name="next" export="script:next"><script name="next" kind="call"><return/></script></module>"#,
+            ),
+            (
+                "main.xml",
+                r#"<module name="main" export="script:main"><script name="main"><goto script="@next.next"/></script></module>"#,
+            ),
+        ]);
+        let error =
+            compile_project_bundle_from_xml_map(&files).expect_err("goto target kind should fail");
+        assert_eq!(error.code, "SCRIPT_GOTO_TARGET_KIND_MISMATCH");
     }
 
     #[test]
@@ -570,7 +648,7 @@ mod pipeline_tests {
                 r#"
 <!-- import {shared} from ../support/ -->
 <module name="battle" export="script:battle">
-<script name="battle">
+<script name="battle" kind="call">
   <text>battle=${shared.boost(3)}</text>
 </script>
 </module>

@@ -1,6 +1,6 @@
 <!-- import shared from shared.xml -->
 <module name="battle" export="script:battle">
-<script name="battle">
+<script name="battle" kind="call">
   <temp name="hp" type="int">30</temp>
   <code>hp = hp + 5; shared.hp = shared.hp - 40;</code>
   <text>battle.local=${hp}</text>

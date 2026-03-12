@@ -14,10 +14,10 @@
 
     <if when="player.hp > 0 AND enemy.hp LTE 0">
       <text>Result: ${player.name} wins. hp=${player.hp}</text>
-      <return script="@victory.victory"/>
+      <goto script="@victory.victory"/>
       <else>
         <text>Result: ${enemy.name} wins. hp=${enemy.hp}</text>
-        <return script="@defeat.defeat"/>
+        <goto script="@defeat.defeat"/>
       </else>
     </if>
   </script>

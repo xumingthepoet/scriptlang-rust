@@ -138,6 +138,14 @@ pub struct CallArgument {
     pub is_ref: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ScriptKind {
+    Call,
+    #[default]
+    Goto,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ScriptTarget {
@@ -249,10 +257,18 @@ pub enum ScriptNode {
         args: Vec<CallArgument>,
         location: SourceSpan,
     },
+    Goto {
+        id: String,
+        target_script: ScriptTarget,
+        args: Vec<CallArgument>,
+        location: SourceSpan,
+    },
+    End {
+        id: String,
+        location: SourceSpan,
+    },
     Return {
         id: String,
-        target_script: Option<ScriptTarget>,
-        args: Vec<CallArgument>,
         location: SourceSpan,
     },
 }
@@ -282,6 +298,8 @@ pub struct ScriptIr {
     pub module_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_script_name: Option<String>,
+    #[serde(default)]
+    pub kind: ScriptKind,
     pub params: Vec<ScriptParam>,
     pub root_group_id: String,
     pub groups: BTreeMap<String, ImplicitGroup>,

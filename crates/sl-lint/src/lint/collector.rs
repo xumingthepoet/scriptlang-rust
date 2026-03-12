@@ -212,23 +212,21 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                             );
                         }
                     }
-                    ScriptNode::Return {
+                    ScriptNode::Goto {
                         target_script,
                         args,
                         location,
                         ..
                     } => {
-                        if let Some(target_script) = target_script {
-                            collect_script_target_usage(
-                                target_script,
-                                &module_name,
-                                &file,
-                                location,
-                                script_name,
-                                context,
-                                &mut locals,
-                            );
-                        }
+                        collect_script_target_usage(
+                            target_script,
+                            &module_name,
+                            &file,
+                            location,
+                            script_name,
+                            context,
+                            &mut locals,
+                        );
                         for arg in args {
                             collect_expression_usage(
                                 &arg.value_expr,
@@ -241,6 +239,7 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                             );
                         }
                     }
+                    ScriptNode::Return { .. } | ScriptNode::End { .. } => {}
                     ScriptNode::If {
                         when_expr,
                         location,
@@ -364,7 +363,9 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
 
                 if matches!(
                     node,
-                    ScriptNode::Return { .. }
+                    ScriptNode::Goto { .. }
+                        | ScriptNode::End { .. }
+                        | ScriptNode::Return { .. }
                         | ScriptNode::Break { .. }
                         | ScriptNode::Continue { .. }
                 ) {
@@ -734,6 +735,8 @@ fn node_span(node: &ScriptNode) -> &SourceSpan {
         | ScriptNode::Break { location, .. }
         | ScriptNode::Continue { location, .. }
         | ScriptNode::Call { location, .. }
+        | ScriptNode::Goto { location, .. }
+        | ScriptNode::End { location, .. }
         | ScriptNode::Return { location, .. } => location,
     }
 }

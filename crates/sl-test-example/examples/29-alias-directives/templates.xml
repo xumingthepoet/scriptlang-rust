@@ -26,7 +26,7 @@
     Port: [#{id: LocationId.Port, terrain: Terrain.Sea, coord: #{x: 9, y: 1}}]
   }</const>
 
-  <script name="echo_seed">
+  <script name="echo_seed" kind="call">
     <text>seed.home=${seed_distance[LocationId.Home]}</text>
   </script>
 </module>

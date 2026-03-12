@@ -113,6 +113,11 @@ pub fn create_engine_from_artifact(
         &options.artifact.entry_script,
         "API_ARTIFACT_ENTRY_PRIVATE",
     )?;
+    validate_entry_script_kind(
+        entry_script,
+        &options.artifact.entry_script,
+        "API_ARTIFACT_ENTRY_KIND",
+    )?;
 
     let compiler_version = options
         .compiler_version
@@ -212,6 +217,7 @@ fn resolve_entry_script(
             ));
         };
         validate_entry_script_access(script, &entry, "API_ENTRY_SCRIPT_PRIVATE")?;
+        validate_entry_script_kind(script, &entry, "API_ENTRY_SCRIPT_KIND")?;
         return Ok(entry);
     }
 
@@ -221,6 +227,7 @@ fn resolve_entry_script(
             .get(&entry)
             .expect("main.main existence should be checked before retrieval");
         validate_entry_script_access(script, &entry, "API_ENTRY_SCRIPT_PRIVATE")?;
+        validate_entry_script_kind(script, &entry, "API_ENTRY_SCRIPT_KIND")?;
         return Ok(entry);
     }
 
@@ -244,6 +251,20 @@ fn validate_entry_script_access(
             "Entry script \"{}\" is private and cannot be started by host.",
             entry
         ),
+    ))
+}
+
+fn validate_entry_script_kind(
+    script: &sl_core::ScriptIr,
+    entry: &str,
+    code: &'static str,
+) -> Result<(), ScriptLangError> {
+    if script.kind == sl_core::ScriptKind::Goto {
+        return Ok(());
+    }
+    Err(ScriptLangError::new(
+        code,
+        format!("Entry script \"{}\" must be goto kind.", entry),
     ))
 }
 
@@ -693,7 +714,7 @@ mod tests {
     <code>score = boost(score);</code>
     <call script="@next"/>
   </script>
-  <script name="next">
+  <script name="next" kind="call">
     <text>${score}</text>
   </script>
 </module>

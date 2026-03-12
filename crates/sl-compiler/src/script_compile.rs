@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CompileGroupMode {
+    script_kind: ScriptKind,
     while_depth: usize,
     allow_option_direct_continue: bool,
 }
@@ -11,9 +12,15 @@ pub(crate) struct CompileGroupMode {
 impl CompileGroupMode {
     pub(crate) fn new(while_depth: usize, allow_option_direct_continue: bool) -> Self {
         Self {
+            script_kind: ScriptKind::Goto,
             while_depth,
             allow_option_direct_continue,
         }
+    }
+
+    pub(crate) fn with_script_kind(mut self, script_kind: ScriptKind) -> Self {
+        self.script_kind = script_kind;
+        self
     }
 }
 
@@ -676,7 +683,8 @@ pub(crate) fn compile_script(
         .unwrap_or(&local_script_name)
         .to_string();
 
-    let params = parse_script_args(root, visible_types)?;
+    let script_kind = parse_script_kind(root)?;
+    let params = parse_script_args(root, visible_types, script_kind)?;
     validate_reserved_prefix_in_user_var_declarations(root)?;
 
     let mut reserved_names = params
@@ -707,7 +715,7 @@ pub(crate) fn compile_script(
         all_script_access,
         module_name,
         &visible_var_types,
-        CompileGroupMode::new(0, false),
+        CompileGroupMode::new(0, false).with_script_kind(script_kind),
     )?;
 
     Ok(ScriptIr {
@@ -716,6 +724,7 @@ pub(crate) fn compile_script(
         access: script_access,
         module_name: module_name.map(|value| value.to_string()),
         local_script_name: module_name.map(|_| local_script_name.clone()),
+        kind: script_kind,
         params,
         root_group_id,
         groups: builder.groups,
@@ -877,7 +886,8 @@ pub(crate) fn compile_group_nodes(
                     all_script_access,
                     module_name,
                     local_var_types,
-                    CompileGroupMode::new(mode.while_depth, false),
+                    CompileGroupMode::new(mode.while_depth, false)
+                        .with_script_kind(mode.script_kind),
                 )?;
 
                 builder.groups.insert(
@@ -1021,7 +1031,8 @@ pub(crate) fn compile_group_nodes(
                     location: child.location.clone(),
                 };
 
-                let group_mode = CompileGroupMode::new(mode.while_depth, false);
+                let group_mode = CompileGroupMode::new(mode.while_depth, false)
+                    .with_script_kind(mode.script_kind);
                 let then_result = compile_child_group(
                     group_id,
                     &then_group_id,
@@ -1088,7 +1099,8 @@ pub(crate) fn compile_group_nodes(
             }
             "while" => {
                 let body_group_id = builder.next_group_id();
-                let while_mode = CompileGroupMode::new(mode.while_depth + 1, false);
+                let while_mode = CompileGroupMode::new(mode.while_depth + 1, false)
+                    .with_script_kind(mode.script_kind);
                 let while_result = compile_child_group(
                     group_id,
                     &body_group_id,
@@ -1172,7 +1184,8 @@ pub(crate) fn compile_group_nodes(
                             }
 
                             let option_group_id = builder.next_group_id();
-                            let option_mode = CompileGroupMode::new(mode.while_depth, true);
+                            let option_mode = CompileGroupMode::new(mode.while_depth, true)
+                                .with_script_kind(mode.script_kind);
                             let option_result = compile_child_group(
                                 group_id,
                                 &option_group_id,
@@ -1263,7 +1276,8 @@ pub(crate) fn compile_group_nodes(
                             }
 
                             let option_group_id = builder.next_group_id();
-                            let option_mode = CompileGroupMode::new(mode.while_depth, true);
+                            let option_mode = CompileGroupMode::new(mode.while_depth, true)
+                                .with_script_kind(mode.script_kind);
                             let template_result = compile_child_group(
                                 group_id,
                                 &option_group_id,
@@ -1453,7 +1467,14 @@ pub(crate) fn compile_group_nodes(
                 },
                 location: child.location.clone(),
             },
-            "return" => {
+            "goto" => {
+                if mode.script_kind != ScriptKind::Goto {
+                    return Err(ScriptLangError::with_span(
+                        "XML_CALL_SCRIPT_GOTO_FORBIDDEN",
+                        "Call script does not support <goto/>.",
+                        child.location.clone(),
+                    ));
+                }
                 let args = parse_args(get_optional_attr(child, "args"))?
                     .into_iter()
                     .map(|mut arg| {
@@ -1473,37 +1494,79 @@ pub(crate) fn compile_group_nodes(
                     .collect::<Result<Vec<_>, _>>()?;
                 if args.iter().any(|arg| arg.is_ref) {
                     return Err(ScriptLangError::with_span(
-                        "XML_RETURN_REF_UNSUPPORTED",
-                        "Return args do not support ref mode.",
+                        "XML_GOTO_REF_UNSUPPORTED",
+                        "Goto args do not support ref mode.",
                         child.location.clone(),
                     ));
                 }
 
-                let target_script = get_optional_attr(child, "script")
-                    .map(|raw| {
-                        parse_script_target_attr(
-                            &raw,
-                            child,
-                            local_var_types,
-                            visible_module_vars,
-                            visible_module_consts,
-                            all_script_access,
-                            module_name,
-                        )
-                    })
-                    .transpose()?;
-                if !args.is_empty() && target_script.is_none() {
+                ScriptNode::Goto {
+                    id: builder.next_node_id("goto"),
+                    target_script: parse_script_target_attr(
+                        &get_required_non_empty_attr(child, "script")?,
+                        child,
+                        local_var_types,
+                        visible_module_vars,
+                        visible_module_consts,
+                        all_script_access,
+                        module_name,
+                    )?,
+                    args,
+                    location: child.location.clone(),
+                }
+            }
+            "return" => {
+                if mode.script_kind != ScriptKind::Call {
                     return Err(ScriptLangError::with_span(
-                        "XML_RETURN_ARGS_REQUIRE_SCRIPT",
-                        "Return args require script attribute.",
+                        "XML_GOTO_SCRIPT_RETURN_FORBIDDEN",
+                        "Goto script does not support <return/>.",
+                        child.location.clone(),
+                    ));
+                }
+                if has_attr(child, "script") || has_attr(child, "args") {
+                    return Err(ScriptLangError::with_span(
+                        "XML_RETURN_ATTR_NOT_ALLOWED",
+                        "<return/> in call script does not support script/args attributes.",
+                        child.location.clone(),
+                    ));
+                }
+                if has_any_child_content(child) {
+                    return Err(ScriptLangError::with_span(
+                        "XML_RETURN_CONTENT_FORBIDDEN",
+                        "<return/> cannot contain child nodes or inline text.",
                         child.location.clone(),
                     ));
                 }
 
                 ScriptNode::Return {
                     id: builder.next_node_id("return"),
-                    target_script,
-                    args,
+                    location: child.location.clone(),
+                }
+            }
+            "end" => {
+                if mode.script_kind != ScriptKind::Goto {
+                    return Err(ScriptLangError::with_span(
+                        "XML_CALL_SCRIPT_END_FORBIDDEN",
+                        "Call script does not support <end/>.",
+                        child.location.clone(),
+                    ));
+                }
+                if !child.attributes.is_empty() {
+                    return Err(ScriptLangError::with_span(
+                        "XML_END_ATTR_NOT_ALLOWED",
+                        "<end/> does not support attributes.",
+                        child.location.clone(),
+                    ));
+                }
+                if has_any_child_content(child) {
+                    return Err(ScriptLangError::with_span(
+                        "XML_END_CONTENT_FORBIDDEN",
+                        "<end/> cannot contain child nodes or inline text.",
+                        child.location.clone(),
+                    ));
+                }
+                ScriptNode::End {
+                    id: builder.next_node_id("end"),
                     location: child.location.clone(),
                 }
             }
@@ -1556,6 +1619,8 @@ pub(crate) fn node_id(node: &ScriptNode) -> &str {
         | ScriptNode::Break { id, .. }
         | ScriptNode::Continue { id, .. }
         | ScriptNode::Call { id, .. }
+        | ScriptNode::Goto { id, .. }
+        | ScriptNode::End { id, .. }
         | ScriptNode::Return { id, .. } => id,
     }
 }
@@ -1665,6 +1730,7 @@ pub(crate) fn parse_type_name_segment<'a>(
 pub(crate) fn parse_script_args(
     root: &XmlElementNode,
     visible_types: &BTreeMap<String, ScriptType>,
+    script_kind: ScriptKind,
 ) -> Result<Vec<ScriptParam>, ScriptLangError> {
     let Some(raw) = get_optional_attr(root, "args") else {
         return Ok(Vec::new());
@@ -1683,6 +1749,13 @@ pub(crate) fn parse_script_args(
             continue;
         }
         let is_ref = segment.starts_with("ref:");
+        if is_ref && script_kind == ScriptKind::Goto {
+            return Err(ScriptLangError::with_span(
+                "SCRIPT_GOTO_ARGS_REF_UNSUPPORTED",
+                "Goto script params do not support ref mode.",
+                root.location.clone(),
+            ));
+        }
         let normalized = if is_ref {
             segment.trim_start_matches("ref:").trim()
         } else {
@@ -1716,6 +1789,32 @@ pub(crate) fn parse_script_args(
     }
 
     Ok(params)
+}
+
+fn parse_script_kind(root: &XmlElementNode) -> Result<ScriptKind, ScriptLangError> {
+    let Some(raw) = get_optional_attr(root, "kind") else {
+        return Ok(ScriptKind::Goto);
+    };
+    let value = raw.trim();
+    if value.is_empty() {
+        return Err(ScriptLangError::with_span(
+            "XML_SCRIPT_KIND_INVALID",
+            "Attribute \"kind\" on <script> must be \"call\" or \"goto\".",
+            root.location.clone(),
+        ));
+    }
+    match value {
+        "call" => Ok(ScriptKind::Call),
+        "goto" => Ok(ScriptKind::Goto),
+        _ => Err(ScriptLangError::with_span(
+            "XML_SCRIPT_KIND_INVALID",
+            format!(
+                "Unsupported <script kind=\"{}\">. Allowed values: call, goto.",
+                value
+            ),
+            root.location.clone(),
+        )),
+    }
 }
 
 pub(crate) fn parse_function_args(
@@ -1880,29 +1979,32 @@ mod script_compile_tests {
             },
         );
         let root_ok = xml_element("script", &[("args", "int:a,ref:Custom:b")], Vec::new());
-        let parsed = parse_script_args(&root_ok, &visible_types).expect("args parse");
+        let parsed =
+            parse_script_args(&root_ok, &visible_types, ScriptKind::Call).expect("args parse");
         assert_eq!(parsed.len(), 2);
         assert!(parsed[1].is_ref);
 
         let root_bad = xml_element("script", &[("args", "int")], Vec::new());
-        let error = parse_script_args(&root_bad, &visible_types).expect_err("bad args");
+        let error =
+            parse_script_args(&root_bad, &visible_types, ScriptKind::Call).expect_err("bad args");
         assert_eq!(error.code, "SCRIPT_ARGS_PARSE_ERROR");
 
         let root_dup = xml_element("script", &[("args", "int:a,int:a")], Vec::new());
-        let error = parse_script_args(&root_dup, &visible_types).expect_err("duplicate args");
+        let error = parse_script_args(&root_dup, &visible_types, ScriptKind::Call)
+            .expect_err("duplicate args");
         assert_eq!(error.code, "SCRIPT_ARGS_DUPLICATE");
 
         let root_bad_type = xml_element("script", &[("args", "#{ }:a")], Vec::new());
-        let error =
-            parse_script_args(&root_bad_type, &visible_types).expect_err("invalid arg type expr");
+        let error = parse_script_args(&root_bad_type, &visible_types, ScriptKind::Call)
+            .expect_err("invalid arg type expr");
         assert_eq!(error.code, "TYPE_PARSE_ERROR");
         let root_unknown_type = xml_element("script", &[("args", "Missing:a")], Vec::new());
-        let error =
-            parse_script_args(&root_unknown_type, &visible_types).expect_err("unknown arg type");
+        let error = parse_script_args(&root_unknown_type, &visible_types, ScriptKind::Call)
+            .expect_err("unknown arg type");
         assert_eq!(error.code, "TYPE_UNKNOWN");
         let root_keyword_arg = xml_element("script", &[("args", "int:shared")], Vec::new());
-        let error =
-            parse_script_args(&root_keyword_arg, &visible_types).expect_err("keyword arg name");
+        let error = parse_script_args(&root_keyword_arg, &visible_types, ScriptKind::Call)
+            .expect_err("keyword arg name");
         assert_eq!(error.code, "NAME_RHAI_KEYWORD_RESERVED");
 
         let fn_node = xml_element(
@@ -2800,10 +2902,10 @@ mod script_compile_tests {
             &mut builder,
             &visible_types,
             &local_var_types,
-            CompileGroupMode::new(0, false),
+            CompileGroupMode::new(0, false).with_script_kind(ScriptKind::Call),
         )
-        .expect_err("return args without script should fail");
-        assert_eq!(error.code, "XML_RETURN_ARGS_REQUIRE_SCRIPT");
+        .expect_err("call return with attrs should fail");
+        assert_eq!(error.code, "XML_RETURN_ATTR_NOT_ALLOWED");
 
         let bad_node = xml_element(
             "script",
@@ -3322,12 +3424,12 @@ mod script_compile_tests {
                     "XML_INPUT_MAX_LENGTH_INVALID",
                 ),
                 (
-                    "return ref unsupported",
+                    "goto ref unsupported",
                     map(&[(
                         "main.xml",
-                        "<script name=\"main\"><return script=\"next\" args=\"ref:x\"/></script>",
+                        "<script name=\"main\"><goto script=\"next\" args=\"ref:x\"/></script>",
                     )]),
-                    "XML_RETURN_REF_UNSUPPORTED",
+                    "XML_GOTO_REF_UNSUPPORTED",
                 ),
                 (
                     "removed node",
@@ -3490,10 +3592,10 @@ mod script_compile_tests {
                     "XML_MISSING_ATTR",
                 ),
                 (
-                    "return args parse error",
+                    "goto args parse error",
                     map(&[(
                         "main.xml",
-                        "<script name=\"main\"><return script=\"s\" args=\"ref:\"/></script>",
+                        "<script name=\"main\"><goto script=\"s\" args=\"ref:\"/></script>",
                     )]),
                     "CALL_ARGS_PARSE_ERROR",
                 ),
@@ -4085,30 +4187,35 @@ mod script_compile_tests {
         let empty_args = parse_script_args(
             &xml_element("script", &[("args", "   ")], Vec::new()),
             &BTreeMap::new(),
+            ScriptKind::Call,
         )
         .expect("empty script args should be accepted");
         assert!(empty_args.is_empty());
         let args_with_empty_segment = parse_script_args(
             &xml_element("script", &[("args", "int:a,,int:b")], Vec::new()),
             &BTreeMap::new(),
+            ScriptKind::Call,
         )
         .expect("empty arg segment should be ignored");
         assert_eq!(args_with_empty_segment.len(), 2);
         let args_bad_start = parse_script_args(
             &xml_element("script", &[("args", ":a")], Vec::new()),
             &BTreeMap::new(),
+            ScriptKind::Call,
         )
         .expect_err("bad args should fail");
         assert_eq!(args_bad_start.code, "SCRIPT_ARGS_PARSE_ERROR");
         let args_bad_end = parse_script_args(
             &xml_element("script", &[("args", "int:")], Vec::new()),
             &BTreeMap::new(),
+            ScriptKind::Call,
         )
         .expect_err("bad args should fail");
         assert_eq!(args_bad_end.code, "SCRIPT_ARGS_PARSE_ERROR");
         let args_empty_name = parse_script_args(
             &xml_element("script", &[("args", "int:   ")], Vec::new()),
             &BTreeMap::new(),
+            ScriptKind::Call,
         )
         .expect_err("empty script arg name should fail");
         assert_eq!(args_empty_name.code, "SCRIPT_ARGS_PARSE_ERROR");
@@ -4577,7 +4684,7 @@ mod script_compile_tests {
     </dynamic-options>
   </choice>
   <call script="@main.next" args="@main.next"/>
-  <return script="@main.next" args="@main.next"/>
+  <goto script="@main.next" args="@main.next"/>
 </script>
 "#,
         )
@@ -4615,7 +4722,7 @@ mod script_compile_tests {
 <script name="main">
   <if when="ids.LocationId.A == 'A'"><text>x</text></if>
   <call script="@main.next" args="ids.LocationId.A"/>
-  <return script="@main.next" args="ids.LocationId.A"/>
+  <goto script="@main.next" args="ids.LocationId.A"/>
 </script>
 "#,
         )
@@ -4665,9 +4772,9 @@ mod script_compile_tests {
         assert!(
             root_group.nodes.iter().any(|node| matches!(
                 node,
-                ScriptNode::Return { args, .. } if args.first().map(|arg| arg.value_expr.as_str()) == Some("'A'")
+                ScriptNode::Goto { args, .. } if args.first().map(|arg| arg.value_expr.as_str()) == Some("'A'")
             )),
-            "return arg should rewrite enum literal using single quotes"
+            "goto arg should rewrite enum literal using single quotes"
         );
     }
 
@@ -4727,7 +4834,7 @@ mod script_compile_tests {
             "XML_SCRIPT_TARGET_NOT_FOUND",
         );
         compile_error(
-            r#"<script name="main"><return script="@main.next" args="@missing.next"/></script>"#,
+            r#"<script name="main"><goto script="@main.next" args="@missing.next"/></script>"#,
             "XML_SCRIPT_TARGET_NOT_FOUND",
         );
         compile_error(
@@ -4735,7 +4842,7 @@ mod script_compile_tests {
             "XML_SCRIPT_TARGET_NOT_FOUND",
         );
         compile_error(
-            r#"<script name="main"><return script="@missing.next"/></script>"#,
+            r#"<script name="main"><goto script="@missing.next"/></script>"#,
             "XML_SCRIPT_TARGET_NOT_FOUND",
         );
     }

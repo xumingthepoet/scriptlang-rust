@@ -15,7 +15,7 @@ This catalog keeps example intent explicit so examples can be refactored without
 | `02-if-while` | `if/else` and `while` execution |
 | `03-choice-loop` | repeated `choice` inside loop with actions |
 | `04-call-ref-return` | `call` with `ref` arg and write-back |
-| `05-return-transfer` | `return script=... args=...` transfer |
+| `05-return-transfer` | `goto script=... args=...` transfer |
 | `06-snapshot-flow` | choice boundary flow suitable for snapshot/resume |
 | `07-battle-duel` | multi-module combined scenario |
 | `08-json-globals` | JSON global data + branching |
@@ -37,7 +37,7 @@ This catalog keeps example intent explicit so examples can be refactored without
 | `24-invoke-dynamic` | dynamic `invoke(fnVar, args)` via `function` reference |
 | `25-function-invoke` | function-call + invoke composition |
 | `26-enum-flow` | `<enum>` + `Type.Member` in attribute args |
-| `27-dynamic-transfer-target` | dynamic script target for call/return |
+| `27-dynamic-transfer-target` | dynamic script target for goto (plus call chain) |
 | `28-map-coverage` | map `#{K=>V}` + `#{V}` usage (string key + enum key + nested/array/ref/function/when) |
 | `29-alias-directives` | multi-module alias stress: type/var/const alias across arrays/maps/const/function/multi-script call chains |
 | `30-invoke-function-alias-module-var` | regression for `invoke(function, ...)` where function body reads explicit alias to imported module var |

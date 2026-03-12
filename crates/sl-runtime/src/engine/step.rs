@@ -46,9 +46,13 @@ enum PlannedNode {
         target_script: ScriptTarget,
         args: Vec<sl_core::CallArgument>,
     },
-    Return {
-        target_script: Option<ScriptTarget>,
+    Goto {
+        target_script: ScriptTarget,
         args: Vec<sl_core::CallArgument>,
+    },
+    End,
+    Return {
+        node_id: String,
     },
     Break,
     Continue {
@@ -151,13 +155,17 @@ impl ScriptLangEngine {
                 target_script: target_script.clone(),
                 args: args.clone(),
             },
-            ScriptNode::Return {
+            ScriptNode::Goto {
                 target_script,
                 args,
                 ..
-            } => PlannedNode::Return {
+            } => PlannedNode::Goto {
                 target_script: target_script.clone(),
                 args: args.clone(),
+            },
+            ScriptNode::End { .. } => PlannedNode::End,
+            ScriptNode::Return { id, .. } => PlannedNode::Return {
+                node_id: id.clone(),
             },
             ScriptNode::Break { .. } => PlannedNode::Break,
             ScriptNode::Continue { target, .. } => PlannedNode::Continue {
@@ -296,11 +304,19 @@ impl ScriptLangEngine {
                 self.execute_call(&target_script, &args)?;
                 Ok(None)
             }
-            PlannedNode::Return {
+            PlannedNode::Goto {
                 target_script,
                 args,
             } => {
-                self.execute_return(target_script, &args)?;
+                self.execute_goto(&target_script, &args)?;
+                Ok(None)
+            }
+            PlannedNode::End => {
+                self.execute_end();
+                Ok(None)
+            }
+            PlannedNode::Return { node_id } => {
+                self.execute_return(&node_id)?;
                 Ok(None)
             }
             PlannedNode::Break => {
@@ -708,7 +724,7 @@ mod step_tests {
             (
                 "next.script.xml",
                 r#"
-<script name="next">
+<script name="next" kind="call">
   <text>Next</text>
 </script>
 "#,
@@ -735,7 +751,7 @@ mod step_tests {
                 "battle.script.xml",
                 r#"
 <!-- import shared from shared.xml -->
-<script name="battle">
+<script name="battle" kind="call">
   <temp name="hp" type="int">30</temp>
   <code>hp = hp + 5; shared.hp = shared.hp - 40;</code>
   <text>battle.local=${hp}</text>
@@ -1171,11 +1187,21 @@ mod step_tests {
                 "next.script.xml",
                 r#"<script name="next"><text>next</text></script>"#,
             ),
+            (
+                "callee.script.xml",
+                r#"<script name="callee" kind="call"><return/></script>"#,
+            ),
         ]));
         let main_root = return_engine
             .scripts
             .get("main")
             .expect("main")
+            .root_group_id
+            .clone();
+        let callee_root = return_engine
+            .scripts
+            .get("callee")
+            .expect("callee")
             .root_group_id
             .clone();
         return_engine.frames = vec![
@@ -1205,7 +1231,7 @@ mod step_tests {
             },
         ];
         return_engine
-            .execute_return(Some(lit("next.next")), &[])
+            .execute_goto(&lit("next.next"), &[])
             .expect("return should pass even when value missing");
         return_engine.frames = vec![
             RuntimeFrame {
@@ -1220,7 +1246,7 @@ mod step_tests {
             },
             RuntimeFrame {
                 frame_id: 2,
-                group_id: main_root,
+                group_id: callee_root,
                 node_index: 0,
                 scope: BTreeMap::new(),
                 completion: CompletionKind::None,
@@ -1234,7 +1260,7 @@ mod step_tests {
             },
         ];
         return_engine
-            .execute_return(None, &[])
+            .execute_return("return")
             .expect("return should pass even when value missing");
 
         let mut while_control = engine_from_sources(map(&[(
@@ -1502,7 +1528,7 @@ mod step_tests {
             },
         ];
         return_skip
-            .execute_return(Some(lit("next.next")), &[])
+            .execute_goto(&lit("next.next"), &[])
             .expect("return should pass when source value is missing");
         return_skip.frames = vec![RuntimeFrame {
             frame_id: 12,
@@ -1524,7 +1550,7 @@ mod step_tests {
             var_types: BTreeMap::new(),
         }];
         return_skip
-            .execute_return(Some(lit("next.next")), &[])
+            .execute_goto(&lit("next.next"), &[])
             .expect("return should pass when resume frame is missing");
 
         let mut find_ctx = engine_from_sources(map(&[(

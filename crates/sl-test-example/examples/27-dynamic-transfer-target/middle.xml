@@ -1,6 +1,6 @@
 <!-- import end from end.xml -->
-<module name="middle" export="script:middle;function:pickReturnTarget">
-  <function name="pickReturnTarget" args="script:current" return_type="script">
+<module name="middle" export="script:middle;function:pickGotoTarget">
+  <function name="pickGotoTarget" args="script:current" return_type="script">
     return current;
     if current == @end.end {
       return @end.end;
@@ -8,9 +8,9 @@
   </function>
 
   <script name="middle">
-    <temp name="returnTarget" type="script">@middle.middle</temp>
-    <code>returnTarget = pickReturnTarget(@end.end);</code>
+    <temp name="gotoTarget" type="script">@middle.middle</temp>
+    <code>gotoTarget = pickGotoTarget(@end.end);</code>
     <text>middle</text>
-    <return script="returnTarget"/>
+    <goto script="gotoTarget"/>
   </script>
 </module>

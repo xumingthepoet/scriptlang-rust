@@ -197,6 +197,15 @@ impl ScriptLangEngine {
                 format!("Call target script \"{}\" not found.", target_script),
             ));
         };
+        if target.kind != ScriptKind::Call {
+            return Err(ScriptLangError::new(
+                "ENGINE_CALL_TARGET_KIND",
+                format!(
+                    "Call target script \"{}\" must be call kind.",
+                    target_script
+                ),
+            ));
+        }
         self.validate_script_access_from_current(&target_script, &target)?;
 
         let mut arg_values = BTreeMap::new();
@@ -267,84 +276,119 @@ impl ScriptLangEngine {
         Ok(())
     }
 
-    pub(super) fn execute_return(
+    pub(super) fn execute_goto(
         &mut self,
-        target_script: Option<ScriptTarget>,
+        target_script: &ScriptTarget,
         args: &[sl_core::CallArgument],
     ) -> Result<(), ScriptLangError> {
         let root_index = self.find_current_root_frame_index()?;
         let root_frame = self.frames[root_index].clone();
         let inherited = root_frame.return_continuation.clone();
+        let target_name = self.resolve_target_script(
+            target_script,
+            "ENGINE_GOTO_TARGET_EMPTY",
+            "Goto target script cannot resolve to empty.",
+        )?;
+        let Some(target) = self.scripts.get(&target_name).cloned() else {
+            return Err(ScriptLangError::new(
+                "ENGINE_GOTO_TARGET",
+                format!("Goto target script \"{}\" not found.", target_name),
+            ));
+        };
+        if target.kind != ScriptKind::Goto {
+            return Err(ScriptLangError::new(
+                "ENGINE_GOTO_TARGET_KIND",
+                format!("Goto target script \"{}\" must be goto kind.", target_name),
+            ));
+        }
+        self.validate_script_access_from_current(&target_name, &target)?;
 
         let mut transfer_arg_values = BTreeMap::new();
-        let mut resolved_return_target: Option<(String, ScriptIr)> = None;
-
-        if let Some(target_name) = target_script.as_ref() {
-            let target_name = self.resolve_target_script(
-                target_name,
-                "ENGINE_RETURN_TARGET_EMPTY",
-                "Return target script cannot resolve to empty.",
-            )?;
-            let Some(target) = self.scripts.get(&target_name).cloned() else {
+        for (index, arg) in args.iter().enumerate() {
+            if arg.is_ref {
                 return Err(ScriptLangError::new(
-                    "ENGINE_RETURN_TARGET",
-                    format!("Return target script \"{}\" not found.", target_name),
+                    "ENGINE_GOTO_REF_UNSUPPORTED",
+                    format!("Goto argument {} cannot use ref mode.", index + 1),
+                ));
+            }
+            let Some(param) = target.params.get(index) else {
+                return Err(ScriptLangError::new(
+                    "ENGINE_GOTO_ARG_UNKNOWN",
+                    format!(
+                        "Goto argument at position {} has no target parameter.",
+                        index + 1
+                    ),
                 ));
             };
-            self.validate_script_access_from_current(&target_name, &target)?;
-
-            for (index, arg) in args.iter().enumerate() {
-                let Some(param) = target.params.get(index) else {
-                    return Err(ScriptLangError::new(
-                        "ENGINE_RETURN_ARG_UNKNOWN",
-                        format!(
-                            "Return argument at position {} has no target parameter.",
-                            index + 1
-                        ),
-                    ));
-                };
-                transfer_arg_values
-                    .insert(param.name.clone(), self.eval_expression(&arg.value_expr)?);
+            if param.is_ref {
+                return Err(ScriptLangError::new(
+                    "ENGINE_GOTO_TARGET_REF_PARAM_UNSUPPORTED",
+                    format!(
+                        "Goto target script \"{}\" cannot declare ref parameter \"{}\".",
+                        target_name, param.name
+                    ),
+                ));
             }
-
-            resolved_return_target = Some((target_name, target));
+            transfer_arg_values.insert(param.name.clone(), self.eval_expression(&arg.value_expr)?);
         }
 
         self.frames.truncate(root_index);
-
-        if let Some((target_name, target)) = resolved_return_target {
-            let mut forwarded = inherited.clone();
-            if let Some(continuation) = inherited {
-                if self
-                    .find_frame_index(continuation.resume_frame_id)
-                    .is_some()
-                {
-                    for (caller_path, value) in continuation.ref_bindings.into_iter().filter_map(
-                        |(callee_var, caller_path)| {
+        let mut forwarded = inherited.clone();
+        if let Some(continuation) = inherited {
+            if self
+                .find_frame_index(continuation.resume_frame_id)
+                .is_some()
+            {
+                for (caller_path, value) in
+                    continuation
+                        .ref_bindings
+                        .into_iter()
+                        .filter_map(|(callee_var, caller_path)| {
                             root_frame
                                 .scope
                                 .get(&callee_var)
                                 .cloned()
                                 .map(|value| (caller_path, value))
-                        },
-                    ) {
-                        self.write_path(&caller_path, value)?;
-                    }
+                        })
+                {
+                    self.write_path(&caller_path, value)?;
                 }
-
-                let mut continuation = forwarded
-                    .take()
-                    .expect("forwarded continuation should exist when inherited is present");
-                continuation.ref_bindings = BTreeMap::new();
-                forwarded = Some(continuation);
             }
 
-            let (scope, var_types) =
-                self.create_script_root_scope(&target_name, transfer_arg_values)?;
-            self.push_root_frame(&target.root_group_id, scope, forwarded, var_types);
-            return Ok(());
+            let mut continuation = forwarded
+                .take()
+                .expect("forwarded continuation should exist when inherited is present");
+            continuation.ref_bindings = BTreeMap::new();
+            forwarded = Some(continuation);
         }
 
+        let (scope, var_types) =
+            self.create_script_root_scope(&target_name, transfer_arg_values)?;
+        self.push_root_frame(&target.root_group_id, scope, forwarded, var_types);
+        Ok(())
+    }
+
+    pub(super) fn execute_return(&mut self, _node_id: &str) -> Result<(), ScriptLangError> {
+        let root_index = self.find_current_root_frame_index()?;
+        let root_frame = self.frames[root_index].clone();
+        let (script_name, _) = self.lookup_group(&root_frame.group_id)?;
+        let script = self.scripts.get(script_name).ok_or_else(|| {
+            ScriptLangError::new(
+                "ENGINE_SCRIPT_NOT_FOUND",
+                format!("Script \"{}\" not found.", script_name),
+            )
+        })?;
+        if script.kind != ScriptKind::Call {
+            return Err(ScriptLangError::new(
+                "ENGINE_RETURN_FORBIDDEN",
+                format!(
+                    "Script \"{}\" is not call kind and cannot <return/>.",
+                    script_name
+                ),
+            ));
+        }
+        let inherited = root_frame.return_continuation.clone();
+        self.frames.truncate(root_index);
         let Some(continuation) = inherited else {
             self.end_execution();
             return Ok(());
@@ -363,6 +407,10 @@ impl ScriptLangEngine {
 
         self.frames[resume_index].node_index = continuation.next_node_index;
         Ok(())
+    }
+
+    pub(super) fn execute_end(&mut self) {
+        self.end_execution();
     }
 
     pub(super) fn find_current_root_frame_index(&self) -> Result<usize, ScriptLangError> {
@@ -409,7 +457,7 @@ mod callstack_tests {
             ),
             (
                 "greeting.script.xml",
-                r#"<script name="greeting"><text>Hi</text></script>"#,
+                r#"<script name="greeting" kind="call"><text>Hi</text></script>"#,
             ),
         ]));
         engine.start("main.main", None).expect("start");
@@ -430,7 +478,7 @@ mod callstack_tests {
             ),
             (
                 "greeting.script.xml",
-                r#"<script name="greeting"><text>Dynamic hi</text></script>"#,
+                r#"<script name="greeting" kind="call"><text>Dynamic hi</text></script>"#,
             ),
         ]));
         dynamic_engine.start("main.main", None).expect("start");
@@ -586,7 +634,7 @@ mod callstack_tests {
             ),
             (
                 "callee.script.xml",
-                r#"<script name="callee" args="ref:int:x"><return/></script>"#,
+                r#"<script name="callee" kind="call" args="ref:int:x"><return/></script>"#,
             ),
         ]));
         call_arg_mismatch.start("main.main", None).expect("start");
@@ -617,9 +665,9 @@ mod callstack_tests {
             var_types: BTreeMap::new(),
         }];
         let error = return_target_missing
-            .execute_return(Some(lit("missing")), &[])
+            .execute_goto(&lit("missing"), &[])
             .expect_err("missing return target should fail");
-        assert_eq!(error.code, "ENGINE_RETURN_TARGET");
+        assert_eq!(error.code, "ENGINE_GOTO_TARGET");
 
         let mut return_empty_target = engine_from_sources(map(&[(
             "main.script.xml",
@@ -643,9 +691,9 @@ mod callstack_tests {
             var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
         }];
         let error = return_empty_target
-            .execute_return(Some(var("dst")), &[])
+            .execute_goto(&var("dst"), &[])
             .expect_err("empty return target should fail");
-        assert_eq!(error.code, "ENGINE_RETURN_TARGET_EMPTY");
+        assert_eq!(error.code, "ENGINE_GOTO_TARGET_EMPTY");
 
         let mut return_bad_type = engine_from_sources(map(&[(
             "main.script.xml",
@@ -669,7 +717,7 @@ mod callstack_tests {
             var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
         }];
         let error = return_bad_type
-            .execute_return(Some(var("dst")), &[])
+            .execute_goto(&var("dst"), &[])
             .expect_err("non-script return target value should fail");
         assert_eq!(error.code, "ENGINE_TARGET_VAR_TYPE");
     }
@@ -757,11 +805,21 @@ mod callstack_tests {
                 "next.script.xml",
                 r#"<script name="next"><text>next</text></script>"#,
             ),
+            (
+                "callee.script.xml",
+                r#"<script name="callee" kind="call"><return/></script>"#,
+            ),
         ]));
         let main_root = engine
             .scripts
             .get("main")
             .expect("main script")
+            .root_group_id
+            .clone();
+        let callee_root = engine
+            .scripts
+            .get("callee")
+            .expect("callee script")
             .root_group_id
             .clone();
         let next_root = engine
@@ -797,7 +855,7 @@ mod callstack_tests {
             },
         ];
         engine
-            .execute_return(Some(lit("next.next")), &[])
+            .execute_goto(&lit("next.next"), &[])
             .expect("return to next should pass");
         assert_eq!(engine.frames.len(), 2);
         assert_eq!(
@@ -808,7 +866,7 @@ mod callstack_tests {
 
         engine.frames = vec![RuntimeFrame {
             frame_id: 1,
-            group_id: main_root.clone(),
+            group_id: callee_root.clone(),
             node_index: 0,
             scope: BTreeMap::new(),
             completion: CompletionKind::None,
@@ -817,14 +875,14 @@ mod callstack_tests {
             var_types: BTreeMap::new(),
         }];
         engine
-            .execute_return(None, &[])
+            .execute_return("return")
             .expect("return without continuation should pass");
         assert!(engine.ended);
 
         engine.ended = false;
         engine.frames = vec![RuntimeFrame {
             frame_id: 1,
-            group_id: main_root.clone(),
+            group_id: callee_root.clone(),
             node_index: 0,
             scope: BTreeMap::new(),
             completion: CompletionKind::None,
@@ -837,7 +895,7 @@ mod callstack_tests {
             var_types: BTreeMap::new(),
         }];
         engine
-            .execute_return(None, &[])
+            .execute_return("return")
             .expect("missing resume frame should end execution");
         assert!(engine.ended);
 
@@ -855,7 +913,7 @@ mod callstack_tests {
             },
             RuntimeFrame {
                 frame_id: 21,
-                group_id: main_root,
+                group_id: callee_root,
                 node_index: 0,
                 scope: BTreeMap::from([("x".to_string(), SlValue::Number(3.0))]),
                 completion: CompletionKind::None,
@@ -869,7 +927,7 @@ mod callstack_tests {
             },
         ];
         engine
-            .execute_return(None, &[])
+            .execute_return("return")
             .expect("return with continuation should pass");
         assert_eq!(engine.frames.len(), 1);
         assert_eq!(engine.frames[0].node_index, 6);
@@ -931,7 +989,7 @@ mod callstack_tests {
         ];
 
         engine
-            .execute_return(Some(lit("next.next")), &[])
+            .execute_goto(&lit("next.next"), &[])
             .expect("return to target script should pass");
 
         let continuation = engine
@@ -981,7 +1039,7 @@ mod callstack_tests {
             var_types: BTreeMap::new(),
         }];
         no_inherited
-            .execute_return(Some(lit("next.next")), &[])
+            .execute_goto(&lit("next.next"), &[])
             .expect("return target should work without inherited continuation");
         assert_eq!(no_inherited.frames.len(), 1);
         assert_eq!(no_inherited.frames[0].group_id, next_root);
@@ -1031,7 +1089,7 @@ mod callstack_tests {
     <!-- import next from next.xml -->
     <script name="main">
       <temp name="nextScene" type="script">@next.next</temp>
-      <return script="nextScene"/>
+      <goto script="nextScene"/>
     </script>
     "#,
             ),
@@ -1072,7 +1130,7 @@ mod callstack_tests {
             ),
             (
                 "callee.script.xml",
-                r#"<script name="callee" args="int:x"><return/></script>"#,
+                r#"<script name="callee" kind="call" args="int:x"><return/></script>"#,
             ),
         ]));
         ref_mismatch.start("main.main", None).expect("start");
@@ -1088,7 +1146,7 @@ mod callstack_tests {
             ),
             (
                 "callee.script.xml",
-                r#"<script name="callee" args="ref:int:x"><text>${x}</text></script>"#,
+                r#"<script name="callee" kind="call" args="ref:int:x"><text>${x}</text></script>"#,
             ),
         ]));
         let main_root = tail
@@ -1134,7 +1192,7 @@ mod callstack_tests {
             ),
             (
                 "callee.script.xml",
-                r#"<script name="callee" args="int:x"><text>${x}</text></script>"#,
+                r#"<script name="callee" kind="call" args="int:x"><text>${x}</text></script>"#,
             ),
         ]));
         tail_ok.frames = vec![RuntimeFrame {
@@ -1355,7 +1413,7 @@ mod callstack_tests {
             ),
             (
                 "callee.script.xml",
-                r#"<script name="callee" args="ref:int:x"><return/></script>"#,
+                r#"<script name="callee" kind="call" args="ref:int:x"><return/></script>"#,
             ),
         ]));
         ref_read_error.start("main.main", None).expect("start");
@@ -1376,7 +1434,7 @@ mod callstack_tests {
             ),
             (
                 "callee.script.xml",
-                r#"<script name="callee" args="int:x"><return/></script>"#,
+                r#"<script name="callee" kind="call" args="int:x"><return/></script>"#,
             ),
         ]));
         eval_arg_error.start("main", None).expect("start");
@@ -1392,7 +1450,7 @@ mod callstack_tests {
             ),
             (
                 "callee.script.xml",
-                r#"<script name="callee" args="int:x"><text>${x}</text></script>"#,
+                r#"<script name="callee" kind="call" args="int:x"><text>${x}</text></script>"#,
             ),
         ]));
         let main_root = tail_scope_error
@@ -1433,18 +1491,18 @@ mod callstack_tests {
 
         let mut no_root = engine_from_sources(map(&[(
             "main.script.xml",
-            r#"<script name="main"><return/></script>"#,
+            r#"<script name="main" kind="call"><return/></script>"#,
         )]));
         no_root.frames.clear();
         let error = no_root
-            .execute_return(None, &[])
+            .execute_return("return")
             .expect_err("missing root frame should fail");
         assert_eq!(error.code, "ENGINE_ROOT_FRAME");
 
         let mut return_arg_eval_error = engine_from_sources(map(&[
             (
                 "main.script.xml",
-                r#"<script name="main"><return script="@next.next" args="bad +"/></script>"#,
+                r#"<script name="main"><goto script="@next.next" args="bad +"/></script>"#,
             ),
             (
                 "next.script.xml",
@@ -1468,11 +1526,21 @@ mod callstack_tests {
                 "next.script.xml",
                 r#"<script name="next"><text>next</text></script>"#,
             ),
+            (
+                "callee.script.xml",
+                r#"<script name="callee" kind="call"><return/></script>"#,
+            ),
         ]));
         let main_root = return_write_error
             .scripts
             .get("main")
             .expect("main script")
+            .root_group_id
+            .clone();
+        let callee_root = return_write_error
+            .scripts
+            .get("callee")
+            .expect("callee script")
             .root_group_id
             .clone();
         return_write_error.frames = vec![
@@ -1493,7 +1561,7 @@ mod callstack_tests {
             },
             RuntimeFrame {
                 frame_id: 11,
-                group_id: main_root,
+                group_id: callee_root,
                 node_index: 0,
                 scope: BTreeMap::from([("x".to_string(), SlValue::Number(7.0))]),
                 completion: CompletionKind::None,
@@ -1512,7 +1580,7 @@ mod callstack_tests {
             },
         ];
         let error = return_write_error
-            .execute_return(None, &[])
+            .execute_return("return")
             .expect_err("return ref write path should fail");
         assert_eq!(error.code, "ENGINE_REF_PATH_WRITE");
 
@@ -1569,14 +1637,14 @@ mod callstack_tests {
             },
         ];
         let error = target_return_write_error
-            .execute_return(Some(lit("next.next")), &[])
+            .execute_goto(&lit("next.next"), &[])
             .expect_err("target return ref write path should fail");
         assert_eq!(error.code, "ENGINE_REF_PATH_WRITE");
 
         let mut return_target_type_error = engine_from_sources(map(&[
             (
                 "main.script.xml",
-                r#"<script name="main"><return script="@next.next" args="'bad'"/></script>"#,
+                r#"<script name="main"><goto script="@next.next" args="'bad'"/></script>"#,
             ),
             (
                 "next.script.xml",
@@ -1610,7 +1678,7 @@ mod callstack_tests {
             (
                 "bump.script.xml",
                 r#"
-<script name="bump" args="ref:int:i">
+<script name="bump" kind="call" args="ref:int:i">
   <code>i += 1;</code>
   <return/>
 </script>
@@ -1844,7 +1912,7 @@ mod callstack_tests {
             "main.xml",
             r#"<module name="main" export="script:main">
 <script name="main"><call script="@hidden"/></script>
-<script name="hidden"><text>ok</text></script>
+<script name="hidden" kind="call"><text>ok</text></script>
 </module>"#,
         )]));
         same_module.start("main.main", None).expect("start");
@@ -1856,7 +1924,7 @@ mod callstack_tests {
         let mut cross_module = engine_from_sources(map(&[
             (
                 "shared.xml",
-                r#"<module name="shared"><script name="hidden"><text>hidden</text></script></module>"#,
+                r#"<module name="shared"><script name="hidden" kind="call"><text>hidden</text></script></module>"#,
             ),
             (
                 "main.xml",
@@ -1896,7 +1964,7 @@ mod callstack_tests {
         let mut dynamic_cross_module = engine_from_sources(map(&[
             (
                 "shared.xml",
-                r#"<module name="shared"><script name="hidden"><text>hidden</text></script></module>"#,
+                r#"<module name="shared"><script name="hidden" kind="call"><text>hidden</text></script></module>"#,
             ),
             (
                 "main.xml",
@@ -1947,7 +2015,7 @@ mod callstack_tests {
             (
                 "lib.xml",
                 r#"<module name="lib">
-  <script name="secret"><text>hidden</text></script>
+  <script name="secret" kind="call"><text>hidden</text></script>
 </module>"#,
             ),
             (
@@ -2028,7 +2096,7 @@ mod callstack_tests {
         }];
         // Return to private script from non-module context should deny access
         let error = engine
-            .execute_return(Some(var("dst")), &[])
+            .execute_goto(&var("dst"), &[])
             .expect_err("return to private script should deny access");
         assert_eq!(error.code, "ENGINE_SCRIPT_ACCESS_DENIED");
     }
@@ -2095,6 +2163,7 @@ mod callstack_tests {
             access: sl_core::AccessLevel::Private,
             module_name: None, // This is the key - module_name is None
             local_script_name: Some("secret".to_string()),
+            kind: sl_core::ScriptKind::Goto,
             params: vec![],
             root_group_id: "g1".to_string(),
             groups: Default::default(),
@@ -2158,6 +2227,7 @@ mod callstack_tests {
             access: sl_core::AccessLevel::Private,
             module_name: Some("lib".to_string()),
             local_script_name: Some("secret".to_string()),
+            kind: sl_core::ScriptKind::Goto,
             params: vec![],
             root_group_id: "g2".to_string(),
             groups: Default::default(),

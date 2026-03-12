@@ -4,7 +4,7 @@
   <call script="@hidden"/>
   <call script="@shared.show"/>
 </script>
-<script name="hidden">
+<script name="hidden" kind="call">
   <text>private sibling ok</text>
 </script>
 </module>
