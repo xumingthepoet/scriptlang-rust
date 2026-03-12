@@ -27,4 +27,10 @@ mod main_tests {
         let code = run_with_args(["sl-cli", "agent", "--help"]);
         assert_eq!(code, 0);
     }
+
+    #[test]
+    fn run_with_args_returns_zero_on_compile_help() {
+        let code = run_with_args(["sl-cli", "compile", "--help"]);
+        assert_eq!(code, 0);
+    }
 }

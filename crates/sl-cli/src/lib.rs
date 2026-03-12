@@ -124,17 +124,33 @@ fn print_full_help() {
         println!();
         println!("{}", render_help(tui.clone()));
     }
+
+    let compile = root
+        .get_subcommands()
+        .find(|cmd| cmd.get_name() == "compile")
+        .cloned();
+    if let Some(compile) = compile {
+        println!();
+        println!("---");
+        println!();
+        println!("{}", render_help(compile.clone()));
+    }
 }
 
 fn run(cli: Cli) -> Result<i32, ScriptLangError> {
     match cli.command {
         Mode::Agent(args) => run_agent(args),
+        Mode::Compile(args) => run_compile(args),
         Mode::Tui(args) => run_tui(args),
     }
 }
 
 fn run_agent(args: AgentArgs) -> Result<i32, ScriptLangError> {
     agent::run_agent(args)
+}
+
+fn run_compile(args: CompileArgs) -> Result<i32, ScriptLangError> {
+    agent::run_compile(args)
 }
 
 fn run_tui(args: TuiArgs) -> Result<i32, ScriptLangError> {
@@ -443,6 +459,15 @@ mod lib_tests {
             "bad",
         ]);
         assert_ne!(replay_error, 0);
+
+        let compile_ok = run_cli_from_args([
+            "sl-cli",
+            "compile",
+            "--scripts-dir",
+            &scripts_dir,
+            "--dry-run",
+        ]);
+        assert_eq!(compile_ok, 0);
     }
 
     #[test]

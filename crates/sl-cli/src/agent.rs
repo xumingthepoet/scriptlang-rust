@@ -18,7 +18,6 @@ pub(super) fn run_agent(args: AgentArgs) -> Result<i32, ScriptLangError> {
         AgentCommand::Choose(args) => run_choose(args),
         AgentCommand::Input(args) => run_input(args),
         AgentCommand::Replay(args) => run_replay(args),
-        AgentCommand::Compile(args) => run_compile(args),
     }
 }
 

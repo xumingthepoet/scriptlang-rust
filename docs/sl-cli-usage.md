@@ -8,11 +8,12 @@
 统一入口：
 
 ```bash
-cargo run -p sl-cli -- <mode> ...
+cargo run -p sl-cli -- <command> ...
 ```
 
-当前支持两个 mode：
+当前支持三个顶层命令：
 - `agent`: 面向脚本化调用/自动化测试
+- `compile`: 编译并输出 artifact（或 dry-run 编译检查）
 - `tui`: 面向人工交互调试（全屏 TUI，必要时自动降级到行模式）
 
 查看帮助：
@@ -21,6 +22,7 @@ cargo run -p sl-cli -- <mode> ...
 cargo run -p sl-cli -- --help
 cargo run -p sl-cli -- agent --help
 cargo run -p sl-cli -- agent replay --help
+cargo run -p sl-cli -- compile --help
 cargo run -p sl-cli -- tui --help
 ```
 
@@ -28,12 +30,11 @@ cargo run -p sl-cli -- tui --help
 
 ## 2. Agent 模式
 
-`agent` 提供五个子命令：
+`agent` 提供四个子命令：
 - `start`
 - `choose`
 - `input`
 - `replay`
-- `compile`
 
 ### 2.1 `agent start`
 
@@ -130,20 +131,20 @@ cargo run -p sl-cli -- agent replay \
 - 按序列依次返回 `value % n`。
 - 序列耗尽后固定返回 `0`。
 
-### 2.5 `agent compile`
+### 2.5 `compile`（顶层命令，不属于 `agent` 子命令）
 
 编译脚本并输出 artifact JSON 文件。支持 `--dry-run` 模式用于排查编译错误。
 
 ```bash
 # Dry-run 模式：只编译不写入，用于调试编译错误
-cargo run -p sl-cli -- agent compile \
+cargo run -p sl-cli -- compile \
   --scripts-dir crates/sl-test-example/examples/01-text-code \
   --dry-run
 ```
 
 ```bash
 # 正常编译：输出 artifact JSON 文件
-cargo run -p sl-cli -- agent compile \
+cargo run -p sl-cli -- compile \
   --scripts-dir crates/sl-test-example/examples/01-text-code \
   -o /tmp/artifact.json
 ```
@@ -248,7 +249,7 @@ cargo run -p sl-cli -- tui --scripts-dir crates/sl-test-example/examples/06-snap
 3. 用 `save/load` 做中断恢复测试
 
 ### 5.4 推荐验证闭环（避免“仅编译通过”）
-1. 先执行 `agent compile --dry-run`，尽早发现 import/类型/XML 语法问题
+1. 先执行 `compile --dry-run`，尽早发现 import/类型/XML 语法问题
 2. 再执行 `agent replay --rand "<固定序列>" --step ...`，覆盖真实运行路径
 3. 将同一组 `--rand` 与 `--step` 固化到 CI/回归脚本，避免随机路径漏测
 

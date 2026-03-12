@@ -5,7 +5,7 @@ Rust workspace implementation of ScriptLang, with Rhai as the embedded script en
 ## Documentation
 - [Architecture overview](ARCHITECTURE.md): workspace layers, dependency direction, crate boundaries, and compile/run flow.
 - [SL Engine API usage](docs/sl-engine-api.md): host-side Rust API and runtime integration.
-- [SL CLI usage](docs/sl-cli-usage.md): `agent`/`tui` commands, machine output, replay workflow.
+- [SL CLI usage](docs/sl-cli-usage.md): `agent`/`compile`/`tui` commands, machine output, replay workflow.
 - [SL Lint usage](docs/sl-lint-usage.md): standalone lint checks and output contract.
 - [ScriptLang syntax rules](docs/scriptlang-syntax.md): XML grammar and language semantics.
 - [Example testing with sl-test-example runner](docs/testing-examples.md): example-case contract and runner usage.
@@ -40,6 +40,7 @@ All code must be written with testability in mind:
 ```bash
 cargo run -p sl-cli -- --help
 cargo run -p sl-cli -- agent --help
+cargo run -p sl-cli -- compile --help
 cargo run -p sl-cli -- tui --help
 ```
 

@@ -4,7 +4,7 @@ use clap::{Args, Parser, Subcommand};
 #[command(name = "sl-cli")]
 #[command(about = "ScriptLang CLI for scripted runs and interactive debugging")]
 #[command(
-    long_about = "ScriptLang CLI for scripted runs and interactive debugging.\n\nUse `agent` for automation-friendly workflows (`start/choose/input/replay`), and `tui` for manual interactive playtesting."
+    long_about = "ScriptLang CLI for scripted runs and interactive debugging.\n\nUse `agent` for stateful automation workflows (`start/choose/input/replay`), `compile` for artifact build output, and `tui` for manual interactive playtesting."
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]
@@ -14,6 +14,11 @@ pub(crate) struct Cli {
 #[derive(Debug, Subcommand)]
 pub(crate) enum Mode {
     Agent(AgentArgs),
+    #[command(about = "Compile scripts and output artifact JSON")]
+    #[command(
+        long_about = "Compile scripts and output artifact JSON.\n\nUse --dry-run to compile only in memory without writing output (useful for debugging compilation errors)."
+    )]
+    Compile(CompileArgs),
     Tui(TuiArgs),
 }
 
@@ -36,11 +41,6 @@ pub(crate) enum AgentCommand {
         long_about = "Run from a fresh start with queued --step actions.\n\nEach `--step` is consumed when a matching boundary appears:\n- choose:<index>\n- input:<text>\n\nWhen steps are exhausted, replay continues until the next boundary (CHOICES/INPUT/END), then exits successfully with a summary."
     )]
     Replay(ReplayArgs),
-    #[command(about = "Compile scripts and output artifact JSON")]
-    #[command(
-        long_about = "Compile scripts and output artifact JSON.\n\nUse --dry-run to compile only in memory without writing output (useful for debugging compilation errors)."
-    )]
-    Compile(CompileArgs),
 }
 
 #[derive(Debug, Args)]
