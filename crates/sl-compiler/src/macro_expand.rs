@@ -25,7 +25,7 @@ pub(crate) fn expand_script_macros(
 
     let mut context = MacroExpansionContext {
         used_var_names,
-        loop_counter: 0,
+        for_counter: 0,
     };
 
     Ok(XmlElementNode {
@@ -90,77 +90,320 @@ pub(crate) fn expand_element_with_macros(
     node: &XmlElementNode,
     context: &mut MacroExpansionContext,
 ) -> Result<Vec<XmlElementNode>, ScriptLangError> {
-    if node.name != "loop" {
-        return Ok(vec![XmlElementNode {
-            name: node.name.clone(),
-            attributes: node.attributes.clone(),
-            children: expand_children(&node.children, context)?,
-            location: node.location.clone(),
-        }]);
+    if node.name == "for" {
+        return Ok(vec![expand_for_macro(node, context)?]);
     }
 
-    let times_expr = parse_loop_times_expr(node)?;
-    let temp_var_name = next_loop_temp_var_name(context);
-    let body_children = expand_children(&node.children, context)?;
+    Ok(vec![XmlElementNode {
+        name: node.name.clone(),
+        attributes: node.attributes.clone(),
+        children: expand_children(&node.children, context)?,
+        location: node.location.clone(),
+    }])
+}
 
-    let decrement_code = XmlElementNode {
+#[derive(Debug, Clone)]
+pub(crate) struct ForTempDecl {
+    pub(crate) name: String,
+    pub(crate) type_expr: String,
+    pub(crate) init_expr: String,
+}
+
+fn expand_for_macro(
+    node: &XmlElementNode,
+    context: &mut MacroExpansionContext,
+) -> Result<XmlElementNode, ScriptLangError> {
+    validate_for_attributes(node)?;
+    let temps_raw = get_required_non_empty_attr(node, "temps")?;
+    let condition_expr = get_required_non_empty_attr(node, "condition")?;
+    let iteration_expr = get_required_non_empty_attr(node, "iteration")?;
+    let temp_decls = parse_for_temps_decls(&temps_raw, node)?;
+
+    let mut temp_names = BTreeSet::new();
+    let mut group_children = Vec::new();
+    for decl in temp_decls {
+        assert_decl_name_not_reserved_or_rhai_keyword(
+            &decl.name,
+            "for temp",
+            node.location.clone(),
+        )?;
+        if !temp_names.insert(decl.name.clone()) {
+            return Err(ScriptLangError::with_span(
+                "XML_FOR_TEMPS_DUPLICATE",
+                format!(
+                    "Attribute \"temps\" on <for> contains duplicated temp name \"{}\".",
+                    decl.name
+                ),
+                node.location.clone(),
+            ));
+        }
+
+        let mut temp_attrs = BTreeMap::new();
+        temp_attrs.insert("name".to_string(), decl.name);
+        temp_attrs.insert("type".to_string(), decl.type_expr);
+        group_children.push(XmlNode::Element(XmlElementNode {
+            name: "temp".to_string(),
+            attributes: temp_attrs,
+            children: vec![XmlNode::Text(XmlTextNode {
+                value: decl.init_expr,
+                location: node.location.clone(),
+            })],
+            location: node.location.clone(),
+        }));
+    }
+
+    let first_flag_name = next_for_first_flag_var_name(context);
+    let mut first_flag_attrs = BTreeMap::new();
+    first_flag_attrs.insert("name".to_string(), first_flag_name.clone());
+    first_flag_attrs.insert("type".to_string(), "boolean".to_string());
+    group_children.push(XmlNode::Element(XmlElementNode {
+        name: "temp".to_string(),
+        attributes: first_flag_attrs,
+        children: vec![XmlNode::Text(XmlTextNode {
+            value: "true".to_string(),
+            location: node.location.clone(),
+        })],
+        location: node.location.clone(),
+    }));
+
+    let clear_first_flag_code = XmlElementNode {
         name: "code".to_string(),
         attributes: BTreeMap::new(),
         children: vec![XmlNode::Text(XmlTextNode {
-            value: format!("{} = {} - 1;", temp_var_name, temp_var_name),
+            value: format!("{} = false;", first_flag_name),
             location: node.location.clone(),
         })],
         location: node.location.clone(),
     };
-
-    let mut loop_var_attrs = BTreeMap::new();
-    loop_var_attrs.insert("name".to_string(), temp_var_name.clone());
-    loop_var_attrs.insert("type".to_string(), "int".to_string());
-
-    let loop_var = XmlElementNode {
-        name: "temp".to_string(),
-        attributes: loop_var_attrs,
+    let iteration_code = XmlElementNode {
+        name: "code".to_string(),
+        attributes: BTreeMap::new(),
         children: vec![XmlNode::Text(XmlTextNode {
-            value: times_expr,
+            value: iteration_expr,
             location: node.location.clone(),
         })],
         location: node.location.clone(),
     };
+
+    let first_flag_else = XmlElementNode {
+        name: "else".to_string(),
+        attributes: BTreeMap::new(),
+        children: vec![XmlNode::Element(iteration_code)],
+        location: node.location.clone(),
+    };
+
+    let mut first_flag_if_attrs = BTreeMap::new();
+    first_flag_if_attrs.insert("when".to_string(), first_flag_name);
+    let first_flag_if = XmlElementNode {
+        name: "if".to_string(),
+        attributes: first_flag_if_attrs,
+        children: vec![
+            XmlNode::Element(clear_first_flag_code),
+            XmlNode::Element(first_flag_else),
+        ],
+        location: node.location.clone(),
+    };
+
+    let mut while_children = vec![XmlNode::Element(first_flag_if)];
+    while_children.extend(expand_children(&node.children, context)?);
 
     let mut while_attrs = BTreeMap::new();
-    while_attrs.insert("when".to_string(), format!("{} > 0", temp_var_name));
-
-    let mut while_children = Vec::new();
-    while_children.push(XmlNode::Element(decrement_code));
-    while_children.extend(body_children);
-
-    let loop_while = XmlElementNode {
+    while_attrs.insert("when".to_string(), condition_expr);
+    group_children.push(XmlNode::Element(XmlElementNode {
         name: "while".to_string(),
         attributes: while_attrs,
         children: while_children,
         location: node.location.clone(),
-    };
+    }));
 
-    Ok(vec![loop_var, loop_while])
+    Ok(XmlElementNode {
+        name: "group".to_string(),
+        attributes: BTreeMap::new(),
+        children: group_children,
+        location: node.location.clone(),
+    })
 }
 
-pub(crate) fn parse_loop_times_expr(node: &XmlElementNode) -> Result<String, ScriptLangError> {
-    let raw = get_required_non_empty_attr(node, "times")?;
-    let trimmed = raw.trim();
-    if trimmed.starts_with("${") && trimmed.ends_with('}') {
+pub(crate) fn parse_for_temps_decls(
+    raw: &str,
+    node: &XmlElementNode,
+) -> Result<Vec<ForTempDecl>, ScriptLangError> {
+    let entries = split_top_level_for_temps_entries(raw);
+    if entries.is_empty() {
+        return Err(invalid_for_temps_error(
+            node,
+            "Attribute \"temps\" on <for> must contain at least one declaration.",
+        ));
+    }
+
+    let mut result = Vec::new();
+    for (index, entry) in entries.iter().enumerate() {
+        if entry.is_empty() {
+            if index == entries.len().saturating_sub(1) {
+                continue;
+            }
+            return Err(invalid_for_temps_error(
+                node,
+                "Attribute \"temps\" on <for> contains empty declaration entry.",
+            ));
+        }
+        result.push(parse_for_temp_decl_entry(entry, node)?);
+    }
+
+    if result.is_empty() {
+        return Err(invalid_for_temps_error(
+            node,
+            "Attribute \"temps\" on <for> must contain at least one declaration.",
+        ));
+    }
+
+    Ok(result)
+}
+
+fn parse_for_temp_decl_entry(
+    entry: &str,
+    node: &XmlElementNode,
+) -> Result<ForTempDecl, ScriptLangError> {
+    let delimiter_positions = top_level_delimiter_positions(entry, ':');
+    if delimiter_positions.len() < 2 {
+        return Err(invalid_for_temps_error(
+            node,
+            "Each temps entry on <for> must be \"name:type:init\".",
+        ));
+    }
+
+    let first = delimiter_positions[0];
+    let second = delimiter_positions[1];
+    let name = entry[..first].trim().to_string();
+    let type_expr = entry[first + 1..second].trim().to_string();
+    let init_expr = entry[second + 1..].trim().to_string();
+
+    if name.is_empty() || type_expr.is_empty() || init_expr.is_empty() {
+        return Err(invalid_for_temps_error(
+            node,
+            "Each temps entry on <for> must provide non-empty name, type, and init.",
+        ));
+    }
+
+    Ok(ForTempDecl {
+        name,
+        type_expr,
+        init_expr,
+    })
+}
+
+fn top_level_delimiter_positions(raw: &str, delimiter: char) -> Vec<usize> {
+    let mut positions = Vec::new();
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut quote: Option<char> = None;
+
+    for (index, ch) in raw.char_indices() {
+        if let Some(active_quote) = quote {
+            if ch == active_quote {
+                quote = None;
+            }
+            continue;
+        }
+
+        if ch == '\'' || ch == '"' {
+            quote = Some(ch);
+            continue;
+        }
+
+        match ch {
+            '(' => paren_depth += 1,
+            ')' if paren_depth > 0 => paren_depth -= 1,
+            '[' => bracket_depth += 1,
+            ']' if bracket_depth > 0 => bracket_depth -= 1,
+            '{' => brace_depth += 1,
+            '}' if brace_depth > 0 => brace_depth -= 1,
+            _ => {}
+        }
+
+        if ch == delimiter && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 {
+            positions.push(index);
+        }
+    }
+
+    positions
+}
+
+fn split_top_level_for_temps_entries(raw: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    let mut brace_depth = 0usize;
+    let mut quote: Option<char> = None;
+
+    for ch in raw.chars() {
+        if let Some(active_quote) = quote {
+            current.push(ch);
+            if ch == active_quote {
+                quote = None;
+            }
+            continue;
+        }
+
+        if ch == '\'' || ch == '"' {
+            quote = Some(ch);
+            current.push(ch);
+            continue;
+        }
+
+        match ch {
+            '(' => paren_depth += 1,
+            ')' if paren_depth > 0 => paren_depth -= 1,
+            '[' => bracket_depth += 1,
+            ']' if bracket_depth > 0 => bracket_depth -= 1,
+            '{' => brace_depth += 1,
+            '}' if brace_depth > 0 => brace_depth -= 1,
+            ';' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                parts.push(current.trim().to_string());
+                current.clear();
+                continue;
+            }
+            _ => {}
+        }
+
+        current.push(ch);
+    }
+
+    parts.push(current.trim().to_string());
+    parts
+}
+
+fn invalid_for_temps_error(node: &XmlElementNode, message: &str) -> ScriptLangError {
+    ScriptLangError::with_span(
+        "XML_FOR_TEMPS_INVALID",
+        message.to_string(),
+        node.location.clone(),
+    )
+}
+
+fn validate_for_attributes(node: &XmlElementNode) -> Result<(), ScriptLangError> {
+    for key in node.attributes.keys() {
+        if matches!(key.as_str(), "temps" | "condition" | "iteration") {
+            continue;
+        }
         return Err(ScriptLangError::with_span(
-            "XML_LOOP_TIMES_TEMPLATE_UNSUPPORTED",
-            "Attribute \"times\" on <loop> must not use ${...} wrapper.",
+            "XML_ATTR_NOT_ALLOWED",
+            format!(
+                "Attribute \"{}\" is not allowed on <for>. Supported attributes: temps, condition, iteration.",
+                key
+            ),
             node.location.clone(),
         ));
     }
-    Ok(raw)
+    Ok(())
 }
 
-pub(crate) fn next_loop_temp_var_name(context: &mut MacroExpansionContext) -> String {
+pub(crate) fn next_for_first_flag_var_name(context: &mut MacroExpansionContext) -> String {
     loop {
-        let candidate = format!("{}{}_remaining", LOOP_TEMP_VAR_PREFIX, context.loop_counter);
-        context.loop_counter += 1;
+        let candidate = format!("{}{}_first", FOR_FIRST_TEMP_VAR_PREFIX, context.for_counter);
+        context.for_counter += 1;
         if context.used_var_names.insert(candidate.clone()) {
             return candidate;
         }
@@ -173,16 +416,15 @@ mod macro_expand_tests {
     use crate::compiler_test_support::*;
 
     #[test]
-    fn loop_macro_expands_to_var_and_while() {
+    fn for_macro_expands_to_group_and_while() {
         let files = map(&[(
             "main.xml",
             r#"
     <module name="main" export="script:main">
     <script name="main">
-      <temp name="i" type="int">0</temp>
-      <loop times="2">
-        <code>i = i + 1;</code>
-      </loop>
+      <for temps="i:int:0" condition="i &lt; 2" iteration="i = i + 1;">
+        <text>${i}</text>
+      </for>
     </script>
     </module>
     "#,
@@ -191,18 +433,135 @@ mod macro_expand_tests {
         let result = compile_project_bundle_from_xml_map(&files).expect("project should compile");
         let main = result.scripts.get("main.main").expect("main script");
         let root = main.groups.get(&main.root_group_id).expect("root group");
-        let var_count = root
+
+        let ScriptNode::If { then_group_id, .. } = root.nodes.first().expect("group node") else {
+            panic!("for should compile into a scoped group");
+        };
+        let for_group = main.groups.get(then_group_id).expect("for group");
+        let var_count = for_group
             .nodes
             .iter()
             .filter(|node| matches!(node, ScriptNode::Var { .. }))
             .count();
-        let while_count = root
+        let while_node = for_group
             .nodes
             .iter()
-            .filter(|node| matches!(node, ScriptNode::While { .. }))
-            .count();
-        assert!(var_count > 0);
-        assert_eq!(while_count, 1);
+            .find_map(|node| match node {
+                ScriptNode::While { body_group_id, .. } => Some(body_group_id.as_str()),
+                _ => None,
+            })
+            .expect("for should produce while node");
+        assert_eq!(var_count, 2);
+
+        let while_group = main.groups.get(while_node).expect("while group");
+        assert!(matches!(
+            while_group.nodes.first(),
+            Some(ScriptNode::If { .. })
+        ));
+    }
+
+    #[test]
+    fn for_macro_guards_iteration_with_first_flag() {
+        let for_node = xml_element(
+            "for",
+            &[
+                ("temps", "i:int:0"),
+                ("condition", "i < 3"),
+                ("iteration", "i = i + 1;"),
+            ],
+            vec![XmlNode::Element(xml_element(
+                "text",
+                &[],
+                vec![xml_text("x")],
+            ))],
+        );
+        let expanded = expand_element_with_macros(
+            &for_node,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect("for should expand");
+        let group = expanded.first().expect("expanded group");
+        assert_eq!(group.name, "group");
+
+        let while_node = group
+            .children
+            .iter()
+            .find_map(|entry| match entry {
+                XmlNode::Element(element) if element.name == "while" => Some(element),
+                _ => None,
+            })
+            .expect("for should contain while");
+        let first_child = while_node.children.first().expect("while first child");
+        let XmlNode::Element(if_node) = first_child else {
+            panic!("while first child must be if");
+        };
+        assert_eq!(if_node.name, "if");
+        let else_node = if_node
+            .children
+            .iter()
+            .find_map(|entry| match entry {
+                XmlNode::Element(element) if element.name == "else" => Some(element),
+                _ => None,
+            })
+            .expect("if should contain else branch");
+        let iteration_code = else_node.children.first().expect("else first child");
+        let XmlNode::Element(code_node) = iteration_code else {
+            panic!("else first child must be code");
+        };
+        assert_eq!(code_node.name, "code");
+        let iteration_text = inline_text_content(code_node);
+        assert_eq!(iteration_text.trim(), "i = i + 1;");
+    }
+
+    #[test]
+    fn for_temps_parser_handles_complex_init_and_empty_middle_entry() {
+        let host = xml_element(
+            "for",
+            &[
+                (
+                    "temps",
+                    "a:int:1;b:string:'x:y';c:#{string=>int}:#{'k': 1};",
+                ),
+                ("condition", "true"),
+                ("iteration", "a = a + 1;"),
+            ],
+            Vec::new(),
+        );
+        let parsed = parse_for_temps_decls(
+            host.attributes
+                .get("temps")
+                .expect("temps attr should exist"),
+            &host,
+        )
+        .expect("complex temps should parse");
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed[1].name, "b");
+        assert_eq!(parsed[1].type_expr, "string");
+        assert_eq!(parsed[1].init_expr, "'x:y'");
+        assert_eq!(parsed[2].type_expr, "#{string=>int}");
+        assert_eq!(parsed[2].init_expr, "#{'k': 1}");
+
+        let broken = xml_element(
+            "for",
+            &[
+                ("temps", "a:int:1;;b:int:2"),
+                ("condition", "true"),
+                ("iteration", "a = a + 1;"),
+            ],
+            Vec::new(),
+        );
+        let error = parse_for_temps_decls(
+            broken
+                .attributes
+                .get("temps")
+                .expect("temps attr should exist"),
+            &broken,
+        )
+        .expect_err("empty middle entry should fail");
+        assert_eq!(error.code, "XML_FOR_TEMPS_INVALID");
     }
 
     #[test]
@@ -232,20 +591,115 @@ mod macro_expand_tests {
             .expect_err("keyword var name should fail");
         assert_eq!(error.code, "NAME_RHAI_KEYWORD_RESERVED");
 
-        let bad_loop = xml_element(
-            "loop",
-            &[("times", "${n}")],
-            vec![XmlNode::Element(xml_element(
-                "text",
-                &[],
-                vec![xml_text("x")],
-            ))],
+        let bad_temps = xml_element(
+            "for",
+            &[
+                ("temps", "i:int"),
+                ("condition", "true"),
+                ("iteration", "i = i + 1;"),
+            ],
+            Vec::new(),
         );
-        let error = parse_loop_times_expr(&bad_loop).expect_err("template times should fail");
-        assert_eq!(error.code, "XML_LOOP_TIMES_TEMPLATE_UNSUPPORTED");
+        let error = expand_element_with_macros(
+            &bad_temps,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect_err("invalid temps should fail");
+        assert_eq!(error.code, "XML_FOR_TEMPS_INVALID");
 
-        let missing_times = xml_element("loop", &[], vec![xml_text("x")]);
-        let error = parse_loop_times_expr(&missing_times).expect_err("times is required");
+        let duplicate_temps = xml_element(
+            "for",
+            &[
+                ("temps", "i:int:0;i:int:1"),
+                ("condition", "true"),
+                ("iteration", "i = i + 1;"),
+            ],
+            Vec::new(),
+        );
+        let error = expand_element_with_macros(
+            &duplicate_temps,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect_err("duplicate temp declarations should fail");
+        assert_eq!(error.code, "XML_FOR_TEMPS_DUPLICATE");
+
+        let reserved_for_temp = xml_element(
+            "for",
+            &[
+                ("temps", "__bad:int:0"),
+                ("condition", "true"),
+                ("iteration", "true;"),
+            ],
+            Vec::new(),
+        );
+        let error = expand_element_with_macros(
+            &reserved_for_temp,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect_err("reserved for temp should fail");
+        assert_eq!(error.code, "NAME_RESERVED_PREFIX");
+
+        let keyword_for_temp = xml_element(
+            "for",
+            &[
+                ("temps", "shared:int:0"),
+                ("condition", "true"),
+                ("iteration", "true;"),
+            ],
+            Vec::new(),
+        );
+        let error = expand_element_with_macros(
+            &keyword_for_temp,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect_err("keyword for temp should fail");
+        assert_eq!(error.code, "NAME_RHAI_KEYWORD_RESERVED");
+
+        let bad_for_attr = xml_element(
+            "for",
+            &[
+                ("temps", "i:int:0"),
+                ("condition", "true"),
+                ("iteration", "i = i + 1;"),
+                ("times", "2"),
+            ],
+            Vec::new(),
+        );
+        let error = expand_element_with_macros(
+            &bad_for_attr,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect_err("unsupported <for> attrs should fail");
+        assert_eq!(error.code, "XML_ATTR_NOT_ALLOWED");
+
+        let missing_iteration = xml_element(
+            "for",
+            &[("temps", "i:int:0"), ("condition", "true")],
+            Vec::new(),
+        );
+        let error = expand_element_with_macros(
+            &missing_iteration,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect_err("missing required attr should fail");
         assert_eq!(error.code, "XML_MISSING_ATTR");
 
         let plain = xml_element(
@@ -258,39 +712,30 @@ mod macro_expand_tests {
         );
         let mut context = MacroExpansionContext {
             used_var_names: BTreeSet::new(),
-            loop_counter: 0,
+            for_counter: 0,
         };
         let expanded = expand_element_with_macros(&plain, &mut context).expect("expand plain node");
         assert_eq!(expanded.len(), 1);
         assert_eq!(expanded[0].name, "text");
 
-        let plain_with_bad_child = xml_element(
-            "text",
-            &[],
+        let for_with_bad_child = xml_element(
+            "for",
+            &[
+                ("temps", "i:int:0"),
+                ("condition", "true"),
+                ("iteration", "i = i + 1;"),
+            ],
             vec![XmlNode::Element(xml_element(
-                "loop",
-                &[("times", "${n}")],
-                vec![xml_text("x")],
+                "for",
+                &[("temps", "bad"), ("condition", "true"), ("iteration", "x")],
+                Vec::new(),
             ))],
         );
-        let error = expand_element_with_macros(&plain_with_bad_child, &mut context)
-            .expect_err("non-loop node child expansion should propagate errors");
-        assert_eq!(error.code, "XML_LOOP_TIMES_TEMPLATE_UNSUPPORTED");
+        let error = expand_element_with_macros(&for_with_bad_child, &mut context)
+            .expect_err("for body child expansion should propagate errors");
+        assert_eq!(error.code, "XML_FOR_TEMPS_INVALID");
 
-        let loop_with_bad_child = xml_element(
-            "loop",
-            &[("times", "2")],
-            vec![XmlNode::Element(xml_element(
-                "loop",
-                &[("times", "${n}")],
-                vec![xml_text("x")],
-            ))],
-        );
-        let error = expand_element_with_macros(&loop_with_bad_child, &mut context)
-            .expect_err("loop body child expansion should propagate errors");
-        assert_eq!(error.code, "XML_LOOP_TIMES_TEMPLATE_UNSUPPORTED");
-
-        let chosen = next_loop_temp_var_name(&mut context);
-        assert!(chosen.starts_with(LOOP_TEMP_VAR_PREFIX));
+        let chosen = next_for_first_flag_var_name(&mut context);
+        assert!(chosen.starts_with(FOR_FIRST_TEMP_VAR_PREFIX));
     }
 }

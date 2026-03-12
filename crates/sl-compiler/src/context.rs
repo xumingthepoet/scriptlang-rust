@@ -1,7 +1,7 @@
 use crate::*;
 
 pub const INTERNAL_RESERVED_NAME_PREFIX: &str = "__";
-pub(crate) const LOOP_TEMP_VAR_PREFIX: &str = "__sl_loop_";
+pub(crate) const FOR_FIRST_TEMP_VAR_PREFIX: &str = "__sl_for_";
 
 #[derive(Debug, Clone)]
 pub struct CompileProjectBundleResult {
@@ -154,7 +154,7 @@ pub(crate) type VisibleModuleResolution = (
 #[derive(Debug, Clone)]
 pub(crate) struct MacroExpansionContext {
     pub(crate) used_var_names: BTreeSet<String>,
-    pub(crate) loop_counter: usize,
+    pub(crate) for_counter: usize,
 }
 
 #[derive(Debug, Clone)]

@@ -23,7 +23,7 @@ This catalog keeps example intent explicit so examples can be refactored without
 | `10-once-static` | `once` static option behavior |
 | `11-choice-fallover-continue` | `fall_over` and `continue` in choice |
 | `12-while-break-continue` | loop control (`break`/`continue`) |
-| `13-loop-times` | `loop times=...` sugar |
+| `13-for-macro` | `for temps/condition/iteration` macro with `continue`/`break` |
 | `14-module-functions` | module `type/function` and cross-module invoke |
 | `15-entry-override-recursive` | entry override and recursive imports |
 | `16-input-name` | multiple `input` boundaries and defaults |

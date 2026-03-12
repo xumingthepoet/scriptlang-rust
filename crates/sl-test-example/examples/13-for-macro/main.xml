@@ -3,12 +3,12 @@
   <temp name="i" type="int">0</temp>
   <temp name="times" type="int">3</temp>
 
-  <loop times="times">
+  <for temps="remaining:int:times" condition="remaining > 0" iteration="remaining = remaining - 1;">
     <code>i = i + 1;</code>
     <if when="i == 2"><continue/></if>
     <if when="i == 3"><break/></if>
     <text>tick-${i}</text>
-  </loop>
+  </for>
 
   <text>done-${i}</text>
   <end/>

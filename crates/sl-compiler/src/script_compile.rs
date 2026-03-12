@@ -1570,10 +1570,10 @@ pub(crate) fn compile_group_nodes(
                     location: child.location.clone(),
                 }
             }
-            "loop" => {
+            "for" => {
                 return Err(ScriptLangError::with_span(
-                    "XML_LOOP_INTERNAL",
-                    "<loop> must be expanded before compile phase.",
+                    "XML_FOR_INTERNAL",
+                    "<for> must be expanded before compile phase.",
                     child.location.clone(),
                 ))
             }
@@ -1584,7 +1584,7 @@ pub(crate) fn compile_group_nodes(
                     child.location.clone(),
                 ))
             }
-            removed @ ("var" | "vars" | "step" | "set" | "push" | "remove") => {
+            removed @ ("loop" | "var" | "vars" | "step" | "set" | "push" | "remove") => {
                 return Err(ScriptLangError::with_span(
                     "XML_REMOVED_NODE",
                     format!("<{}> is removed in ScriptLang.", removed),
@@ -3230,7 +3230,7 @@ mod script_compile_tests {
             CompileGroupMode::new(0, false),
         )
         .expect_err("if then group child compile errors should propagate");
-        assert_eq!(error.code, "XML_LOOP_INTERNAL");
+        assert_eq!(error.code, "XML_REMOVED_NODE");
 
         let bad_if_else = xml_element(
             "script",
@@ -3257,7 +3257,7 @@ mod script_compile_tests {
             CompileGroupMode::new(0, false),
         )
         .expect_err("if else group child compile errors should propagate");
-        assert_eq!(error.code, "XML_LOOP_INTERNAL");
+        assert_eq!(error.code, "XML_REMOVED_NODE");
 
         let bad_while_body = xml_element(
             "script",
@@ -3280,7 +3280,7 @@ mod script_compile_tests {
             CompileGroupMode::new(0, false),
         )
         .expect_err("while body compile errors should propagate");
-        assert_eq!(error.code, "XML_LOOP_INTERNAL");
+        assert_eq!(error.code, "XML_REMOVED_NODE");
 
         let bad_choice_text = xml_element(
             "script",
@@ -3392,7 +3392,7 @@ mod script_compile_tests {
             CompileGroupMode::new(0, false),
         )
         .expect_err("choice option body compile errors should propagate");
-        assert_eq!(error.code, "XML_LOOP_INTERNAL");
+        assert_eq!(error.code, "XML_REMOVED_NODE");
 
         let bad_dynamic_fall_over_bool = xml_element(
             "script",
@@ -3454,7 +3454,7 @@ mod script_compile_tests {
             CompileGroupMode::new(0, false),
         )
         .expect_err("dynamic option template body errors should propagate");
-        assert_eq!(error.code, "XML_LOOP_INTERNAL");
+        assert_eq!(error.code, "XML_REMOVED_NODE");
     }
 
     #[test]
@@ -3729,12 +3729,12 @@ mod script_compile_tests {
                     "NAME_RHAI_KEYWORD_RESERVED",
                 ),
                 (
-                    "loop times template unsupported",
+                    "loop removed",
                     map(&[(
                         "main.xml",
                         "<script name=\"main\"><loop times=\"${n}\"><text>x</text></loop></script>",
                     )]),
-                    "XML_LOOP_TIMES_TEMPLATE_UNSUPPORTED",
+                    "XML_REMOVED_NODE",
                 ),
                 (
                     "text inline required",
@@ -4275,17 +4275,21 @@ mod script_compile_tests {
         )
         .expect("manual complex compile_group should pass");
 
-        let mut loop_builder = GroupBuilder::new("loop.xml");
-        let loop_group = loop_builder.next_group_id();
-        let loop_error = compile_group(
-            &loop_group,
+        let mut for_builder = GroupBuilder::new("for.xml");
+        let for_group = for_builder.next_group_id();
+        let for_error = compile_group(
+            &for_group,
             None,
             &xml_element(
                 "script",
                 &[("name", "main")],
                 vec![XmlNode::Element(xml_element(
-                    "loop",
-                    &[("times", "2")],
+                    "for",
+                    &[
+                        ("temps", "i:int:0"),
+                        ("condition", "i < 2"),
+                        ("iteration", "i = i + 1;"),
+                    ],
                     vec![XmlNode::Element(xml_element(
                         "text",
                         &[],
@@ -4293,13 +4297,13 @@ mod script_compile_tests {
                     ))],
                 ))],
             ),
-            &mut loop_builder,
+            &mut for_builder,
             &BTreeMap::new(),
             &BTreeMap::new(),
             CompileGroupMode::new(0, false),
         )
-        .expect_err("loop should have been expanded");
-        assert_eq!(loop_error.code, "XML_LOOP_INTERNAL");
+        .expect_err("for should have been expanded");
+        assert_eq!(for_error.code, "XML_FOR_INTERNAL");
 
         let while_node = ScriptNode::While {
             id: "w1".to_string(),
@@ -4557,11 +4561,11 @@ mod script_compile_tests {
             .expect("var without name should be ignored");
 
         let mut context = MacroExpansionContext {
-            used_var_names: BTreeSet::from([format!("{}{}_remaining", LOOP_TEMP_VAR_PREFIX, 0)]),
-            loop_counter: 0,
+            used_var_names: BTreeSet::from([format!("{}{}_first", FOR_FIRST_TEMP_VAR_PREFIX, 0)]),
+            for_counter: 0,
         };
-        let generated = next_loop_temp_var_name(&mut context);
-        assert!(generated.ends_with("_remaining"));
+        let generated = next_for_first_flag_var_name(&mut context);
+        assert!(generated.ends_with("_first"));
 
         assert_eq!(
             crate::defaults::slvalue_from_json(JsonValue::Null),

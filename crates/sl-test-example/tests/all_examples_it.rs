@@ -65,8 +65,8 @@ fn example_12_while_break_continue_matches_testcase() {
 }
 
 #[test]
-fn example_13_loop_times_matches_testcase() {
-    assert_example("13-loop-times");
+fn example_13_for_macro_matches_testcase() {
+    assert_example("13-for-macro");
 }
 
 #[test]
