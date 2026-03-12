@@ -323,6 +323,49 @@ mod frame_stack_tests {
     }
 
     #[test]
+    fn finish_frame_with_invalid_group_id_fails() {
+        // Test finish_frame with script_root=true but invalid group_id
+        // This triggers the lookup_group error branch
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]));
+        // Create a frame with an invalid group_id that doesn't exist in group_lookup
+        engine.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id: "invalid-group-id".to_string(),
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::new(),
+        }];
+        let error = engine
+            .finish_frame(1)
+            .expect_err("invalid group should fail");
+        assert_eq!(error.code, "ENGINE_GROUP_NOT_FOUND");
+    }
+
+    #[test]
+    fn goto_script_without_explicit_end_fails() {
+        // Goto scripts must terminate with explicit <end/>,
+        // otherwise ENGINE_EXPLICIT_END_REQUIRED error is raised
+        let mut engine = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><text>Hello</text></script>"#,
+        )]));
+        engine.start("main", None).expect("start");
+        let output = engine.next_output().expect("text output");
+        assert_eq!(output_kind(&output), "text");
+        // Reaching end of script without explicit <end/> should fail
+        let error = engine
+            .next_output()
+            .expect_err("should fail without explicit end");
+        assert_eq!(error.code, "ENGINE_EXPLICIT_END_REQUIRED");
+    }
+
+    #[test]
     pub(super) fn finish_frame_writes_back_ref_binding_on_success() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",

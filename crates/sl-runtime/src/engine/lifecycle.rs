@@ -1513,4 +1513,44 @@ mod lifecycle_tests {
         assert_eq!(*uninit, SlValue::Number(0.0));
         assert_eq!(*init, SlValue::Number(42.0));
     }
+
+    #[test]
+    pub(super) fn entry_script_must_be_goto_kind() {
+        // Test line 436: entry script must be goto kind
+        let files = map(&[(
+            "main.xml",
+            r#"<module name="main" export="script:main"><script name="main" kind="call"><text>Call script</text></script></module>"#,
+        )]);
+        let compiled = compile_project_from_sources(files);
+        let mut engine = ScriptLangEngine::new(ScriptLangEngineOptions {
+            scripts: compiled.scripts,
+            global_data: compiled.global_data,
+            module_var_declarations: compiled.module_var_declarations,
+            module_var_init_order: compiled.module_var_init_order,
+            module_const_declarations: compiled.module_const_declarations,
+            module_const_init_order: compiled.module_const_init_order,
+            host_functions: None,
+            random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: None,
+        })
+        .expect("engine should build");
+        let error = engine
+            .start("main.main", None)
+            .expect_err("call kind entry should fail");
+        assert_eq!(error.code, "ENGINE_ENTRY_SCRIPT_KIND");
+    }
+
+    #[test]
+    fn normalize_script_builtin_arg_empty() {
+        let result = normalize_script_builtin_arg("");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn normalize_script_builtin_arg_only_at_sign() {
+        let result = normalize_script_builtin_arg("@");
+        assert!(result.is_none());
+    }
 }

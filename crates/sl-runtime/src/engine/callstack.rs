@@ -2245,4 +2245,116 @@ mod callstack_tests {
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code, "ENGINE_SCRIPT_ACCESS_DENIED");
     }
+
+    #[test]
+    pub(super) fn call_goto_kind_script_via_variable_fails() {
+        // Test line 201: calling a Goto kind script via dynamic variable call should fail
+        let mut engine = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+    <script name="main">
+      <temp name="target" type="script">@battle.battle</temp>
+      <call script="target"/>
+    </script>
+    "#,
+            ),
+            (
+                "battle.script.xml",
+                r#"<script name="battle" kind="goto"><text>battle</text></script>"#,
+            ),
+        ]));
+        engine.start("main.main", None).expect("start");
+
+        let error = engine
+            .next_output()
+            .expect_err("calling goto kind via variable should fail");
+        assert_eq!(error.code, "ENGINE_CALL_TARGET_KIND");
+    }
+
+    #[test]
+    pub(super) fn goto_call_kind_script_via_variable_fails() {
+        // Test line 299: goto to a Call kind script via dynamic variable should fail
+        let mut engine = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+    <script name="main">
+      <temp name="target" type="script">@battle.battle</temp>
+      <goto script="target"/>
+    </script>
+    "#,
+            ),
+            (
+                "battle.script.xml",
+                r#"<script name="battle" kind="call"><text>battle</text></script>"#,
+            ),
+        ]));
+        engine.start("main.main", None).expect("start");
+
+        let error = engine
+            .next_output()
+            .expect_err("goto to call kind via variable should fail");
+        assert_eq!(error.code, "ENGINE_GOTO_TARGET_KIND");
+    }
+
+    #[test]
+    pub(super) fn execute_return_with_invalid_resume_frame() {
+        // Test line 397-400: execute_return when resume_frame_id doesn't exist
+        // This can happen if the caller frame was removed
+        use sl_core::ContinuationFrame;
+
+        let mut engine = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+    <script name="main">
+      <call script="@callee.callee"/>
+      <end/>
+    </script>
+    "#,
+            ),
+            (
+                "callee.script.xml",
+                r#"<script name="callee" kind="call"><return/></script>"#,
+            ),
+        ]));
+        engine.start("main.main", None).expect("start");
+
+        // Call the callee
+        engine.next_output().expect("should call callee");
+
+        // At this point we should be in the callee frame with a return continuation
+        // Let's create a scenario where the resume_frame_id doesn't exist
+
+        // Get the callee script's root group
+        let callee_group_id = engine
+            .scripts
+            .get("callee")
+            .expect("callee script")
+            .root_group_id
+            .clone();
+
+        // Replace frames with a frame that has an invalid resume_frame_id
+        let invalid_continuation = ContinuationFrame {
+            resume_frame_id: 9999, // Non-existent frame
+            ref_bindings: BTreeMap::new(),
+            next_node_index: 0,
+        };
+
+        engine.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id: callee_group_id,
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: Some(invalid_continuation),
+            var_types: BTreeMap::new(),
+        }];
+
+        // Now execute_return should hit line 397-400 and call end_execution
+        let result = engine.execute_return("return");
+        assert!(result.is_ok()); // It should succeed by calling end_execution
+    }
 }

@@ -2067,6 +2067,247 @@ mod script_compile_tests {
     }
 
     #[test]
+    fn script_kind_error_paths_are_covered() {
+        // Test empty kind attribute (line 1800)
+        let root = parse_xml_document(r#"<script name="main" kind=""><text>Main</text></script>"#)
+            .expect("xml")
+            .root;
+        let error = compile_script(CompileScriptOptions {
+            script_path: "main.xml",
+            root: &root,
+            script_access: AccessLevel::Public,
+            qualified_script_name: Some("main.main"),
+            module_name: Some("main"),
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+            all_script_access: &BTreeMap::new(),
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
+        })
+        .expect_err("empty kind should fail");
+        assert_eq!(error.code, "XML_SCRIPT_KIND_INVALID");
+
+        // Test explicit goto kind (line 1808)
+        let root =
+            parse_xml_document(r#"<script name="main" kind="goto"><text>Main</text></script>"#)
+                .expect("xml")
+                .root;
+        let result = compile_script(CompileScriptOptions {
+            script_path: "main.xml",
+            root: &root,
+            script_access: AccessLevel::Public,
+            qualified_script_name: Some("main.main"),
+            module_name: Some("main"),
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+            all_script_access: &BTreeMap::new(),
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
+        });
+        // Explicit goto kind should compile successfully
+        assert!(result.is_ok());
+
+        // Test invalid kind attribute (line 1808-1811)
+        let root =
+            parse_xml_document(r#"<script name="main" kind="invalid"><text>Main</text></script>"#)
+                .expect("xml")
+                .root;
+        let error = compile_script(CompileScriptOptions {
+            script_path: "main.xml",
+            root: &root,
+            script_access: AccessLevel::Public,
+            qualified_script_name: Some("main.main"),
+            module_name: Some("main"),
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+            all_script_access: &BTreeMap::new(),
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
+        })
+        .expect_err("invalid kind should fail");
+        assert_eq!(error.code, "XML_SCRIPT_KIND_INVALID");
+
+        // Test goto in call script (line 1472)
+        let root = parse_xml_document(
+            r#"<script name="main" kind="call"><goto script="@next"/></script>"#,
+        )
+        .expect("xml")
+        .root;
+        let error = compile_script(CompileScriptOptions {
+            script_path: "main.xml",
+            root: &root,
+            script_access: AccessLevel::Public,
+            qualified_script_name: Some("main.main"),
+            module_name: Some("main"),
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+            all_script_access: &BTreeMap::new(),
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
+        })
+        .expect_err("goto in call script should fail");
+        assert_eq!(error.code, "XML_CALL_SCRIPT_GOTO_FORBIDDEN");
+
+        // Test return in goto script (line 1520)
+        let root = parse_xml_document(r#"<script name="main"><return/></script>"#)
+            .expect("xml")
+            .root;
+        let error = compile_script(CompileScriptOptions {
+            script_path: "main.xml",
+            root: &root,
+            script_access: AccessLevel::Public,
+            qualified_script_name: Some("main.main"),
+            module_name: Some("main"),
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+            all_script_access: &BTreeMap::new(),
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
+        })
+        .expect_err("return in goto script should fail");
+        assert_eq!(error.code, "XML_GOTO_SCRIPT_RETURN_FORBIDDEN");
+
+        // Test end in call script (line 1548)
+        let root = parse_xml_document(r#"<script name="main" kind="call"><end/></script>"#)
+            .expect("xml")
+            .root;
+        let error = compile_script(CompileScriptOptions {
+            script_path: "main.xml",
+            root: &root,
+            script_access: AccessLevel::Public,
+            qualified_script_name: Some("main.main"),
+            module_name: Some("main"),
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+            all_script_access: &BTreeMap::new(),
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
+        })
+        .expect_err("end in call script should fail");
+        assert_eq!(error.code, "XML_CALL_SCRIPT_END_FORBIDDEN");
+
+        // Test return with child content (line 1534)
+        let root =
+            parse_xml_document(r#"<script name="main" kind="call"><return>bad</return></script>"#)
+                .expect("xml")
+                .root;
+        let error = compile_script(CompileScriptOptions {
+            script_path: "main.xml",
+            root: &root,
+            script_access: AccessLevel::Public,
+            qualified_script_name: Some("main.main"),
+            module_name: Some("main"),
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+            all_script_access: &BTreeMap::new(),
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
+        })
+        .expect_err("return with content should fail");
+        assert_eq!(error.code, "XML_RETURN_CONTENT_FORBIDDEN");
+
+        // Test end with attributes (line 1555)
+        let root = parse_xml_document(r#"<script name="main"><end attr="bad"/></script>"#)
+            .expect("xml")
+            .root;
+        let error = compile_script(CompileScriptOptions {
+            script_path: "main.xml",
+            root: &root,
+            script_access: AccessLevel::Public,
+            qualified_script_name: Some("main.main"),
+            module_name: Some("main"),
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+            all_script_access: &BTreeMap::new(),
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
+        })
+        .expect_err("end with attr should fail");
+        assert_eq!(error.code, "XML_END_ATTR_NOT_ALLOWED");
+
+        // Test end with child content (line 1562)
+        let root = parse_xml_document(r#"<script name="main"><end>bad</end></script>"#)
+            .expect("xml")
+            .root;
+        let error = compile_script(CompileScriptOptions {
+            script_path: "main.xml",
+            root: &root,
+            script_access: AccessLevel::Public,
+            qualified_script_name: Some("main.main"),
+            module_name: Some("main"),
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+            all_script_access: &BTreeMap::new(),
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
+        })
+        .expect_err("end with content should fail");
+        assert_eq!(error.code, "XML_END_CONTENT_FORBIDDEN");
+
+        // Test goto script with ref args (line 1753)
+        let root = parse_xml_document(
+            r#"<script name="main" args="ref:int:x"><text>Main</text></script>"#,
+        )
+        .expect("xml")
+        .root;
+        let error = compile_script(CompileScriptOptions {
+            script_path: "main.xml",
+            root: &root,
+            script_access: AccessLevel::Public,
+            qualified_script_name: Some("main.main"),
+            module_name: Some("main"),
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+            all_script_access: &BTreeMap::new(),
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
+        })
+        .expect_err("ref args in goto script should fail");
+        assert_eq!(error.code, "SCRIPT_GOTO_ARGS_REF_UNSUPPORTED");
+
+        // Test goto with empty/missing script attribute (line 1506)
+        let root = parse_xml_document(r#"<script name="main"><goto script=""/></script>"#)
+            .expect("xml")
+            .root;
+        let error = compile_script(CompileScriptOptions {
+            script_path: "main.xml",
+            root: &root,
+            script_access: AccessLevel::Public,
+            qualified_script_name: Some("main.main"),
+            module_name: Some("main"),
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+            all_script_access: &BTreeMap::new(),
+            invoke_all_functions: &BTreeMap::new(),
+            invoke_public_functions: &BTreeSet::new(),
+        })
+        .expect_err("empty script attr should fail");
+        assert_eq!(error.code, "XML_EMPTY_ATTR");
+    }
+
+    #[test]
     fn parse_function_return_and_type_expr_success_paths_are_covered() {
         let function_node = xml_element(
             "function",

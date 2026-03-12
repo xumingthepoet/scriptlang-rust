@@ -448,6 +448,27 @@ mod tests {
     }
 
     #[test]
+    fn compile_project_from_xml_map_rejects_call_kind_entry() {
+        // Test explicit entry script is Call kind (not Goto kind)
+        let scripts = map(&[(
+            "main.xml",
+            r#"<module name="main" export="script:main"><script name="main" kind="call"><text>Call script</text></script></module>"#,
+        )]);
+        let explicit_error = compile_project_from_xml_map(&scripts, Some("main.main".to_string()))
+            .expect_err("call kind explicit entry should fail");
+        assert_eq!(explicit_error.code, "API_ENTRY_SCRIPT_KIND");
+
+        // Test default main.main is Call kind (not Goto kind)
+        let default_scripts = map(&[(
+            "main.xml",
+            r#"<module name="main" export="script:main"><script name="main" kind="call"><text>Call script</text></script></module>"#,
+        )]);
+        let default_error = compile_project_from_xml_map(&default_scripts, None)
+            .expect_err("call kind default entry should fail");
+        assert_eq!(default_error.code, "API_ENTRY_SCRIPT_KIND");
+    }
+
+    #[test]
     fn compile_artifact_from_xml_map_builds_artifact() {
         let scripts = map(&[(
             "main.xml",
@@ -959,5 +980,28 @@ mod tests {
         .expect("engine should build");
         let out = engine.next_output().expect("input output");
         assert_eq!(output_kind(&out), "input");
+    }
+
+    #[test]
+    fn create_engine_from_artifact_rejects_call_entry_script() {
+        // Test that entry script must be Goto kind, not Call kind
+        let scripts = map(&[(
+            "main.xml",
+            r#"<module name="main" export="script:main"><script name="main" kind="call"><text>Call script</text></script></module>"#,
+        )]);
+        let artifact = compile_artifact_from_xml_map(&scripts, Some("main.main".to_string()))
+            .expect("compile should pass");
+        let error = create_engine_from_artifact(CreateEngineFromArtifactOptions {
+            artifact,
+            entry_args: None,
+            host_functions: None,
+            random_seed: Some(1),
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: None,
+        })
+        .err()
+        .expect("call kind entry should fail");
+        assert_eq!(error.code, "API_ARTIFACT_ENTRY_KIND");
     }
 }
