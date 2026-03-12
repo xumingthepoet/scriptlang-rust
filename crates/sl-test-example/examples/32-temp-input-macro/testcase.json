@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "sl-tool-case",
+  "entryScript": "main.main",
+  "actions": [
+    { "kind": "input", "text": "   " },
+    { "kind": "input", "text": "Guard" }
+  ],
+  "expectedEvents": [
+    { "kind": "input", "promptText": "Name your hero", "defaultText": "Traveler" },
+    { "kind": "input", "promptText": "Choose title", "defaultText": "" },
+    { "kind": "text", "text": "Traveler-Guard" },
+    { "kind": "end" }
+  ]
+}

@@ -486,10 +486,28 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 - `max_length` 按 Unicode 字符数量计数（实现口径：`chars().count()`）。
 - 宿主提交输入后，若长度超过 `max_length`，运行时返回 `ENGINE_INPUT_TOO_LONG`。
 - 用户输入空白时会回退到 `default_text`；回退后的值同样参与 `max_length` 校验。
+- 常见“先定义 string temp，再 input”可用 `<temp-input>` 宏简写。
 
 ```xml
 <temp name="heroName" type="string">"Traveler"</temp>
 <input var="heroName" text="请输入名字" max_length="16"/>
+<text>Hello ${heroName}</text>
+```
+
+### 6.11.1 `<temp-input>`
+
+用途：声明一个 `string` 类型临时变量，并立刻对它发起输入边界。  
+属性：`name`、`type`、`text`（必填），`max_length`（可选，非负整数）。  
+限制：
+- `type` 目前只能写 `string`。
+- 不允许子元素；内联文本作为默认值表达式（为空时默认空串）。
+
+编译期等价展开：
+- `<temp name=\"...\" type=\"string\">...</temp>`
+- `<input var=\"...\" text=\"...\" max_length=\"...\"/>`
+
+```xml
+<temp-input name="heroName" type="string" text="请输入名字" max_length="16">"Traveler"</temp-input>
 <text>Hello ${heroName}</text>
 ```
 

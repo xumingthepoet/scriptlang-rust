@@ -37,7 +37,7 @@ pub(crate) fn expand_script_macros(
 }
 
 pub(crate) fn collect_declared_var_names(node: &XmlElementNode, names: &mut BTreeSet<String>) {
-    if node.name == "temp" {
+    if node.name == "temp" || node.name == "temp-input" {
         if let Some(name) = node.attributes.get("name") {
             if !name.is_empty() {
                 names.insert(name.clone());
@@ -53,10 +53,15 @@ pub(crate) fn collect_declared_var_names(node: &XmlElementNode, names: &mut BTre
 pub(crate) fn validate_reserved_prefix_in_user_var_declarations(
     node: &XmlElementNode,
 ) -> Result<(), ScriptLangError> {
-    if node.name == "temp" {
+    if node.name == "temp" || node.name == "temp-input" {
         if let Some(name) = node.attributes.get("name") {
             if !name.is_empty() {
-                assert_decl_name_not_reserved_or_rhai_keyword(name, "temp", node.location.clone())?;
+                let label = if node.name == "temp" {
+                    "temp"
+                } else {
+                    "temp-input"
+                };
+                assert_decl_name_not_reserved_or_rhai_keyword(name, label, node.location.clone())?;
             }
         }
     }
@@ -93,6 +98,9 @@ pub(crate) fn expand_element_with_macros(
     if node.name == "for" {
         return Ok(vec![expand_for_macro(node, context)?]);
     }
+    if node.name == "temp-input" {
+        return expand_temp_input_macro(node);
+    }
 
     Ok(vec![XmlElementNode {
         name: node.name.clone(),
@@ -100,6 +108,86 @@ pub(crate) fn expand_element_with_macros(
         children: expand_children(&node.children, context)?,
         location: node.location.clone(),
     }])
+}
+
+fn expand_temp_input_macro(node: &XmlElementNode) -> Result<Vec<XmlElementNode>, ScriptLangError> {
+    validate_temp_input_attributes(node)?;
+    if let Some(child) = element_children(node).next() {
+        return Err(ScriptLangError::with_span(
+            "XML_TEMP_INPUT_CONTENT_FORBIDDEN",
+            "<temp-input> cannot contain child elements. Use inline text only.",
+            child.location.clone(),
+        ));
+    }
+
+    let name = get_required_non_empty_attr(node, "name")?;
+    assert_decl_name_not_reserved_or_rhai_keyword(&name, "temp-input", node.location.clone())?;
+
+    let type_name = get_required_non_empty_attr(node, "type")?;
+    if type_name.trim() != "string" {
+        return Err(ScriptLangError::with_span(
+            "XML_TEMP_INPUT_TYPE_UNSUPPORTED",
+            format!(
+                "Attribute \"type\" on <temp-input> only supports \"string\", got \"{}\".",
+                type_name
+            ),
+            node.location.clone(),
+        ));
+    }
+
+    let prompt_text = get_required_non_empty_attr(node, "text")?;
+    let max_length = get_optional_attr(node, "max_length");
+    let inline = inline_text_content(node);
+
+    let mut temp_attrs = BTreeMap::new();
+    temp_attrs.insert("name".to_string(), name.clone());
+    temp_attrs.insert("type".to_string(), "string".to_string());
+    let temp_children = if inline.trim().is_empty() {
+        Vec::new()
+    } else {
+        vec![XmlNode::Text(XmlTextNode {
+            value: inline,
+            location: node.location.clone(),
+        })]
+    };
+    let temp_node = XmlElementNode {
+        name: "temp".to_string(),
+        attributes: temp_attrs,
+        children: temp_children,
+        location: node.location.clone(),
+    };
+
+    let mut input_attrs = BTreeMap::new();
+    input_attrs.insert("var".to_string(), name);
+    input_attrs.insert("text".to_string(), prompt_text);
+    if let Some(value) = max_length {
+        input_attrs.insert("max_length".to_string(), value);
+    }
+    let input_node = XmlElementNode {
+        name: "input".to_string(),
+        attributes: input_attrs,
+        children: Vec::new(),
+        location: node.location.clone(),
+    };
+
+    Ok(vec![temp_node, input_node])
+}
+
+fn validate_temp_input_attributes(node: &XmlElementNode) -> Result<(), ScriptLangError> {
+    for key in node.attributes.keys() {
+        if matches!(key.as_str(), "name" | "type" | "text" | "max_length") {
+            continue;
+        }
+        return Err(ScriptLangError::with_span(
+            "XML_ATTR_NOT_ALLOWED",
+            format!(
+                "Attribute \"{}\" is not allowed on <temp-input>. Supported attributes: name, type, text, max_length.",
+                key
+            ),
+            node.location.clone(),
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -565,6 +653,56 @@ mod macro_expand_tests {
     }
 
     #[test]
+    fn temp_input_macro_expands_to_temp_then_input() {
+        let node = xml_element(
+            "temp-input",
+            &[
+                ("name", "heroName"),
+                ("type", "string"),
+                ("text", "Name your hero"),
+                ("max_length", "16"),
+            ],
+            vec![xml_text("\"Traveler\"")],
+        );
+        let expanded = expand_element_with_macros(
+            &node,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect("temp-input should expand");
+        assert_eq!(expanded.len(), 2);
+
+        let temp = &expanded[0];
+        assert_eq!(temp.name, "temp");
+        assert_eq!(
+            temp.attributes.get("name").map(String::as_str),
+            Some("heroName")
+        );
+        assert_eq!(
+            temp.attributes.get("type").map(String::as_str),
+            Some("string")
+        );
+        assert_eq!(inline_text_content(temp), "\"Traveler\"");
+
+        let input = &expanded[1];
+        assert_eq!(input.name, "input");
+        assert_eq!(
+            input.attributes.get("var").map(String::as_str),
+            Some("heroName")
+        );
+        assert_eq!(
+            input.attributes.get("text").map(String::as_str),
+            Some("Name your hero")
+        );
+        assert_eq!(
+            input.attributes.get("max_length").map(String::as_str),
+            Some("16")
+        );
+    }
+
+    #[test]
     fn macro_expand_validation_error_paths_are_covered() {
         let reserved_var = xml_element(
             "script",
@@ -590,6 +728,19 @@ mod macro_expand_tests {
         let error = validate_reserved_prefix_in_user_var_declarations(&keyword_var)
             .expect_err("keyword var name should fail");
         assert_eq!(error.code, "NAME_RHAI_KEYWORD_RESERVED");
+
+        let reserved_temp_input = xml_element(
+            "temp-input",
+            &[
+                ("name", "__bad"),
+                ("type", "string"),
+                ("text", "Name your hero"),
+            ],
+            Vec::new(),
+        );
+        let error = validate_reserved_prefix_in_user_var_declarations(&reserved_temp_input)
+            .expect_err("reserved temp-input name should fail");
+        assert_eq!(error.code, "NAME_RESERVED_PREFIX");
 
         let bad_temps = xml_element(
             "for",
@@ -701,6 +852,99 @@ mod macro_expand_tests {
         )
         .expect_err("missing required attr should fail");
         assert_eq!(error.code, "XML_MISSING_ATTR");
+
+        let temp_input_missing_type = xml_element(
+            "temp-input",
+            &[("name", "hero"), ("text", "Name your hero")],
+            Vec::new(),
+        );
+        let error = expand_element_with_macros(
+            &temp_input_missing_type,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect_err("missing type on temp-input should fail");
+        assert_eq!(error.code, "XML_MISSING_ATTR");
+
+        let temp_input_bad_type = xml_element(
+            "temp-input",
+            &[
+                ("name", "hero"),
+                ("type", "int"),
+                ("text", "Name your hero"),
+            ],
+            Vec::new(),
+        );
+        let error = expand_element_with_macros(
+            &temp_input_bad_type,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect_err("non-string temp-input type should fail");
+        assert_eq!(error.code, "XML_TEMP_INPUT_TYPE_UNSUPPORTED");
+
+        let temp_input_bad_attr = xml_element(
+            "temp-input",
+            &[
+                ("name", "hero"),
+                ("type", "string"),
+                ("text", "Name your hero"),
+                ("var", "hero"),
+            ],
+            Vec::new(),
+        );
+        let error = expand_element_with_macros(
+            &temp_input_bad_attr,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect_err("unsupported temp-input attrs should fail");
+        assert_eq!(error.code, "XML_ATTR_NOT_ALLOWED");
+
+        let temp_input_with_child = xml_element(
+            "temp-input",
+            &[
+                ("name", "hero"),
+                ("type", "string"),
+                ("text", "Name your hero"),
+            ],
+            vec![XmlNode::Element(xml_element(
+                "text",
+                &[],
+                vec![xml_text("x")],
+            ))],
+        );
+        let error = expand_element_with_macros(
+            &temp_input_with_child,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect_err("temp-input child elements should fail");
+        assert_eq!(error.code, "XML_TEMP_INPUT_CONTENT_FORBIDDEN");
+
+        let empty_inline_temp_input = xml_element(
+            "temp-input",
+            &[("name", "title"), ("type", "string"), ("text", "Title")],
+            vec![xml_text("  ")],
+        );
+        let expanded = expand_element_with_macros(
+            &empty_inline_temp_input,
+            &mut MacroExpansionContext {
+                used_var_names: BTreeSet::new(),
+                for_counter: 0,
+            },
+        )
+        .expect("empty inline temp-input should expand");
+        assert_eq!(expanded.len(), 2);
+        assert!(expanded[0].children.is_empty());
 
         let plain = xml_element(
             "text",

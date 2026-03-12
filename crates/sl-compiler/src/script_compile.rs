@@ -1577,6 +1577,13 @@ pub(crate) fn compile_group_nodes(
                     child.location.clone(),
                 ))
             }
+            "temp-input" => {
+                return Err(ScriptLangError::with_span(
+                    "XML_TEMP_INPUT_INTERNAL",
+                    "<temp-input> must be expanded before compile phase.",
+                    child.location.clone(),
+                ))
+            }
             "else" => {
                 return Err(ScriptLangError::with_span(
                     "XML_ELSE_POSITION",
@@ -4304,6 +4311,32 @@ mod script_compile_tests {
         )
         .expect_err("for should have been expanded");
         assert_eq!(for_error.code, "XML_FOR_INTERNAL");
+
+        let mut temp_input_builder = GroupBuilder::new("temp-input.xml");
+        let temp_input_group = temp_input_builder.next_group_id();
+        let temp_input_error = compile_group(
+            &temp_input_group,
+            None,
+            &xml_element(
+                "script",
+                &[("name", "main")],
+                vec![XmlNode::Element(xml_element(
+                    "temp-input",
+                    &[
+                        ("name", "hero"),
+                        ("type", "string"),
+                        ("text", "Name your hero"),
+                    ],
+                    vec![xml_text("\"Traveler\"")],
+                ))],
+            ),
+            &mut temp_input_builder,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            CompileGroupMode::new(0, false),
+        )
+        .expect_err("temp-input should have been expanded");
+        assert_eq!(temp_input_error.code, "XML_TEMP_INPUT_INTERNAL");
 
         let while_node = ScriptNode::While {
             id: "w1".to_string(),

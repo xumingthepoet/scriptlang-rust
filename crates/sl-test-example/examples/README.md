@@ -42,6 +42,7 @@ This catalog keeps example intent explicit so examples can be refactored without
 | `29-alias-directives` | multi-module alias stress: type/var/const alias across arrays/maps/const/function/multi-script call chains |
 | `30-invoke-function-alias-module-var` | regression for `invoke(function, ...)` where function body reads explicit alias to imported module var |
 | `31-invoke-map-short-function-ref` | regression for enum-key map storing short `*function` refs that are later passed to `invoke(...)` |
+| `32-temp-input-macro` | `temp-input` macro for `string temp + input` with blank fallback and max_length |
 
 ## Notes
 - `26-enum-flow` intentionally covers enum member usage directly in XML attribute expressions (`args="ids.LocationId.A"`).

@@ -1,0 +1,8 @@
+<module name="main" export="script:main">
+  <script name="main">
+    <temp-input name="heroName" type="string" text="Name your hero" max_length="16">"Traveler"</temp-input>
+    <temp-input name="title" type="string" text="Choose title" max_length="8"></temp-input>
+    <text>${heroName}-${title}</text>
+    <end/>
+  </script>
+</module>
