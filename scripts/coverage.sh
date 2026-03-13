@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+START_TS="$(date +%s)"
 TMP_LOG="$(mktemp)"
 TMP_JSON="$(mktemp)"
 TMP_UNCOVERED="$(mktemp)"
@@ -10,7 +11,17 @@ TMP_OUT="$(mktemp)"
 cleanup() {
   rm -f "$TMP_LOG" "$TMP_JSON" "$TMP_UNCOVERED" "$TMP_OUT"
 }
-trap cleanup EXIT
+
+on_exit() {
+  local status="$1"
+  local end_ts elapsed
+  end_ts="$(date +%s)"
+  elapsed="$((end_ts - START_TS))"
+  printf 'COVERAGE_TIME_USED_SECONDS: %ss\n' "$elapsed"
+  cleanup
+  exit "$status"
+}
+trap 'on_exit $?' EXIT
 
 cd "$ROOT_DIR"
 
