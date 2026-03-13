@@ -571,6 +571,9 @@ module 相关规则：
 - `@short` 会在编译期补全为当前 module 的限定名
 - `@short` 仅可用于 module 脚本上下文；在非 module 脚本中使用会编译失败
 - 若 `script` 来自变量，变量值需是 `@module.script` 形态（module 内写入 `@short` 时会在编译期补全）
+- 可见性语义：
+  - 静态字面量目标（`@module.script` / `@short`）仍遵循 import + export 可见性；
+  - 动态变量目标（`script` 类型变量）按引用能力执行：变量里已持有合法脚本引用即可调用（可到 private 脚本）。
 - 变量目标只支持“变量名”本身，不支持路径表达式（如 `a.b`）
 - `script="battle.main"`、`script="${...}"` 会编译失败
 - `script="next"` 只有在 `next` 是可见且类型为 `script` 的变量时才合法；否则会编译失败
@@ -599,6 +602,9 @@ module 相关规则与 `<call>` 相同：
 - 同 module 内可写短名 `@next`
 - `@short` 仅可用于 module 脚本上下文；在非 module 脚本中使用会编译失败
 - 若 `script` 来自变量，变量值需是 `@module.script` 形态（module 内写入 `@short` 时会在编译期补全）
+- 可见性语义：
+  - 静态字面量目标（`@module.script` / `@short`）仍遵循 import + export 可见性；
+  - 动态变量目标（`script` 类型变量）按引用能力执行：变量里已持有合法脚本引用即可跳转（可到 private 脚本）。
 - 变量目标只支持“变量名”本身，不支持路径表达式（如 `a.b`）
 - `script="${...}"` 已移除，动态目标用 `script` 类型变量承载
 

@@ -1,0 +1,11 @@
+<!-- import bridge from bridge.xml -->
+<module name="main" export="script:main">
+  <script name="main">
+    <goto script="@bridge.forward" args="@private_loop"/>
+  </script>
+
+  <script name="private_loop">
+    <text>should-reach-private-loop</text>
+    <end/>
+  </script>
+</module>

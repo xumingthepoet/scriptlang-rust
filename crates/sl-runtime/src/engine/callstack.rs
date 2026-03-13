@@ -176,7 +176,7 @@ impl ScriptLangEngine {
         target_script: &ScriptTarget,
         args: &[sl_core::CallArgument],
     ) -> Result<(), ScriptLangError> {
-        let target_script = self.resolve_target_script(
+        let target_script_name = self.resolve_target_script(
             target_script,
             "ENGINE_CALL_TARGET_EMPTY",
             "Call target script cannot resolve to empty.",
@@ -191,10 +191,10 @@ impl ScriptLangEngine {
             caller_group.nodes.len()
         };
 
-        let Some(target) = self.scripts.get(&target_script).cloned() else {
+        let Some(target) = self.scripts.get(&target_script_name).cloned() else {
             return Err(ScriptLangError::new(
                 "ENGINE_CALL_TARGET",
-                format!("Call target script \"{}\" not found.", target_script),
+                format!("Call target script \"{}\" not found.", target_script_name),
             ));
         };
         if target.kind != ScriptKind::Call {
@@ -202,11 +202,13 @@ impl ScriptLangEngine {
                 "ENGINE_CALL_TARGET_KIND",
                 format!(
                     "Call target script \"{}\" must be call kind.",
-                    target_script
+                    target_script_name
                 ),
             ));
         }
-        self.validate_script_access_from_current(&target_script, &target)?;
+        if matches!(target_script, ScriptTarget::Literal { .. }) {
+            self.validate_script_access_from_current(&target_script_name, &target)?;
+        }
 
         let mut arg_values = BTreeMap::new();
         let mut ref_bindings = BTreeMap::new();
@@ -260,7 +262,8 @@ impl ScriptLangEngine {
         if is_tail_at_root {
             let inherited = caller.return_continuation.clone();
             self.frames.pop();
-            let (scope, var_types) = self.create_script_root_scope(&target_script, arg_values)?;
+            let (scope, var_types) =
+                self.create_script_root_scope(&target_script_name, arg_values)?;
             self.push_root_frame(&target.root_group_id, scope, inherited, var_types);
             return Ok(());
         }
@@ -271,7 +274,7 @@ impl ScriptLangEngine {
             ref_bindings,
         };
 
-        let (scope, var_types) = self.create_script_root_scope(&target_script, arg_values)?;
+        let (scope, var_types) = self.create_script_root_scope(&target_script_name, arg_values)?;
         self.push_root_frame(&target.root_group_id, scope, Some(continuation), var_types);
         Ok(())
     }
@@ -301,7 +304,9 @@ impl ScriptLangEngine {
                 format!("Goto target script \"{}\" must be goto kind.", target_name),
             ));
         }
-        self.validate_script_access_from_current(&target_name, &target)?;
+        if matches!(target_script, ScriptTarget::Literal { .. }) {
+            self.validate_script_access_from_current(&target_name, &target)?;
+        }
 
         let mut transfer_arg_values = BTreeMap::new();
         for (index, arg) in args.iter().enumerate() {
@@ -1878,7 +1883,7 @@ mod callstack_tests {
     }
 
     #[test]
-    pub(super) fn call_access_control_enforces_private_visibility_rules() {
+    pub(super) fn call_access_control_keeps_static_private_check_but_allows_dynamic_capability() {
         let mut same_module = engine_from_sources(map(&[(
             "main.xml",
             r#"<module name="main" export="script:main">
@@ -1928,8 +1933,8 @@ mod callstack_tests {
             var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
         }];
         let cross_module_error = cross_module
-            .execute_call(&var("dst"), &[])
-            .expect_err("cross-module private call should fail");
+            .execute_call(&lit("shared.hidden"), &[])
+            .expect_err("cross-module private static call should fail");
         assert_eq!(cross_module_error.code, "ENGINE_SCRIPT_ACCESS_DENIED");
 
         let mut dynamic_cross_module = engine_from_sources(map(&[
@@ -1969,14 +1974,17 @@ mod callstack_tests {
             return_continuation: None,
             var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
         }];
-        let dynamic_error = dynamic_cross_module
+        dynamic_cross_module
             .execute_call(&var("dst"), &[])
-            .expect_err("dynamic cross-module private call should fail");
-        assert_eq!(dynamic_error.code, "ENGINE_SCRIPT_ACCESS_DENIED");
+            .expect("dynamic cross-module private call should pass");
+        let output = dynamic_cross_module
+            .next_output()
+            .expect("next should pass");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "hidden"));
     }
 
     #[test]
-    fn private_script_alias_without_module_name_denies_access() {
+    fn private_script_alias_without_module_name_allows_dynamic_capability() {
         // When a module has exactly one private script with a unique local name,
         // the runtime creates a short alias with module_name = None.
         // This tests that a private script with module_name = None denies access.
@@ -2017,16 +2025,15 @@ mod callstack_tests {
             return_continuation: None,
             var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
         }];
-        // The script lib.secret is private, and calling from non-module context
-        // should deny access
-        let error = engine
+        engine
             .execute_call(&var("dst"), &[])
-            .expect_err("private script call should deny access");
-        assert_eq!(error.code, "ENGINE_SCRIPT_ACCESS_DENIED");
+            .expect("private script call via dynamic variable should pass");
+        let output = engine.next_output().expect("next should pass");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "hidden"));
     }
 
     #[test]
-    fn return_to_private_script_without_module_denies_access() {
+    fn return_to_private_script_without_module_allows_dynamic_capability() {
         // Test line 230: return target validation when target has no module_name
         let mut engine = engine_from_sources(map(&[
             (
@@ -2065,11 +2072,11 @@ mod callstack_tests {
             return_continuation: None,
             var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
         }];
-        // Return to private script from non-module context should deny access
-        let error = engine
+        engine
             .execute_goto(&var("dst"), &[])
-            .expect_err("return to private script should deny access");
-        assert_eq!(error.code, "ENGINE_SCRIPT_ACCESS_DENIED");
+            .expect("return to private script via dynamic variable should pass");
+        let output = engine.next_output().expect("next should pass");
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "help"));
     }
 
     #[test]

@@ -88,3 +88,9 @@
 - 如何验证：
   - 非法 LT/LTE/AND、单双引号或 Rhai 语法错误，应在 `compile_*` 阶段返回 `XML_RHAI_*`。
   - 同源码重复执行时，runtime 的 Rhai 编译计数应保持一次命中（可用 `rhai_compile_count` 探针断言）。
+
+### 2026-03-13 — 架构决策 — `script` 动态目标与 `function invoke` 对齐 capability 语义
+- 发现：若 `call/goto` 的动态 `script` 变量仍按调用方可见性二次拦截，会让“跨模块传递脚本引用”失去意义，语义与 `invoke(fnVar, args)` 不一致。
+- 细节：`crates/sl-runtime/src/engine/callstack.rs` 中，private 访问校验仅用于静态字面量目标；动态变量目标（`ScriptTarget::Variable`）按已持有引用执行，不再触发 `ENGINE_SCRIPT_ACCESS_DENIED`。
+- 失败模式：若把动态目标路径重新接回 private 拦截，会回归“编译通过，但桥接模块转发 private 脚本引用在运行时报 access denied”。
+- 如何验证：三模块链路（app -> bridge -> private_target）中，`bridge` 通过 `script` 变量 `goto/call` private 目标应成功；`app` 直接静态写 `@private_target` 仍应失败。

@@ -1,0 +1,5 @@
+<module name="bridge" export="script:forward">
+  <script name="forward" args="script:return_script">
+    <goto script="return_script"/>
+  </script>
+</module>

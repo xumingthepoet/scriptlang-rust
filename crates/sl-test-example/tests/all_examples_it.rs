@@ -150,6 +150,11 @@ fn example_34_invoke_private_capability_matches_testcase() {
 }
 
 #[test]
+fn example_35_script_private_capability_matches_testcase() {
+    assert_example("35-script-private-capability");
+}
+
+#[test]
 fn example_22_access_control_matches_testcase() {
     assert_example("22-access-control");
 }

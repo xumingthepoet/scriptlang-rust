@@ -80,6 +80,9 @@
   - 不支持 `invoke(*module.func, [args])`。
   - 动态调用按引用能力执行：`fnVar` 持有合法引用即可调用对应目标（含 private 目标）。
   - 静态调用可见性规则不变：`module.func(...)` 仍遵循 import + export。
+- `script` 动态目标（`call/goto` 的 `script` 变量）同样按引用能力执行：
+  - 变量里持有合法 `@module.script` 引用时可跳转/调用对应目标（含 private 目标）。
+  - 静态字面量目标（`@module.script`）可见性规则不变，仍遵循 import + export。
 
 ## 3. `sl-api` 高层 API
 
