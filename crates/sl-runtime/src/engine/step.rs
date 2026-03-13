@@ -2309,4 +2309,65 @@ mod step_tests {
         // Should have: callee text, after call
         assert!(outputs.len() >= 2);
     }
+
+    #[test]
+    pub(super) fn planned_node_return_error_path_is_covered() {
+        // Test PlannedNode::Return branch with error from execute_return
+        // This covers line 319: self.execute_return(&node_id)?
+
+        let mut engine = engine_from_sources(map(&[
+            (
+                "main.script.xml",
+                r#"
+<script name="main">
+  <call script="@callee.callee"/>
+  <text>after call</text>
+  <end/>
+</script>
+"#,
+            ),
+            (
+                "callee.script.xml",
+                r#"
+<script name="callee" kind="call">
+  <text>callee text</text>
+  <return/>
+</script>
+"#,
+            ),
+        ]));
+        engine.start("main.main", None).expect("start");
+
+        // Manually set up state to trigger error in execute_return
+        // Clear group_lookup to trigger ENGINE_GROUP_NOT_FOUND error
+        engine.group_lookup.clear();
+
+        // Get the callee script's root group
+        let callee_script = engine.scripts.get("callee.callee").expect("callee");
+        let callee_group_id = callee_script.root_group_id.clone();
+
+        // Set up frames with the error condition
+        let frame_id = 1;
+        engine.frames = vec![RuntimeFrame {
+            frame_id,
+            group_id: callee_group_id,
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::new(),
+        }];
+
+        // This should trigger the error path in execute_return
+        let error = engine
+            .execute_planned_node(
+                frame_id,
+                PlannedNode::Return {
+                    node_id: "return".to_string(),
+                },
+            )
+            .expect_err("execute_return should fail with missing group");
+        assert_eq!(error.code, "ENGINE_GROUP_NOT_FOUND");
+    }
 }

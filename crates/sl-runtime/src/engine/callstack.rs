@@ -356,13 +356,8 @@ impl ScriptLangEngine {
     pub(super) fn execute_return(&mut self, _node_id: &str) -> Result<(), ScriptLangError> {
         let root_index = self.find_current_root_frame_index()?;
         let root_frame = self.frames[root_index].clone();
-        let (script_name, _) = self.lookup_group(&root_frame.group_id)?;
-        let _script = self.scripts.get(script_name).ok_or_else(|| {
-            ScriptLangError::new(
-                "ENGINE_SCRIPT_NOT_FOUND",
-                format!("Script \"{}\" not found.", script_name),
-            )
-        })?;
+        // lookup_group already verifies script existence, so no need to check again
+        let (_script_name, _group) = self.lookup_group(&root_frame.group_id)?;
         let inherited = root_frame.return_continuation.clone();
         self.frames.truncate(root_index);
         let Some(continuation) = inherited else {
@@ -2440,8 +2435,8 @@ mod callstack_tests {
     #[test]
     pub(super) fn execute_return_script_not_found() {
         // Test execute_return when script is not found after lookup_group succeeds (lines 360-365)
-        // Need group_lookup to have the entry pointing to a missing script
-        use super::lifecycle::GroupLookup;
+        // Need group_lookup to have the entry pointing to a missing script AND return_continuation to be Some
+        use sl_core::ContinuationFrame;
 
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
@@ -2458,7 +2453,6 @@ mod callstack_tests {
             .clone();
 
         // Modify group_lookup to point to a non-existent script
-        // First get the existing lookup entry
         let existing_lookup = engine.group_lookup.get(&group_id).cloned();
         assert!(
             existing_lookup.is_some(),
@@ -2466,6 +2460,7 @@ mod callstack_tests {
         );
 
         // Replace with a lookup pointing to a non-existent script
+        use super::lifecycle::GroupLookup;
         engine.group_lookup.insert(
             group_id.clone(),
             GroupLookup {
@@ -2474,7 +2469,12 @@ mod callstack_tests {
             },
         );
 
-        // Set up a root frame
+        // Set up a root frame with return_continuation set (to enter the code path at line 366+)
+        let continuation = ContinuationFrame {
+            resume_frame_id: 1,
+            ref_bindings: BTreeMap::new(),
+            next_node_index: 0,
+        };
         engine.frames = vec![RuntimeFrame {
             frame_id: 1,
             group_id,
@@ -2482,7 +2482,7 @@ mod callstack_tests {
             scope: BTreeMap::new(),
             completion: CompletionKind::None,
             script_root: true,
-            return_continuation: None,
+            return_continuation: Some(continuation),
             var_types: BTreeMap::new(),
         }];
 

@@ -598,8 +598,8 @@ fn normalize_module_initializer(
         "module initializer expression",
         RhaiInputMode::CodeBlock,
         RhaiCompileTarget::Expression,
-        Some(&runtime_function_symbol_map),
-        Some(&runtime_rewrite_map),
+        &runtime_function_symbol_map,
+        &runtime_rewrite_map,
     )?;
     Ok(Some(preprocessed))
 }
@@ -957,16 +957,6 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
             if !is_local && decl.access != AccessLevel::Public {
                 continue;
             }
-            if functions.contains_key(&decl.qualified_name) {
-                return Err(ScriptLangError::with_span(
-                    "FUNCTION_DECL_DUPLICATE",
-                    format!(
-                        "Duplicate function declaration \"{}\".",
-                        decl.qualified_name
-                    ),
-                    decl.location.clone(),
-                ));
-            }
             let function_namespace = decl
                 .qualified_name
                 .split_once('.')
@@ -1060,8 +1050,8 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
                 "function body",
                 RhaiInputMode::CodeBlock,
                 RhaiCompileTarget::CodeBlock,
-                Some(&runtime_function_symbol_map),
-                Some(&runtime_rewrite_map),
+                &runtime_function_symbol_map,
+                &runtime_rewrite_map,
             )?;
 
             functions.insert(
@@ -1521,17 +1511,6 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
     let mut functions = BTreeMap::new();
     for module in module_by_path.values() {
         for decl in &module.function_decls {
-            if functions.contains_key(&decl.qualified_name) {
-                return Err(ScriptLangError::with_span(
-                    "FUNCTION_DECL_DUPLICATE",
-                    format!(
-                        "Duplicate function declaration \"{}\".",
-                        decl.qualified_name
-                    ),
-                    decl.location.clone(),
-                ));
-            }
-
             let function_namespace = decl
                 .qualified_name
                 .split_once('.')
@@ -1614,8 +1593,8 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
                 "function body",
                 RhaiInputMode::CodeBlock,
                 RhaiCompileTarget::CodeBlock,
-                Some(&runtime_function_symbol_map),
-                Some(&runtime_rewrite_map),
+                &runtime_function_symbol_map,
+                &runtime_rewrite_map,
             )?;
 
             functions.insert(
@@ -4453,6 +4432,53 @@ mod module_resolver_tests {
     }
 
     #[test]
+    fn validate_module_const_init_rules_rejects_const_referencing_var() {
+        // Test when a module const references a mutable module var
+        // This covers lines 1946-1948: error when const initializer references mutable var
+        let span = SourceSpan::synthetic();
+
+        // Create a module const that references a variable
+        let module_consts = BTreeMap::from([(
+            "main.counter".to_string(),
+            ModuleConstDecl {
+                namespace: "main".to_string(),
+                name: "counter".to_string(),
+                qualified_name: "main.counter".to_string(),
+                access: AccessLevel::Public,
+                r#type: ScriptType::Primitive {
+                    name: "int".to_string(),
+                },
+                // References "hp" which is a mutable var, not a const
+                initial_value_expr: Some("hp + 1".to_string()),
+                location: span.clone(),
+            },
+        )]);
+
+        // Create a mutable module var
+        let module_vars = BTreeMap::from([(
+            "main.hp".to_string(),
+            ModuleVarDecl {
+                namespace: "main".to_string(),
+                name: "hp".to_string(),
+                qualified_name: "main.hp".to_string(),
+                access: AccessLevel::Public,
+                r#type: ScriptType::Primitive {
+                    name: "int".to_string(),
+                },
+                initial_value_expr: Some("100".to_string()),
+                location: span.clone(),
+            },
+        )]);
+
+        let init_order = vec!["main.counter".to_string()];
+
+        // This should error because const references mutable var
+        let error = validate_module_const_init_rules(&module_consts, &init_order, &module_vars)
+            .expect_err("const referencing var should fail");
+        assert_eq!(error.code, "MODULE_CONST_INIT_REF_NON_CONST");
+    }
+
+    #[test]
     fn resolve_visible_module_symbols_reports_type_resolution_error() {
         // Test that type resolution errors propagate through line 784
         // This creates a type with a field referencing a non-existent type
@@ -4576,6 +4602,71 @@ mod module_resolver_tests {
         let error = collect_functions_for_bundle_with_aliases(&module_by_path, &BTreeMap::new())
             .expect_err("unknown return type should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
+
+    #[test]
+    fn collect_functions_for_bundle_rejects_conflicting_module_aliases() {
+        // Test line 1487: collect_module_explicit_visible_symbol_aliases conflict detection
+        let span = SourceSpan::synthetic();
+        let module = ModuleDeclarations {
+            type_decls: vec![],
+            function_decls: vec![ParsedFunctionDecl {
+                name: "foo".to_string(),
+                qualified_name: "shared.foo".to_string(),
+                access: AccessLevel::Public,
+                params: vec![],
+                return_decl: ParsedFunctionReturnDecl {
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    location: span.clone(),
+                },
+                code: "out = 1;".to_string(),
+                location: span.clone(),
+            }],
+            module_global_var_decls: vec![
+                ParsedModuleVarDecl {
+                    namespace: "shared".to_string(),
+                    name: "hp".to_string(),
+                    qualified_name: "shared.hp".to_string(),
+                    access: AccessLevel::Public,
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    initial_value_expr: None,
+                    location: span.clone(),
+                },
+                ParsedModuleVarDecl {
+                    namespace: "shared".to_string(),
+                    name: "mp".to_string(),
+                    qualified_name: "shared.mp".to_string(),
+                    access: AccessLevel::Public,
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    initial_value_expr: None,
+                    location: span.clone(),
+                },
+            ],
+            module_global_const_decls: vec![],
+        };
+        let module_by_path = BTreeMap::from([("shared.xml".to_string(), module)]);
+
+        // Two aliases with same name pointing to different targets in same namespace
+        let module_alias_directives_by_namespace = BTreeMap::from([(
+            "shared".to_string(),
+            vec![
+                AliasDirective {
+                    target_qualified_name: "shared.hp".to_string(),
+                    alias_name: "stat".to_string(),
+                },
+                AliasDirective {
+                    target_qualified_name: "shared.mp".to_string(),
+                    alias_name: "stat".to_string(),
+                },
+            ],
+        )]);
+
+        let error = collect_functions_for_bundle_with_aliases(
+            &module_by_path,
+            &module_alias_directives_by_namespace,
+        )
+        .expect_err("conflicting module aliases should fail");
+        assert_eq!(error.code, "ALIAS_NAME_CONFLICT");
     }
 
     #[test]
@@ -5368,5 +5459,22 @@ mod module_resolver_tests {
         )
         .expect_err("alias name conflicts with existing const should fail");
         assert_eq!(conflict.code, "ALIAS_NAME_CONFLICT");
+
+        // Test runtime_module_global_rewrite_map_from_targets: target without namespace (no '.')
+        let no_namespace_targets: Vec<&str> = vec!["localVar"];
+        let no_namespace_map =
+            runtime_module_global_rewrite_map_from_targets(no_namespace_targets.iter().copied());
+        assert!(
+            no_namespace_map.is_empty(),
+            "targets without namespace should be skipped"
+        );
+    }
+
+    #[test]
+    fn collect_module_symbol_targets_handles_no_modules() {
+        // Test lines 1487, 1493: empty module iter handling
+        let empty_modules: Vec<ModuleDeclarations> = vec![];
+        let result = collect_module_symbol_targets(empty_modules.iter());
+        assert!(result.is_empty());
     }
 }

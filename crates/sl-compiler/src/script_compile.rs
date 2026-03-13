@@ -57,11 +57,7 @@ fn map_rhai_preprocess_error_to_compile(
     error: ScriptLangError,
     span: &SourceSpan,
 ) -> ScriptLangError {
-    let code = if error.code.starts_with("RHAI_PREPROCESS_") {
-        format!("XML_{}", error.code)
-    } else {
-        "XML_RHAI_PREPROCESS".to_string()
-    };
+    let code = format!("XML_{}", error.code);
     ScriptLangError::with_span(code, error.message, span.clone())
 }
 
@@ -91,17 +87,16 @@ pub(crate) fn preprocess_and_compile_rhai_source(
     context: &str,
     input_mode: RhaiInputMode,
     target: RhaiCompileTarget,
-    runtime_function_symbol_map: Option<&BTreeMap<String, String>>,
-    runtime_module_global_rewrite_map: Option<&BTreeMap<String, String>>,
+    runtime_function_symbol_map: &BTreeMap<String, String>,
+    runtime_module_global_rewrite_map: &BTreeMap<String, String>,
 ) -> Result<String, ScriptLangError> {
     let preprocessed = preprocess_scriptlang_rhai_input(source, context, input_mode)
         .map_err(|error| map_rhai_preprocess_error_to_compile(error, span))?;
-    let source_for_compile = runtime_function_symbol_map
-        .map(|rewrite_map| rewrite_function_calls(&preprocessed, rewrite_map))
-        .unwrap_or_else(|| preprocessed.clone());
-    let source_for_compile = runtime_module_global_rewrite_map
-        .map(|rewrite_map| rewrite_module_global_qualified_access(&source_for_compile, rewrite_map))
-        .unwrap_or(source_for_compile);
+    let source_for_compile = rewrite_function_calls(&preprocessed, runtime_function_symbol_map);
+    let source_for_compile = rewrite_module_global_qualified_access(
+        &source_for_compile,
+        runtime_module_global_rewrite_map,
+    );
     compile_rhai_source_for_target(&source_for_compile, span, context, target)?;
     Ok(preprocessed)
 }
@@ -128,8 +123,8 @@ fn preprocess_and_compile_template_expressions(
             "text interpolation expression",
             RhaiInputMode::TextInterpolationExpr,
             RhaiCompileTarget::Expression,
-            Some(runtime_function_symbol_map),
-            Some(runtime_module_global_rewrite_map),
+            runtime_function_symbol_map,
+            runtime_module_global_rewrite_map,
         )?;
         out.push_str("${");
         out.push_str(&preprocessed);
@@ -765,8 +760,8 @@ fn normalize_expression_literals(
         rhai_context,
         RhaiInputMode::CodeBlock,
         rhai_compile_target,
-        Some(&runtime_function_symbol_map),
-        Some(&runtime_module_global_rewrite_map),
+        &runtime_function_symbol_map,
+        &runtime_module_global_rewrite_map,
     )
 }
 
@@ -831,8 +826,8 @@ fn normalize_attribute_expression_literals(
         "attribute expression",
         RhaiInputMode::AttributeExpr,
         RhaiCompileTarget::Expression,
-        Some(&runtime_function_symbol_map),
-        Some(&runtime_module_global_rewrite_map),
+        &runtime_function_symbol_map,
+        &runtime_module_global_rewrite_map,
     )
 }
 
@@ -5132,6 +5127,33 @@ mod script_compile_tests {
             crate::defaults::slvalue_from_json(JsonValue::Null),
             SlValue::String("null".to_string())
         );
+
+        // Test build_runtime_module_global_rewrite_map: qualified_name without namespace (no '.')
+        let span = SourceSpan::synthetic();
+        let no_namespace_vars = BTreeMap::from([(
+            "localVar".to_string(),
+            ModuleVarDecl {
+                namespace: "".to_string(),
+                name: "localVar".to_string(),
+                qualified_name: "localVar".to_string(),
+                access: AccessLevel::Private,
+                r#type: ScriptType::Primitive {
+                    name: "int".to_string(),
+                },
+                initial_value_expr: None,
+                location: span.clone(),
+            },
+        )]);
+        let no_namespace_map =
+            build_runtime_module_global_rewrite_map(&no_namespace_vars, &BTreeMap::new());
+        assert!(
+            no_namespace_map.is_empty(),
+            "no namespace vars should be skipped"
+        );
+
+        // Test build_runtime_function_symbol_map with empty map
+        let empty_fn_map = build_runtime_function_symbol_map(&BTreeMap::new());
+        assert!(empty_fn_map.is_empty());
     }
 
     #[test]
@@ -5234,6 +5256,13 @@ mod script_compile_tests {
         compile_error(
             r#"<script name="main"><choice text="Pick"><dynamic-options array="arr" item="it"><option text="${Status.Invalid}"/></dynamic-options></choice></script>"#,
             "ENUM_LITERAL_MEMBER_UNKNOWN",
+        );
+
+        // Test line 1570: dynamic-options with invalid Rhai syntax in array attribute
+        // This triggers normalize_attribute_expression_literals error path
+        compile_error(
+            r#"<script name="main"><choice text="Pick"><dynamic-options array="if if if" item="it"><option text="a"/></dynamic-options></choice></script>"#,
+            "XML_RHAI_SYNTAX_INVALID",
         );
     }
 
@@ -5731,5 +5760,38 @@ mod script_compile_tests {
         compile_ok_with_enum(
             r##"<script name="main"><temp name="tbl" type="#{Status=>int}">#{Active: 1}</temp></script>"##,
         );
+    }
+
+    #[test]
+    fn rhai_compile_error_paths_are_covered() {
+        // Test lines 75-81: Rhai compilation error handling
+        let span = SourceSpan::synthetic();
+        let empty_map = BTreeMap::new();
+
+        // Test invalid Rhai syntax - should trigger error path at line 75
+        let error = preprocess_and_compile_rhai_source(
+            "this is not valid rhai !!!",
+            &span,
+            "test context",
+            RhaiInputMode::CodeBlock,
+            RhaiCompileTarget::CodeBlock,
+            &empty_map,
+            &empty_map,
+        )
+        .expect_err("invalid rhai should fail");
+        assert_eq!(error.code, "XML_RHAI_SYNTAX_INVALID");
+
+        // Test invalid attribute expression - should also trigger error path
+        let error2 = preprocess_and_compile_rhai_source(
+            "@#$%^&*(",
+            &span,
+            "test context",
+            RhaiInputMode::AttributeExpr,
+            RhaiCompileTarget::Expression,
+            &empty_map,
+            &empty_map,
+        )
+        .expect_err("invalid expression should fail");
+        assert_eq!(error2.code, "XML_RHAI_SYNTAX_INVALID");
     }
 }

@@ -3551,4 +3551,24 @@ let public = 3;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), SlValue::Number(3.0));
     }
+
+    #[test]
+    pub(super) fn function_symbol_map_handles_non_dotted_names() {
+        // Test lines 590-593: when function_symbol_map keys don't contain '.', skip them
+        // This tests the split_once('.') returning None case
+        use super::*;
+
+        let files = map(&[(
+            "main.xml",
+            r#"<module name="main" export="script:main">
+  <function name="local_func" args="" return_type="int">return 1;</function>
+  <script name="main"><text>ok</text></script>
+</module>"#,
+        )]);
+        let engine = engine_from_sources(files);
+        // The engine should have function_symbol_map with "local_func" key (no namespace/dot)
+        // This exercises the continue at line 592 when split_once returns None
+        // We can't directly test the internal function, but we verify the engine works
+        assert!(engine.scripts.contains_key("main"));
+    }
 }

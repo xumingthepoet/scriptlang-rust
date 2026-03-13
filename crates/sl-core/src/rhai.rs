@@ -804,4 +804,44 @@ mod rhai_tests {
             replace_module_global_symbol(source, "shared.hp", "__sl_module_ns_shared[\"hp\"]");
         assert_eq!(rewritten, source);
     }
+
+    #[test]
+    fn is_function_literal_start_covers_early_return() {
+        // chars.get(index) != Some(&'*') - not a star
+        let chars: Vec<char> = "abc".chars().collect();
+        assert!(!is_function_literal_start(&chars, 0));
+
+        // index + 1 >= chars.len() - star at end of input
+        let chars: Vec<char> = "*".chars().collect();
+        assert!(!is_function_literal_start(&chars, 0));
+
+        // Valid case - star followed by identifier
+        let chars: Vec<char> = "*foo".chars().collect();
+        assert!(is_function_literal_start(&chars, 0));
+
+        // Valid case with preceding whitespace
+        let chars: Vec<char> = " *foo".chars().collect();
+        assert!(is_function_literal_start(&chars, 1));
+    }
+
+    #[test]
+    fn parse_function_literal_name_covers_error_path() {
+        // chars.get(index) returns None - empty input after at_index
+        let chars: Vec<char> = "".chars().collect();
+        assert_eq!(parse_function_literal_name(&chars, 0), None);
+
+        // Valid case - star followed by identifier
+        let chars: Vec<char> = "*foo".chars().collect();
+        assert_eq!(
+            parse_function_literal_name(&chars, 0),
+            Some(("foo".to_string(), 4))
+        );
+
+        // Valid case with dots
+        let chars: Vec<char> = "*foo.bar".chars().collect();
+        assert_eq!(
+            parse_function_literal_name(&chars, 0),
+            Some(("foo.bar".to_string(), 8))
+        );
+    }
 }
