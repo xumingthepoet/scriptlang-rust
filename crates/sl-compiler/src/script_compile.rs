@@ -1,6 +1,4 @@
 use crate::*;
-#[cfg(test)]
-use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct CompileGroupMode {
@@ -1027,7 +1025,6 @@ pub(crate) fn compile_script(
         &visible_var_types,
         CompileGroupMode::new(0, false).with_script_kind(script_kind),
     )?;
-
     Ok(ScriptIr {
         script_path: script_path.to_string(),
         script_name,
@@ -1044,6 +1041,194 @@ pub(crate) fn compile_script(
         visible_module_consts: visible_module_consts.clone(),
         invoke_all_functions: invoke_all_functions.clone(),
     })
+}
+
+pub fn validate_terminal_structure_from_xml_map(
+    xml_by_path: &BTreeMap<String, String>,
+) -> Result<(), ScriptLangError> {
+    for (file_path, source_text) in xml_by_path {
+        let parsed = parse_xml_document(source_text)
+            .map_err(|error| with_file_context_shared(error, file_path))?;
+        let root = parsed.root;
+        match root.name.as_str() {
+            "script" => {
+                validate_script_terminal_structure_for_root(&root)
+                    .map_err(|error| with_file_context_shared(error, file_path))?;
+            }
+            "module" => {
+                for script_node in element_children(&root).filter(|child| child.name == "script") {
+                    validate_script_terminal_structure_for_root(script_node)
+                        .map_err(|error| with_file_context_shared(error, file_path))?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn validate_script_terminal_structure_for_root(
+    root: &XmlElementNode,
+) -> Result<(), ScriptLangError> {
+    let script_name = get_required_non_empty_attr(root, "name")?;
+    let script_kind = parse_script_kind(root)?;
+    let expanded_root = expand_script_macros(root, &[])?;
+    validate_script_terminal_structure(&expanded_root, script_kind, &script_name)
+}
+
+fn kind_terminal_labels(script_kind: ScriptKind) -> &'static str {
+    match script_kind {
+        ScriptKind::Goto => "<goto/> or <end/>",
+        ScriptKind::Call => "<return/>",
+    }
+}
+
+fn is_kind_terminal_node(name: &str, script_kind: ScriptKind) -> bool {
+    match script_kind {
+        ScriptKind::Goto => name == "goto" || name == "end",
+        ScriptKind::Call => name == "return",
+    }
+}
+
+fn terminal_structure_error(
+    script_name: &str,
+    script_kind: ScriptKind,
+    detail: &str,
+    span: SourceSpan,
+) -> ScriptLangError {
+    let kind_label = match script_kind {
+        ScriptKind::Goto => "goto",
+        ScriptKind::Call => "call",
+    };
+    ScriptLangError::with_span(
+        "XML_SCRIPT_TERMINATOR_REQUIRED",
+        format!(
+            "{} script \"{}\" terminal structure invalid: {}. Expected terminal: {}.",
+            kind_label,
+            script_name,
+            detail,
+            kind_terminal_labels(script_kind),
+        ),
+        span,
+    )
+}
+
+fn validate_script_terminal_structure(
+    script_root: &XmlElementNode,
+    script_kind: ScriptKind,
+    script_name: &str,
+) -> Result<(), ScriptLangError> {
+    validate_container_terminal_tail(script_root, script_kind, script_name)
+}
+
+fn validate_container_terminal_tail(
+    container: &XmlElementNode,
+    script_kind: ScriptKind,
+    script_name: &str,
+) -> Result<(), ScriptLangError> {
+    let children = element_children(container).collect::<Vec<_>>();
+    let Some(tail) = children.last() else {
+        return Err(terminal_structure_error(
+            script_name,
+            script_kind,
+            "empty block cannot naturally terminate",
+            container.location.clone(),
+        ));
+    };
+
+    if is_kind_terminal_node(&tail.name, script_kind) {
+        return Ok(());
+    }
+
+    match tail.name.as_str() {
+        "group" => validate_container_terminal_tail(tail, script_kind, script_name),
+        "if" => validate_if_terminal_tail(tail, script_kind, script_name),
+        "choice" => validate_choice_terminal_tail(tail, script_kind, script_name),
+        "while" => Err(terminal_structure_error(
+            script_name,
+            script_kind,
+            "tail node <while> is not allowed as terminal proof",
+            tail.location.clone(),
+        )),
+        _ => Err(terminal_structure_error(
+            script_name,
+            script_kind,
+            &format!("tail node <{}> is not a terminal node", tail.name),
+            tail.location.clone(),
+        )),
+    }
+}
+
+fn validate_if_terminal_tail(
+    if_node: &XmlElementNode,
+    script_kind: ScriptKind,
+    script_name: &str,
+) -> Result<(), ScriptLangError> {
+    let then_children = if_node
+        .children
+        .iter()
+        .filter(|entry| !matches!(entry, XmlNode::Element(element) if element.name == "else"))
+        .cloned()
+        .collect::<Vec<_>>();
+    let then_container = XmlElementNode {
+        name: "if-then".to_string(),
+        attributes: BTreeMap::new(),
+        children: then_children,
+        location: if_node.location.clone(),
+    };
+    validate_container_terminal_tail(&then_container, script_kind, script_name)?;
+
+    let else_node = element_children(if_node).find(|child| child.name == "else");
+    let Some(else_node) = else_node else {
+        return Err(terminal_structure_error(
+            script_name,
+            script_kind,
+            "tail <if> must include <else> so both branches terminate",
+            if_node.location.clone(),
+        ));
+    };
+    validate_container_terminal_tail(else_node, script_kind, script_name)
+}
+
+fn validate_choice_terminal_tail(
+    choice_node: &XmlElementNode,
+    script_kind: ScriptKind,
+    script_name: &str,
+) -> Result<(), ScriptLangError> {
+    let mut checked_branch = false;
+    for child in element_children(choice_node) {
+        match child.name.as_str() {
+            "option" => {
+                checked_branch = true;
+                validate_container_terminal_tail(child, script_kind, script_name)?;
+            }
+            "dynamic-options" => {
+                let templates = element_children(child).collect::<Vec<_>>();
+                if templates.len() != 1 || templates[0].name != "option" {
+                    return Err(terminal_structure_error(
+                        script_name,
+                        script_kind,
+                        "tail <choice> has invalid <dynamic-options> template",
+                        child.location.clone(),
+                    ));
+                }
+                checked_branch = true;
+                validate_container_terminal_tail(templates[0], script_kind, script_name)?;
+            }
+            _ => {}
+        }
+    }
+
+    if checked_branch {
+        return Ok(());
+    }
+
+    Err(terminal_structure_error(
+        script_name,
+        script_kind,
+        "tail <choice> has no option branches",
+        choice_node.location.clone(),
+    ))
 }
 
 #[cfg(test)]
@@ -2652,6 +2837,113 @@ mod script_compile_tests {
         })
         .expect_err("empty script attr should fail");
         assert_eq!(error.code, "XML_EMPTY_ATTR");
+    }
+
+    #[test]
+    fn terminal_structure_validation_covers_kind_group_if_choice_and_while() {
+        let goto_ok = parse_xml_document(
+            r#"
+<script name="main">
+  <if when="true">
+    <goto script="@next.next"/>
+    <else>
+      <group>
+        <end/>
+      </group>
+    </else>
+  </if>
+</script>
+"#,
+        )
+        .expect("xml")
+        .root;
+        validate_script_terminal_structure(&goto_ok, ScriptKind::Goto, "main.main")
+            .expect("goto if/else terminal structure should pass");
+
+        let goto_choice_bad = parse_xml_document(
+            r#"
+<script name="main">
+  <choice text="Pick">
+    <option text="A"><goto script="@next.next"/></option>
+    <option text="B"><text>B</text></option>
+  </choice>
+</script>
+"#,
+        )
+        .expect("xml")
+        .root;
+        let error =
+            validate_script_terminal_structure(&goto_choice_bad, ScriptKind::Goto, "main.main")
+                .expect_err("goto choice branch without terminal should fail");
+        assert_eq!(error.code, "XML_SCRIPT_TERMINATOR_REQUIRED");
+
+        let goto_if_no_else = parse_xml_document(
+            r#"
+<script name="main">
+  <if when="true">
+    <goto script="@next.next"/>
+  </if>
+</script>
+"#,
+        )
+        .expect("xml")
+        .root;
+        let error =
+            validate_script_terminal_structure(&goto_if_no_else, ScriptKind::Goto, "main.main")
+                .expect_err("goto tail if without else should fail");
+        assert_eq!(error.code, "XML_SCRIPT_TERMINATOR_REQUIRED");
+
+        let goto_while_tail = parse_xml_document(
+            r#"
+<script name="main">
+  <while when="true">
+    <goto script="@next.next"/>
+  </while>
+</script>
+"#,
+        )
+        .expect("xml")
+        .root;
+        let error =
+            validate_script_terminal_structure(&goto_while_tail, ScriptKind::Goto, "main.main")
+                .expect_err("while tail should fail");
+        assert_eq!(error.code, "XML_SCRIPT_TERMINATOR_REQUIRED");
+
+        let call_ok = parse_xml_document(
+            r#"
+<script name="main" kind="call">
+  <choice text="Pick">
+    <option text="A">
+      <return/>
+    </option>
+    <dynamic-options array="[1]" item="it">
+      <option text="${it}">
+        <return/>
+      </option>
+    </dynamic-options>
+  </choice>
+</script>
+"#,
+        )
+        .expect("xml")
+        .root;
+        validate_script_terminal_structure(&call_ok, ScriptKind::Call, "main.main")
+            .expect("call choice terminal structure should pass");
+
+        let call_bad = parse_xml_document(
+            r#"
+<script name="main" kind="call">
+  <group>
+    <text>x</text>
+  </group>
+</script>
+"#,
+        )
+        .expect("xml")
+        .root;
+        let error = validate_script_terminal_structure(&call_bad, ScriptKind::Call, "main.main")
+            .expect_err("call non-return tail should fail");
+        assert_eq!(error.code, "XML_SCRIPT_TERMINATOR_REQUIRED");
     }
 
     #[test]

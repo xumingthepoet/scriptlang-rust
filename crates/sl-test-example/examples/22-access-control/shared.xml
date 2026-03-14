@@ -1,8 +1,10 @@
 <module name="shared" export="script:show">
 <script name="show" kind="call">
   <text>public import ok</text>
+  <return/>
 </script>
 <script name="hide">
   <text>private import hidden</text>
+  <end/>
 </script>
 </module>

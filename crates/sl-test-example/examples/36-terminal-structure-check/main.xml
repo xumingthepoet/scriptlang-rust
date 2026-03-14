@@ -1,0 +1,7 @@
+<module name="main" export="script:main">
+  <script name="main">
+    <if when="true">
+      <goto script="@main.main"/>
+    </if>
+  </script>
+</module>

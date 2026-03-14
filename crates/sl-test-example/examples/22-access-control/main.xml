@@ -7,5 +7,6 @@
 </script>
 <script name="hidden" kind="call">
   <text>private sibling ok</text>
+  <return/>
 </script>
 </module>

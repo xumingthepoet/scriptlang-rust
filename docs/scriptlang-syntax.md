@@ -626,7 +626,12 @@ module 相关规则与 `<call>` 相同：
 - 仅 `kind="goto"` 脚本可使用
 - 不支持属性和内容
 - 命中后直接产出终止事件（`End`），宿主应停止继续驱动
-- `kind="goto"` 脚本不允许自然结束；若未显式 `<end/>` 结束，运行时报 `ENGINE_EXPLICIT_END_REQUIRED`
+- 脚本会在编译期做“终止结构校验”（非路径推理）：
+  - `kind="goto"` 末尾结构必须能递归证明为 `<goto/>` 或 `<end/>`
+  - `kind="call"` 末尾结构必须能递归证明为 `<return/>`
+  - 末尾可递归节点：`<group>`、`<if>`（then/else 均需通过）、`<choice>`（每个 option 模板均需通过）
+  - 末尾 `<while>` 一律不通过；`<if>` 无 `<else>` 视为空分支，不通过
+  - 违规时报：`XML_SCRIPT_TERMINATOR_REQUIRED`
 
 ```xml
 <end/>

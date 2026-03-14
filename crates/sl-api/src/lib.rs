@@ -4,7 +4,7 @@ use std::sync::Arc;
 use sl_compiler::{
     compile_artifact_from_xml_map as compile_compiled_artifact_from_xml_map,
     compile_project_bundle_from_xml_map, compile_project_scripts_from_xml_map,
-    CompileProjectBundleResult,
+    validate_terminal_structure_from_xml_map, CompileProjectBundleResult,
 };
 use sl_core::{CompileProjectResult, CompiledProjectArtifact};
 use sl_runtime::{HostFunctionRegistry, ScriptLangEngineOptions};
@@ -60,7 +60,9 @@ pub struct ResumeEngineFromArtifactOptions {
 pub fn compile_scripts_from_xml_map(
     scripts_xml: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<String, sl_core::ScriptIr>, ScriptLangError> {
-    compile_project_scripts_from_xml_map(scripts_xml)
+    let scripts = compile_project_scripts_from_xml_map(scripts_xml)?;
+    validate_terminal_structure_from_xml_map(scripts_xml)?;
+    Ok(scripts)
 }
 
 pub fn compile_project_from_xml_map(
@@ -75,6 +77,7 @@ pub fn compile_project_from_xml_map(
         module_const_declarations,
         module_const_init_order,
     } = compile_project_bundle_from_xml_map(xml_by_path)?;
+    validate_terminal_structure_from_xml_map(xml_by_path)?;
 
     let entry_script = resolve_entry_script(&scripts, entry_script)?;
 
@@ -93,7 +96,9 @@ pub fn compile_artifact_from_xml_map(
     xml_by_path: &BTreeMap<String, String>,
     entry_script: Option<String>,
 ) -> Result<CompiledProjectArtifact, ScriptLangError> {
-    compile_compiled_artifact_from_xml_map(xml_by_path, entry_script)
+    let artifact = compile_compiled_artifact_from_xml_map(xml_by_path, entry_script)?;
+    validate_terminal_structure_from_xml_map(xml_by_path)?;
+    Ok(artifact)
 }
 
 pub fn create_engine_from_artifact(
@@ -185,6 +190,7 @@ pub fn resume_engine_from_xml(
     options: ResumeEngineFromXmlOptions,
 ) -> Result<ScriptLangEngine, ScriptLangError> {
     let compiled = compile_project_bundle_from_xml_map(&options.scripts_xml)?;
+    validate_terminal_structure_from_xml_map(&options.scripts_xml)?;
     resume_engine_from_artifact(ResumeEngineFromArtifactOptions {
         artifact: CompiledProjectArtifact {
             schema_version: sl_core::COMPILED_PROJECT_SCHEMA.to_string(),
@@ -337,6 +343,7 @@ mod tests {
     <option text="A"><text>A</text></option>
     <option text="B"><text>B</text></option>
   </choice>
+  <end/>
 </script>
 </module>
 "#,
@@ -356,6 +363,7 @@ mod tests {
     <option text="A"><text>A</text></option>
     <option text="B"><text>B</text></option>
   </choice>
+  <end/>
 </script>
 </module>
 "#,
@@ -370,11 +378,11 @@ mod tests {
         let scripts = map(&[
             (
                 "main.xml",
-                r#"<module name="main" export="script:main"><script name="main"><text>Main</text></script></module>"#,
+                r#"<module name="main" export="script:main"><script name="main"><text>Main</text><end/></script></module>"#,
             ),
             (
                 "alt.xml",
-                r#"<module name="alt" export="script:alt"><script name="alt"><text>Alt</text></script></module>"#,
+                r#"<module name="alt" export="script:alt"><script name="alt"><text>Alt</text><end/></script></module>"#,
             ),
         ]);
         let project = compile_project_from_xml_map(&scripts, Some("alt.alt".to_string()))
@@ -389,7 +397,7 @@ mod tests {
             "battle.xml",
             r#"
 <module name="battle" export="script:main">
-  <script name="main"><text>Battle</text></script>
+  <script name="main"><text>Battle</text><end/></script>
 </module>
 "#,
         )]);
@@ -403,7 +411,7 @@ mod tests {
     fn compile_project_from_xml_map_returns_error_for_missing_explicit_entry() {
         let scripts = map(&[(
             "foo.xml",
-            r#"<module name="foo" export="script:foo"><script name="foo"><text>Hello</text></script></module>"#,
+            r#"<module name="foo" export="script:foo"><script name="foo"><text>Hello</text><end/></script></module>"#,
         )]);
         let error = compile_project_from_xml_map(&scripts, Some("missing".to_string()))
             .expect_err("missing entry should fail");
@@ -414,7 +422,7 @@ mod tests {
     fn compile_project_from_xml_map_returns_error_without_main_when_entry_missing() {
         let scripts = map(&[(
             "foo.xml",
-            r#"<module name="foo" export="script:foo"><script name="foo"><text>Hello</text></script></module>"#,
+            r#"<module name="foo" export="script:foo"><script name="foo"><text>Hello</text><end/></script></module>"#,
         )]);
         let error =
             compile_project_from_xml_map(&scripts, None).expect_err("default main should fail");
@@ -425,7 +433,7 @@ mod tests {
     fn compile_project_from_xml_map_rejects_private_entry_script() {
         let scripts = map(&[(
             "main.xml",
-            r#"<module name="main"><script name="main"><text>Main</text></script></module>"#,
+            r#"<module name="main"><script name="main"><text>Main</text><end/></script></module>"#,
         )]);
         let default_error = compile_project_from_xml_map(&scripts, None)
             .expect_err("private default entry should fail");
@@ -434,11 +442,11 @@ mod tests {
         let explicit_scripts = map(&[
             (
                 "main.xml",
-                r#"<module name="main" export="script:main"><script name="main"><text>Main</text></script></module>"#,
+                r#"<module name="main" export="script:main"><script name="main"><text>Main</text><end/></script></module>"#,
             ),
             (
                 "hidden.xml",
-                r#"<module name="hidden"><script name="entry"><text>Hidden</text></script></module>"#,
+                r#"<module name="hidden"><script name="entry"><text>Hidden</text><end/></script></module>"#,
             ),
         ]);
         let explicit_error =
@@ -452,7 +460,7 @@ mod tests {
         // Test explicit entry script is Call kind (not Goto kind)
         let scripts = map(&[(
             "main.xml",
-            r#"<module name="main" export="script:main"><script name="main" kind="call"><text>Call script</text></script></module>"#,
+            r#"<module name="main" export="script:main"><script name="main" kind="call"><return/></script></module>"#,
         )]);
         let explicit_error = compile_project_from_xml_map(&scripts, Some("main.main".to_string()))
             .expect_err("call kind explicit entry should fail");
@@ -461,7 +469,7 @@ mod tests {
         // Test default main.main is Call kind (not Goto kind)
         let default_scripts = map(&[(
             "main.xml",
-            r#"<module name="main" export="script:main"><script name="main" kind="call"><text>Call script</text></script></module>"#,
+            r#"<module name="main" export="script:main"><script name="main" kind="call"><return/></script></module>"#,
         )]);
         let default_error = compile_project_from_xml_map(&default_scripts, None)
             .expect_err("call kind default entry should fail");
@@ -472,7 +480,7 @@ mod tests {
     fn compile_artifact_from_xml_map_builds_artifact() {
         let scripts = map(&[(
             "main.xml",
-            r#"<module name="main" export="script:main"><script name="main"><text>Main</text></script></module>"#,
+            r#"<module name="main" export="script:main"><script name="main"><text>Main</text><end/></script></module>"#,
         )]);
         let artifact = compile_artifact_from_xml_map(&scripts, None).expect("compile artifact");
         assert_eq!(artifact.schema_version, sl_core::COMPILED_PROJECT_SCHEMA);
@@ -487,6 +495,7 @@ mod tests {
 <module name="main" export="script:main">
 <script name="main">
   <choice text="Pick"><option text="A"><text>A</text></option></choice>
+  <end/>
 </script>
 </module>
 "#,
@@ -534,7 +543,7 @@ mod tests {
     fn create_engine_from_artifact_rejects_private_entry_script() {
         let scripts = map(&[(
             "main.xml",
-            r#"<module name="main"><script name="main"><text>Main</text></script></module>"#,
+            r#"<module name="main"><script name="main"><text>Main</text><end/></script></module>"#,
         )]);
         let bundle = compile_project_bundle_from_xml_map(&scripts).expect("bundle should compile");
         let error = create_engine_from_artifact(CreateEngineFromArtifactOptions {
@@ -569,6 +578,7 @@ mod tests {
 <module name="main" export="script:main">
 <script name="main">
   <choice text="Pick"><option text="A"><text>A</text></option></choice>
+  <end/>
 </script>
 </module>
 "#,
@@ -614,6 +624,7 @@ mod tests {
     <option text="A"><text>A</text></option>
     <option text="B"><text>B</text></option>
   </choice>
+  <end/>
 </script>
 </module>
 "#,
@@ -645,6 +656,7 @@ mod tests {
   <text>${a}</text>
   <temp name="b" type="int">random(5)</temp>
   <text>${b}</text>
+  <end/>
 </script>
 </module>
 "#,
@@ -687,6 +699,7 @@ mod tests {
   <choice text="Pick">
     <option text="A"><text>A</text></option>
   </choice>
+  <end/>
 </script>
 </module>
 "#,
@@ -734,9 +747,11 @@ mod tests {
     <input var="cmd" text="Go"/>
     <code>score = boost(score);</code>
     <call script="@next"/>
+    <end/>
   </script>
   <script name="next" kind="call">
     <text>${score}</text>
+    <return/>
   </script>
 </module>
 "#,
@@ -787,6 +802,7 @@ mod tests {
     <option text="A"><text>A</text></option>
     <option text="B"><text>B</text></option>
   </choice>
+  <end/>
 </script>
 </module>
 "#,
@@ -963,6 +979,7 @@ mod tests {
 <script name="main">
   <temp name="name" type="string">"Traveler"</temp>
   <input var="name" text="Name"/>
+  <end/>
 </script>
 </module>
 "#,
@@ -987,7 +1004,7 @@ mod tests {
         // Test that entry script must be Goto kind, not Call kind
         let scripts = map(&[(
             "main.xml",
-            r#"<module name="main" export="script:main"><script name="main" kind="call"><text>Call script</text></script></module>"#,
+            r#"<module name="main" export="script:main"><script name="main" kind="call"><return/></script></module>"#,
         )]);
         let artifact = compile_artifact_from_xml_map(&scripts, Some("main.main".to_string()))
             .expect("compile should pass");

@@ -455,6 +455,7 @@ mod agent_tests {
   </choice>
   <temp name="name" type="string">"Traveler"</temp>
   <input var="name" text="Name"/>
+  <end/>
 </script>
 </module>"#,
         );
@@ -518,6 +519,7 @@ mod agent_tests {
       <text>${r}</text>
       <temp name="name" type="string">"Traveler"</temp>
       <input var="name" text="Name"/>
+      <end/>
     </option>
   </choice>
 </script>
@@ -565,6 +567,7 @@ mod agent_tests {
       <text>${r}</text>
       <temp name="name" type="string">"Traveler"</temp>
       <input var="name" text="Name"/>
+      <end/>
     </option>
   </choice>
 </script>

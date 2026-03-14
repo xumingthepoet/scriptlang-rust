@@ -28,5 +28,6 @@
 
   <script name="echo_seed" kind="call">
     <text>seed.home=${seed_distance[LocationId.Home]}</text>
+    <return/>
   </script>
 </module>

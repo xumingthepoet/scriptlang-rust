@@ -455,7 +455,7 @@ mod line_tui_tests {
         let scenario = load_temp_scenario(
             "line-tui-handle-line",
             r#"<module name="main" export="script:main">
-<script name="main"><text>ok</text></script>
+<script name="main"><text>ok</text><end/></script>
 </module>"#,
         );
         let state_file = temp_path("line-tui-handle-line-state.json");

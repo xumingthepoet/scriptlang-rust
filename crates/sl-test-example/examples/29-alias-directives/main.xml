@@ -36,5 +36,6 @@
     <text>nodes=${nodes.len}</text>
     <text>home=${distance_map[LocationId.Home]}</text>
     <text>port=${calc.distanceOf(distance_map, LocationId.Port)}</text>
+    <return/>
   </script>
 </module>

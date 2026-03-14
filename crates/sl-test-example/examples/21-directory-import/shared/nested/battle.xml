@@ -2,5 +2,6 @@
 <module name="battle" export="script:battle">
 <script name="battle" kind="call">
   <text>battle=${shared.boost(shared.base)}</text>
+  <return/>
 </script>
 </module>

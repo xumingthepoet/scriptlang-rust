@@ -39,6 +39,7 @@ pub use artifact::{
 };
 pub use context::CompileProjectBundleResult;
 pub use pipeline::{compile_project_bundle_from_xml_map, compile_project_scripts_from_xml_map};
+pub use script_compile::validate_terminal_structure_from_xml_map;
 
 pub(crate) use context::*;
 pub(crate) use error_context::with_file_context_shared;

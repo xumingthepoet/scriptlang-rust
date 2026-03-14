@@ -4,6 +4,32 @@ fn assert_example(name: &str) {
     sl_test_example::assert_case(&example_dir, &case_path).expect("example testcase should pass");
 }
 
+fn read_scripts_xml_from_example(name: &str) -> std::collections::BTreeMap<String, String> {
+    let example_dir = sl_test_example::example_dir(name);
+    let mut scripts = std::collections::BTreeMap::new();
+    for entry in walkdir::WalkDir::new(&example_dir)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.path();
+        if !path.to_string_lossy().ends_with(".xml") {
+            continue;
+        }
+        let relative = path
+            .strip_prefix(&example_dir)
+            .expect("example path should strip prefix")
+            .to_string_lossy()
+            .replace('\\', "/");
+        let content = std::fs::read_to_string(path).expect("example xml should be readable");
+        scripts.insert(relative, content);
+    }
+    scripts
+}
+
 #[test]
 fn example_01_text_code_matches_testcase() {
     assert_example("01-text-code");
@@ -152,6 +178,14 @@ fn example_34_invoke_private_capability_matches_testcase() {
 #[test]
 fn example_35_script_private_capability_matches_testcase() {
     assert_example("35-script-private-capability");
+}
+
+#[test]
+fn example_36_terminal_structure_check_reports_compile_error() {
+    let scripts_xml = read_scripts_xml_from_example("36-terminal-structure-check");
+    let error = sl_api::compile_artifact_from_xml_map(&scripts_xml, Some("main.main".to_string()))
+        .expect_err("invalid terminal structure should fail at compile time");
+    assert_eq!(error.code, "XML_SCRIPT_TERMINATOR_REQUIRED");
 }
 
 #[test]
