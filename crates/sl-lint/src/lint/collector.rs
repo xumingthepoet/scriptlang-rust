@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 
 use regex::Regex;
-use rhai::Engine;
 use sl_compiler::CompileProjectBundleResult;
 use sl_core::{
     preprocess_scriptlang_rhai_input, ChoiceEntry, RhaiInputMode, ScriptIr, ScriptNode,
@@ -818,7 +817,6 @@ fn analyze_expression(expr: &str) -> ExpressionRefs {
     let mut refs = ExpressionRefs::default();
     let rewritten = preprocess_scriptlang_rhai_input(expr, "lint", RhaiInputMode::CodeBlock)
         .unwrap_or_else(|_| expr.to_string());
-    let _ = Engine::new().compile(&rewritten);
 
     for caps in call_name_regex().captures_iter(&rewritten) {
         if let Some(name) = caps.get(1) {
