@@ -19,10 +19,7 @@ pub(crate) fn run_rules(context: &LintContext) -> Vec<LintDiagnostic> {
 
 fn collect_unused_script(context: &LintContext, diagnostics: &mut Vec<LintDiagnostic>) {
     for (name, decl) in &context.scripts {
-        if context.reachable_scripts.contains(name)
-            || context.used_scripts.contains(name)
-            || context.exported_scripts.contains(name)
-        {
+        if context.reachable_scripts.contains(name) || context.used_scripts.contains(name) {
             continue;
         }
         diagnostics.push(LintDiagnostic::warning(
@@ -84,7 +81,7 @@ fn collect_unused_module(context: &LintContext, diagnostics: &mut Vec<LintDiagno
 
 fn collect_unused_function(context: &LintContext, diagnostics: &mut Vec<LintDiagnostic>) {
     for (name, decl) in &context.functions {
-        if context.used_functions.contains(name) || context.exported_functions.contains(name) {
+        if context.used_functions.contains(name) {
             continue;
         }
         diagnostics.push(LintDiagnostic::warning(
@@ -306,6 +303,22 @@ mod tests {
     }
 
     #[test]
+    fn run_rules_emits_unused_function_even_if_exported() {
+        let mut ctx = base_context();
+        ctx.functions.insert(
+            "main.add".to_string(),
+            NamedDecl {
+                name: "add".to_string(),
+                file: "main.xml".to_string(),
+                span: SourceSpan::synthetic(),
+            },
+        );
+        ctx.exported_functions.insert("main.add".to_string());
+        let result = run_rules(&ctx);
+        assert!(result.iter().any(|d| d.code == "unused-function"));
+    }
+
+    #[test]
     fn run_rules_emits_unused_module_var() {
         let mut ctx = base_context();
         ctx.module_vars.insert(
@@ -357,6 +370,22 @@ mod tests {
         let result = run_rules(&ctx);
         assert!(result.iter().any(|d| d.code == "unused-param"));
         assert!(result.iter().any(|d| d.code == "unused-local-var"));
+    }
+
+    #[test]
+    fn run_rules_emits_unused_script_even_if_exported() {
+        let mut ctx = base_context();
+        ctx.scripts.insert(
+            "main.unused".to_string(),
+            NamedDecl {
+                name: "unused".to_string(),
+                file: "main.xml".to_string(),
+                span: SourceSpan::synthetic(),
+            },
+        );
+        ctx.exported_scripts.insert("main.unused".to_string());
+        let result = run_rules(&ctx);
+        assert!(result.iter().any(|d| d.code == "unused-script"));
     }
 
     #[test]
