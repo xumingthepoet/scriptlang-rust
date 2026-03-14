@@ -353,6 +353,294 @@ mod tests {
     }
 
     #[test]
+    fn compile_scripts_fails_on_compile_error() {
+        // Line 63: compile fails (not terminal validation)
+        let invalid_xml = map(&[("main.xml", "<invalid>")]);
+        let result = compile_scripts_from_xml_map(&invalid_xml);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        eprintln!("compile error: code={}, message={}", err.code, err.message);
+    }
+
+    #[test]
+    fn compile_scripts_fails_on_terminal_validation_error() {
+        // Lines 63,64: compile succeeds but terminal validation fails
+        let scripts = map(&[(
+            "main.xml",
+            r#"<module name="main" export="script:main"><script name="main"><text>no terminal</text></script></module>"#,
+        )]);
+        let result = compile_scripts_from_xml_map(&scripts);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        eprintln!(
+            "compile terminal error: code={}, message={}",
+            err.code, err.message
+        );
+    }
+
+    #[test]
+    fn compile_project_fails_on_terminal_validation_error() {
+        // Lines 80: compile succeeds but terminal validation fails
+        let scripts = map(&[(
+            "main.xml",
+            r#"<module name="main" export="script:main"><script name="main"><text>no terminal</text></script></module>"#,
+        )]);
+        let result = compile_project_from_xml_map(&scripts, None);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        eprintln!(
+            "compile project terminal error: code={}, message={}",
+            err.code, err.message
+        );
+    }
+
+    #[test]
+    fn compile_artifact_fails_on_terminal_validation_error() {
+        // Lines 100: compile succeeds but terminal validation fails
+        let scripts = map(&[(
+            "main.xml",
+            r#"<module name="main" export="script:main"><script name="main"><text>no terminal</text></script></module>"#,
+        )]);
+        let result = compile_artifact_from_xml_map(&scripts, None);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        eprintln!(
+            "compile artifact terminal error: code={}, message={}",
+            err.code, err.message
+        );
+    }
+
+    #[test]
+    fn validate_terminal_structure_covers_parse_error() {
+        // Line 1051: parse_xml_document error path
+        // Directly call validator with invalid XML to trigger parse error
+        let direct_xml = map(&[("main.xml", "<invalid>")]);
+        let result = sl_compiler::validate_terminal_structure_from_xml_map(&direct_xml);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_terminal_structure_covers_missing_script_name() {
+        // Line 1073: get_required_non_empty_attr("name") error path
+        let missing_name = map(&[(
+            "main.xml",
+            r#"<module name="main"><script><text>test</text><end/></script></module>"#,
+        )]);
+        let result = sl_compiler::validate_terminal_structure_from_xml_map(&missing_name);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        eprintln!(
+            "missing_name error: code={}, message={}",
+            err.code, err.message
+        );
+    }
+
+    #[test]
+    fn validate_terminal_structure_covers_script_root_with_terminal_error() {
+        // Lines 1055-1056: script root with terminal validation error
+        let script_root = map(&[(
+            "main.xml",
+            r#"<script name="main" kind="goto"><text>no terminal</text></script>"#,
+        )]);
+        let result = sl_compiler::validate_terminal_structure_from_xml_map(&script_root);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        eprintln!(
+            "script_root error: code={}, message={}",
+            err.code, err.message
+        );
+    }
+
+    #[test]
+    fn validate_terminal_structure_covers_module_with_invalid_script() {
+        // Lines 1056: module with script that has terminal validation error
+        let module_with_bad_script = map(&[(
+            "main.xml",
+            r#"<module name="main"><script name="main" kind="goto"><text>no terminal</text></script></module>"#,
+        )]);
+        let result = sl_compiler::validate_terminal_structure_from_xml_map(&module_with_bad_script);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        eprintln!(
+            "module_bad_script error: code={}, message={}",
+            err.code, err.message
+        );
+    }
+
+    #[test]
+    fn validate_terminal_structure_covers_choice_dynamic_options_error() {
+        // Lines 1208-1211: choice with invalid dynamic-options template
+        let choice_bad_dynamic = map(&[(
+            "main.xml",
+            r#"<module name="main"><script name="main" kind="goto"><choice text="Pick"><dynamic-options>not_option</dynamic-options></choice></script></module>"#,
+        )]);
+        let result = sl_compiler::validate_terminal_structure_from_xml_map(&choice_bad_dynamic);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        eprintln!(
+            "choice_bad_dynamic error: code={}, message={}",
+            err.code, err.message
+        );
+    }
+
+    #[test]
+    fn validate_terminal_structure_covers_choice_dynamic_options_valid_but_option_no_terminal() {
+        // Line 1216: dynamic-options with valid option template but option has no terminal
+        let choice_dynamic_option_no_terminal = map(&[(
+            "main.xml",
+            r#"<module name="main"><script name="main" kind="goto"><choice text="Pick"><dynamic-options><option text="A"><text>no end</text></option></dynamic-options></choice></script></module>"#,
+        )]);
+        let result = sl_compiler::validate_terminal_structure_from_xml_map(
+            &choice_dynamic_option_no_terminal,
+        );
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        eprintln!(
+            "choice_dynamic_option error: code={}, message={}",
+            err.code, err.message
+        );
+    }
+
+    #[test]
+    fn validate_terminal_structure_covers_choice_option_with_terminal_error() {
+        // Line 1216: choice with option that has terminal error
+        let choice_option_no_terminal = map(&[(
+            "main.xml",
+            r#"<module name="main"><script name="main" kind="goto"><choice text="Pick"><option text="A"><text>no end</text></option></choice></script></module>"#,
+        )]);
+        let result =
+            sl_compiler::validate_terminal_structure_from_xml_map(&choice_option_no_terminal);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        eprintln!(
+            "choice_option error: code={}, message={}",
+            err.code, err.message
+        );
+    }
+
+    #[test]
+    fn validate_terminal_structure_covers_choice_other_child() {
+        // Line 1218: choice with other child (not option or dynamic-options)
+        let choice_other = map(&[(
+            "main.xml",
+            r#"<module name="main"><script name="main" kind="goto"><choice text="Pick"><text>not option</text></choice></script></module>"#,
+        )]);
+        let result = sl_compiler::validate_terminal_structure_from_xml_map(&choice_other);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        eprintln!(
+            "choice_other error: code={}, message={}",
+            err.code, err.message
+        );
+    }
+
+    #[test]
+    fn validate_terminal_structure_ignores_non_standard_xml_root() {
+        // Line 1064: _ => {} branch - non-script/module root is ignored
+        let non_standard_xml = map(&[(
+            "main.xml",
+            r#"<custom-data><item>value</item></custom-data>"#,
+        )]);
+        // Should succeed because non-script/module root is ignored
+        let result = sl_compiler::validate_terminal_structure_from_xml_map(&non_standard_xml);
+        assert!(result.is_ok(), "non-standard XML root should be ignored");
+    }
+
+    #[test]
+    fn validate_terminal_structure_covers_invalid_script_kind() {
+        // Line 1074: parse_script_kind error path
+        let invalid_kind = map(&[(
+            "main.xml",
+            r#"<module name="main"><script name="main" kind="invalid"><text>test</text><end/></script></module>"#,
+        )]);
+        let result = sl_compiler::validate_terminal_structure_from_xml_map(&invalid_kind);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        eprintln!(
+            "invalid_kind error: code={}, message={}",
+            err.code, err.message
+        );
+    }
+
+    #[test]
+    fn validate_terminal_structure_covers_macro_expand_error() {
+        // Line 1075: expand_script_macros error path (invalid for expression)
+        let macro_error = map(&[(
+            "main.xml",
+            r#"<module name="main"><script name="main" kind="goto"><for temps="i" condition="invalid_expr"></for><end/></script></module>"#,
+        )]);
+        let result = sl_compiler::validate_terminal_structure_from_xml_map(&macro_error);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        eprintln!("macro_error: code={}, message={}", err.code, err.message);
+    }
+
+    #[test]
+    fn validate_terminal_structure_covers_empty_block() {
+        // Lines 1131-1134: empty block error path
+        // Script with empty group
+        let empty_block = map(&[(
+            "main.xml",
+            r#"<module name="main"><script name="main" kind="goto"><group></group></script></module>"#,
+        )]);
+        let result = sl_compiler::validate_terminal_structure_from_xml_map(&empty_block);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        eprintln!(
+            "empty_block error: code={}, message={}",
+            err.code, err.message
+        );
+    }
+
+    #[test]
+    fn validate_terminal_structure_covers_if_without_else() {
+        // Line 1179: if tail without else branch
+        let if_no_else = map(&[(
+            "main.xml",
+            r#"<module name="main"><script name="main" kind="goto"><if condition="true"><text>then</text></if></script></module>"#,
+        )]);
+        let result = sl_compiler::validate_terminal_structure_from_xml_map(&if_no_else);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        eprintln!(
+            "if_no_else error: code={}, message={}",
+            err.code, err.message
+        );
+    }
+
+    #[test]
+    fn validate_terminal_structure_covers_choice_without_option() {
+        // Line 1218: choice tail without option branches
+        let choice_no_option = map(&[(
+            "main.xml",
+            r#"<module name="main"><script name="main" kind="goto"><choice text="Pick"></choice></script></module>"#,
+        )]);
+        let result = sl_compiler::validate_terminal_structure_from_xml_map(&choice_no_option);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        eprintln!(
+            "choice_no_option error: code={}, message={}",
+            err.code, err.message
+        );
+    }
+
+    #[test]
+    fn validate_terminal_structure_covers_while_not_allowed_as_terminal() {
+        // Line 1147: while not allowed as terminal
+        let while_terminal = map(&[(
+            "main.xml",
+            r#"<module name="main"><script name="main" kind="goto"><while condition="true"><text>loop</text></while></script></module>"#,
+        )]);
+        let result = sl_compiler::validate_terminal_structure_from_xml_map(&while_terminal);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        eprintln!(
+            "while_terminal error: code={}, message={}",
+            err.code, err.message
+        );
+    }
+
+    #[test]
     fn compile_project_from_xml_map_uses_default_main_entry() {
         let scripts = map(&[(
             "main.xml",
@@ -732,6 +1020,75 @@ mod tests {
         resumed.choose(0).expect("choose should succeed");
         let next = resumed.next_output().expect("next should succeed");
         assert_eq!(output_kind(&next), "text");
+    }
+
+    #[test]
+    fn resume_engine_from_xml_fails_on_compile_error() {
+        // Line 192: compile fails in resume_engine_from_xml
+        let invalid_xml = map(&[("main.xml", "<invalid>")]);
+        let result = resume_engine_from_xml(ResumeEngineFromXmlOptions {
+            scripts_xml: invalid_xml,
+            snapshot: Snapshot {
+                schema_version: sl_runtime::SNAPSHOT_SCHEMA.to_string(),
+                compiler_version: "test".to_string(),
+                runtime_frames: Vec::new(),
+                rng_state: 1,
+                pending_boundary: PendingBoundary::Input {
+                    node_id: "n".to_string(),
+                    target_var: "x".to_string(),
+                    prompt_text: "p".to_string(),
+                    default_text: "d".to_string(),
+                    max_length: None,
+                },
+                module_vars: BTreeMap::new(),
+                once_state_by_script: BTreeMap::new(),
+            },
+            host_functions: None,
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: None,
+        });
+        // Must fail due to compile error
+        assert!(
+            result.is_err(),
+            "resume_engine_from_xml should fail on compile error"
+        );
+    }
+
+    #[test]
+    fn resume_engine_from_xml_fails_on_terminal_validation_error() {
+        // Line 193: terminal validation fails in resume_engine_from_xml
+        let scripts = map(&[(
+            "main.xml",
+            r#"<module name="main" export="script:main"><script name="main"><text>no terminal</text></script></module>"#,
+        )]);
+        let result = resume_engine_from_xml(ResumeEngineFromXmlOptions {
+            scripts_xml: scripts,
+            snapshot: Snapshot {
+                schema_version: sl_runtime::SNAPSHOT_SCHEMA.to_string(),
+                compiler_version: "test".to_string(),
+                runtime_frames: Vec::new(),
+                rng_state: 1,
+                pending_boundary: PendingBoundary::Input {
+                    node_id: "n".to_string(),
+                    target_var: "x".to_string(),
+                    prompt_text: "p".to_string(),
+                    default_text: "d".to_string(),
+                    max_length: None,
+                },
+                module_vars: BTreeMap::new(),
+                once_state_by_script: BTreeMap::new(),
+            },
+            host_functions: None,
+            random_sequence: None,
+            random_sequence_index: None,
+            compiler_version: None,
+        });
+        // Must fail due to terminal validation error
+        assert!(
+            result.is_err(),
+            "resume_engine_from_xml should fail on terminal validation error"
+        );
     }
 
     #[test]

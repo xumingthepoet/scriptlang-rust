@@ -2693,9 +2693,10 @@ let public = 3;
 </module>"#,
         )]));
         // Manually inject a non-dotted key into visible_consts_by_script
+        // The script_name is "main.main" (module.script)
         engine
             .visible_consts_by_script
-            .entry("main".to_string())
+            .entry("main.main".to_string())
             .or_default()
             .insert("invalid_no_dot".to_string());
         // The script execution should still work
