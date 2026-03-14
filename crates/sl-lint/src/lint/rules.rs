@@ -19,7 +19,10 @@ pub(crate) fn run_rules(context: &LintContext) -> Vec<LintDiagnostic> {
 
 fn collect_unused_script(context: &LintContext, diagnostics: &mut Vec<LintDiagnostic>) {
     for (name, decl) in &context.scripts {
-        if context.reachable_scripts.contains(name) || context.used_scripts.contains(name) {
+        if context.reachable_scripts.contains(name)
+            || context.used_scripts.contains(name)
+            || context.exported_scripts.contains(name)
+        {
             continue;
         }
         diagnostics.push(LintDiagnostic::warning(
@@ -81,7 +84,7 @@ fn collect_unused_module(context: &LintContext, diagnostics: &mut Vec<LintDiagno
 
 fn collect_unused_function(context: &LintContext, diagnostics: &mut Vec<LintDiagnostic>) {
     for (name, decl) in &context.functions {
-        if context.used_functions.contains(name) {
+        if context.used_functions.contains(name) || context.exported_functions.contains(name) {
             continue;
         }
         diagnostics.push(LintDiagnostic::warning(
@@ -96,7 +99,7 @@ fn collect_unused_function(context: &LintContext, diagnostics: &mut Vec<LintDiag
 
 fn collect_unused_module_var(context: &LintContext, diagnostics: &mut Vec<LintDiagnostic>) {
     for (name, decl) in &context.module_vars {
-        if context.used_module_vars.contains(name) {
+        if context.used_module_vars.contains(name) || context.exported_module_vars.contains(name) {
             continue;
         }
         diagnostics.push(LintDiagnostic::warning(
@@ -111,7 +114,9 @@ fn collect_unused_module_var(context: &LintContext, diagnostics: &mut Vec<LintDi
 
 fn collect_unused_module_const(context: &LintContext, diagnostics: &mut Vec<LintDiagnostic>) {
     for (name, decl) in &context.module_consts {
-        if context.used_module_consts.contains(name) {
+        if context.used_module_consts.contains(name)
+            || context.exported_module_consts.contains(name)
+        {
             continue;
         }
         diagnostics.push(LintDiagnostic::warning(

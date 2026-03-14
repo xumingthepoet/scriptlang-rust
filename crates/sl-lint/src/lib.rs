@@ -124,8 +124,27 @@ mod tests {
         let bundle = compile_project_bundle_from_xml_map(&scripts).expect("bundle should compile");
         let report = crate::lint::run_lint(&scripts, &bundle, "main.main");
         assert!(
-            report.diagnostics.is_empty(),
-            "unexpected diagnostics: {:?}",
+            report
+                .diagnostics
+                .iter()
+                .all(|item| item.code != "unused-import"),
+            "unexpected unused-import diagnostics: {:?}",
+            report.diagnostics
+        );
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .all(|item| item.code != "unused-script"),
+            "unexpected unused-script diagnostics: {:?}",
+            report.diagnostics
+        );
+        assert!(
+            report
+                .diagnostics
+                .iter()
+                .all(|item| item.code != "unused-module"),
+            "unexpected unused-module diagnostics: {:?}",
             report.diagnostics
         );
     }

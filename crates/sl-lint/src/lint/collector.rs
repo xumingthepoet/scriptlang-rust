@@ -67,6 +67,10 @@ pub(crate) struct FunctionBodyDecl {
 pub(crate) struct LintContext {
     pub(crate) modules: BTreeMap<String, ModuleDecl>,
     pub(crate) scripts: BTreeMap<String, NamedDecl>,
+    pub(crate) exported_scripts: HashSet<String>,
+    pub(crate) exported_functions: HashSet<String>,
+    pub(crate) exported_module_vars: HashSet<String>,
+    pub(crate) exported_module_consts: HashSet<String>,
     pub(crate) functions: BTreeMap<String, NamedDecl>,
     pub(crate) function_bodies: BTreeMap<String, FunctionBodyDecl>,
     pub(crate) module_vars: BTreeMap<String, NamedDecl>,
@@ -79,6 +83,7 @@ pub(crate) struct LintContext {
     pub(crate) used_module_vars: HashSet<String>,
     pub(crate) used_module_consts: HashSet<String>,
     pub(crate) used_import_modules_by_file: HashMap<String, HashSet<String>>,
+    pub(crate) alias_symbol_targets: HashSet<String>,
     pub(crate) short_name_candidates: Vec<ShortNameCandidate>,
     pub(crate) unreachable_nodes: Vec<UnreachableNode>,
 }
@@ -90,6 +95,7 @@ pub(crate) fn collect_context(
 ) -> LintContext {
     let mut context = LintContext::default();
     collect_declarations(xml_by_path, &mut context);
+    collect_alias_symbol_usage(&mut context);
     collect_script_usage(bundle, &mut context);
     collect_initializer_usage(bundle, &mut context);
     collect_function_usage(&mut context);
@@ -108,6 +114,7 @@ fn collect_declarations(xml_by_path: &BTreeMap<String, String>, context: &mut Li
         let Some(module_name) = document.root.attributes.get("name").cloned() else {
             continue;
         };
+        collect_exports(&document.root, &module_name, context);
 
         let mut imports = Vec::new();
         for directive in parse_import_directives(source) {
@@ -128,6 +135,7 @@ fn collect_declarations(xml_by_path: &BTreeMap<String, String>, context: &mut Li
                 }
             }
         }
+        track_module_token_uses(file, source, &imports, context);
         for alias in parse_alias_directives(source) {
             if let Some((target_module, _)) = alias.target_qualified_name.split_once('.') {
                 context
@@ -136,6 +144,9 @@ fn collect_declarations(xml_by_path: &BTreeMap<String, String>, context: &mut Li
                     .or_default()
                     .insert(target_module.to_string());
             }
+            context
+                .alias_symbol_targets
+                .insert(alias.target_qualified_name.clone());
         }
 
         context.modules.insert(
@@ -185,6 +196,81 @@ fn collect_declarations(xml_by_path: &BTreeMap<String, String>, context: &mut Li
                 }
                 _ => {}
             }
+        }
+    }
+}
+
+fn track_module_token_uses(
+    file: &str,
+    source: &str,
+    imports: &[ImportDecl],
+    context: &mut LintContext,
+) {
+    let source_without_comments = strip_xml_comments(source);
+    for import in imports {
+        let needle = format!("{}.", import.module_name);
+        if source_without_comments.contains(&needle) {
+            context
+                .used_import_modules_by_file
+                .entry(file.to_string())
+                .or_default()
+                .insert(import.module_name.clone());
+        }
+    }
+}
+
+fn strip_xml_comments(source: &str) -> String {
+    xml_comment_regex().replace_all(source, " ").into_owned()
+}
+
+fn collect_exports(root: &XmlElementNode, module_name: &str, context: &mut LintContext) {
+    let Some(export_attr) = root.attributes.get("export") else {
+        return;
+    };
+    for segment in export_attr.split(';') {
+        let trimmed = segment.trim();
+        let Some((kind, values)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let kind = kind.trim();
+        for item in values.split(',') {
+            let name = item.trim();
+            if name.is_empty() {
+                continue;
+            }
+            let qualified = format!("{}.{}", module_name, name);
+            match kind {
+                "script" => {
+                    context.exported_scripts.insert(qualified);
+                }
+                "function" => {
+                    context.exported_functions.insert(qualified);
+                }
+                "var" => {
+                    context.exported_module_vars.insert(qualified);
+                }
+                "const" => {
+                    context.exported_module_consts.insert(qualified);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn collect_alias_symbol_usage(context: &mut LintContext) {
+    for target in &context.alias_symbol_targets {
+        if context.scripts.contains_key(target) {
+            context.used_scripts.insert(target.clone());
+        }
+        if context.functions.contains_key(target) {
+            context.used_functions.insert(target.clone());
+        }
+        if context.module_vars.contains_key(target) {
+            context.used_module_vars.insert(target.clone());
+        }
+        if context.module_consts.contains_key(target) {
+            context.used_module_consts.insert(target.clone());
         }
     }
 }
@@ -640,13 +726,13 @@ fn mark_function_use(
     name: &str,
     module_name: &str,
     file: &str,
-    span: &SourceSpan,
+    _span: &SourceSpan,
     script: Option<&ScriptIr>,
     context: &mut LintContext,
 ) {
     if context.functions.contains_key(name) {
         context.used_functions.insert(name.to_string());
-        track_module_and_short(name, module_name, file, span, context);
+        track_module_and_short(name, file, context);
         return;
     }
 
@@ -662,7 +748,7 @@ fn mark_function_use(
         if let Some(function) = script.visible_functions.get(name) {
             if context.functions.contains_key(&function.name) {
                 context.used_functions.insert(function.name.clone());
-                track_module_and_short(&function.name, module_name, file, span, context);
+                track_module_and_short(&function.name, file, context);
             }
         }
     }
@@ -672,18 +758,18 @@ fn mark_value_use(
     name: &str,
     module_name: &str,
     file: &str,
-    span: &SourceSpan,
+    _span: &SourceSpan,
     script: Option<&ScriptIr>,
     context: &mut LintContext,
 ) {
     if context.module_vars.contains_key(name) {
         context.used_module_vars.insert(name.to_string());
-        track_module_and_short(name, module_name, file, span, context);
+        track_module_and_short(name, file, context);
         return;
     }
     if context.module_consts.contains_key(name) {
         context.used_module_consts.insert(name.to_string());
-        track_module_and_short(name, module_name, file, span, context);
+        track_module_and_short(name, file, context);
         return;
     }
 
@@ -703,38 +789,30 @@ fn mark_value_use(
     if let Some(script) = script {
         if let Some(decl) = script.visible_module_vars.get(name) {
             context.used_module_vars.insert(decl.qualified_name.clone());
-            track_module_and_short(&decl.qualified_name, module_name, file, span, context);
+            track_module_and_short(&decl.qualified_name, file, context);
         }
         if let Some(decl) = script.visible_module_consts.get(name) {
             context
                 .used_module_consts
                 .insert(decl.qualified_name.clone());
-            track_module_and_short(&decl.qualified_name, module_name, file, span, context);
+            track_module_and_short(&decl.qualified_name, file, context);
         }
     }
 }
 
-fn track_module_and_short(
-    qualified: &str,
-    module_name: &str,
-    file: &str,
-    span: &SourceSpan,
-    context: &mut LintContext,
-) {
+fn track_module_and_short(qualified: &str, file: &str, context: &mut LintContext) {
     if let Some((ns, short)) = qualified.split_once('.') {
         context
             .used_import_modules_by_file
             .entry(file.to_string())
             .or_default()
             .insert(ns.to_string());
-        if ns == module_name {
-            context.short_name_candidates.push(ShortNameCandidate {
-                file: file.to_string(),
-                span: span.clone(),
-                qualified_name: qualified.to_string(),
-                short_name: short.to_string(),
-            });
-        }
+        context.short_name_candidates.push(ShortNameCandidate {
+            file: file.to_string(),
+            span: SourceSpan::synthetic(),
+            qualified_name: qualified.to_string(),
+            short_name: short.to_string(),
+        });
     }
 }
 
@@ -742,7 +820,7 @@ fn mark_script_use(
     raw_script_name: &str,
     module_name: &str,
     file: &str,
-    span: &SourceSpan,
+    _span: &SourceSpan,
     from_script: Option<&str>,
     context: &mut LintContext,
 ) {
@@ -763,14 +841,12 @@ fn mark_script_use(
             .entry(file.to_string())
             .or_default()
             .insert(target_module.to_string());
-        if target_module == module_name {
-            context.short_name_candidates.push(ShortNameCandidate {
-                file: file.to_string(),
-                span: span.clone(),
-                qualified_name: script_name.clone(),
-                short_name: short_name.to_string(),
-            });
-        }
+        context.short_name_candidates.push(ShortNameCandidate {
+            file: file.to_string(),
+            span: SourceSpan::synthetic(),
+            qualified_name: script_name.clone(),
+            short_name: short_name.to_string(),
+        });
     }
 }
 
@@ -917,6 +993,11 @@ fn function_literal_regex() -> &'static Regex {
         Regex::new(r"\*([A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)?)")
             .expect("function literal regex should compile")
     })
+}
+
+fn xml_comment_regex() -> &'static Regex {
+    static REGEX: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r"(?s)<!--.*?-->").expect("xml comment regex should compile"))
 }
 
 fn collect_node_text(node: &XmlElementNode) -> String {
