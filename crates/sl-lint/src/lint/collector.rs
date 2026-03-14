@@ -69,8 +69,6 @@ pub(crate) struct LintContext {
     pub(crate) scripts: BTreeMap<String, NamedDecl>,
     pub(crate) exported_scripts: HashSet<String>,
     pub(crate) exported_functions: HashSet<String>,
-    pub(crate) exported_module_vars: HashSet<String>,
-    pub(crate) exported_module_consts: HashSet<String>,
     pub(crate) functions: BTreeMap<String, NamedDecl>,
     pub(crate) function_bodies: BTreeMap<String, FunctionBodyDecl>,
     pub(crate) module_vars: BTreeMap<String, NamedDecl>,
@@ -357,12 +355,6 @@ fn collect_exports(root: &XmlElementNode, module_name: &str, context: &mut LintC
                 }
                 "function" => {
                     context.exported_functions.insert(qualified);
-                }
-                "var" => {
-                    context.exported_module_vars.insert(qualified);
-                }
-                "const" => {
-                    context.exported_module_consts.insert(qualified);
                 }
                 _ => {}
             }

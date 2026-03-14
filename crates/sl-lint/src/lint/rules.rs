@@ -336,38 +336,6 @@ mod tests {
     }
 
     #[test]
-    fn run_rules_emits_unused_module_var_even_if_exported() {
-        let mut ctx = base_context();
-        ctx.module_vars.insert(
-            "main.hp".to_string(),
-            NamedDecl {
-                name: "hp".to_string(),
-                file: "main.xml".to_string(),
-                span: SourceSpan::synthetic(),
-            },
-        );
-        ctx.exported_module_vars.insert("main.hp".to_string());
-        let result = run_rules(&ctx);
-        assert!(result.iter().any(|d| d.code == "unused-module-var"));
-    }
-
-    #[test]
-    fn run_rules_emits_unused_module_const_even_if_exported() {
-        let mut ctx = base_context();
-        ctx.module_consts.insert(
-            "main.BASE".to_string(),
-            NamedDecl {
-                name: "BASE".to_string(),
-                file: "main.xml".to_string(),
-                span: SourceSpan::synthetic(),
-            },
-        );
-        ctx.exported_module_consts.insert("main.BASE".to_string());
-        let result = run_rules(&ctx);
-        assert!(result.iter().any(|d| d.code == "unused-module-const"));
-    }
-
-    #[test]
     fn run_rules_emits_unused_param_and_local_var() {
         let mut ctx = base_context();
         ctx.script_locals.insert(

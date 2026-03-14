@@ -1674,14 +1674,6 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
     Ok(functions)
 }
 
-#[cfg(test)]
-pub(crate) fn collect_module_vars_for_bundle(
-    module_by_path: &BTreeMap<String, ModuleDeclarations>,
-    visible_functions: &BTreeMap<String, FunctionDecl>,
-) -> Result<(BTreeMap<String, ModuleVarDecl>, Vec<String>), ScriptLangError> {
-    collect_module_vars_for_bundle_with_aliases(module_by_path, visible_functions, &BTreeMap::new())
-}
-
 pub(crate) fn collect_module_vars_for_bundle_with_aliases(
     module_by_path: &BTreeMap<String, ModuleDeclarations>,
     visible_functions: &BTreeMap<String, FunctionDecl>,
@@ -1832,20 +1824,6 @@ pub(crate) fn collect_module_vars_for_bundle_with_aliases(
 
     validate_module_var_init_order(&module_vars, &init_order)?;
     Ok((module_vars, init_order))
-}
-
-#[cfg(test)]
-pub(crate) fn collect_module_consts_for_bundle(
-    module_by_path: &BTreeMap<String, ModuleDeclarations>,
-    module_vars: &BTreeMap<String, ModuleVarDecl>,
-    visible_functions: &BTreeMap<String, FunctionDecl>,
-) -> Result<(BTreeMap<String, ModuleConstDecl>, Vec<String>), ScriptLangError> {
-    collect_module_consts_for_bundle_with_aliases(
-        module_by_path,
-        module_vars,
-        visible_functions,
-        &BTreeMap::new(),
-    )
 }
 
 pub(crate) fn collect_module_consts_for_bundle_with_aliases(
@@ -3625,9 +3603,12 @@ mod module_resolver_tests {
                 module_global_const_decls: Vec::new(),
             },
         )]);
-        let (bundle_globals, init_order) =
-            collect_module_vars_for_bundle(&module_for_bundle, &BTreeMap::new())
-                .expect("bundle alias should resolve");
+        let (bundle_globals, init_order) = collect_module_vars_for_bundle_with_aliases(
+            &module_for_bundle,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("bundle alias should resolve");
         assert!(bundle_globals.contains_key("bundle.item"));
         assert_eq!(init_order, vec!["bundle.item".to_string()]);
 
@@ -3816,8 +3797,12 @@ mod module_resolver_tests {
             .expect_err("module global type should resolve");
         assert_eq!(error.code, "TYPE_UNKNOWN");
 
-        let bundle_error = collect_module_vars_for_bundle(&bad_global_type, &BTreeMap::new())
-            .expect_err("bundle module global type should resolve");
+        let bundle_error = collect_module_vars_for_bundle_with_aliases(
+            &bad_global_type,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect_err("bundle module global type should resolve");
         assert_eq!(bundle_error.code, "TYPE_UNKNOWN");
 
         assert_eq!(
@@ -4349,9 +4334,13 @@ mod module_resolver_tests {
                 },
             ),
         ]);
-        let duplicate_error =
-            collect_module_consts_for_bundle(&duplicate, &module_vars, &BTreeMap::new())
-                .expect_err("duplicate const should fail");
+        let duplicate_error = collect_module_consts_for_bundle_with_aliases(
+            &duplicate,
+            &module_vars,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect_err("duplicate const should fail");
         assert_eq!(duplicate_error.code, "MODULE_GLOBAL_CONST_DUPLICATE");
 
         let bad_order = BTreeMap::from([(
@@ -4382,9 +4371,13 @@ mod module_resolver_tests {
                 ],
             },
         )]);
-        let order_error =
-            collect_module_consts_for_bundle(&bad_order, &module_vars, &BTreeMap::new())
-                .expect_err("forward const reference should fail");
+        let order_error = collect_module_consts_for_bundle_with_aliases(
+            &bad_order,
+            &module_vars,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect_err("forward const reference should fail");
         assert_eq!(order_error.code, "MODULE_CONST_INIT_ORDER");
     }
 
@@ -4458,9 +4451,13 @@ mod module_resolver_tests {
             ),
         ]);
         let module_vars = BTreeMap::new();
-        let error =
-            collect_module_consts_for_bundle(&module_by_path, &module_vars, &BTreeMap::new())
-                .expect_err("duplicate type should fail");
+        let error = collect_module_consts_for_bundle_with_aliases(
+            &module_by_path,
+            &module_vars,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect_err("duplicate type should fail");
         assert_eq!(error.code, "TYPE_DECL_DUPLICATE");
     }
 
@@ -4884,8 +4881,12 @@ mod module_resolver_tests {
             ("a.xml".to_string(), module1),
             ("b.xml".to_string(), module2),
         ]);
-        let error = collect_module_vars_for_bundle(&module_by_path, &BTreeMap::new())
-            .expect_err("duplicate type should fail");
+        let error = collect_module_vars_for_bundle_with_aliases(
+            &module_by_path,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect_err("duplicate type should fail");
         assert_eq!(error.code, "TYPE_DECL_DUPLICATE");
     }
 
@@ -4912,8 +4913,12 @@ mod module_resolver_tests {
             module_global_const_decls: Vec::new(),
         };
         let module_by_path = BTreeMap::from([("a.xml".to_string(), module)]);
-        let error = collect_module_vars_for_bundle(&module_by_path, &BTreeMap::new())
-            .expect_err("invalid type should fail");
+        let error = collect_module_vars_for_bundle_with_aliases(
+            &module_by_path,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect_err("invalid type should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
     }
 
@@ -4971,9 +4976,12 @@ mod module_resolver_tests {
             ("b.xml".to_string(), module_b),
         ]);
 
-        let (module_vars, _init_order) =
-            collect_module_vars_for_bundle(&module_by_path, &BTreeMap::new())
-                .expect("module vars should resolve local short enum types");
+        let (module_vars, _init_order) = collect_module_vars_for_bundle_with_aliases(
+            &module_by_path,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("module vars should resolve local short enum types");
 
         let var_a = module_vars
             .get("event_a.next_phase")
@@ -5017,9 +5025,13 @@ mod module_resolver_tests {
             module_global_const_decls: Vec::new(),
         };
         let module_by_path = BTreeMap::from([("a.xml".to_string(), module)]);
-        let error =
-            collect_module_consts_for_bundle(&module_by_path, &BTreeMap::new(), &BTreeMap::new())
-                .expect_err("invalid type should fail");
+        let error = collect_module_consts_for_bundle_with_aliases(
+            &module_by_path,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect_err("invalid type should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
     }
 
@@ -5077,9 +5089,13 @@ mod module_resolver_tests {
             ("b.xml".to_string(), module_b),
         ]);
 
-        let (module_consts, _init_order) =
-            collect_module_consts_for_bundle(&module_by_path, &BTreeMap::new(), &BTreeMap::new())
-                .expect("module consts should resolve local short enum types");
+        let (module_consts, _init_order) = collect_module_consts_for_bundle_with_aliases(
+            &module_by_path,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+        )
+        .expect("module consts should resolve local short enum types");
 
         let const_a = module_consts
             .get("event_a.next_phase")
