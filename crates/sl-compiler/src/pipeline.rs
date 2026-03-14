@@ -29,12 +29,18 @@ pub fn compile_project_bundle_from_xml_map(
         &module_alias_directives_by_namespace,
     )?;
     let (module_var_declarations, module_var_init_order) =
-        collect_module_vars_for_bundle(&module_by_path, &invoke_all_functions)?;
-    let (module_const_declarations, module_const_init_order) = collect_module_consts_for_bundle(
-        &module_by_path,
-        &module_var_declarations,
-        &invoke_all_functions,
-    )?;
+        collect_module_vars_for_bundle_with_aliases(
+            &module_by_path,
+            &invoke_all_functions,
+            &module_alias_directives_by_namespace,
+        )?;
+    let (module_const_declarations, module_const_init_order) =
+        collect_module_consts_for_bundle_with_aliases(
+            &module_by_path,
+            &module_var_declarations,
+            &invoke_all_functions,
+            &module_alias_directives_by_namespace,
+        )?;
 
     let mut scripts = BTreeMap::new();
     let mut reachable_cache = HashMap::new();

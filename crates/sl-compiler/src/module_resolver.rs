@@ -1450,6 +1450,7 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
 ) -> Result<BTreeMap<String, FunctionDecl>, ScriptLangError> {
     let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
     let mut type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut namespace_type_aliases: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
     for module in module_by_path.values() {
         for decl in &module.type_decls {
             if type_decls_map.contains_key(&decl.qualified_name) {
@@ -1464,6 +1465,12 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
                 .entry(decl.name.clone())
                 .or_default()
                 .push(decl.qualified_name.clone());
+            if let Some((namespace, _)) = decl.qualified_name.split_once('.') {
+                namespace_type_aliases
+                    .entry(namespace.to_string())
+                    .or_default()
+                    .insert(decl.name.clone(), decl.qualified_name.clone());
+            }
         }
     }
 
@@ -1478,13 +1485,36 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
         })
         .collect::<BTreeMap<_, _>>();
 
+    let module_scoped_explicit_type_aliases = collect_module_explicit_visible_type_aliases(
+        module_alias_directives_by_namespace,
+        &type_decls_map,
+    )?;
     let mut resolved_types: BTreeMap<String, ScriptType> = BTreeMap::new();
     let mut visiting = HashSet::new();
     for type_name in type_decls_map.keys() {
+        let namespace = type_name
+            .split_once('.')
+            .map(|(namespace, _)| namespace)
+            .unwrap_or_default();
+        let mut aliases = type_aliases.clone();
+        if let Some(namespace_aliases) = namespace_type_aliases.get(namespace) {
+            for (alias, qualified_name) in namespace_aliases {
+                aliases
+                    .entry(alias.clone())
+                    .or_insert_with(|| qualified_name.clone());
+            }
+        }
+        if let Some(module_scoped_aliases) = module_scoped_explicit_type_aliases.get(namespace) {
+            for (alias, qualified_name) in module_scoped_aliases {
+                aliases
+                    .entry(alias.clone())
+                    .or_insert_with(|| qualified_name.clone());
+            }
+        }
         resolve_named_type_with_aliases(
             type_name,
             &type_decls_map,
-            &type_aliases,
+            &aliases,
             &mut resolved_types,
             &mut visiting,
         )?;
@@ -1534,6 +1564,16 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
                 .split_once('.')
                 .map(|(namespace, _)| namespace)
                 .unwrap_or_default();
+            let visible_types_in_scope = visible_types_for_namespace(
+                &visible_types,
+                &namespace_type_aliases,
+                function_namespace,
+            );
+            let visible_types_in_scope = visible_types_with_namespace_type_aliases(
+                &visible_types_in_scope,
+                &resolved_types,
+                module_scoped_explicit_type_aliases.get(function_namespace),
+            );
 
             let mut params = Vec::new();
             for param in &decl.params {
@@ -1541,7 +1581,7 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
                     name: param.name.clone(),
                     r#type: resolve_type_expr_in_namespace(
                         &param.type_expr,
-                        &visible_types,
+                        &visible_types_in_scope,
                         function_namespace,
                         &param.location,
                     )?,
@@ -1551,7 +1591,7 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
 
             let return_type = resolve_type_expr_in_namespace(
                 &decl.return_decl.type_expr,
-                &visible_types,
+                &visible_types_in_scope,
                 function_namespace,
                 &decl.return_decl.location,
             )?;
@@ -1581,7 +1621,7 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
             )?;
             let normalized_code = rewrite_and_validate_enum_literals_in_expression(
                 &function_rewritten_code,
-                &visible_types,
+                &visible_types_in_scope,
                 &decl.location,
             )?;
             let runtime_rewrite_map = runtime_module_global_rewrite_map_from_targets(
@@ -1634,9 +1674,18 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
     Ok(functions)
 }
 
+#[cfg(test)]
 pub(crate) fn collect_module_vars_for_bundle(
     module_by_path: &BTreeMap<String, ModuleDeclarations>,
     visible_functions: &BTreeMap<String, FunctionDecl>,
+) -> Result<(BTreeMap<String, ModuleVarDecl>, Vec<String>), ScriptLangError> {
+    collect_module_vars_for_bundle_with_aliases(module_by_path, visible_functions, &BTreeMap::new())
+}
+
+pub(crate) fn collect_module_vars_for_bundle_with_aliases(
+    module_by_path: &BTreeMap<String, ModuleDeclarations>,
+    visible_functions: &BTreeMap<String, FunctionDecl>,
+    module_alias_directives_by_namespace: &BTreeMap<String, Vec<AliasDirective>>,
 ) -> Result<(BTreeMap<String, ModuleVarDecl>, Vec<String>), ScriptLangError> {
     let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
     let mut type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -1676,13 +1725,36 @@ pub(crate) fn collect_module_vars_for_bundle(
         })
         .collect::<BTreeMap<_, _>>();
 
+    let module_scoped_explicit_type_aliases = collect_module_explicit_visible_type_aliases(
+        module_alias_directives_by_namespace,
+        &type_decls_map,
+    )?;
     let mut resolved_types: BTreeMap<String, ScriptType> = BTreeMap::new();
     let mut visiting = HashSet::new();
     for type_name in type_decls_map.keys() {
+        let namespace = type_name
+            .split_once('.')
+            .map(|(namespace, _)| namespace)
+            .unwrap_or_default();
+        let mut aliases = type_aliases.clone();
+        if let Some(namespace_aliases) = namespace_type_aliases.get(namespace) {
+            for (alias, qualified_name) in namespace_aliases {
+                aliases
+                    .entry(alias.clone())
+                    .or_insert_with(|| qualified_name.clone());
+            }
+        }
+        if let Some(module_scoped_aliases) = module_scoped_explicit_type_aliases.get(namespace) {
+            for (alias, qualified_name) in module_scoped_aliases {
+                aliases
+                    .entry(alias.clone())
+                    .or_insert_with(|| qualified_name.clone());
+            }
+        }
         resolve_named_type_with_aliases(
             type_name,
             &type_decls_map,
-            &type_aliases,
+            &aliases,
             &mut resolved_types,
             &mut visiting,
         )?;
@@ -1718,6 +1790,11 @@ pub(crate) fn collect_module_vars_for_bundle(
                     &visible_types,
                     &namespace_type_aliases,
                     &decl.namespace,
+                );
+                let local_visible_types = visible_types_with_namespace_type_aliases(
+                    &local_visible_types,
+                    &resolved_types,
+                    module_scoped_explicit_type_aliases.get(&decl.namespace),
                 );
                 let resolved_type = resolve_type_expr_in_namespace(
                     &decl.type_expr,
@@ -1757,10 +1834,25 @@ pub(crate) fn collect_module_vars_for_bundle(
     Ok((module_vars, init_order))
 }
 
+#[cfg(test)]
 pub(crate) fn collect_module_consts_for_bundle(
     module_by_path: &BTreeMap<String, ModuleDeclarations>,
     module_vars: &BTreeMap<String, ModuleVarDecl>,
     visible_functions: &BTreeMap<String, FunctionDecl>,
+) -> Result<(BTreeMap<String, ModuleConstDecl>, Vec<String>), ScriptLangError> {
+    collect_module_consts_for_bundle_with_aliases(
+        module_by_path,
+        module_vars,
+        visible_functions,
+        &BTreeMap::new(),
+    )
+}
+
+pub(crate) fn collect_module_consts_for_bundle_with_aliases(
+    module_by_path: &BTreeMap<String, ModuleDeclarations>,
+    module_vars: &BTreeMap<String, ModuleVarDecl>,
+    visible_functions: &BTreeMap<String, FunctionDecl>,
+    module_alias_directives_by_namespace: &BTreeMap<String, Vec<AliasDirective>>,
 ) -> Result<(BTreeMap<String, ModuleConstDecl>, Vec<String>), ScriptLangError> {
     let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
     let mut type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -1800,13 +1892,36 @@ pub(crate) fn collect_module_consts_for_bundle(
         })
         .collect::<BTreeMap<_, _>>();
 
+    let module_scoped_explicit_type_aliases = collect_module_explicit_visible_type_aliases(
+        module_alias_directives_by_namespace,
+        &type_decls_map,
+    )?;
     let mut resolved_types: BTreeMap<String, ScriptType> = BTreeMap::new();
     let mut visiting = HashSet::new();
     for type_name in type_decls_map.keys() {
+        let namespace = type_name
+            .split_once('.')
+            .map(|(namespace, _)| namespace)
+            .unwrap_or_default();
+        let mut aliases = type_aliases.clone();
+        if let Some(namespace_aliases) = namespace_type_aliases.get(namespace) {
+            for (alias, qualified_name) in namespace_aliases {
+                aliases
+                    .entry(alias.clone())
+                    .or_insert_with(|| qualified_name.clone());
+            }
+        }
+        if let Some(module_scoped_aliases) = module_scoped_explicit_type_aliases.get(namespace) {
+            for (alias, qualified_name) in module_scoped_aliases {
+                aliases
+                    .entry(alias.clone())
+                    .or_insert_with(|| qualified_name.clone());
+            }
+        }
         resolve_named_type_with_aliases(
             type_name,
             &type_decls_map,
-            &type_aliases,
+            &aliases,
             &mut resolved_types,
             &mut visiting,
         )?;
@@ -1842,6 +1957,11 @@ pub(crate) fn collect_module_consts_for_bundle(
                     &visible_types,
                     &namespace_type_aliases,
                     &decl.namespace,
+                );
+                let local_visible_types = visible_types_with_namespace_type_aliases(
+                    &local_visible_types,
+                    &resolved_types,
+                    module_scoped_explicit_type_aliases.get(&decl.namespace),
                 );
                 let resolved_type = resolve_type_expr_in_namespace(
                     &decl.type_expr,
@@ -5832,5 +5952,84 @@ mod module_resolver_tests {
         )
         .expect_err("explicit alias conflicting with namespace alias should fail");
         assert_eq!(error.code, "ALIAS_NAME_CONFLICT");
+    }
+
+    #[test]
+    fn collect_functions_for_bundle_resolves_module_scoped_type_alias_when_short_name_ambiguous() {
+        let span = SourceSpan::synthetic();
+        let ids_module = ModuleDeclarations {
+            type_decls: vec![ParsedTypeDecl {
+                name: "MessageKey".to_string(),
+                qualified_name: "ids.MessageKey".to_string(),
+                access: AccessLevel::Public,
+                fields: Vec::new(),
+                enum_members: vec!["Ping".to_string()],
+                location: span.clone(),
+            }],
+            function_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: Vec::new(),
+        };
+        let ids1_module = ModuleDeclarations {
+            type_decls: vec![ParsedTypeDecl {
+                name: "MessageKey".to_string(),
+                qualified_name: "ids1.MessageKey".to_string(),
+                access: AccessLevel::Public,
+                fields: Vec::new(),
+                enum_members: vec!["Ping".to_string()],
+                location: span.clone(),
+            }],
+            function_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: Vec::new(),
+        };
+        let event_system_module = ModuleDeclarations {
+            type_decls: Vec::new(),
+            function_decls: vec![ParsedFunctionDecl {
+                name: "notify".to_string(),
+                qualified_name: "event_system.notify".to_string(),
+                access: AccessLevel::Public,
+                params: vec![ParsedFunctionParamDecl {
+                    name: "message_key".to_string(),
+                    type_expr: ParsedTypeExpr::Custom("MessageKey".to_string()),
+                    location: span.clone(),
+                }],
+                return_decl: ParsedFunctionReturnDecl {
+                    type_expr: ParsedTypeExpr::Primitive("boolean".to_string()),
+                    location: span.clone(),
+                },
+                code: "ret = message_key == MessageKey.Ping;".to_string(),
+                location: span.clone(),
+            }],
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: Vec::new(),
+        };
+        let module_by_path = BTreeMap::from([
+            ("ids.xml".to_string(), ids_module),
+            ("ids1.xml".to_string(), ids1_module),
+            ("event_system.xml".to_string(), event_system_module),
+        ]);
+
+        let module_alias_directives_by_namespace = BTreeMap::from([(
+            "event_system".to_string(),
+            vec![AliasDirective {
+                target_qualified_name: "ids.MessageKey".to_string(),
+                alias_name: "MessageKey".to_string(),
+            }],
+        )]);
+
+        let functions = collect_functions_for_bundle_with_aliases(
+            &module_by_path,
+            &module_alias_directives_by_namespace,
+        )
+        .expect("module-scoped type alias should disambiguate short type name");
+
+        let notify = functions
+            .get("event_system.notify")
+            .expect("event_system.notify should exist");
+        assert!(matches!(
+            notify.params[0].r#type,
+            ScriptType::Enum { ref type_name, .. } if type_name == "ids.MessageKey"
+        ));
     }
 }
