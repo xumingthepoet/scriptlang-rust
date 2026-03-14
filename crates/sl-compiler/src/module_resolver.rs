@@ -509,6 +509,24 @@ fn merge_namespace_module_symbol_aliases(
     Ok(())
 }
 
+fn visible_types_for_namespace(
+    visible_types: &BTreeMap<String, ScriptType>,
+    namespace_type_aliases: &BTreeMap<String, BTreeMap<String, String>>,
+    namespace: &str,
+) -> BTreeMap<String, ScriptType> {
+    let mut local_visible_types = visible_types.clone();
+    let Some(aliases) = namespace_type_aliases.get(namespace) else {
+        return local_visible_types;
+    };
+    for (alias, qualified_name) in aliases {
+        let Some(ty) = visible_types.get(qualified_name).cloned() else {
+            continue;
+        };
+        local_visible_types.insert(alias.clone(), ty);
+    }
+    local_visible_types
+}
+
 fn namespace_alias_rewrite_map(
     namespace_aliases_by_namespace: &BTreeMap<String, BTreeMap<String, String>>,
     namespace: &str,
@@ -1622,6 +1640,7 @@ pub(crate) fn collect_module_vars_for_bundle(
 ) -> Result<(BTreeMap<String, ModuleVarDecl>, Vec<String>), ScriptLangError> {
     let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
     let mut type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut namespace_type_aliases: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
 
     for module in module_by_path.values() {
         for decl in &module.type_decls {
@@ -1637,6 +1656,12 @@ pub(crate) fn collect_module_vars_for_bundle(
                 .entry(decl.name.clone())
                 .or_default()
                 .push(decl.qualified_name.clone());
+            if let Some((namespace, _)) = decl.qualified_name.split_once('.') {
+                namespace_type_aliases
+                    .entry(namespace.to_string())
+                    .or_default()
+                    .insert(decl.name.clone(), decl.qualified_name.clone());
+            }
         }
     }
 
@@ -1689,8 +1714,17 @@ pub(crate) fn collect_module_vars_for_bundle(
                 ));
             }
             module_vars.insert(decl.qualified_name.clone(), {
-                let resolved_type =
-                    resolve_type_expr(&decl.type_expr, &visible_types, &decl.location)?;
+                let local_visible_types = visible_types_for_namespace(
+                    &visible_types,
+                    &namespace_type_aliases,
+                    &decl.namespace,
+                );
+                let resolved_type = resolve_type_expr_in_namespace(
+                    &decl.type_expr,
+                    &local_visible_types,
+                    &decl.namespace,
+                    &decl.location,
+                )?;
                 let alias_rewrite_map = namespace_alias_rewrite_map(
                     &namespace_aliases_by_namespace,
                     &decl.namespace,
@@ -1700,7 +1734,7 @@ pub(crate) fn collect_module_vars_for_bundle(
                     &decl.initial_value_expr,
                     &resolved_type,
                     &alias_rewrite_map,
-                    &visible_types,
+                    &local_visible_types,
                     visible_functions,
                     &decl.namespace,
                     &decl.location,
@@ -1730,6 +1764,7 @@ pub(crate) fn collect_module_consts_for_bundle(
 ) -> Result<(BTreeMap<String, ModuleConstDecl>, Vec<String>), ScriptLangError> {
     let mut type_decls_map: BTreeMap<String, ParsedTypeDecl> = BTreeMap::new();
     let mut type_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut namespace_type_aliases: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
 
     for module in module_by_path.values() {
         for decl in &module.type_decls {
@@ -1745,6 +1780,12 @@ pub(crate) fn collect_module_consts_for_bundle(
                 .entry(decl.name.clone())
                 .or_default()
                 .push(decl.qualified_name.clone());
+            if let Some((namespace, _)) = decl.qualified_name.split_once('.') {
+                namespace_type_aliases
+                    .entry(namespace.to_string())
+                    .or_default()
+                    .insert(decl.name.clone(), decl.qualified_name.clone());
+            }
         }
     }
 
@@ -1797,8 +1838,17 @@ pub(crate) fn collect_module_consts_for_bundle(
                 ));
             }
             module_consts.insert(decl.qualified_name.clone(), {
-                let resolved_type =
-                    resolve_type_expr(&decl.type_expr, &visible_types, &decl.location)?;
+                let local_visible_types = visible_types_for_namespace(
+                    &visible_types,
+                    &namespace_type_aliases,
+                    &decl.namespace,
+                );
+                let resolved_type = resolve_type_expr_in_namespace(
+                    &decl.type_expr,
+                    &local_visible_types,
+                    &decl.namespace,
+                    &decl.location,
+                )?;
                 let alias_rewrite_map = namespace_alias_rewrite_map(
                     &namespace_aliases_by_namespace,
                     &decl.namespace,
@@ -1808,7 +1858,7 @@ pub(crate) fn collect_module_consts_for_bundle(
                     &decl.initial_value_expr,
                     &resolved_type,
                     &alias_rewrite_map,
-                    &visible_types,
+                    &local_visible_types,
                     visible_functions,
                     &decl.namespace,
                     &decl.location,
@@ -3254,6 +3304,23 @@ mod module_resolver_tests {
         let error = parse_module_files(&sources).expect_err("duplicate enum member should fail");
         assert_eq!(error.code, "ENUM_MEMBER_DUPLICATE");
         assert!(error.message.contains("In file \"bad-enum.xml\":"));
+
+        let qualified_enum_name = BTreeMap::from([(
+            "bad-qualified-enum.xml".to_string(),
+            r#"<module name="bad" export="enum:Status">
+<enum name="bad.Status">
+  <member name="Active"/>
+</enum>
+</module>"#
+                .to_string(),
+        )]);
+        let qualified_sources = parse_sources(&qualified_enum_name).expect("parse sources");
+        let qualified_error =
+            parse_module_files(&qualified_sources).expect_err("qualified enum name should fail");
+        assert_eq!(qualified_error.code, "NAME_IDENTIFIER_INVALID");
+        assert!(qualified_error
+            .message
+            .contains("In file \"bad-qualified-enum.xml\":"));
     }
 
     #[test]
@@ -4731,6 +4798,83 @@ mod module_resolver_tests {
     }
 
     #[test]
+    fn collect_module_vars_for_bundle_resolves_local_short_enum_type_with_duplicate_names() {
+        let span = SourceSpan::synthetic();
+        let enum_a = ParsedTypeDecl {
+            name: "FollowupPhase".to_string(),
+            qualified_name: "event_a.FollowupPhase".to_string(),
+            access: AccessLevel::Private,
+            fields: Vec::new(),
+            enum_members: vec!["Phase2".to_string(), "Phase3".to_string()],
+            location: span.clone(),
+        };
+        let enum_b = ParsedTypeDecl {
+            name: "FollowupPhase".to_string(),
+            qualified_name: "event_b.FollowupPhase".to_string(),
+            access: AccessLevel::Private,
+            fields: Vec::new(),
+            enum_members: vec!["Phase2".to_string(), "Phase3".to_string()],
+            location: span.clone(),
+        };
+
+        let module_a = ModuleDeclarations {
+            type_decls: vec![enum_a],
+            function_decls: Vec::new(),
+            module_global_var_decls: vec![ParsedModuleVarDecl {
+                namespace: "event_a".to_string(),
+                name: "next_phase".to_string(),
+                qualified_name: "event_a.next_phase".to_string(),
+                access: AccessLevel::Private,
+                type_expr: ParsedTypeExpr::Custom("FollowupPhase".to_string()),
+                initial_value_expr: Some("FollowupPhase.Phase2".to_string()),
+                location: span.clone(),
+            }],
+            module_global_const_decls: Vec::new(),
+        };
+        let module_b = ModuleDeclarations {
+            type_decls: vec![enum_b],
+            function_decls: Vec::new(),
+            module_global_var_decls: vec![ParsedModuleVarDecl {
+                namespace: "event_b".to_string(),
+                name: "next_phase".to_string(),
+                qualified_name: "event_b.next_phase".to_string(),
+                access: AccessLevel::Private,
+                type_expr: ParsedTypeExpr::Custom("FollowupPhase".to_string()),
+                initial_value_expr: Some("FollowupPhase.Phase3".to_string()),
+                location: span.clone(),
+            }],
+            module_global_const_decls: Vec::new(),
+        };
+
+        let module_by_path = BTreeMap::from([
+            ("a.xml".to_string(), module_a),
+            ("b.xml".to_string(), module_b),
+        ]);
+
+        let (module_vars, _init_order) =
+            collect_module_vars_for_bundle(&module_by_path, &BTreeMap::new())
+                .expect("module vars should resolve local short enum types");
+
+        let var_a = module_vars
+            .get("event_a.next_phase")
+            .expect("event_a.next_phase should exist");
+        let var_b = module_vars
+            .get("event_b.next_phase")
+            .expect("event_b.next_phase should exist");
+
+        assert!(matches!(
+            var_a.r#type,
+            ScriptType::Enum { ref type_name, .. } if type_name == "event_a.FollowupPhase"
+        ));
+        assert!(matches!(
+            var_b.r#type,
+            ScriptType::Enum { ref type_name, .. } if type_name == "event_b.FollowupPhase"
+        ));
+        assert_eq!(var_a.initial_value_expr.as_deref(), Some("\"Phase2\""));
+        assert_eq!(var_b.initial_value_expr.as_deref(), Some("\"Phase3\""));
+    }
+
+    #[test]
     fn collect_module_consts_for_bundle_rejects_recursive_type() {
         let span = SourceSpan::synthetic();
         // Type that references a non-existent type
@@ -4757,6 +4901,83 @@ mod module_resolver_tests {
             collect_module_consts_for_bundle(&module_by_path, &BTreeMap::new(), &BTreeMap::new())
                 .expect_err("invalid type should fail");
         assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
+
+    #[test]
+    fn collect_module_consts_for_bundle_resolves_local_short_enum_type_with_duplicate_names() {
+        let span = SourceSpan::synthetic();
+        let enum_a = ParsedTypeDecl {
+            name: "FollowupPhase".to_string(),
+            qualified_name: "event_a.FollowupPhase".to_string(),
+            access: AccessLevel::Private,
+            fields: Vec::new(),
+            enum_members: vec!["Phase2".to_string(), "Phase3".to_string()],
+            location: span.clone(),
+        };
+        let enum_b = ParsedTypeDecl {
+            name: "FollowupPhase".to_string(),
+            qualified_name: "event_b.FollowupPhase".to_string(),
+            access: AccessLevel::Private,
+            fields: Vec::new(),
+            enum_members: vec!["Phase2".to_string(), "Phase3".to_string()],
+            location: span.clone(),
+        };
+
+        let module_a = ModuleDeclarations {
+            type_decls: vec![enum_a],
+            function_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: vec![ParsedModuleConstDecl {
+                namespace: "event_a".to_string(),
+                name: "next_phase".to_string(),
+                qualified_name: "event_a.next_phase".to_string(),
+                access: AccessLevel::Private,
+                type_expr: ParsedTypeExpr::Custom("FollowupPhase".to_string()),
+                initial_value_expr: Some("FollowupPhase.Phase2".to_string()),
+                location: span.clone(),
+            }],
+        };
+        let module_b = ModuleDeclarations {
+            type_decls: vec![enum_b],
+            function_decls: Vec::new(),
+            module_global_var_decls: Vec::new(),
+            module_global_const_decls: vec![ParsedModuleConstDecl {
+                namespace: "event_b".to_string(),
+                name: "next_phase".to_string(),
+                qualified_name: "event_b.next_phase".to_string(),
+                access: AccessLevel::Private,
+                type_expr: ParsedTypeExpr::Custom("FollowupPhase".to_string()),
+                initial_value_expr: Some("FollowupPhase.Phase3".to_string()),
+                location: span.clone(),
+            }],
+        };
+
+        let module_by_path = BTreeMap::from([
+            ("a.xml".to_string(), module_a),
+            ("b.xml".to_string(), module_b),
+        ]);
+
+        let (module_consts, _init_order) =
+            collect_module_consts_for_bundle(&module_by_path, &BTreeMap::new(), &BTreeMap::new())
+                .expect("module consts should resolve local short enum types");
+
+        let const_a = module_consts
+            .get("event_a.next_phase")
+            .expect("event_a.next_phase const should exist");
+        let const_b = module_consts
+            .get("event_b.next_phase")
+            .expect("event_b.next_phase const should exist");
+
+        assert!(matches!(
+            const_a.r#type,
+            ScriptType::Enum { ref type_name, .. } if type_name == "event_a.FollowupPhase"
+        ));
+        assert!(matches!(
+            const_b.r#type,
+            ScriptType::Enum { ref type_name, .. } if type_name == "event_b.FollowupPhase"
+        ));
+        assert_eq!(const_a.initial_value_expr.as_deref(), Some("\"Phase2\""));
+        assert_eq!(const_b.initial_value_expr.as_deref(), Some("\"Phase3\""));
     }
 
     #[test]

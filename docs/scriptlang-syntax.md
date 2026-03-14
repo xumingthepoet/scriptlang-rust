@@ -46,6 +46,7 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 - 跨 module import 只能访问对方在 `export` 中声明的元素；未导出的元素仅在本 module 内可见。
 - 宿主入口脚本必须在 `export` 中声明；未导出脚本不能作为 entry。
 - 声明名（`script/type/enum/field/member/function/args/return/var/const/temp/dynamic-options item/index`）会在编译期做 Rhai 关键字冲突检查，命中时报 `NAME_RHAI_KEYWORD_RESERVED`（大小写敏感）。
+- 声明名必须是单段标识符（`[A-Za-z_][A-Za-z0-9_]*`），不允许在声明位使用限定名（例如 `<enum name="main.State">` 非法）。
 - 当前约束：`module name` 仅做 `__` 前缀保留检查，不参与 Rhai 关键字冲突拦截。
 
 ## 2. import 语法

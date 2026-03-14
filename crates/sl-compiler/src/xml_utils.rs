@@ -123,6 +123,11 @@ pub(crate) fn type_name_regex() -> &'static Regex {
     })
 }
 
+pub(crate) fn decl_name_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").expect("decl regex must compile"))
+}
+
 pub(crate) fn parse_args(raw: Option<String>) -> Result<Vec<CallArgument>, ScriptLangError> {
     let Some(raw) = raw else {
         return Ok(Vec::new());
@@ -303,6 +308,16 @@ pub(crate) fn assert_decl_name_not_reserved_or_rhai_keyword(
     span: SourceSpan,
 ) -> Result<(), ScriptLangError> {
     assert_name_not_reserved(name, label, span.clone())?;
+    if !decl_name_regex().is_match(name) {
+        return Err(ScriptLangError::with_span(
+            "NAME_IDENTIFIER_INVALID",
+            format!(
+                "Name \"{}\" for {} must be a single identifier (letters/digits/underscore only, no dot).",
+                name, label
+            ),
+            span,
+        ));
+    }
     if !rhai_decl_name_conflicts_keyword(name) {
         return Ok(());
     }
@@ -318,7 +333,7 @@ pub(crate) fn assert_decl_name_not_reserved_or_rhai_keyword(
 }
 
 fn rhai_decl_name_conflicts_keyword(name: &str) -> bool {
-    name.split('.').any(is_rhai_reserved_keyword)
+    is_rhai_reserved_keyword(name)
 }
 
 fn is_rhai_reserved_keyword(name: &str) -> bool {
@@ -1852,5 +1867,17 @@ mod xml_utils_tests {
 
         assert_decl_name_not_reserved_or_rhai_keyword("Shared", "var", span)
             .expect("capitalized variant should pass");
+    }
+
+    #[test]
+    fn declaration_name_rejects_qualified_identifier() {
+        let span = SourceSpan::synthetic();
+        let err = assert_decl_name_not_reserved_or_rhai_keyword(
+            "event_bandit_ambush.FollowupPhase",
+            "enum",
+            span,
+        )
+        .expect_err("qualified declaration name should fail");
+        assert_eq!(err.code, "NAME_IDENTIFIER_INVALID");
     }
 }

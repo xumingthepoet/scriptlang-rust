@@ -1,0 +1,10 @@
+<module name="main" export="script:main;enum:FollowupPhase">
+  <enum name="main.FollowupPhase">
+    <member name="Phase2"/>
+    <member name="Phase3"/>
+  </enum>
+
+  <script name="main">
+    <text>should not compile</text>
+  </script>
+</module>

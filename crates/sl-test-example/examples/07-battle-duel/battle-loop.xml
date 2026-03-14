@@ -1,6 +1,6 @@
 <!-- import actors from actors.xml -->
-<module name="battle-loop" export="script:battle-loop">
-  <script name="battle-loop" kind="call" args="ref:actors.Combatant:player,ref:actors.Combatant:enemy">
+<module name="battle_loop" export="script:battle_loop">
+  <script name="battle_loop" kind="call" args="ref:actors.Combatant:player,ref:actors.Combatant:enemy">
     <temp name="potions" type="int">1</temp>
     <temp name="rounds" type="int">0</temp>
 

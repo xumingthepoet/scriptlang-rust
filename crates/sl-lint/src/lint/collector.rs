@@ -4,7 +4,7 @@ use regex::Regex;
 use sl_compiler::CompileProjectBundleResult;
 use sl_core::{
     preprocess_scriptlang_rhai_input, ChoiceEntry, RhaiInputMode, ScriptIr, ScriptNode,
-    ScriptTarget, SourceSpan,
+    ScriptTarget, SourceLocation, SourceSpan,
 };
 use sl_parser::{
     parse_alias_directives, parse_import_directives, parse_xml_document, ImportDirective,
@@ -115,6 +115,7 @@ fn collect_declarations(xml_by_path: &BTreeMap<String, String>, context: &mut Li
             continue;
         };
         collect_exports(&document.root, &module_name, context);
+        collect_short_name_candidates_from_source(file, source, &module_name, context);
 
         let mut imports = Vec::new();
         for directive in parse_import_directives(source) {
@@ -221,6 +222,80 @@ fn track_module_token_uses(
 
 fn strip_xml_comments(source: &str) -> String {
     xml_comment_regex().replace_all(source, " ").into_owned()
+}
+
+fn collect_short_name_candidates_from_source(
+    file: &str,
+    source: &str,
+    module_name: &str,
+    context: &mut LintContext,
+) {
+    let pattern = format!(
+        r"\b({}\.[A-Za-z_][A-Za-z0-9_-]*)",
+        regex::escape(module_name)
+    );
+    let regex = Regex::new(&pattern).expect("short-name candidate regex should compile");
+    let comment_spans = xml_comment_regex()
+        .find_iter(source)
+        .map(|item| (item.start(), item.end()))
+        .collect::<Vec<_>>();
+
+    for caps in regex.captures_iter(source) {
+        let Some(matched) = caps.get(1) else {
+            continue;
+        };
+        let start = matched.start();
+        if comment_spans
+            .iter()
+            .any(|(begin, end)| start >= *begin && start < *end)
+        {
+            continue;
+        }
+        let text = matched.as_str().to_string();
+        let Some((_, short_name)) = text.split_once('.') else {
+            continue;
+        };
+        if short_name
+            .chars()
+            .next()
+            .map(|ch| ch.is_ascii_uppercase())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        context.short_name_candidates.push(ShortNameCandidate {
+            file: file.to_string(),
+            span: source_span_from_offset(source, start, matched.end()),
+            qualified_name: text.clone(),
+            short_name: short_name.to_string(),
+        });
+    }
+}
+
+fn source_span_from_offset(source: &str, start: usize, end: usize) -> SourceSpan {
+    let start_loc = source_location_from_offset(source, start);
+    let end_loc = source_location_from_offset(source, end.saturating_sub(1));
+    SourceSpan {
+        start: start_loc,
+        end: end_loc,
+    }
+}
+
+fn source_location_from_offset(source: &str, offset: usize) -> SourceLocation {
+    let mut line = 1usize;
+    let mut column = 1usize;
+    for (index, ch) in source.char_indices() {
+        if index >= offset {
+            break;
+        }
+        if ch == '\n' {
+            line += 1;
+            column = 1;
+        } else {
+            column += 1;
+        }
+    }
+    SourceLocation { line, column }
 }
 
 fn collect_exports(root: &XmlElementNode, module_name: &str, context: &mut LintContext) {
@@ -748,7 +823,9 @@ fn mark_function_use(
         if let Some(function) = script.visible_functions.get(name) {
             if context.functions.contains_key(&function.name) {
                 context.used_functions.insert(function.name.clone());
-                track_module_and_short(&function.name, file, context);
+                if name.contains('.') {
+                    track_module_and_short(&function.name, file, context);
+                }
             }
         }
     }
@@ -789,30 +866,28 @@ fn mark_value_use(
     if let Some(script) = script {
         if let Some(decl) = script.visible_module_vars.get(name) {
             context.used_module_vars.insert(decl.qualified_name.clone());
-            track_module_and_short(&decl.qualified_name, file, context);
+            if name.contains('.') {
+                track_module_and_short(&decl.qualified_name, file, context);
+            }
         }
         if let Some(decl) = script.visible_module_consts.get(name) {
             context
                 .used_module_consts
                 .insert(decl.qualified_name.clone());
-            track_module_and_short(&decl.qualified_name, file, context);
+            if name.contains('.') {
+                track_module_and_short(&decl.qualified_name, file, context);
+            }
         }
     }
 }
 
 fn track_module_and_short(qualified: &str, file: &str, context: &mut LintContext) {
-    if let Some((ns, short)) = qualified.split_once('.') {
+    if let Some((ns, _short)) = qualified.split_once('.') {
         context
             .used_import_modules_by_file
             .entry(file.to_string())
             .or_default()
             .insert(ns.to_string());
-        context.short_name_candidates.push(ShortNameCandidate {
-            file: file.to_string(),
-            span: SourceSpan::synthetic(),
-            qualified_name: qualified.to_string(),
-            short_name: short.to_string(),
-        });
     }
 }
 
@@ -835,18 +910,12 @@ fn mark_script_use(
             .or_default()
             .insert(script_name.clone());
     }
-    if let Some((target_module, short_name)) = script_name.split_once('.') {
+    if let Some((target_module, _short_name)) = script_name.split_once('.') {
         context
             .used_import_modules_by_file
             .entry(file.to_string())
             .or_default()
             .insert(target_module.to_string());
-        context.short_name_candidates.push(ShortNameCandidate {
-            file: file.to_string(),
-            span: SourceSpan::synthetic(),
-            qualified_name: script_name.clone(),
-            short_name: short_name.to_string(),
-        });
     }
 }
 

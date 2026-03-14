@@ -1090,6 +1090,22 @@ mod type_expr_tests {
         .expect_err("keyword type name should fail");
         assert_eq!(enum_keyword_type.code, "NAME_RHAI_KEYWORD_RESERVED");
 
+        let enum_qualified_type = parse_enum_declaration_node_with_namespace(
+            &xml_element(
+                "enum",
+                &[("name", "event_bandit_ambush.FollowupPhase")],
+                vec![XmlNode::Element(xml_element(
+                    "member",
+                    &[("name", "Value")],
+                    Vec::new(),
+                ))],
+            ),
+            "module",
+            AccessLevel::Private,
+        )
+        .expect_err("qualified enum name should fail");
+        assert_eq!(enum_qualified_type.code, "NAME_IDENTIFIER_INVALID");
+
         // Test enum with namespace (qualified name)
         let enum_with_ns = parse_enum_declaration_node_with_namespace(
             &xml_element(

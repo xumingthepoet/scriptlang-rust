@@ -189,6 +189,21 @@ fn example_36_terminal_structure_check_reports_compile_error() {
 }
 
 #[test]
+fn example_37_lint_function_script_literal_compiles() {
+    let scripts_xml = read_scripts_xml_from_example("37-lint-function-script-literal");
+    sl_api::compile_artifact_from_xml_map(&scripts_xml, Some("main.main".to_string()))
+        .expect("lint regression example should compile");
+}
+
+#[test]
+fn example_38_invalid_qualified_enum_name_reports_compile_error() {
+    let scripts_xml = read_scripts_xml_from_example("38-invalid-qualified-enum-name");
+    let error = sl_api::compile_artifact_from_xml_map(&scripts_xml, Some("main.main".to_string()))
+        .expect_err("qualified enum declaration name should fail at compile time");
+    assert_eq!(error.code, "NAME_IDENTIFIER_INVALID");
+}
+
+#[test]
 fn example_22_access_control_matches_testcase() {
     assert_example("22-access-control");
 }

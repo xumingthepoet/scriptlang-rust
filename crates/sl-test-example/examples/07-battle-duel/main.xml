@@ -1,5 +1,5 @@
 <!-- import actors from actors.xml -->
-<!-- import battle-loop from battle-loop.xml -->
+<!-- import battle_loop from battle-loop.xml -->
 <!-- import victory from victory.xml -->
 <!-- import defeat from defeat.xml -->
 <module name="main" export="script:main">
@@ -10,7 +10,7 @@
     <text>Battle start: ${player.name}(${player.hp}) vs ${enemy.name}(${enemy.hp})</text>
     <text>Tip: if you keep using weak attacks, you will lose.</text>
 
-    <call script="@battle-loop.battle-loop" args="ref:player,ref:enemy"/>
+    <call script="@battle_loop.battle_loop" args="ref:player,ref:enemy"/>
 
     <if when="player.hp > 0 AND enemy.hp LTE 0">
       <text>Result: ${player.name} wins. hp=${player.hp}</text>
