@@ -116,4 +116,17 @@ mod tests {
         let report = crate::lint::run_lint(&scripts, &bundle, "main.main");
         assert!(report.diagnostics.iter().all(|item| !item.code.is_empty()));
     }
+
+    #[test]
+    fn lint_tracks_alias_and_function_script_literals() {
+        let dir = example_dir("37-lint-function-script-literal");
+        let scripts = read_scripts_xml_from_dir(&dir).expect("example scripts should load");
+        let bundle = compile_project_bundle_from_xml_map(&scripts).expect("bundle should compile");
+        let report = crate::lint::run_lint(&scripts, &bundle, "main.main");
+        assert!(
+            report.diagnostics.is_empty(),
+            "unexpected diagnostics: {:?}",
+            report.diagnostics
+        );
+    }
 }

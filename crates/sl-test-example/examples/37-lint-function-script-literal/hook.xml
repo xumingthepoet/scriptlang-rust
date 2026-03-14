@@ -1,0 +1,7 @@
+<!-- import router from router.xml -->
+<module name="hook" export="function:bootstrap">
+  <function name="bootstrap" return_type="boolean">
+    let target = @router.hidden;
+    return is_goto_kind_script(target);
+  </function>
+</module>

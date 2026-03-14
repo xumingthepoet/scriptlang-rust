@@ -3,8 +3,14 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use regex::Regex;
 use rhai::Engine;
 use sl_compiler::CompileProjectBundleResult;
-use sl_core::{ChoiceEntry, ScriptIr, ScriptNode, ScriptTarget, SourceSpan};
-use sl_parser::{parse_import_directives, parse_xml_document, ImportDirective, XmlNode};
+use sl_core::{
+    preprocess_scriptlang_rhai_input, ChoiceEntry, RhaiInputMode, ScriptIr, ScriptNode,
+    ScriptTarget, SourceSpan,
+};
+use sl_parser::{
+    parse_alias_directives, parse_import_directives, parse_xml_document, ImportDirective,
+    XmlElementNode, XmlNode,
+};
 
 #[derive(Debug, Clone)]
 pub(crate) struct NamedDecl {
@@ -50,16 +56,26 @@ pub(crate) struct ScriptLocals {
     pub(crate) used_locals: HashSet<String>,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct FunctionBodyDecl {
+    pub(crate) module_name: String,
+    pub(crate) file: String,
+    pub(crate) span: SourceSpan,
+    pub(crate) code: String,
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct LintContext {
     pub(crate) modules: BTreeMap<String, ModuleDecl>,
     pub(crate) scripts: BTreeMap<String, NamedDecl>,
     pub(crate) functions: BTreeMap<String, NamedDecl>,
+    pub(crate) function_bodies: BTreeMap<String, FunctionBodyDecl>,
     pub(crate) module_vars: BTreeMap<String, NamedDecl>,
     pub(crate) module_consts: BTreeMap<String, NamedDecl>,
     pub(crate) script_locals: BTreeMap<String, ScriptLocals>,
     pub(crate) script_edges: HashMap<String, HashSet<String>>,
     pub(crate) reachable_scripts: HashSet<String>,
+    pub(crate) used_scripts: HashSet<String>,
     pub(crate) used_functions: HashSet<String>,
     pub(crate) used_module_vars: HashSet<String>,
     pub(crate) used_module_consts: HashSet<String>,
@@ -77,6 +93,7 @@ pub(crate) fn collect_context(
     collect_declarations(xml_by_path, &mut context);
     collect_script_usage(bundle, &mut context);
     collect_initializer_usage(bundle, &mut context);
+    collect_function_usage(&mut context);
     context.reachable_scripts = collect_reachable(entry_script, &context.script_edges);
     context
 }
@@ -112,6 +129,15 @@ fn collect_declarations(xml_by_path: &BTreeMap<String, String>, context: &mut Li
                 }
             }
         }
+        for alias in parse_alias_directives(source) {
+            if let Some((target_module, _)) = alias.target_qualified_name.split_once('.') {
+                context
+                    .used_import_modules_by_file
+                    .entry(file.clone())
+                    .or_default()
+                    .insert(target_module.to_string());
+            }
+        }
 
         context.modules.insert(
             module_name.clone(),
@@ -141,7 +167,16 @@ fn collect_declarations(xml_by_path: &BTreeMap<String, String>, context: &mut Li
                     context.scripts.insert(qualified_name, decl);
                 }
                 "function" => {
-                    context.functions.insert(qualified_name, decl);
+                    context.functions.insert(qualified_name.clone(), decl);
+                    context.function_bodies.insert(
+                        qualified_name,
+                        FunctionBodyDecl {
+                            module_name: module_name.clone(),
+                            file: file.clone(),
+                            span: node.location.clone(),
+                            code: collect_node_text(node),
+                        },
+                    );
                 }
                 "var" => {
                     context.module_vars.insert(qualified_name, decl);
@@ -196,7 +231,7 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                             &module_name,
                             &file,
                             location,
-                            script_name,
+                            Some(script_name),
                             context,
                             &mut locals,
                         );
@@ -206,9 +241,10 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                                 &module_name,
                                 &file,
                                 location,
-                                script,
+                                Some(script),
                                 context,
-                                &mut locals,
+                                Some(&mut locals),
+                                Some(script_name),
                             );
                         }
                     }
@@ -223,7 +259,7 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                             &module_name,
                             &file,
                             location,
-                            script_name,
+                            Some(script_name),
                             context,
                             &mut locals,
                         );
@@ -233,9 +269,10 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                                 &module_name,
                                 &file,
                                 location,
-                                script,
+                                Some(script),
                                 context,
-                                &mut locals,
+                                Some(&mut locals),
+                                Some(script_name),
                             );
                         }
                     }
@@ -255,9 +292,10 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                             &module_name,
                             &file,
                             location,
-                            script,
+                            Some(script),
                             context,
-                            &mut locals,
+                            Some(&mut locals),
+                            Some(script_name),
                         );
                     }
                     ScriptNode::Code { code, location, .. } => {
@@ -266,9 +304,10 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                             &module_name,
                             &file,
                             location,
-                            script,
+                            Some(script),
                             context,
-                            &mut locals,
+                            Some(&mut locals),
+                            Some(script_name),
                         );
                     }
                     ScriptNode::Var {
@@ -287,9 +326,10 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                                 &module_name,
                                 &file,
                                 location,
-                                script,
+                                Some(script),
                                 context,
-                                &mut locals,
+                                Some(&mut locals),
+                                Some(script_name),
                             );
                         }
                     }
@@ -305,9 +345,10 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                                 &module_name,
                                 &file,
                                 location,
-                                script,
+                                Some(script),
                                 context,
-                                &mut locals,
+                                Some(&mut locals),
+                                Some(script_name),
                             );
                         }
                     }
@@ -323,9 +364,10 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                                 &module_name,
                                 &file,
                                 location,
-                                script,
+                                Some(script),
                                 context,
-                                &mut locals,
+                                Some(&mut locals),
+                                Some(script_name),
                             );
                         }
                         for entry in entries {
@@ -333,7 +375,8 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                                 entry,
                                 &module_name,
                                 &file,
-                                script,
+                                script_name,
+                                Some(script),
                                 context,
                                 &mut locals,
                             );
@@ -351,9 +394,10 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                                 &module_name,
                                 &file,
                                 location,
-                                script,
+                                Some(script),
                                 context,
-                                &mut locals,
+                                Some(&mut locals),
+                                Some(script_name),
                             );
                         }
                         locals.used_locals.insert(target_var.clone());
@@ -382,7 +426,8 @@ fn collect_choice_entry_usage(
     entry: &ChoiceEntry,
     module_name: &str,
     file: &str,
-    script: &ScriptIr,
+    script_name: &str,
+    script: Option<&ScriptIr>,
     context: &mut LintContext,
     locals: &mut ScriptLocals,
 ) {
@@ -396,7 +441,8 @@ fn collect_choice_entry_usage(
                     &option.location,
                     script,
                     context,
-                    locals,
+                    Some(locals),
+                    Some(script_name),
                 );
             }
             for expr in extract_template_expressions(&option.text) {
@@ -407,7 +453,8 @@ fn collect_choice_entry_usage(
                     &option.location,
                     script,
                     context,
-                    locals,
+                    Some(locals),
+                    Some(script_name),
                 );
             }
         }
@@ -419,7 +466,8 @@ fn collect_choice_entry_usage(
                 &block.location,
                 script,
                 context,
-                locals,
+                Some(locals),
+                Some(script_name),
             );
             if let Some(expr) = &block.template.when_expr {
                 collect_expression_usage(
@@ -429,7 +477,8 @@ fn collect_choice_entry_usage(
                     &block.template.location,
                     script,
                     context,
-                    locals,
+                    Some(locals),
+                    Some(script_name),
                 );
             }
             for expr in extract_template_expressions(&block.template.text) {
@@ -440,7 +489,8 @@ fn collect_choice_entry_usage(
                     &block.template.location,
                     script,
                     context,
-                    locals,
+                    Some(locals),
+                    Some(script_name),
                 );
             }
         }
@@ -484,8 +534,39 @@ fn collect_initializer_expression(
     for ident in refs.identifiers {
         mark_value_use(&ident, module_name, file, span, None, context);
     }
-    for literal in extract_invoke_literals(expr) {
-        mark_function_use(&literal, module_name, file, span, None, context);
+    for function_name in refs.function_literals {
+        mark_function_use(&function_name, module_name, file, span, None, context);
+    }
+    for script_name in refs.script_literals {
+        mark_script_use(&script_name, module_name, file, span, None, context);
+    }
+}
+
+fn collect_function_usage(context: &mut LintContext) {
+    let mut queue: VecDeque<String> = context.used_functions.iter().cloned().collect();
+    let mut visited = HashSet::new();
+    while let Some(function_name) = queue.pop_front() {
+        if !visited.insert(function_name.clone()) {
+            continue;
+        }
+        let Some(function) = context.function_bodies.get(&function_name).cloned() else {
+            continue;
+        };
+        collect_expression_usage(
+            &function.code,
+            &function.module_name,
+            &function.file,
+            &function.span,
+            None,
+            context,
+            None,
+            None,
+        );
+        for discovered in context.used_functions.iter().cloned() {
+            if !visited.contains(&discovered) {
+                queue.push_back(discovered);
+            }
+        }
     }
 }
 
@@ -495,32 +576,20 @@ fn collect_script_target_usage(
     module_name: &str,
     file: &str,
     location: &SourceSpan,
-    from_script: &str,
+    from_script: Option<&str>,
     context: &mut LintContext,
     locals: &mut ScriptLocals,
 ) {
     match target_script {
         ScriptTarget::Literal { script_name } => {
-            context
-                .script_edges
-                .entry(from_script.to_string())
-                .or_default()
-                .insert(script_name.clone());
-            if let Some((target_module, short_name)) = script_name.split_once('.') {
-                context
-                    .used_import_modules_by_file
-                    .entry(file.to_string())
-                    .or_default()
-                    .insert(target_module.to_string());
-                if target_module == module_name {
-                    context.short_name_candidates.push(ShortNameCandidate {
-                        file: file.to_string(),
-                        span: location.clone(),
-                        qualified_name: script_name.clone(),
-                        short_name: short_name.to_string(),
-                    });
-                }
-            }
+            mark_script_use(
+                script_name,
+                module_name,
+                file,
+                location,
+                from_script,
+                context,
+            );
         }
         ScriptTarget::Variable { var_name } => {
             locals.used_locals.insert(var_name.clone());
@@ -534,24 +603,37 @@ fn collect_expression_usage(
     module_name: &str,
     file: &str,
     span: &SourceSpan,
-    script: &ScriptIr,
+    script: Option<&ScriptIr>,
     context: &mut LintContext,
-    locals: &mut ScriptLocals,
+    mut locals: Option<&mut ScriptLocals>,
+    current_script_name: Option<&str>,
 ) {
     let refs = analyze_expression(expr);
     for call in refs.calls {
-        mark_function_use(&call, module_name, file, span, Some(script), context);
+        mark_function_use(&call, module_name, file, span, script, context);
     }
     for ident in refs.identifiers {
-        if locals.params.iter().any(|item| item.name == ident)
-            || locals.vars.iter().any(|item| item.name == ident)
-        {
-            locals.used_locals.insert(ident.clone());
+        if let Some(local_state) = locals.as_mut() {
+            if local_state.params.iter().any(|item| item.name == ident)
+                || local_state.vars.iter().any(|item| item.name == ident)
+            {
+                local_state.used_locals.insert(ident.clone());
+            }
         }
-        mark_value_use(&ident, module_name, file, span, Some(script), context);
+        mark_value_use(&ident, module_name, file, span, script, context);
     }
-    for literal in extract_invoke_literals(expr) {
-        mark_function_use(&literal, module_name, file, span, Some(script), context);
+    for function_name in refs.function_literals {
+        mark_function_use(&function_name, module_name, file, span, script, context);
+    }
+    for script_name in refs.script_literals {
+        mark_script_use(
+            &script_name,
+            module_name,
+            file,
+            span,
+            current_script_name,
+            context,
+        );
     }
 }
 
@@ -657,6 +739,53 @@ fn track_module_and_short(
     }
 }
 
+fn mark_script_use(
+    raw_script_name: &str,
+    module_name: &str,
+    file: &str,
+    span: &SourceSpan,
+    from_script: Option<&str>,
+    context: &mut LintContext,
+) {
+    let Some(script_name) = normalize_script_literal(raw_script_name, module_name) else {
+        return;
+    };
+    context.used_scripts.insert(script_name.clone());
+    if let Some(source_script) = from_script {
+        context
+            .script_edges
+            .entry(source_script.to_string())
+            .or_default()
+            .insert(script_name.clone());
+    }
+    if let Some((target_module, short_name)) = script_name.split_once('.') {
+        context
+            .used_import_modules_by_file
+            .entry(file.to_string())
+            .or_default()
+            .insert(target_module.to_string());
+        if target_module == module_name {
+            context.short_name_candidates.push(ShortNameCandidate {
+                file: file.to_string(),
+                span: span.clone(),
+                qualified_name: script_name.clone(),
+                short_name: short_name.to_string(),
+            });
+        }
+    }
+}
+
+fn normalize_script_literal(raw_script_name: &str, module_name: &str) -> Option<String> {
+    let trimmed = raw_script_name.trim().trim_start_matches('@');
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.contains('.') {
+        return Some(trimmed.to_string());
+    }
+    Some(format!("{}.{}", module_name, trimmed))
+}
+
 fn collect_reachable(
     entry_script: &str,
     edges: &HashMap<String, HashSet<String>>,
@@ -681,21 +810,22 @@ fn collect_reachable(
 struct ExpressionRefs {
     calls: BTreeSet<String>,
     identifiers: BTreeSet<String>,
+    function_literals: BTreeSet<String>,
+    script_literals: BTreeSet<String>,
 }
 
 fn analyze_expression(expr: &str) -> ExpressionRefs {
     let mut refs = ExpressionRefs::default();
-    let engine = Engine::new();
-    if engine.compile_expression(expr).is_err() {
-        return refs;
-    }
+    let rewritten = preprocess_scriptlang_rhai_input(expr, "lint", RhaiInputMode::CodeBlock)
+        .unwrap_or_else(|_| expr.to_string());
+    let _ = Engine::new().compile(&rewritten);
 
-    for caps in call_name_regex().captures_iter(expr) {
+    for caps in call_name_regex().captures_iter(&rewritten) {
         if let Some(name) = caps.get(1) {
             refs.calls.insert(name.as_str().to_string());
         }
     }
-    for caps in identifier_regex().captures_iter(expr) {
+    for caps in identifier_regex().captures_iter(&rewritten) {
         let Some(name) = caps.get(1) else {
             continue;
         };
@@ -703,6 +833,12 @@ fn analyze_expression(expr: &str) -> ExpressionRefs {
             continue;
         }
         refs.identifiers.insert(name.as_str().to_string());
+    }
+    for function_name in extract_function_literals(expr) {
+        refs.function_literals.insert(function_name);
+    }
+    for script_name in extract_script_literals(expr) {
+        refs.script_literals.insert(script_name);
     }
     refs
 }
@@ -715,8 +851,15 @@ fn extract_template_expressions(value: &str) -> Vec<String> {
         .collect()
 }
 
-fn extract_invoke_literals(expr: &str) -> Vec<String> {
-    invoke_literal_regex()
+fn extract_script_literals(expr: &str) -> Vec<String> {
+    script_literal_regex()
+        .captures_iter(expr)
+        .filter_map(|caps| caps.get(1).map(|inner| inner.as_str().to_string()))
+        .collect()
+}
+
+fn extract_function_literals(expr: &str) -> Vec<String> {
+    function_literal_regex()
         .captures_iter(expr)
         .filter_map(|caps| caps.get(1).map(|inner| inner.as_str().to_string()))
         .collect()
@@ -762,14 +905,31 @@ fn identifier_regex() -> &'static Regex {
     })
 }
 
-fn invoke_literal_regex() -> &'static Regex {
+fn script_literal_regex() -> &'static Regex {
     static REGEX: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     REGEX.get_or_init(|| {
-        Regex::new(
-            r#"invoke\s*\(\s*["']([A-Za-z_][A-Za-z0-9_-]*\.[A-Za-z_][A-Za-z0-9_-]*)["']\s*[,)]"#,
-        )
-        .expect("invoke literal regex should compile")
+        Regex::new(r"@([A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)?)")
+            .expect("script literal regex should compile")
     })
+}
+
+fn function_literal_regex() -> &'static Regex {
+    static REGEX: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"\*([A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)?)")
+            .expect("function literal regex should compile")
+    })
+}
+
+fn collect_node_text(node: &XmlElementNode) -> String {
+    node.children
+        .iter()
+        .filter_map(|child| match child {
+            XmlNode::Text(text) => Some(text.value.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn is_keyword(token: &str) -> bool {
@@ -801,10 +961,10 @@ mod tests {
     }
 
     #[test]
-    fn analyze_expression_skips_invalid_expression() {
+    fn analyze_expression_handles_invalid_expression_without_panic() {
         let refs = analyze_expression("if (");
-        assert!(refs.calls.is_empty());
         assert!(refs.identifiers.is_empty());
+        assert!(refs.calls.contains("if"));
     }
 
     #[test]
@@ -814,8 +974,10 @@ mod tests {
     }
 
     #[test]
-    fn extract_invoke_literals_works() {
-        let items = extract_invoke_literals(r#"invoke("a.b", [])"#);
-        assert_eq!(items, vec!["a.b".to_string()]);
+    fn analyze_expression_extracts_script_literals() {
+        let refs = analyze_expression("event_system.addListener(msg, @event.tick, *main.check)");
+        assert!(refs.calls.contains("event_system.addListener"));
+        assert!(refs.script_literals.contains("event.tick"));
+        assert!(refs.function_literals.contains("main.check"));
     }
 }

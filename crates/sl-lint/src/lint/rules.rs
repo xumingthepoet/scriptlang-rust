@@ -19,7 +19,7 @@ pub(crate) fn run_rules(context: &LintContext) -> Vec<LintDiagnostic> {
 
 fn collect_unused_script(context: &LintContext, diagnostics: &mut Vec<LintDiagnostic>) {
     for (name, decl) in &context.scripts {
-        if context.reachable_scripts.contains(name) {
+        if context.reachable_scripts.contains(name) || context.used_scripts.contains(name) {
             continue;
         }
         diagnostics.push(LintDiagnostic::warning(
@@ -38,6 +38,10 @@ fn collect_unused_module(context: &LintContext, diagnostics: &mut Vec<LintDiagno
             .reachable_scripts
             .iter()
             .any(|script| script.starts_with(&format!("{}.", module_name)));
+        let has_used_script = context
+            .used_scripts
+            .iter()
+            .any(|script| script.starts_with(&format!("{}.", module_name)));
         let has_used_function = context
             .used_functions
             .iter()
@@ -50,8 +54,18 @@ fn collect_unused_module(context: &LintContext, diagnostics: &mut Vec<LintDiagno
             .used_module_consts
             .iter()
             .any(|name| name.starts_with(&format!("{}.", module_name)));
+        let has_import_reference = context
+            .used_import_modules_by_file
+            .values()
+            .any(|used_modules| used_modules.contains(module_name));
 
-        if has_reachable_script || has_used_function || has_used_var || has_used_const {
+        if has_reachable_script
+            || has_used_script
+            || has_used_function
+            || has_used_var
+            || has_used_const
+            || has_import_reference
+        {
             continue;
         }
 

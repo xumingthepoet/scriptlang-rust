@@ -1,0 +1,5 @@
+<module name="ids" export="enum:LocationId">
+  <enum name="LocationId">
+    <member name="Home"/>
+  </enum>
+</module>

@@ -9,6 +9,14 @@ cargo run -p sl-lint -- \
   --scripts-dir crates/sl-test-example/examples/14-module-functions
 ```
 
+针对 `example-project`：
+
+```bash
+cargo run -p sl-lint -- \
+  --scripts-dir example-project \
+  --entry-script app.main
+```
+
 可选参数：
 - `--entry-script <name>`：入口脚本名，默认 `main.main`
 
@@ -37,3 +45,11 @@ cargo run -p sl-lint -- \
 - `prefer-short-name`
 - `unused-import`
 - `unreachable-node`
+
+## 4. 引用识别范围
+
+- `unused-import` 会把以下用法视为“已使用”：
+  - 脚本/表达式中的跨模块符号引用（函数、模块变量、模块常量、脚本字面量）。
+  - 注释 alias 指令（如 `<!-- alias ids.LocationId -->`）里的目标模块。
+- `unused-script` 除了静态 `call/goto` 可达链，还会识别表达式和函数体里的 `@module.script` / `@short` 字面量引用。
+- 函数体（`<function>...</function>`）中的 ScriptLang 表达式也会参与引用分析，不再只分析 `<script>` 节点。

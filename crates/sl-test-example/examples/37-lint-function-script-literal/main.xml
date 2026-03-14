@@ -1,0 +1,14 @@
+<!-- import hook from hook.xml -->
+<!-- import router from router.xml -->
+<!-- import ids from ids.xml -->
+<!-- alias ids.LocationId -->
+<module name="main" export="script:main">
+  <script name="main">
+    <temp name="loc" type="LocationId">LocationId.Home</temp>
+    <text>${loc}</text>
+    <if when="hook.bootstrap()">
+      <goto script="@router.start"/>
+    </if>
+    <goto script="@router.hidden"/>
+  </script>
+</module>

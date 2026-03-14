@@ -634,12 +634,12 @@ mod macro_expand_tests {
         assert_eq!(iteration_text.trim(), "i = i + 1;");
 
         // Cover the _ => None branches in find_map by iterating over mixed content
-        let mixed_children: Vec<XmlNode<'_>> = vec![
+        let mixed_children: Vec<XmlNode> = vec![
             XmlNode::Element(xml_element("text", &[], vec![xml_text("text")])),
             XmlNode::Element(xml_element("if", &[], Vec::new())),
             XmlNode::Text(XmlTextNode {
-                content: "text".to_string(),
-                location: SourceSpan::default(),
+                value: "text".to_string(),
+                location: SourceSpan::synthetic(),
             }),
         ];
         // This find_map will hit _ => None for text and Text nodes
@@ -1260,12 +1260,12 @@ mod macro_expand_tests {
         assert_eq!(inline_text_content(iteration_code).trim(), "true;");
 
         // Cover the _ => None branches in find_map (lines 1231:22, 1242:22)
-        let mixed_children: Vec<XmlNode<'_>> = vec![
+        let mixed_children: Vec<XmlNode> = vec![
             XmlNode::Element(xml_element("text", &[], vec![xml_text("text")])),
             XmlNode::Element(xml_element("code", &[], Vec::new())),
             XmlNode::Text(XmlTextNode {
-                content: "text".to_string(),
-                location: SourceSpan::default(),
+                value: "text".to_string(),
+                location: SourceSpan::synthetic(),
             }),
         ];
         // This find_map will hit _ => None for text and Text nodes

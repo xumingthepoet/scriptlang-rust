@@ -1,0 +1,11 @@
+<module name="router" export="script:start,hidden">
+  <script name="start">
+    <text>start</text>
+    <end/>
+  </script>
+
+  <script name="hidden">
+    <text>hidden</text>
+    <end/>
+  </script>
+</module>
