@@ -798,18 +798,36 @@ mod lifecycle_tests {
     #[test]
     pub(super) fn new_rejects_module_function_symbol_conflict_after_normalization() {
         // Test lines 277-287: when two functions have names that normalize to the same Rhai symbol
-        // "foo-bar" and "foo_bar" both become "foo_bar" after symbol normalization
-        // We use same module prefix so they normalize to the same symbol
-        let files = map(&[(
-            "main.xml",
-            r#"
-    <module name="main" export="script:main;function:foo-bar,foo_bar">
-      <function name="foo-bar" return_type="int">return 1;</function>
-      <function name="foo_bar" return_type="int">return 2;</function>
+        // We keep function names valid and trigger conflict via module namespace normalization:
+        // "event-a.on_tick" and "event_a.on_tick" both become "event_a_on_tick".
+        let files = map(&[
+            (
+                "event-a.xml",
+                r#"
+    <module name="event-a" export="function:on_tick">
+      <function name="on_tick" return_type="int">return 1;</function>
+    </module>
+    "#,
+            ),
+            (
+                "event_a.xml",
+                r#"
+    <module name="event_a" export="function:on_tick">
+      <function name="on_tick" return_type="int">return 2;</function>
+    </module>
+    "#,
+            ),
+            (
+                "main.xml",
+                r#"
+    <!-- import event-a from event-a.xml -->
+    <!-- import event_a from event_a.xml -->
+    <module name="main" export="script:main">
       <script name="main"><text>Hello</text></script>
     </module>
     "#,
-        )]);
+            ),
+        ]);
         let compiled = compile_project_from_sources(files);
         let result = ScriptLangEngine::new(ScriptLangEngineOptions {
             scripts: compiled.scripts,
