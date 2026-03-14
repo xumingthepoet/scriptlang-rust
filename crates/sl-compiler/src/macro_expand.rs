@@ -523,6 +523,7 @@ mod macro_expand_tests {
             r#"
     <module name="main" export="script:main">
     <script name="main">
+      <text>before</text>
       <for temps="i:int:0" condition="i LT 2" iteration="i = i + 1;">
         <text>${i}</text>
       </for>
@@ -535,12 +536,13 @@ mod macro_expand_tests {
         let main = result.scripts.get("main.main").expect("main script");
         let root = main.groups.get(&main.root_group_id).expect("root group");
 
+        // root.nodes is [Text, If], so find_map's _ => None branch executes for Text
         let then_group_id = root
             .nodes
             .iter()
             .find_map(|node| match node {
                 ScriptNode::If { then_group_id, .. } => Some(then_group_id.as_str()),
-                _ => None,
+                _ => None, // This executes for Text node
             })
             .expect("for should compile into a scoped group");
         let for_group = main.groups.get(then_group_id).expect("for group");
@@ -549,17 +551,19 @@ mod macro_expand_tests {
             .iter()
             .filter(|node| matches!(node, ScriptNode::Var { .. }))
             .count();
+        // for_group.nodes is [Var, Var, While], so find_map's _ => None executes for Var nodes
         let while_node = for_group
             .nodes
             .iter()
             .find_map(|node| match node {
                 ScriptNode::While { body_group_id, .. } => Some(body_group_id.as_str()),
-                _ => None,
+                _ => None, // This executes for Var nodes
             })
             .expect("for should produce while node");
         assert_eq!(var_count, 2);
 
         let while_group = main.groups.get(while_node).expect("while group");
+        // while_group.nodes.first() is Some(If), so matches! Some branch is covered
         assert!(matches!(
             while_group.nodes.first(),
             Some(ScriptNode::If { .. })

@@ -2498,4 +2498,59 @@ mod callstack_tests {
             .expect_err("return with missing script should fail");
         assert_eq!(error.code, "ENGINE_SCRIPT_NOT_FOUND");
     }
+
+    #[test]
+    fn execute_goto_private_script_cross_module_access_denied() {
+        // Line 308: validate_script_access_from_current in execute_goto
+        // Test that goto to a private script from a different module is denied
+        // when target_script is ScriptTarget::Literal
+        let mut engine = engine_from_sources(map(&[
+            (
+                "lib.xml",
+                r#"<module name="lib">
+  <script name="secret" kind="goto"><text>x</text></script>
+</module>"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<module name="main" export="script:main">
+<script name="main"><text>x</text></script>
+</module>
+"#,
+            ),
+        ]));
+        engine.start("main.main", None).expect("start");
+
+        // Get main's root group
+        let main_group_id = engine
+            .scripts
+            .get("main.main")
+            .expect("main script")
+            .root_group_id
+            .clone();
+
+        // Set up a root frame with current module = "main"
+        engine.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id: main_group_id,
+            node_index: 0,
+            scope: BTreeMap::new(),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::new(),
+        }];
+
+        // Try to goto a private script in a different module (lib.secret)
+        // This should fail at line 308 because:
+        // - target_script is ScriptTarget::Literal (matches)
+        // - target.access == Private
+        // - target.module_name == Some("lib")
+        // - current_module_name == Some("main") != target_module_name
+        let error = engine
+            .execute_goto(&lit("lib.secret"), &[])
+            .expect_err("goto to private script in different module should fail");
+        assert_eq!(error.code, "ENGINE_SCRIPT_ACCESS_DENIED");
+    }
 }

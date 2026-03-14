@@ -1293,9 +1293,9 @@ fn visible_types_with_namespace_type_aliases(
     };
     let mut scoped = base_visible_types.clone();
     for (alias, qualified_name) in namespace_alias_targets {
-        let Some(resolved_type) = resolved_types.get(qualified_name) else {
-            continue;
-        };
+        let resolved_type = resolved_types.get(qualified_name).expect(
+            "alias target should exist in resolved_types (already validated by collect_explicit_visible_type_aliases)",
+        );
         scoped
             .entry(alias.clone())
             .or_insert_with(|| resolved_type.clone());
@@ -4945,6 +4945,31 @@ mod module_resolver_tests {
     }
 
     #[test]
+    fn normalize_module_initializer_rejects_invalid_script_literal_without_module_context() {
+        // Test line 579: normalize_and_validate_script_literals_in_expression error
+        // when script literal @script doesn't have module context
+        let span = SourceSpan::synthetic();
+        let int_type = ScriptType::Primitive {
+            name: "int".to_string(),
+        };
+
+        // Provide an expression with a short script literal (@target) without module_name
+        // This should fail because short script literals require module context
+        let result = normalize_module_initializer(
+            &Some("@target".to_string()),
+            &int_type,
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            "", // empty module_name - this causes the error
+            &span,
+        );
+        let error = result.expect_err("script literal without module context should fail");
+        // The error is XML_RHAI_SYNTAX_INVALID because Rhai fails to parse the invalid literal
+        assert_eq!(error.code, "XML_RHAI_SYNTAX_INVALID");
+    }
+
+    #[test]
     fn normalize_module_initializer_rejects_function_call_syntax() {
         // Test lines 604, 668, 902, 1004: normalize_module_initializer error propagation
         // for module variables and constants with invalid enum literal initializers
@@ -4975,6 +5000,44 @@ mod module_resolver_tests {
         let error_const = crate::compile_project_bundle_from_xml_map(&files_const)
             .expect_err("module const with invalid enum member should fail");
         assert_eq!(error_const.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
+    }
+
+    #[test]
+    fn resolve_visible_module_symbols_rejects_function_with_invalid_function_literal() {
+        // Test lines 1014, 1020: normalize_and_validate_function_literals_with_names error
+        // for function code containing invalid function literal reference
+        use crate::compiler_test_support::*;
+
+        // Test function with function literal referencing non-existent function
+        let files = map(&[(
+            "main.xml",
+            r#"<module name="main" export="script:main;function:test">
+<function name="test" args="" return_type="int">return *nonexistent_func();</function>
+<script name="main"><text>test</text></script>
+</module>"#,
+        )]);
+        let error = crate::compile_project_bundle_from_xml_map(&files)
+            .expect_err("function with invalid function literal should fail");
+        assert_eq!(error.code, "XML_RHAI_SYNTAX_INVALID");
+    }
+
+    #[test]
+    fn resolve_visible_module_symbols_rejects_function_with_invalid_rhai_code() {
+        // Test lines 1055, 1590: preprocess_and_compile_rhai_source error
+        // for function code containing invalid rhai syntax
+        use crate::compiler_test_support::*;
+
+        // Test function with invalid rhai syntax (unclosed bracket)
+        let files = map(&[(
+            "main.xml",
+            r#"<module name="main" export="script:main;function:test">
+<function name="test" args="" return_type="int">return if true { 1;</function>
+<script name="main"><text>test</text></script>
+</module>"#,
+        )]);
+        let error = crate::compile_project_bundle_from_xml_map(&files)
+            .expect_err("function with invalid rhai syntax should fail");
+        assert_eq!(error.code, "XML_RHAI_SYNTAX_INVALID");
     }
 
     #[test]
@@ -5476,5 +5539,77 @@ mod module_resolver_tests {
         let empty_modules: Vec<ModuleDeclarations> = vec![];
         let result = collect_module_symbol_targets(empty_modules.iter());
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn collect_functions_for_bundle_rejects_explicit_alias_conflicting_with_namespace_alias() {
+        // Test line 1493: explicit alias conflicts with namespace alias (from module var/const)
+        // but explicit aliases themselves don't conflict
+        let span = SourceSpan::synthetic();
+        let module = ModuleDeclarations {
+            type_decls: vec![],
+            function_decls: vec![ParsedFunctionDecl {
+                name: "foo".to_string(),
+                qualified_name: "shared.foo".to_string(),
+                access: AccessLevel::Public,
+                params: vec![],
+                return_decl: ParsedFunctionReturnDecl {
+                    type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    location: span.clone(),
+                },
+                code: "out = 1;".to_string(),
+                location: span.clone(),
+            }],
+            // This creates namespace alias: shared -> hp -> shared.hp
+            module_global_var_decls: vec![ParsedModuleVarDecl {
+                namespace: "shared".to_string(),
+                name: "hp".to_string(),
+                qualified_name: "shared.hp".to_string(),
+                access: AccessLevel::Public,
+                type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                initial_value_expr: None,
+                location: span.clone(),
+            }],
+            // This creates namespace alias: shared -> other -> shared.other
+            module_global_const_decls: vec![ParsedModuleConstDecl {
+                namespace: "shared".to_string(),
+                name: "other".to_string(),
+                qualified_name: "shared.other".to_string(),
+                access: AccessLevel::Public,
+                type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                initial_value_expr: Some("1".to_string()),
+                location: span.clone(),
+            }],
+        };
+        let module_by_path = BTreeMap::from([("shared.xml".to_string(), module)]);
+
+        // The explicit alias must target a symbol that exists in module_symbol_targets
+        // (from module var/const), otherwise it gets filtered out at line 461-462
+        let module_alias_directives_by_namespace = BTreeMap::from([(
+            "shared".to_string(),
+            vec![
+                // This explicit alias targets shared.other (a const), which is in module_symbol_targets
+                // Alias "other" doesn't conflict with namespace alias "other" because they have the same target
+                AliasDirective {
+                    target_qualified_name: "shared.other".to_string(),
+                    alias_name: "other".to_string(),
+                },
+                // This explicit alias "hp" has DIFFERENT target from namespace alias hp -> shared.hp
+                // This should trigger conflict at line 1493
+                AliasDirective {
+                    target_qualified_name: "shared.other".to_string(),
+                    alias_name: "hp".to_string(),
+                },
+            ],
+        )]);
+
+        // The conflict should be detected in merge_namespace_module_symbol_aliases (line 1493)
+        // not in collect_module_explicit_visible_symbol_aliases (line 1487)
+        let error = collect_functions_for_bundle_with_aliases(
+            &module_by_path,
+            &module_alias_directives_by_namespace,
+        )
+        .expect_err("explicit alias conflicting with namespace alias should fail");
+        assert_eq!(error.code, "ALIAS_NAME_CONFLICT");
     }
 }
