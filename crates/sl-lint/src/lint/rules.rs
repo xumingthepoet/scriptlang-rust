@@ -99,7 +99,7 @@ fn collect_unused_function(context: &LintContext, diagnostics: &mut Vec<LintDiag
 
 fn collect_unused_module_var(context: &LintContext, diagnostics: &mut Vec<LintDiagnostic>) {
     for (name, decl) in &context.module_vars {
-        if context.used_module_vars.contains(name) || context.exported_module_vars.contains(name) {
+        if context.used_module_vars.contains(name) {
             continue;
         }
         diagnostics.push(LintDiagnostic::warning(
@@ -114,9 +114,7 @@ fn collect_unused_module_var(context: &LintContext, diagnostics: &mut Vec<LintDi
 
 fn collect_unused_module_const(context: &LintContext, diagnostics: &mut Vec<LintDiagnostic>) {
     for (name, decl) in &context.module_consts {
-        if context.used_module_consts.contains(name)
-            || context.exported_module_consts.contains(name)
-        {
+        if context.used_module_consts.contains(name) {
             continue;
         }
         diagnostics.push(LintDiagnostic::warning(
@@ -273,6 +271,26 @@ mod tests {
     }
 
     #[test]
+    fn run_rules_skips_unused_module_when_import_referenced() {
+        let mut ctx = base_context();
+        ctx.modules.insert(
+            "shared".to_string(),
+            ModuleDecl {
+                module_name: "shared".to_string(),
+                file: "shared.xml".to_string(),
+                span: SourceSpan::synthetic(),
+                imports: Vec::new(),
+            },
+        );
+        ctx.used_import_modules_by_file.insert(
+            "main.xml".to_string(),
+            std::collections::HashSet::from(["shared".to_string()]),
+        );
+        let result = run_rules(&ctx);
+        assert!(!result.iter().any(|d| d.code == "unused-module"));
+    }
+
+    #[test]
     fn run_rules_emits_unused_function() {
         let mut ctx = base_context();
         ctx.functions.insert(
@@ -313,6 +331,38 @@ mod tests {
                 span: SourceSpan::synthetic(),
             },
         );
+        let result = run_rules(&ctx);
+        assert!(result.iter().any(|d| d.code == "unused-module-const"));
+    }
+
+    #[test]
+    fn run_rules_emits_unused_module_var_even_if_exported() {
+        let mut ctx = base_context();
+        ctx.module_vars.insert(
+            "main.hp".to_string(),
+            NamedDecl {
+                name: "hp".to_string(),
+                file: "main.xml".to_string(),
+                span: SourceSpan::synthetic(),
+            },
+        );
+        ctx.exported_module_vars.insert("main.hp".to_string());
+        let result = run_rules(&ctx);
+        assert!(result.iter().any(|d| d.code == "unused-module-var"));
+    }
+
+    #[test]
+    fn run_rules_emits_unused_module_const_even_if_exported() {
+        let mut ctx = base_context();
+        ctx.module_consts.insert(
+            "main.BASE".to_string(),
+            NamedDecl {
+                name: "BASE".to_string(),
+                file: "main.xml".to_string(),
+                span: SourceSpan::synthetic(),
+            },
+        );
+        ctx.exported_module_consts.insert("main.BASE".to_string());
         let result = run_rules(&ctx);
         assert!(result.iter().any(|d| d.code == "unused-module-const"));
     }

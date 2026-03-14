@@ -7,8 +7,8 @@ use sl_core::{
     ScriptTarget, SourceLocation, SourceSpan,
 };
 use sl_parser::{
-    parse_alias_directives, parse_import_directives, parse_xml_document, ImportDirective,
-    XmlElementNode, XmlNode,
+    parse_alias_directives, parse_import_directives, parse_xml_document, AliasDirective,
+    ImportDirective, XmlElementNode, XmlNode,
 };
 
 #[derive(Debug, Clone)]
@@ -115,7 +115,14 @@ fn collect_declarations(xml_by_path: &BTreeMap<String, String>, context: &mut Li
             continue;
         };
         collect_exports(&document.root, &module_name, context);
-        collect_short_name_candidates_from_source(file, source, &module_name, context);
+        let alias_directives = parse_alias_directives(source);
+        collect_short_name_candidates_from_source(
+            file,
+            source,
+            &module_name,
+            &alias_directives,
+            context,
+        );
 
         let mut imports = Vec::new();
         for directive in parse_import_directives(source) {
@@ -137,7 +144,7 @@ fn collect_declarations(xml_by_path: &BTreeMap<String, String>, context: &mut Li
             }
         }
         track_module_token_uses(file, source, &imports, context);
-        for alias in parse_alias_directives(source) {
+        for alias in alias_directives {
             if let Some((target_module, _)) = alias.target_qualified_name.split_once('.') {
                 context
                     .used_import_modules_by_file
@@ -228,6 +235,7 @@ fn collect_short_name_candidates_from_source(
     file: &str,
     source: &str,
     module_name: &str,
+    alias_directives: &[AliasDirective],
     context: &mut LintContext,
 ) {
     let pattern = format!(
@@ -255,14 +263,6 @@ fn collect_short_name_candidates_from_source(
         let Some((_, short_name)) = text.split_once('.') else {
             continue;
         };
-        if short_name
-            .chars()
-            .next()
-            .map(|ch| ch.is_ascii_uppercase())
-            .unwrap_or(false)
-        {
-            continue;
-        }
         context.short_name_candidates.push(ShortNameCandidate {
             file: file.to_string(),
             span: source_span_from_offset(source, start, matched.end()),
@@ -270,6 +270,43 @@ fn collect_short_name_candidates_from_source(
             short_name: short_name.to_string(),
         });
     }
+
+    for alias in alias_directives {
+        let qualified_name = alias.target_qualified_name.as_str();
+        if qualified_name.starts_with(&format!("{module_name}.")) {
+            continue;
+        }
+
+        for (start, _) in source.match_indices(qualified_name) {
+            let end = start + qualified_name.len();
+            if comment_spans
+                .iter()
+                .any(|(begin, finish)| start >= *begin && start < *finish)
+            {
+                continue;
+            }
+            if !is_candidate_token_boundary(source, start, end) {
+                continue;
+            }
+            context.short_name_candidates.push(ShortNameCandidate {
+                file: file.to_string(),
+                span: source_span_from_offset(source, start, end),
+                qualified_name: qualified_name.to_string(),
+                short_name: alias.alias_name.clone(),
+            });
+        }
+    }
+}
+
+fn is_candidate_token_boundary(source: &str, start: usize, end: usize) -> bool {
+    let left = source[..start].chars().next_back();
+    let right = source[end..].chars().next();
+    is_candidate_boundary_char(left) && is_candidate_boundary_char(right)
+}
+
+fn is_candidate_boundary_char(ch: Option<char>) -> bool {
+    ch.map(|value| !(value.is_ascii_alphanumeric() || value == '_' || value == '.'))
+        .unwrap_or(true)
 }
 
 fn source_span_from_offset(source: &str, start: usize, end: usize) -> SourceSpan {
@@ -1127,5 +1164,32 @@ mod tests {
         assert!(refs.calls.contains("event_system.addListener"));
         assert!(refs.script_literals.contains("event.tick"));
         assert!(refs.function_literals.contains("main.check"));
+    }
+
+    #[test]
+    fn collect_short_name_candidates_includes_alias_target_usage() {
+        let source = r#"
+<!-- alias ids.LocationId -->
+<module name="event_bandit_ambush">
+  <function name="can_phase_1_fn" args="ids.LocationId:location_id" return_type="boolean">
+    return true;
+  </function>
+</module>
+"#;
+        let alias_directives = parse_alias_directives(source);
+        let mut context = LintContext::default();
+        collect_short_name_candidates_from_source(
+            "events/bandit_ambush.xml",
+            source,
+            "event_bandit_ambush",
+            &alias_directives,
+            &mut context,
+        );
+
+        assert!(context
+            .short_name_candidates
+            .iter()
+            .any(|candidate| candidate.qualified_name == "ids.LocationId"
+                && candidate.short_name == "LocationId"));
     }
 }

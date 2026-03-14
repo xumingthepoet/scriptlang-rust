@@ -51,6 +51,8 @@ cargo run -p sl-lint -- \
 - `unused-import` 会把以下用法视为“已使用”：
   - 脚本/表达式中的跨模块符号引用（函数、模块变量、模块常量、脚本字面量）。
   - 注释 alias 指令（如 `<!-- alias ids.LocationId -->`）里的目标模块。
+- `unused-module` 会把 import/alias 的实际使用记录视为模块已使用，不会对这类模块重复报未使用。
 - `unused-script` 除了静态 `call/goto` 可达链，还会识别表达式和函数体里的 `@module.script` / `@short` 字面量引用。
-- `unused-script` / `unused-function` / `unused-module-var` / `unused-module-const` 会跳过在 `export` 中声明为对外公开的符号。
+- `unused-script` / `unused-function` 会跳过在 `export` 中声明为对外公开的符号。
+- `unused-module-var` / `unused-module-const` 不会因为 `export` 自动豁免；只要未被读取就会告警。
 - 函数体（`<function>...</function>`）中的 ScriptLang 表达式也会参与引用分析，不再只分析 `<script>` 节点。
