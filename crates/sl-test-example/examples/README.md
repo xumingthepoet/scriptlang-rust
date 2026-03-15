@@ -56,6 +56,7 @@ This catalog keeps example intent explicit so examples can be refactored without
 | `43-nested-module-internal-descendant-visibility-deny` | same-root initializer cannot access `c.d.*` when `c` does not export `module:d` |
 | `44-xml-initializer-format-combo` | `format=\"xml\"` structured init for `var/const/temp` across object/array/map/enum-map with inline coexistence |
 | `45-xml-initializer-mixed-content-deny` | compile-time rejection when `format=\"xml\"` mixes non-empty text and structural child nodes |
+| `46-compile-name-finalization-mixed` | compile-time final naming regression: nested module + alias + short call all execute without runtime name inference |
 
 ## Notes
 - `26-enum-flow` intentionally covers enum member usage directly in XML attribute expressions (`args="ids.LocationId.A"`).

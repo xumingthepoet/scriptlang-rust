@@ -724,6 +724,47 @@ fn runtime_module_global_rewrite_map_from_targets<'a>(
     map
 }
 
+fn runtime_function_symbol_map_for_namespace(
+    visible_function_names: &BTreeSet<String>,
+    function_namespace: &str,
+) -> BTreeMap<String, String> {
+    let mut map = visible_function_names
+        .iter()
+        .map(|name| (name.clone(), rhai_function_symbol(name)))
+        .collect::<BTreeMap<_, _>>();
+
+    let root_name = namespace_root(function_namespace);
+    for short_name in visible_function_names
+        .iter()
+        .filter(|name| !name.contains('.'))
+    {
+        let local_candidate = format!("{function_namespace}.{short_name}");
+        if visible_function_names.contains(&local_candidate) {
+            map.entry(short_name.clone())
+                .or_insert_with(|| rhai_function_symbol(&local_candidate));
+            continue;
+        }
+        let root_candidate = format!("{root_name}.{short_name}");
+        if visible_function_names.contains(&root_candidate) {
+            map.entry(short_name.clone())
+                .or_insert_with(|| rhai_function_symbol(&root_candidate));
+        }
+    }
+
+    for qualified_name in visible_function_names {
+        let Some((namespace, short_name)) = qualified_name.rsplit_once('.') else {
+            continue;
+        };
+        if namespace != function_namespace {
+            continue;
+        }
+        map.entry(short_name.to_string())
+            .or_insert_with(|| rhai_function_symbol(qualified_name));
+    }
+
+    map
+}
+
 fn multi_segment_symbol_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
@@ -1497,26 +1538,15 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
                 &decl.location,
             )?;
             let runtime_rewrite_map = runtime_module_global_rewrite_map_from_targets(
-                namespace_aliases_by_namespace
-                    .get(function_namespace)
-                    .into_iter()
-                    .flat_map(|map| map.values().map(String::as_str)),
+                declared_module_var_names
+                    .iter()
+                    .chain(declared_module_const_names.iter())
+                    .map(String::as_str),
             );
-            let mut runtime_function_symbol_map = visible_function_names
-                .iter()
-                .map(|name| (name.clone(), rhai_function_symbol(name)))
-                .collect::<BTreeMap<_, _>>();
-            for qualified_name in visible_function_names.iter() {
-                let Some((namespace, short_name)) = qualified_name.rsplit_once('.') else {
-                    continue;
-                };
-                if namespace != function_namespace {
-                    continue;
-                }
-                runtime_function_symbol_map
-                    .entry(short_name.to_string())
-                    .or_insert_with(|| rhai_function_symbol(qualified_name));
-            }
+            let runtime_function_symbol_map = runtime_function_symbol_map_for_namespace(
+                &visible_function_names,
+                function_namespace,
+            );
             let normalized_code = preprocess_and_compile_rhai_source(
                 &normalized_code,
                 &decl.location,
@@ -2070,6 +2100,8 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
         &mut namespace_aliases_by_namespace,
         &module_scoped_explicit_symbol_aliases,
     )?;
+    let (declared_module_var_names, declared_module_const_names) =
+        collect_declared_module_global_names(module_by_path.values());
 
     let mut visible_function_names = BTreeSet::new();
     for module in module_by_path.values() {
@@ -2156,26 +2188,15 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
                 &decl.location,
             )?;
             let runtime_rewrite_map = runtime_module_global_rewrite_map_from_targets(
-                namespace_aliases_by_namespace
-                    .get(function_namespace)
-                    .into_iter()
-                    .flat_map(|map| map.values().map(String::as_str)),
+                declared_module_var_names
+                    .iter()
+                    .chain(declared_module_const_names.iter())
+                    .map(String::as_str),
             );
-            let mut runtime_function_symbol_map = visible_function_names
-                .iter()
-                .map(|name| (name.clone(), rhai_function_symbol(name)))
-                .collect::<BTreeMap<_, _>>();
-            for qualified_name in visible_function_names.iter() {
-                let Some((namespace, short_name)) = qualified_name.rsplit_once('.') else {
-                    continue;
-                };
-                if namespace != function_namespace {
-                    continue;
-                }
-                runtime_function_symbol_map
-                    .entry(short_name.to_string())
-                    .or_insert_with(|| rhai_function_symbol(qualified_name));
-            }
+            let runtime_function_symbol_map = runtime_function_symbol_map_for_namespace(
+                &visible_function_names,
+                function_namespace,
+            );
             let normalized_code = preprocess_and_compile_rhai_source(
                 &normalized_code,
                 &decl.location,

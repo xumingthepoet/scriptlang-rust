@@ -1,0 +1,13 @@
+<module name="pkg" export="module:inner">
+  <module name="inner" export="module:math">
+    <module name="math" export="function:addFast;var:base">
+      <var name="base" type="int">10</var>
+      <function name="helper" args="int:x" return_type="int">
+        return base + x;
+      </function>
+      <function name="addFast" args="int:x" return_type="int">
+        return helper(x);
+      </function>
+    </module>
+  </module>
+</module>

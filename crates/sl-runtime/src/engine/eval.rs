@@ -293,34 +293,23 @@ impl ScriptLangEngine {
         }
 
         let mut namespace_values: BTreeMap<String, BTreeMap<String, SlValue>> = BTreeMap::new();
-        let mut qualified_rewrite_map = BTreeMap::new();
         for (qualified_name, value) in &self.module_vars_value {
-            // qualified_name should be namespace.name format, skip invalid entries
-            let Some((namespace, name)) = qualified_name.rsplit_once('.') else {
+            let Some(decl) = self.module_var_declarations.get(qualified_name) else {
                 continue;
             };
             namespace_values
-                .entry(namespace.to_string())
+                .entry(decl.namespace.clone())
                 .or_default()
-                .insert(name.to_string(), value.clone());
-            qualified_rewrite_map.insert(
-                qualified_name.clone(),
-                format!("{}.{}", module_namespace_symbol(namespace), name),
-            );
+                .insert(decl.name.clone(), value.clone());
         }
         for (qualified_name, value) in &self.module_consts_value {
-            // qualified_name should be namespace.name format, skip invalid entries
-            let Some((namespace, name)) = qualified_name.rsplit_once('.') else {
+            let Some(decl) = self.module_const_declarations.get(qualified_name) else {
                 continue;
             };
             namespace_values
-                .entry(namespace.to_string())
+                .entry(decl.namespace.clone())
                 .or_default()
-                .insert(name.to_string(), value.clone());
-            qualified_rewrite_map.insert(
-                qualified_name.clone(),
-                format!("{}.{}", module_namespace_symbol(namespace), name),
-            );
+                .insert(decl.name.clone(), value.clone());
         }
 
         let mut scope = Scope::new();
@@ -337,10 +326,9 @@ impl ScriptLangEngine {
             scope.push_dynamic(name.clone(), slvalue_to_dynamic(value));
         }
 
-        let rewritten = rewrite_module_global_qualified_access(expr, &qualified_rewrite_map);
         let result = self.eval_rhai_source_with_cache(
             &mut scope,
-            &format!("({})", rewritten),
+            &format!("({})", expr),
             "Module global initializer eval failed",
         );
         for (name, before) in global_snapshot {
@@ -375,19 +363,14 @@ impl ScriptLangEngine {
         }
 
         let mut namespace_values: BTreeMap<String, BTreeMap<String, SlValue>> = BTreeMap::new();
-        let mut qualified_rewrite_map = BTreeMap::new();
         for (qualified_name, value) in &self.module_consts_value {
-            let Some((namespace, name)) = qualified_name.rsplit_once('.') else {
+            let Some(decl) = self.module_const_declarations.get(qualified_name) else {
                 continue;
             };
             namespace_values
-                .entry(namespace.to_string())
+                .entry(decl.namespace.clone())
                 .or_default()
-                .insert(name.to_string(), value.clone());
-            qualified_rewrite_map.insert(
-                qualified_name.clone(),
-                format!("{}.{}", module_namespace_symbol(namespace), name),
-            );
+                .insert(decl.name.clone(), value.clone());
         }
 
         let mut scope = Scope::new();
@@ -404,10 +387,9 @@ impl ScriptLangEngine {
             scope.push_dynamic(name.clone(), slvalue_to_dynamic(value));
         }
 
-        let rewritten = rewrite_module_global_qualified_access(expr, &qualified_rewrite_map);
         let result = self.eval_rhai_source_with_cache(
             &mut scope,
-            &format!("({})", rewritten),
+            &format!("({})", expr),
             "Module const initializer eval failed",
         );
 
@@ -512,69 +494,12 @@ impl ScriptLangEngine {
         context: &str,
     ) -> Result<SlValue, ScriptLangError> {
         let script_name = self.resolve_current_script_name().unwrap_or_default();
-        let function_symbol_map = self
-            .visible_function_symbols_by_script
-            .get(&script_name)
-            .cloned()
-            .unwrap_or_default();
-        let mut visible_module = self
-            .visible_module_by_script
-            .get(&script_name)
-            .cloned()
-            .unwrap_or_default();
-        let mut visible_consts = self
-            .visible_consts_by_script
-            .get(&script_name)
-            .cloned()
-            .unwrap_or_default();
-        let mut required_function_namespaces = BTreeSet::new();
-        if let Some(module_name) = self
-            .scripts
-            .get(&script_name)
-            .and_then(|script| script.module_name.as_ref())
-        {
-            required_function_namespaces.insert(module_name.clone());
+        if !self.scripts.contains_key(&script_name) {
+            return Err(ScriptLangError::new(
+                "ENGINE_SCRIPT_MISSING",
+                "Current script missing.",
+            ));
         }
-        for qualified_name in function_symbol_map.keys() {
-            let Some((namespace, _)) = qualified_name.rsplit_once('.') else {
-                continue;
-            };
-            required_function_namespaces.insert(namespace.to_string());
-        }
-        for symbol in function_symbol_map.values() {
-            for qualified_name in self
-                .invoke_function_symbols
-                .iter()
-                .filter(|(_, invoke_symbol)| *invoke_symbol == symbol)
-                .map(|(qualified_name, _)| qualified_name)
-            {
-                let Some((namespace, _)) = qualified_name.rsplit_once('.') else {
-                    continue;
-                };
-                required_function_namespaces.insert(namespace.to_string());
-            }
-        }
-        for qualified_name in self.invoke_all_functions.keys() {
-            let Some((namespace, _)) = qualified_name.rsplit_once('.') else {
-                continue;
-            };
-            required_function_namespaces.insert(namespace.to_string());
-        }
-        for decl in self.module_var_declarations.values() {
-            required_function_namespaces.insert(decl.namespace.clone());
-        }
-        for decl in self.module_const_declarations.values() {
-            required_function_namespaces.insert(decl.namespace.clone());
-        }
-        for decl in self.module_var_declarations.values() {
-            // namespace is always in required_function_namespaces (added at line 452-453)
-            visible_module.insert(decl.qualified_name.clone());
-        }
-        for decl in self.module_const_declarations.values() {
-            // namespace is always in required_function_namespaces (added at line 454-456)
-            visible_consts.insert(decl.qualified_name.clone());
-        }
-        let qualified_rewrite_map = self.build_module_global_qualified_rewrite_map(&script_name);
 
         if !self.host_functions.names().is_empty() {
             return Err(ScriptLangError::new(
@@ -602,44 +527,43 @@ impl ScriptLangEngine {
         }
 
         let mut module_namespace_snapshot = BTreeMap::new();
-        for qualified_name in &visible_module {
-            let Some((namespace, name)) = qualified_name.rsplit_once('.') else {
-                continue;
-            };
+        for decl in self.module_var_declarations.values() {
             let value = self
                 .module_vars_value
-                .get(qualified_name)
+                .get(&decl.qualified_name)
                 .cloned()
                 .ok_or_else(|| {
                     ScriptLangError::new(
                         "ENGINE_MODULE_GLOBAL_MISSING",
-                        format!("Module global \"{}\" is not initialized.", qualified_name),
+                        format!(
+                            "Module global \"{}\" is not initialized.",
+                            decl.qualified_name
+                        ),
                     )
                 })?;
             module_namespace_snapshot
-                .entry(namespace.to_string())
+                .entry(decl.namespace.clone())
                 .or_insert_with(BTreeMap::new)
-                .insert(name.to_string(), value);
+                .insert(decl.name.clone(), value);
         }
-        for qualified_name in &visible_consts {
-            // qualified_name is always namespace.name format
-            let (namespace, name) = qualified_name
-                .rsplit_once('.')
-                .expect("qualified const name should contain '.'");
+        for decl in self.module_const_declarations.values() {
             let value = self
                 .module_consts_value
-                .get(qualified_name)
+                .get(&decl.qualified_name)
                 .cloned()
                 .ok_or_else(|| {
                     ScriptLangError::new(
                         "ENGINE_MODULE_CONST_MISSING",
-                        format!("Module const \"{}\" is not initialized.", qualified_name),
+                        format!(
+                            "Module const \"{}\" is not initialized.",
+                            decl.qualified_name
+                        ),
                     )
                 })?;
             module_namespace_snapshot
-                .entry(namespace.to_string())
+                .entry(decl.namespace.clone())
                 .or_insert_with(BTreeMap::new)
-                .insert(name.to_string(), value);
+                .insert(decl.name.clone(), value);
         }
 
         let mut module_namespace_symbols = BTreeMap::new();
@@ -664,16 +588,14 @@ impl ScriptLangEngine {
 
         let mut code_let_bindings = BTreeSet::new();
         let source = {
-            let prelude = self.get_or_build_module_prelude(&script_name, &function_symbol_map)?;
-            let rewritten_script =
-                rewrite_module_global_qualified_access(script, &qualified_rewrite_map);
+            let prelude = self.get_or_build_module_prelude(&script_name)?;
             if !is_expression {
-                code_let_bindings = collect_top_level_let_bindings(&rewritten_script);
+                code_let_bindings = collect_top_level_let_bindings(script);
             }
             if is_expression {
-                format!("{}\n({})", prelude, rewritten_script)
+                format!("{}\n({})", prelude, script)
             } else {
-                format!("{}\n{}", prelude, rewritten_script)
+                format!("{}\n{}", prelude, script)
             }
         };
 
@@ -750,53 +672,54 @@ impl ScriptLangEngine {
 
             for (name, value) in entries {
                 let qualified_name = format!("{}.{}", namespace, name);
-                if !visible_module.contains(&qualified_name) {
-                    if visible_consts.contains(&qualified_name) {
-                        let before = self
-                            .module_consts_value
-                            .get(&qualified_name)
-                            .cloned()
-                            .ok_or_else(|| {
-                                ScriptLangError::new(
-                                    "ENGINE_MODULE_CONST_DECL_MISSING",
-                                    format!(
-                                        "Module const \"{}\" is visible but declaration is missing.",
-                                        qualified_name
-                                    ),
-                                )
-                            })?;
-                        if value != before {
-                            return Err(ScriptLangError::new(
-                                "ENGINE_CONST_READONLY",
+                if self.module_var_declarations.contains_key(&qualified_name) {
+                    let declared_type =
+                        self.module_vars_type.get(&qualified_name).ok_or_else(|| {
+                            ScriptLangError::new(
+                                "ENGINE_MODULE_GLOBAL_DECL_MISSING",
                                 format!(
-                                    "Module const \"{}\" is readonly and cannot be mutated.",
+                                    "Module global \"{}\" declaration is missing.",
                                     qualified_name
                                 ),
-                            ));
-                        }
-                    }
-                    continue;
-                }
-                let declared_type =
-                    self.module_vars_type.get(&qualified_name).ok_or_else(|| {
-                        ScriptLangError::new(
-                            "ENGINE_MODULE_GLOBAL_DECL_MISSING",
+                            )
+                        })?;
+                    if !is_type_compatible(&value, declared_type) {
+                        return Err(ScriptLangError::new(
+                            "ENGINE_TYPE_MISMATCH",
                             format!(
-                                "Module global \"{}\" is visible but declaration is missing.",
+                                "Module global \"{}\" does not match declared type.",
                                 qualified_name
                             ),
-                        )
-                    })?;
-                if !is_type_compatible(&value, declared_type) {
-                    return Err(ScriptLangError::new(
-                        "ENGINE_TYPE_MISMATCH",
-                        format!(
-                            "Module global \"{}\" does not match declared type.",
-                            qualified_name
-                        ),
-                    ));
+                        ));
+                    }
+                    self.module_vars_value.insert(qualified_name, value);
+                    continue;
                 }
-                self.module_vars_value.insert(qualified_name, value);
+
+                if self.module_const_declarations.contains_key(&qualified_name) {
+                    let before = self
+                        .module_consts_value
+                        .get(&qualified_name)
+                        .cloned()
+                        .ok_or_else(|| {
+                            ScriptLangError::new(
+                                "ENGINE_MODULE_CONST_DECL_MISSING",
+                                format!(
+                                    "Module const \"{}\" declaration is missing.",
+                                    qualified_name
+                                ),
+                            )
+                        })?;
+                    if value != before {
+                        return Err(ScriptLangError::new(
+                            "ENGINE_CONST_READONLY",
+                            format!(
+                                "Module const \"{}\" is readonly and cannot be mutated.",
+                                qualified_name
+                            ),
+                        ));
+                    }
+                }
             }
         }
 
@@ -806,10 +729,9 @@ impl ScriptLangEngine {
     pub(super) fn get_or_build_module_prelude(
         &mut self,
         script_name: &str,
-        function_symbol_map: &BTreeMap<String, String>,
     ) -> Result<&str, ScriptLangError> {
         if !self.module_prelude_by_script.contains_key(script_name) {
-            let prelude = self.build_module_prelude(script_name, function_symbol_map)?;
+            let prelude = self.build_module_prelude(script_name)?;
             self.module_prelude_by_script
                 .insert(script_name.to_string(), prelude);
         }
@@ -823,17 +745,14 @@ impl ScriptLangEngine {
     pub(super) fn build_module_prelude(
         &self,
         script_name: &str,
-        function_symbol_map: &BTreeMap<String, String>,
     ) -> Result<String, ScriptLangError> {
-        let Some(script) = self.scripts.get(script_name) else {
+        if !self.scripts.contains_key(script_name) {
             return Ok(String::new());
-        };
+        }
         let visible_globals = self
             .visible_globals_by_script
             .get(script_name)
             .expect("script visibility should exist for registered script");
-        let current_module = script.module_name.as_deref();
-
         let mut out = String::new();
         out.push_str("let invoke = |name, args| {\n");
         out.push_str(
@@ -899,51 +818,9 @@ impl ScriptLangEngine {
                 }
             }
 
-            let rewritten = decl.code.clone();
-            let function_rewrite_map = self.build_module_global_rewrite_map_all();
-            let rewritten =
-                rewrite_module_global_qualified_access(&rewritten, &function_rewrite_map);
-            out.push_str(&rewritten);
+            out.push_str(&decl.code);
             out.push('\n');
             out.push_str("\n};\n");
-        }
-
-        if let Some(module_name) = current_module {
-            let local_aliases = self.invoke_module_local_qualified(module_name);
-            for (local_name, qualified_name) in local_aliases {
-                let Some(decl) = self.invoke_all_functions.get(&qualified_name) else {
-                    continue;
-                };
-                let rhai_name = function_symbol_map
-                    .get(&local_name)
-                    .cloned()
-                    .expect("visible function symbol map should contain local alias");
-                let target_symbol = self
-                    .invoke_function_symbols
-                    .get(&qualified_name)
-                    .cloned()
-                    .expect("invoke symbol map should contain local target symbol");
-                let params = decl
-                    .params
-                    .iter()
-                    .map(|param| param.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                out.push_str("let ");
-                out.push_str(&rhai_name);
-                out.push_str(" = |");
-                out.push_str(&params);
-                out.push_str("| {\n");
-                out.push_str("call(");
-                out.push_str(&target_symbol);
-                if params.is_empty() {
-                    out.push_str(")\n};\n");
-                } else {
-                    out.push_str(", ");
-                    out.push_str(&params);
-                    out.push_str(")\n};\n");
-                }
-            }
         }
 
         out.push_str("invoke = |name, args| {\n");
@@ -985,37 +862,6 @@ impl ScriptLangEngine {
                 );
                 out.push_str(")\n}\n");
             }
-            if let Some((namespace, short_name)) = qualified_name.rsplit_once('.') {
-                if current_module == Some(namespace) {
-                    out.push_str("if name == \"*");
-                    out.push_str(short_name);
-                    out.push_str("\" {\n");
-                    out.push_str("if args.len != ");
-                    out.push_str(&decl.params.len().to_string());
-                    out.push_str(" {\n");
-                    out.push_str(
-                        "throw \"__sl_err:ENGINE_INVOKE_ARG_COUNT_MISMATCH:Invoke target ",
-                    );
-                    out.push_str(qualified_name);
-                    out.push_str(" received unexpected arg count.\";\n");
-                    out.push_str("}\n");
-                    out.push_str("return ");
-                    out.push_str("call(");
-                    out.push_str(target_symbol);
-                    if decl.params.is_empty() {
-                        out.push_str(")\n}\n");
-                    } else {
-                        out.push_str(", ");
-                        out.push_str(
-                            &(0..decl.params.len())
-                                .map(|index| format!("args[{index}]"))
-                                .collect::<Vec<_>>()
-                                .join(", "),
-                        );
-                        out.push_str(")\n}\n");
-                    }
-                }
-            }
         }
         out.push_str(
             "throw \"__sl_err:ENGINE_INVOKE_TARGET_NOT_FOUND:Invoke target not found.\" + name;\n",
@@ -1025,78 +871,9 @@ impl ScriptLangEngine {
         Ok(out)
     }
 
-    fn invoke_module_local_qualified(&self, module_name: &str) -> BTreeMap<String, String> {
-        let mut local = BTreeMap::new();
-        for qualified_name in self.invoke_all_functions.keys() {
-            let Some((namespace, short_name)) = qualified_name.as_str().rsplit_once('.') else {
-                continue;
-            };
-            if namespace == module_name {
-                local.insert(short_name.to_string(), qualified_name.to_string());
-            }
-        }
-        local
-    }
-
     #[cfg(test)]
-    fn invoke_body_symbol_map(&self, qualified_name: &str) -> BTreeMap<String, String> {
-        let mut map = self.invoke_function_symbols.clone();
-        let Some((namespace, _)) = qualified_name.rsplit_once('.') else {
-            return map;
-        };
-        for (short_name, local_qualified) in self.invoke_module_local_qualified(namespace) {
-            if let Some(symbol) = self.invoke_function_symbols.get(&local_qualified) {
-                map.entry(short_name).or_insert_with(|| symbol.clone());
-            }
-        }
-        map
-    }
-
-    fn build_module_global_rewrite_map_all(&self) -> BTreeMap<String, String> {
-        let mut out = BTreeMap::new();
-        for qualified_name in self
-            .module_var_declarations
-            .keys()
-            .cloned()
-            .chain(self.module_const_declarations.keys().cloned())
-        {
-            let Some((namespace, name)) = qualified_name.rsplit_once('.') else {
-                continue;
-            };
-            out.insert(
-                qualified_name.clone(),
-                format!("{}.{}", module_namespace_symbol(namespace), name),
-            );
-        }
-        out
-    }
-
-    pub(super) fn build_module_global_qualified_rewrite_map(
-        &self,
-        script_name: &str,
-    ) -> BTreeMap<String, String> {
-        let mut out = BTreeMap::new();
-        let visible_module = self
-            .visible_module_by_script
-            .get(script_name)
-            .cloned()
-            .unwrap_or_default();
-        let visible_consts = self
-            .visible_consts_by_script
-            .get(script_name)
-            .cloned()
-            .unwrap_or_default();
-        for qualified_name in visible_module.iter().chain(visible_consts.iter()) {
-            let Some((namespace, name)) = qualified_name.rsplit_once('.') else {
-                continue;
-            };
-            out.insert(
-                qualified_name.clone(),
-                format!("{}.{}", module_namespace_symbol(namespace), name),
-            );
-        }
-
-        out
+    fn invoke_body_symbol_map(&self, _qualified_name: &str) -> BTreeMap<String, String> {
+        self.invoke_function_symbols.clone()
     }
 
     #[cfg(test)]
@@ -1368,7 +1145,10 @@ let public = 3;
         )]));
         engine.start("main.main", None).expect("start");
         let value = engine
-            .eval_module_global_initializer("main.base + main.base + main.hp", "main")
+            .eval_module_global_initializer(
+                "__sl_module_ns_main.base + __sl_module_ns_main.base + __sl_module_ns_main.hp",
+                "main",
+            )
             .expect("initializer should evaluate");
         assert_eq!(value, SlValue::Number(15.0));
     }
@@ -1803,9 +1583,6 @@ let public = 3;
         invalid_visible_module
             .start("main.main", None)
             .expect("start");
-        invalid_visible_module
-            .visible_module_by_script
-            .insert("main.main".to_string(), BTreeSet::from(["bad".to_string()]));
         if let Some(script) = invalid_visible_module.scripts.get_mut("main.main") {
             let mut bad_decl = script
                 .visible_module_vars
@@ -1969,14 +1746,6 @@ let public = 3;
 
         let mut map_helpers_engine = engine_from_sources(module_files);
         map_helpers_engine.start("main.main", None).expect("start");
-        assert!(map_helpers_engine
-            .build_module_global_qualified_rewrite_map("missing")
-            .is_empty());
-        map_helpers_engine
-            .visible_module_by_script
-            .insert("main.main".to_string(), BTreeSet::from(["bad".to_string()]));
-        let rewritten = map_helpers_engine.build_module_global_qualified_rewrite_map("main.main");
-        assert!(rewritten.is_empty());
 
         map_helpers_engine.module_var_declarations.insert(
             "other.hp".to_string(),
@@ -2067,7 +1836,7 @@ let public = 3;
                 .insert("ghost".to_string(), ghost);
         }
         let _ = alias_visibility_engine
-            .execute_rhai("shared.hp + 1", true, "expression")
+            .execute_rhai("__sl_module_ns_shared.hp + 1", true, "expression")
             .expect("eval should pass");
     }
 
@@ -2436,13 +2205,7 @@ let public = 3;
             .or_default()
             .insert("ghost".to_string());
         let prelude = prelude_missing_global
-            .build_module_prelude(
-                "main.main",
-                prelude_missing_global
-                    .visible_function_symbols_by_script
-                    .get("main.main")
-                    .expect("symbol map"),
-            )
+            .build_module_prelude("main.main")
             .expect("prelude build should ignore missing global binding");
         assert!(prelude.contains("let shared_add = |"));
     }
@@ -2587,7 +2350,8 @@ let public = 3;
         // Need to start the engine first to initialize consts
         engine.start("main.main", None).expect("start");
         // Verify the base const works without our modification
-        let result_before = engine.eval_module_const_initializer("main.base + 1", "main");
+        let result_before =
+            engine.eval_module_const_initializer("__sl_module_ns_main.base + 1", "main");
         assert!(
             result_before.is_ok(),
             "base test should work before modification"
@@ -2599,7 +2363,7 @@ let public = 3;
             .module_consts_value
             .insert("invalid_no_dot".to_string(), SlValue::Number(42.0));
         // This should still work because the valid const should be processed
-        let result = engine.eval_module_const_initializer("main.base + 1", "main");
+        let result = engine.eval_module_const_initializer("__sl_module_ns_main.base + 1", "main");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), SlValue::Number(8.0));
     }
@@ -2623,8 +2387,7 @@ let public = 3;
     }
 
     #[test]
-    pub(super) fn execute_rhai_with_mode_handles_non_dotted_visible_const() {
-        // Test line 379: when visible_consts contains a non-dotted name, skip it
+    pub(super) fn execute_rhai_with_mode_uses_script_visible_consts_from_artifact() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
             r#"<module name="main" export="script:main;const:base">
@@ -2632,36 +2395,19 @@ let public = 3;
   <script name="main"><text>ok</text></script>
 </module>"#,
         )]));
-        // Manually inject a non-dotted key into visible_consts_by_script
-        // The script_name is "main.main" (module.script)
-        engine
-            .visible_consts_by_script
-            .entry("main.main".to_string())
-            .or_default()
-            .insert("invalid_no_dot".to_string());
-        // The script execution should still work
         engine.start("main.main", None).expect("start");
         let output = engine.next_output();
         assert!(output.is_ok());
     }
 
     #[test]
-    pub(super) fn execute_rhai_with_mode_handles_non_dotted_function_symbol() {
-        // Test lines 591-593: when function_symbol_map contains a non-dotted name, skip it
+    pub(super) fn execute_rhai_with_mode_no_longer_depends_on_function_symbol_map_cache() {
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
             r#"<module name="main" export="script:main">
   <script name="main"><text>ok</text></script>
 </module>"#,
         )]));
-        // Manually inject a non-dotted key into visible_function_symbols_by_script
-        // The script_name is "main.main" (module.script)
-        engine
-            .visible_function_symbols_by_script
-            .entry("main.main".to_string())
-            .or_default()
-            .insert("nodots_func".to_string(), "test_symbol".to_string());
-        // The script execution should still work
         engine.start("main.main", None).expect("start");
         let output = engine.next_output();
         assert!(output.is_ok());
@@ -2729,7 +2475,8 @@ let public = 3;
         // Need to start first to initialize globals
         engine.start("main.main", None).expect("start");
         // Verify it works before modification
-        let result_before = engine.eval_module_global_initializer("main.score + 1", "main");
+        let result_before =
+            engine.eval_module_global_initializer("__sl_module_ns_main.score + 1", "main");
         assert!(result_before.is_ok());
         assert_eq!(result_before.unwrap(), SlValue::Number(11.0));
 
@@ -2738,7 +2485,7 @@ let public = 3;
             .module_vars_value
             .insert("invalid_no_dot".to_string(), SlValue::Number(42.0));
         // Should still work because valid globals should be processed
-        let result = engine.eval_module_global_initializer("main.score + 1", "main");
+        let result = engine.eval_module_global_initializer("__sl_module_ns_main.score + 1", "main");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), SlValue::Number(11.0));
     }
@@ -2756,7 +2503,8 @@ let public = 3;
         // Need to start first to initialize consts
         engine.start("main.main", None).expect("start");
         // Verify it works before modification
-        let result_before = engine.eval_module_global_initializer("main.BASE + 1", "main");
+        let result_before =
+            engine.eval_module_global_initializer("__sl_module_ns_main.BASE + 1", "main");
         assert!(result_before.is_ok());
         assert_eq!(result_before.unwrap(), SlValue::Number(11.0));
 
@@ -2765,7 +2513,7 @@ let public = 3;
             .module_consts_value
             .insert("invalid_no_dot".to_string(), SlValue::Number(99.0));
         // Should still work because valid consts should be processed
-        let result = engine.eval_module_global_initializer("main.BASE + 1", "main");
+        let result = engine.eval_module_global_initializer("__sl_module_ns_main.BASE + 1", "main");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), SlValue::Number(11.0));
     }
@@ -3179,28 +2927,14 @@ let public = 3;
         let mut engine = engine_from_sources(files);
         engine.start("main.main", None).expect("start");
 
-        let symbol_map = engine
-            .visible_function_symbols_by_script
-            .get("main.main")
-            .cloned()
-            .expect("function symbols should exist");
         let prelude = engine
-            .build_module_prelude("main.main", &symbol_map)
+            .build_module_prelude("main.main")
             .expect("prelude should build");
         assert!(prelude.contains("name.starts_with(\"*\")"));
         assert!(prelude.contains("if name == \"*main.add\""));
-        assert!(prelude.contains("if name == \"*add\""));
         assert!(prelude.contains("if name == \"*main.hidden\""));
-
-        let local = engine.invoke_module_local_qualified("main");
-        assert!(local.contains_key("add"));
-        assert!(local.contains_key("ping"));
-        assert!(!local.contains_key("remote"));
-
         let body_map = engine.invoke_body_symbol_map("main.add");
-        assert!(body_map.contains_key("add"));
-        let passthrough_map = engine.invoke_body_symbol_map("badname");
-        assert!(!passthrough_map.is_empty());
+        assert!(!body_map.is_empty());
     }
 
     #[test]
@@ -3259,7 +2993,7 @@ let public = 3;
         )]));
         engine.start("main.main", None).expect("start");
         // This should work even though module has no consts
-        let result = engine.eval_module_global_initializer("main.score + 1", "main");
+        let result = engine.eval_module_global_initializer("__sl_module_ns_main.score + 1", "main");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), SlValue::Number(11.0));
     }
@@ -3298,8 +3032,8 @@ let public = 3;
         );
         // Note: We don't add "main.missing" to module_consts_value
 
-        // Should still work because the missing const should be skipped
-        let result = engine.eval_module_global_initializer("main.score + 1", "main");
+        // Missing declaration value is irrelevant when expression does not read it.
+        let result = engine.eval_module_global_initializer("__sl_module_ns_main.score + 1", "main");
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), SlValue::Number(11.0));
     }
@@ -3428,12 +3162,12 @@ let public = 3;
         engine.start("main.main", None).expect("start");
 
         // Test expression mode (line 631) - is_expression=true
-        let result = engine.eval_expression("main.score");
+        let result = engine.eval_expression("__sl_module_ns_main.score");
         assert!(result.is_ok());
 
         // Test code block mode (line 636) - is_expression=false
         // Use run_code which passes is_expression=false
-        let result = engine.run_code("main.score + 1");
+        let result = engine.run_code("__sl_module_ns_main.score + 1");
         assert!(result.is_ok());
     }
 
@@ -3566,8 +3300,6 @@ let public = 3;
 
     #[test]
     pub(super) fn function_symbol_map_handles_non_dotted_names() {
-        // Test lines 590-593: when function_symbol_map keys don't contain '.', skip them
-        // This tests the rsplit_once('.') returning None case
         use super::*;
 
         let files = map(&[(
@@ -3578,16 +3310,12 @@ let public = 3;
 </module>"#,
         )]);
         let engine = engine_from_sources(files);
-        // The engine should have function_symbol_map with "local_func" key (no namespace/dot)
-        // This exercises the continue at line 592 when split_once returns None
-        // We can't directly test the internal function, but we verify the engine works
+        // Runtime should only depend on compiled scripts and invoke maps.
         assert!(engine.scripts.contains_key("main"));
     }
 
     #[test]
     pub(super) fn function_symbol_map_non_dotted_entries_triggers_execute_rhai_with_mode() {
-        // Test lines 590-593: trigger the rsplit_once('.') None branch in execute_rhai_with_mode
-        // This test actually triggers execute_rhai_with_mode which contains the uncovered code
         use super::*;
 
         let files = map(&[(
@@ -3598,18 +3326,10 @@ let public = 3;
 </module>"#,
         )]);
         let mut engine = engine_from_sources(files);
-        // Manually inject a non-dotted key into visible_function_symbols_by_script to trigger the branch
-        engine
-            .visible_function_symbols_by_script
-            .entry("main.main".to_string())
-            .or_default()
-            .insert("nodots_func".to_string(), "test_symbol".to_string());
-
         // Start and run - this should trigger execute_rhai_with_mode
         engine.start("main.main", None).expect("start");
         let _output1 = engine.next_output();
-        // May succeed or fail depending on whether invalid symbol causes issue
-        // The important thing is that we execute the code path
+        // The important thing is that execute path still works without symbol-map cache.
     }
 
     #[test]

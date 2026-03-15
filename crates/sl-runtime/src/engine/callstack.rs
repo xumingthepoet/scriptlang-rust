@@ -59,28 +59,6 @@ impl ScriptLangEngine {
         Ok(target_script)
     }
 
-    fn is_script_name_segment(segment: &str) -> bool {
-        let mut chars = segment.chars();
-        let Some(first) = chars.next() else {
-            return false;
-        };
-        if !first.is_ascii_alphabetic() && first != '_' {
-            return false;
-        }
-        chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
-    }
-
-    fn is_qualified_script_name(name: &str) -> bool {
-        let Some((module_name, local_name)) = name.rsplit_once('.') else {
-            return false;
-        };
-        if module_name.is_empty() || local_name.is_empty() {
-            return false;
-        }
-        Self::is_script_name_segment(local_name)
-            && module_name.split('.').all(Self::is_script_name_segment)
-    }
-
     fn resolve_target_script(
         &mut self,
         target: &ScriptTarget,
@@ -105,18 +83,7 @@ impl ScriptLangEngine {
                         format!("Target variable \"{}\" must be script.", var_name),
                     )
                 })?;
-                let target_script =
-                    self.normalize_target_script(stripped, missing_code, missing_message)?;
-                if !Self::is_qualified_script_name(&target_script) {
-                    return Err(ScriptLangError::new(
-                        "ENGINE_TARGET_VAR_TYPE",
-                        format!(
-                            "Target variable \"{}\" must be script and hold @module.script.",
-                            var_name
-                        ),
-                    ));
-                }
-                Ok(target_script)
+                self.normalize_target_script(stripped, missing_code, missing_message)
             }
         }
     }
@@ -1301,7 +1268,7 @@ mod callstack_tests {
         assert_eq!(error.code, "ENGINE_SCRIPT_NOT_FOUND");
         assert_eq!(
             globals
-                .build_module_prelude("missing-script", &BTreeMap::new())
+                .build_module_prelude("missing-script")
                 .expect("missing script prelude should be empty"),
             ""
         );
@@ -1320,7 +1287,7 @@ mod callstack_tests {
         ]));
         module_engine.invoke_function_symbols.clear();
         let error = module_engine
-            .build_module_prelude("main", &BTreeMap::new())
+            .build_module_prelude("main")
             .expect_err("missing symbol mapping should fail");
         assert_eq!(error.code, "ENGINE_MODULE_FUNCTION_SYMBOL_MISSING");
 
@@ -1711,7 +1678,7 @@ mod callstack_tests {
     }
 
     #[test]
-    pub(super) fn resolve_target_script_variable_rejects_short_script_literal() {
+    pub(super) fn resolve_target_script_variable_keeps_short_script_literal() {
         let mut engine = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><temp name="cmd" type="string">""</temp><input var="cmd" text="go"/></script>"#,
@@ -1729,14 +1696,14 @@ mod callstack_tests {
             var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
         }];
 
-        let error = engine
+        let target = engine
             .resolve_target_script(&var("dst"), "ERR", "err")
-            .expect_err("short variable target should fail");
-        assert_eq!(error.code, "ENGINE_TARGET_VAR_TYPE");
+            .expect("short variable target should pass");
+        assert_eq!(target, "next");
     }
 
     #[test]
-    pub(super) fn resolve_target_script_variable_rejects_invalid_qualified_names() {
+    pub(super) fn resolve_target_script_variable_keeps_raw_names_without_semantic_validation() {
         // Test empty module name (".script")
         let mut engine1 = engine_from_sources(map(&[(
             "main.script.xml",
@@ -1754,10 +1721,10 @@ mod callstack_tests {
             return_continuation: None,
             var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
         }];
-        let error1 = engine1
+        let value1 = engine1
             .resolve_target_script(&var("dst"), "ERR", "err")
-            .expect_err("empty module name should fail");
-        assert_eq!(error1.code, "ENGINE_TARGET_VAR_TYPE");
+            .expect("empty module name pattern should pass resolution");
+        assert_eq!(value1, ".script");
 
         // Test empty local name ("module.")
         let mut engine2 = engine_from_sources(map(&[(
@@ -1776,10 +1743,10 @@ mod callstack_tests {
             return_continuation: None,
             var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
         }];
-        let error2 = engine2
+        let value2 = engine2
             .resolve_target_script(&var("dst"), "ERR", "err")
-            .expect_err("empty local name should fail");
-        assert_eq!(error2.code, "ENGINE_TARGET_VAR_TYPE");
+            .expect("empty local name pattern should pass resolution");
+        assert_eq!(value2, "module.");
 
         // Multi-level namespace target should be accepted
         let mut engine3 = engine_from_sources(map(&[(
@@ -1826,10 +1793,10 @@ mod callstack_tests {
             return_continuation: None,
             var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
         }];
-        let error4 = engine4
+        let value4 = engine4
             .resolve_target_script(&var("dst"), "ERR", "err")
-            .expect_err("digit first char should fail");
-        assert_eq!(error4.code, "ENGINE_TARGET_VAR_TYPE");
+            .expect("digit-first module segment should pass resolution");
+        assert_eq!(value4, "123test.script");
 
         // Test valid qualified script name with hyphen in segment (triggers is_script_name_segment success path at line 70)
         let mut engine5 = engine_from_sources(map(&[(
@@ -1876,10 +1843,10 @@ mod callstack_tests {
             return_continuation: None,
             var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
         }];
-        let error5 = engine6
+        let value5 = engine6
             .resolve_target_script(&var("dst"), "ERR", "err")
-            .expect_err("invalid character in segment should fail");
-        assert_eq!(error5.code, "ENGINE_TARGET_VAR_TYPE");
+            .expect("invalid identifier characters should pass resolution");
+        assert_eq!(value5, "module.invalid$name");
 
         // Test empty segment in qualified name (e.g., "foo..bar") - triggers line 65
         let mut engine7 = engine_from_sources(map(&[(
@@ -1898,10 +1865,10 @@ mod callstack_tests {
             return_continuation: None,
             var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
         }];
-        let error6 = engine7
+        let value6 = engine7
             .resolve_target_script(&var("dst"), "ERR", "err")
-            .expect_err("empty segment in qualified name should fail");
-        assert_eq!(error6.code, "ENGINE_TARGET_VAR_TYPE");
+            .expect("empty segment should pass resolution");
+        assert_eq!(value6, "foo..bar");
     }
 
     #[test]

@@ -162,11 +162,27 @@ fn build_runtime_module_global_rewrite_map(
 
 fn build_runtime_function_symbol_map(
     visible_functions: &BTreeMap<String, FunctionDecl>,
+    module_name: Option<&str>,
 ) -> BTreeMap<String, String> {
-    visible_functions
+    let mut out = visible_functions
         .keys()
         .map(|name| (name.clone(), rhai_function_symbol(name)))
-        .collect()
+        .collect::<BTreeMap<_, _>>();
+    if let Some(module_name) = module_name {
+        let root_name = module_root_name(module_name).to_string();
+        for short_name in visible_functions.keys().filter(|name| !name.contains('.')) {
+            let local_candidate = format!("{module_name}.{short_name}");
+            if visible_functions.contains_key(&local_candidate) {
+                out.insert(short_name.clone(), rhai_function_symbol(&local_candidate));
+                continue;
+            }
+            let root_candidate = format!("{root_name}.{short_name}");
+            if visible_functions.contains_key(&root_candidate) {
+                out.insert(short_name.clone(), rhai_function_symbol(&root_candidate));
+            }
+        }
+    }
+    out
 }
 
 fn is_identifier_char(ch: Option<char>) -> bool {
@@ -792,7 +808,8 @@ fn normalize_expression_literals(
     )?;
     let runtime_module_global_rewrite_map =
         build_runtime_module_global_rewrite_map(visible_module_vars, visible_module_consts);
-    let runtime_function_symbol_map = build_runtime_function_symbol_map(visible_functions);
+    let runtime_function_symbol_map =
+        build_runtime_function_symbol_map(visible_functions, module_name);
     preprocess_and_compile_rhai_source(
         &rewritten,
         span,
@@ -858,7 +875,8 @@ fn normalize_attribute_expression_literals(
     )?;
     let runtime_module_global_rewrite_map =
         build_runtime_module_global_rewrite_map(visible_module_vars, visible_module_consts);
-    let runtime_function_symbol_map = build_runtime_function_symbol_map(visible_functions);
+    let runtime_function_symbol_map =
+        build_runtime_function_symbol_map(visible_functions, module_name);
     preprocess_and_compile_rhai_source(
         &rewritten,
         span,
@@ -913,7 +931,8 @@ fn normalize_template_literals(
     )?;
     let runtime_module_global_rewrite_map =
         build_runtime_module_global_rewrite_map(visible_module_vars, visible_module_consts);
-    let runtime_function_symbol_map = build_runtime_function_symbol_map(visible_functions);
+    let runtime_function_symbol_map =
+        build_runtime_function_symbol_map(visible_functions, module_name);
     preprocess_and_compile_template_expressions(
         &rewritten,
         span,
@@ -5640,7 +5659,7 @@ mod script_compile_tests {
         );
 
         // Test build_runtime_function_symbol_map with empty map
-        let empty_fn_map = build_runtime_function_symbol_map(&BTreeMap::new());
+        let empty_fn_map = build_runtime_function_symbol_map(&BTreeMap::new(), None);
         assert!(empty_fn_map.is_empty());
     }
 

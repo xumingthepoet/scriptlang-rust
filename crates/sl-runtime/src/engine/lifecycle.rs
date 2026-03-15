@@ -131,9 +131,6 @@ pub struct ScriptLangEngine {
     pub(super) module_vars_type: BTreeMap<String, ScriptType>,
     pub(super) module_consts_value: BTreeMap<String, SlValue>,
     pub(super) visible_globals_by_script: HashMap<String, BTreeSet<String>>,
-    pub(super) visible_module_by_script: HashMap<String, BTreeSet<String>>,
-    pub(super) visible_consts_by_script: HashMap<String, BTreeSet<String>>,
-    pub(super) visible_function_symbols_by_script: HashMap<String, BTreeMap<String, String>>,
     pub(super) invoke_all_functions: BTreeMap<String, FunctionDecl>,
     pub(super) invoke_function_symbols: BTreeMap<String, String>,
     pub(super) module_prelude_by_script: HashMap<String, String>,
@@ -180,9 +177,6 @@ impl ScriptLangEngine {
 
         let mut group_lookup: HashMap<String, GroupLookup> = HashMap::new();
         let mut visible_globals_by_script = HashMap::new();
-        let mut visible_module_by_script = HashMap::new();
-        let mut visible_consts_by_script = HashMap::new();
-        let mut visible_function_symbols_by_script = HashMap::new();
 
         let mut invoke_all_functions = BTreeMap::new();
         let mut invoke_function_symbols = BTreeMap::new();
@@ -218,17 +212,6 @@ impl ScriptLangEngine {
                 script_name.clone(),
                 script.visible_globals.iter().cloned().collect(),
             );
-            let mut visible_module = BTreeSet::new();
-            for decl in script.visible_module_vars.values() {
-                visible_module.insert(decl.qualified_name.clone());
-            }
-            visible_module_by_script.insert(script_name.clone(), visible_module);
-
-            let mut visible_consts = BTreeSet::new();
-            for decl in script.visible_module_consts.values() {
-                visible_consts.insert(decl.qualified_name.clone());
-            }
-            visible_consts_by_script.insert(script_name.clone(), visible_consts);
 
             for function_name in script.visible_functions.keys() {
                 if host_functions
@@ -247,7 +230,6 @@ impl ScriptLangEngine {
             }
 
             let mut symbol_to_public = BTreeMap::new();
-            let mut public_to_symbol = BTreeMap::new();
             for function_name in script.visible_functions.keys() {
                 let symbol = rhai_function_symbol(function_name);
                 if let Some(existing) = symbol_to_public.get(&symbol) {
@@ -260,9 +242,7 @@ impl ScriptLangEngine {
                     ));
                 }
                 symbol_to_public.insert(symbol.clone(), function_name.clone());
-                public_to_symbol.insert(function_name.clone(), symbol);
             }
-            visible_function_symbols_by_script.insert(script_name.clone(), public_to_symbol);
 
             for (qualified_name, decl) in &script.invoke_all_functions {
                 if !invoke_all_functions.contains_key(qualified_name) {
@@ -363,9 +343,6 @@ impl ScriptLangEngine {
             module_vars_type,
             module_consts_value: BTreeMap::new(),
             visible_globals_by_script,
-            visible_module_by_script,
-            visible_consts_by_script,
-            visible_function_symbols_by_script,
             invoke_all_functions,
             invoke_function_symbols,
             module_prelude_by_script: HashMap::new(),
@@ -1134,9 +1111,8 @@ mod lifecycle_tests {
         );
         assert_eq!(
             engine
-                .visible_function_symbols_by_script
-                .get("main")
-                .and_then(|m| m.get("shared.addWithGameBonus"))
+                .invoke_function_symbols
+                .get("shared.addWithGameBonus")
                 .map(String::as_str),
             Some("shared_addWithGameBonus")
         );

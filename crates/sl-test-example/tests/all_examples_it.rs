@@ -259,6 +259,11 @@ fn example_45_xml_initializer_mixed_content_deny_reports_compile_error() {
 }
 
 #[test]
+fn example_46_compile_name_finalization_mixed_matches_testcase() {
+    assert_example("46-compile-name-finalization-mixed");
+}
+
+#[test]
 fn example_22_access_control_matches_testcase() {
     assert_example("22-access-control");
 }

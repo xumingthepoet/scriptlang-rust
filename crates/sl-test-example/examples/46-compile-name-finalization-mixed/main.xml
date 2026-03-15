@@ -1,0 +1,11 @@
+<!-- import pkg from pkg.xml -->
+<!-- alias pkg.inner.math.base as seed -->
+<module name="main" export="script:main">
+  <script name="main">
+    <temp name="v1" type="int">pkg.inner.math.addFast(2)</temp>
+    <temp name="v2" type="int">pkg.inner.math.addFast(3)</temp>
+    <temp name="v3" type="int">seed + pkg.inner.math.base</temp>
+    <text>${v1}-${v2}-${v3}</text>
+    <end/>
+  </script>
+</module>
