@@ -1,0 +1,8 @@
+<!-- import shared from shared.xml -->
+<!-- alias shared.hp -->
+<!-- alias shared.hp -->
+<module name="main" export="script:main">
+  <script name="main">
+    <text>${hp}</text>
+  </script>
+</module>

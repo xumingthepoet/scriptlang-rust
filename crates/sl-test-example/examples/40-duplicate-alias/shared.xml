@@ -1,0 +1,3 @@
+<module name="shared" export="var:hp">
+  <var name="hp" type="int">1</var>
+</module>

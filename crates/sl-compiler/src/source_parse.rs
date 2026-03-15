@@ -72,12 +72,15 @@ fn parse_source_entry(
         )
     })?;
 
+    let alias_directives = parse_alias_directives(source_text);
+    reject_duplicate_alias_directives(&alias_directives)?;
+
     Ok(ParsedSourceEntry {
         file_path,
         root: document.root,
         module_name,
         imports: parse_import_directives(source_text),
-        alias_directives: parse_alias_directives(source_text),
+        alias_directives,
     })
 }
 
@@ -136,6 +139,35 @@ fn extract_module_name(root: &XmlElementNode) -> Result<String, ScriptLangError>
     Ok(module_name.to_string())
 }
 
+fn reject_duplicate_alias_directives(directives: &[AliasDirective]) -> Result<(), ScriptLangError> {
+    let mut targets_by_alias = BTreeMap::new();
+    for directive in directives {
+        if let Some(existing_target) = targets_by_alias.get(&directive.alias_name) {
+            if existing_target == &directive.target_qualified_name {
+                return Err(ScriptLangError::new(
+                    "ALIAS_DUPLICATE",
+                    format!(
+                        "Duplicate alias \"{}\" for target \"{}\".",
+                        directive.alias_name, directive.target_qualified_name
+                    ),
+                ));
+            }
+            return Err(ScriptLangError::new(
+                "ALIAS_NAME_CONFLICT",
+                format!(
+                    "Alias \"{}\" points to both \"{}\" and \"{}\".",
+                    directive.alias_name, existing_target, directive.target_qualified_name
+                ),
+            ));
+        }
+        targets_by_alias.insert(
+            directive.alias_name.clone(),
+            directive.target_qualified_name.clone(),
+        );
+    }
+    Ok(())
+}
+
 fn resolve_import_directives(
     current_path: &str,
     directives: &[ImportDirective],
@@ -179,9 +211,16 @@ fn resolve_import_directives(
                         ),
                     ));
                 }
-                if seen.insert(resolved.clone()) {
-                    imports.push(resolved);
+                if !seen.insert(resolved.clone()) {
+                    return Err(ScriptLangError::new(
+                        "IMPORT_DUPLICATE",
+                        format!(
+                            "Duplicate import target \"{}\" in \"{}\".",
+                            resolved, current_path
+                        ),
+                    ));
                 }
+                imports.push(resolved);
             }
             ImportDirective::Directory {
                 module_names,
@@ -220,9 +259,16 @@ fn resolve_import_directives(
                             ),
                         ));
                     };
-                    if seen.insert(resolved.clone()) {
-                        imports.push(resolved.clone());
+                    if !seen.insert(resolved.clone()) {
+                        return Err(ScriptLangError::new(
+                            "IMPORT_DUPLICATE",
+                            format!(
+                                "Duplicate import target \"{}\" in \"{}\".",
+                                resolved, current_path
+                            ),
+                        ));
                     }
+                    imports.push(resolved.clone());
                 }
             }
         }
@@ -401,7 +447,7 @@ mod source_parse_tests {
     }
 
     #[test]
-    fn parse_sources_deduplicates_file_and_directory_imports() {
+    fn parse_sources_rejects_duplicate_file_and_directory_imports() {
         let files = BTreeMap::from([
             (
                 "main.xml".to_string(),
@@ -418,11 +464,8 @@ mod source_parse_tests {
             ),
         ]);
 
-        let sources = parse_sources(&files).expect("duplicate imports should dedupe");
-        assert_eq!(
-            sources.get("main.xml").expect("main source").imports,
-            vec!["shared/nested/base.xml".to_string()]
-        );
+        let error = parse_sources(&files).expect_err("duplicate imports should fail");
+        assert_eq!(error.code, "IMPORT_DUPLICATE");
     }
 
     #[test]
@@ -514,7 +557,7 @@ mod source_parse_tests {
     }
 
     #[test]
-    fn parse_sources_rejects_blank_module_name_and_helper_dedupes_duplicates() {
+    fn parse_sources_rejects_blank_module_name_and_duplicate_aliases() {
         let blank_name = BTreeMap::from([(
             "main.xml".to_string(),
             r#"<module name="   " export="script:main"><script name="main"></script></module>"#
@@ -527,23 +570,26 @@ mod source_parse_tests {
             "XML_MODULE_NAME_MISSING"
         );
 
-        let imports = resolve_import_directives(
-            "main.xml",
-            &[
-                ImportDirective::File {
-                    module_name: "Shared".to_string(),
-                    from_path: "shared.xml".to_string(),
-                },
-                ImportDirective::File {
-                    module_name: "Shared".to_string(),
-                    from_path: "shared.xml".to_string(),
-                },
-            ],
-            &BTreeSet::from(["shared.xml".to_string()]),
-            &BTreeMap::from([("shared.xml".to_string(), "Shared".to_string())]),
-        )
-        .expect("duplicate file imports should dedupe");
-        assert_eq!(imports, vec!["shared.xml".to_string()]);
+        let duplicate_alias = BTreeMap::from([
+            (
+                "main.xml".to_string(),
+                r#"
+<!-- import shared from shared.xml -->
+<!-- alias shared.hp -->
+<!-- alias shared.hp -->
+<module name="main" export="script:main"><script name="main"></script></module>
+"#
+                .to_string(),
+            ),
+            (
+                "shared.xml".to_string(),
+                r#"<module name="shared" export="var:hp"><var name="hp" type="int">1</var></module>"#
+                    .to_string(),
+            ),
+        ]);
+        let duplicate_alias_error =
+            parse_sources(&duplicate_alias).expect_err("duplicate alias should fail");
+        assert_eq!(duplicate_alias_error.code, "ALIAS_DUPLICATE");
     }
 
     #[test]

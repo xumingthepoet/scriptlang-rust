@@ -77,6 +77,7 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 - `<!-- import Shared from shared.xml -->` 只导入该文件声明的 `Shared` module。
 - `<!-- import { Battle, Shared } from modules/ -->` 递归扫描目录，只导入显式列出的 module。
 - 目录 import 要求目录树内 module 名唯一；重名直接报错。
+- 同一文件内，重复导入到同一个目标文件会编译报错（不再静默去重）。
 - import 缺失、目录未匹配到任何 module、或循环依赖都会编译报错。
 
 ## 2.1 alias 语法
@@ -94,6 +95,7 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 - `alias` 只影响当前文件脚本编译时的可见符号，不会新增 import 边。
 - `alias` 目标必须在当前 import + export 可见闭包内。
 - `alias` 仅支持 `type` / module `var` / module `const`，不支持 function。
+- 同一文件内，重复声明完全相同的 alias 会编译报错（不再静默跳过）。
 - 同名 alias 指向不同目标会编译报错；alias 名与同类已可见名字冲突也会编译报错。
 
 ## 3. `<script>` 顶层属性

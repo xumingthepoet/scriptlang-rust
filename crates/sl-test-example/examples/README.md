@@ -49,6 +49,8 @@ This catalog keeps example intent explicit so examples can be refactored without
 | `36-terminal-structure-check` | compile-time terminal-structure validation for script tail `if/else` branches |
 | `37-lint-function-script-literal` | lint regression: alias-only import usage + function-body `@script` literal tracking |
 | `38-invalid-qualified-enum-name` | compile-time declaration-name validation: `<enum name>` must be short identifier, not qualified path |
+| `39-duplicate-import` | compile-time validation: duplicate `import` target in one module is rejected |
+| `40-duplicate-alias` | compile-time validation: duplicate `alias` directive in one module is rejected |
 
 ## Notes
 - `26-enum-flow` intentionally covers enum member usage directly in XML attribute expressions (`args="ids.LocationId.A"`).

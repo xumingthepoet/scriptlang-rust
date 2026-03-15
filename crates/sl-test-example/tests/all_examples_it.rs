@@ -204,6 +204,22 @@ fn example_38_invalid_qualified_enum_name_reports_compile_error() {
 }
 
 #[test]
+fn example_39_duplicate_import_reports_compile_error() {
+    let scripts_xml = read_scripts_xml_from_example("39-duplicate-import");
+    let error = sl_api::compile_artifact_from_xml_map(&scripts_xml, Some("main.main".to_string()))
+        .expect_err("duplicate import should fail at compile time");
+    assert_eq!(error.code, "IMPORT_DUPLICATE");
+}
+
+#[test]
+fn example_40_duplicate_alias_reports_compile_error() {
+    let scripts_xml = read_scripts_xml_from_example("40-duplicate-alias");
+    let error = sl_api::compile_artifact_from_xml_map(&scripts_xml, Some("main.main".to_string()))
+        .expect_err("duplicate alias should fail at compile time");
+    assert_eq!(error.code, "ALIAS_DUPLICATE");
+}
+
+#[test]
 fn example_22_access_control_matches_testcase() {
     assert_example("22-access-control");
 }

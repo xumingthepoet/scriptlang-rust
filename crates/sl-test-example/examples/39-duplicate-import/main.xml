@@ -1,0 +1,7 @@
+<!-- import shared from shared.xml -->
+<!-- import shared from shared.xml -->
+<module name="main" export="script:main">
+  <script name="main">
+    <text>${shared.hp}</text>
+  </script>
+</module>
