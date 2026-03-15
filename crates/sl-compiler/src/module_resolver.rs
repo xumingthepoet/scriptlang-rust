@@ -6544,6 +6544,35 @@ mod module_resolver_tests {
         let error_dot = crate::compile_project_bundle_from_xml_map(&files_dot)
             .expect_err("dot in name should fail");
         assert_eq!(error_dot.code, "NAME_IDENTIFIER_INVALID");
+
+        // Test valid nested module with export targets
+        let files_valid_nested = BTreeMap::from([(
+            "test.xml".to_string(),
+            r#"<module name="main" export="module:sub">
+<module name="sub" export="script:main;function:helper">
+  <function name="helper" args="" return_type="int">return 1;</function>
+  <script name="main"><text>ok</text></script>
+</module>
+</module>"#
+                .to_string(),
+        )]);
+        let result = crate::compile_project_bundle_from_xml_map(&files_valid_nested);
+        assert!(result.is_ok(), "valid nested module should compile");
+
+        // Test deep nested module with export (covers namespace checking paths)
+        let files_deep_nested = BTreeMap::from([(
+            "test.xml".to_string(),
+            r#"<module name="a" export="module:b">
+<module name="b" export="module:c">
+<module name="c" export="script:main">
+  <script name="main"><text>ok</text></script>
+</module>
+</module>
+</module>"#
+                .to_string(),
+        )]);
+        let result_deep = crate::compile_project_bundle_from_xml_map(&files_deep_nested);
+        assert!(result_deep.is_ok(), "deep nested module should compile");
     }
 
     #[test]

@@ -3320,6 +3320,46 @@ mod script_compile_tests {
                 .expect_err("short function literal without module should fail");
         assert_eq!(no_module_error.code, "XML_FUNCTION_LITERAL_INVALID");
 
+        // Test line 588: else branch when module_name is None and qualified not visible
+        // Use a function literal that's not in visible_functions, with module_name = None
+        let empty_functions: BTreeSet<String> = BTreeSet::new();
+        let no_module_not_visible = normalize_and_validate_function_literals_with_names(
+            "*main.add",
+            &span,
+            None,
+            &empty_functions,
+        )
+        .expect_err("function literal not visible with no module should fail");
+        assert_eq!(no_module_not_visible.code, "XML_FUNCTION_LITERAL_NOT_FOUND");
+
+        // Test line 580: candidate in visible_functions branch
+        // Add a function that matches candidate pattern but not the original qualified
+        let mut visible_functions2 = BTreeMap::new();
+        visible_functions2.insert(
+            "main.other.add".to_string(),
+            FunctionDecl {
+                name: "main.other.add".to_string(),
+                params: vec![],
+                return_binding: FunctionReturn {
+                    r#type: ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                    location: span.clone(),
+                },
+                code: "out = 1;".to_string(),
+                location: span.clone(),
+            },
+        );
+        // "other.add" is not in visible_functions, but "main.other.add" (candidate) is
+        let with_candidate = normalize_and_validate_function_literals(
+            "*other.add",
+            &span,
+            Some("main"),
+            &visible_functions2,
+        )
+        .expect("candidate in visible_functions should be used");
+        assert_eq!(with_candidate, "*main.other.add");
+
         // Test line 205-206: whitespace after function literal
         let with_whitespace = normalize_and_validate_function_literals(
             "*add ",
@@ -5661,6 +5701,100 @@ mod script_compile_tests {
         // Test build_runtime_function_symbol_map with empty map
         let empty_fn_map = build_runtime_function_symbol_map(&BTreeMap::new(), None);
         assert!(empty_fn_map.is_empty());
+
+        // Test build_runtime_function_symbol_map with module_name and short names (lines 178-182)
+        // rhai_function_symbol converts "." to "_", so "main.add" -> "main_add"
+        let span = SourceSpan::synthetic();
+        let mut fn_map = BTreeMap::new();
+        // Add a short name (no '.') - this will be iterated in the for loop
+        fn_map.insert(
+            "add".to_string(),
+            FunctionDecl {
+                name: "add".to_string(),
+                params: vec![],
+                return_binding: FunctionReturn {
+                    r#type: ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                    location: span.clone(),
+                },
+                code: "1".to_string(),
+                location: span.clone(),
+            },
+        );
+        // Also add a qualified name with module_name prefix - this will be the local_candidate
+        fn_map.insert(
+            "main.add".to_string(),
+            FunctionDecl {
+                name: "main.add".to_string(),
+                params: vec![],
+                return_binding: FunctionReturn {
+                    r#type: ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                    location: span.clone(),
+                },
+                code: "1".to_string(),
+                location: span.clone(),
+            },
+        );
+        // Test: with module_name="main", short_name="add", local_candidate="main.add" exists
+        // So it should override with local_candidate (line 176-177 continue, line 178)
+        let fn_map_with_local = build_runtime_function_symbol_map(&fn_map, Some("main"));
+        // rhai_function_symbol("main.add") = "main_add"
+        assert_eq!(fn_map_with_local.get("add"), Some(&"main_add".to_string()));
+
+        // Test case 2: module_name="util", local_candidate="util.add" exists
+        let fn_map2_result = build_runtime_function_symbol_map(&fn_map, Some("util"));
+        // local_candidate doesn't exist (no "util.add"), so no override happens
+        // Short name "add" keeps its original symbol "add"
+        assert_eq!(fn_map2_result.get("add"), Some(&"add".to_string()));
+
+        // Test case 3: module_name=None should not process short names
+        let fn_map_no_module = build_runtime_function_symbol_map(&fn_map, None);
+        assert_eq!(fn_map_no_module.get("add"), Some(&"add".to_string()));
+
+        // Test case 4: test root_candidate branch (lines 180-181)
+        // When local_candidate doesn't exist but root_candidate exists
+        // module_name="main.sub" -> root_name="main"
+        let mut fn_map3 = BTreeMap::new();
+        fn_map3.insert(
+            "add".to_string(), // short name
+            FunctionDecl {
+                name: "add".to_string(),
+                params: vec![],
+                return_binding: FunctionReturn {
+                    r#type: ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                    location: span.clone(),
+                },
+                code: "1".to_string(),
+                location: span.clone(),
+            },
+        );
+        // "main.add" exists as root candidate
+        fn_map3.insert(
+            "main.add".to_string(),
+            FunctionDecl {
+                name: "main.add".to_string(),
+                params: vec![],
+                return_binding: FunctionReturn {
+                    r#type: ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                    location: span.clone(),
+                },
+                code: "1".to_string(),
+                location: span.clone(),
+            },
+        );
+        // With module_name="main.sub", root_name="main"
+        // local_candidate = "main.sub.add" doesn't exist
+        // root_candidate = "main.add" exists, should override
+        let fn_map3_result = build_runtime_function_symbol_map(&fn_map3, Some("main.sub"));
+        // Should use root_candidate "main.add"
+        assert_eq!(fn_map3_result.get("add"), Some(&"main_add".to_string()));
     }
 
     #[test]
@@ -5899,6 +6033,21 @@ mod script_compile_tests {
         )
         .expect_err("cross-module literal not in access_map should fail");
         assert_eq!(cross_module_not_found.code, "XML_SCRIPT_TARGET_NOT_FOUND");
+
+        // Test line 440: candidate in access_map branch
+        // "other.foo" not in access_map, but "main.other.foo" (candidate) is in access_map
+        let access_map_with_candidate = BTreeMap::from([
+            ("main.next".to_string(), AccessLevel::Public),
+            ("main.other.foo".to_string(), AccessLevel::Public),
+        ]);
+        let with_candidate = normalize_and_validate_script_literals_in_expression(
+            "@other.foo",
+            &span,
+            Some("main"),
+            Some(&access_map_with_candidate),
+        )
+        .expect("candidate in access_map should be used");
+        assert_eq!(with_candidate, "@main.other.foo");
 
         let short_literal_error = normalize_and_validate_script_literals_in_expression(
             "dst = @next;",

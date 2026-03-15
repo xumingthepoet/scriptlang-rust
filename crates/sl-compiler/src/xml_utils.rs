@@ -2336,6 +2336,47 @@ mod xml_utils_tests {
         )
         .expect_err("primitive xml initializer should be rejected");
         assert_eq!(unsupported_error.code, "XML_INIT_XML_TYPE_UNSUPPORTED");
+
+        // Test mixed content error in build_initializer_expr_from_xml_for_type_expr (lines 242-245)
+        // Both text and child elements should trigger XML_INIT_XML_MIXED_CONTENT
+        let mixed_node = xml_element(
+            "var",
+            &[("format", "xml")],
+            vec![
+                xml_text("text content"),
+                XmlNode::Element(xml_element("item", &[], vec![xml_text("1")])),
+            ],
+        );
+        let mixed_error = build_initializer_expr_from_xml_for_type_expr(
+            &mixed_node,
+            &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Primitive("int".to_string()))),
+        )
+        .expect_err("mixed content should fail");
+        assert_eq!(mixed_error.code, "XML_INIT_XML_MIXED_CONTENT");
+
+        // Test Custom (object) type success path (line 272: parse_inline_required_no_element_children)
+        let object_node = xml_element(
+            "var",
+            &[("format", "xml")],
+            vec![
+                XmlNode::Element(xml_element(
+                    "field",
+                    &[("name", "hp")],
+                    vec![xml_text("100")],
+                )),
+                XmlNode::Element(xml_element(
+                    "field",
+                    &[("name", "name")],
+                    vec![xml_text("\"Hero\"")],
+                )),
+            ],
+        );
+        let object_expr = build_initializer_expr_from_xml_for_type_expr(
+            &object_node,
+            &ParsedTypeExpr::Custom("Hero".to_string()),
+        )
+        .expect("object xml with fields should pass");
+        assert!(object_expr.contains("hp: 100"));
     }
 
     #[test]
@@ -2525,5 +2566,215 @@ mod xml_utils_tests {
             build_initializer_expr_from_xml(&enum_map_bad_key, &enum_map_type, &visible_types)
                 .expect_err("unknown enum member should fail");
         assert_eq!(enum_map_bad_key_error.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
+
+        // Test line 378-389: missing field in object xml initializer
+        // Create object type with fields but provide only partial fields in XML
+        let object_with_required_fields = ScriptType::Object {
+            type_name: "Hero".to_string(),
+            fields: BTreeMap::from([
+                (
+                    "hp".to_string(),
+                    ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                ),
+                (
+                    "mp".to_string(),
+                    ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                ),
+                (
+                    "name".to_string(),
+                    ScriptType::Primitive {
+                        name: "string".to_string(),
+                    },
+                ),
+            ]),
+        };
+        let object_partial_fields = xml_element(
+            "temp",
+            &[("format", "xml")],
+            vec![
+                XmlNode::Element(xml_element(
+                    "field",
+                    &[("name", "hp")],
+                    vec![xml_text("100")],
+                )),
+                // Missing "mp" and "name" fields
+            ],
+        );
+        let missing_field_error = build_initializer_expr_from_xml(
+            &object_partial_fields,
+            &object_with_required_fields,
+            &visible_types,
+        )
+        .expect_err("missing fields should fail");
+        assert_eq!(missing_field_error.code, "XML_INIT_XML_FIELD_MISSING");
+
+        // Test line 410-420: Map type with string key
+        let string_key_map_type = ScriptType::Map {
+            key_type: MapKeyType::String,
+            value_type: Box::new(ScriptType::Primitive {
+                name: "int".to_string(),
+            }),
+        };
+        let string_key_map_node = xml_element(
+            "temp",
+            &[("format", "xml")],
+            vec![
+                XmlNode::Element(xml_element("tuple", &[("key", "one")], vec![xml_text("1")])),
+                XmlNode::Element(xml_element("tuple", &[("key", "two")], vec![xml_text("2")])),
+            ],
+        );
+        let string_key_expr = build_initializer_expr_from_xml(
+            &string_key_map_node,
+            &string_key_map_type,
+            &visible_types,
+        )
+        .expect("string key map should work");
+        assert!(string_key_expr.contains("\"one\": 1"));
+        assert!(string_key_expr.contains("\"two\": 2"));
+
+        // Test line 396-404: array with non-item child element
+        let array_bad_child = xml_element(
+            "temp",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element("notitem", &[], Vec::new()))],
+        );
+        let array_bad_child_error = build_initializer_expr_from_xml_for_type_expr(
+            &array_bad_child,
+            &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Primitive("int".to_string()))),
+        )
+        .expect_err("non-item child should fail");
+        assert_eq!(array_bad_child_error.code, "XML_INIT_XML_CHILD_INVALID");
+
+        // Test line 442-444: unsupported type in build_initializer_expr_from_xml
+        let unsupported_type = ScriptType::Function;
+        let unsupported_node = xml_element("temp", &[("format", "xml")], Vec::new());
+        let unsupported_error =
+            build_initializer_expr_from_xml(&unsupported_node, &unsupported_type, &visible_types)
+                .expect_err("unsupported type should fail");
+        assert_eq!(unsupported_error.code, "XML_INIT_XML_TYPE_UNSUPPORTED");
+
+        // Test line 230-231: parse_xml_map_entries with child element in tuple
+        let map_with_child_in_tuple = xml_element(
+            "temp",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "tuple",
+                &[("key", "test")],
+                vec![XmlNode::Element(xml_element("nested", &[], Vec::new()))],
+            ))],
+        );
+        let map_child_error = build_initializer_expr_from_xml(
+            &map_with_child_in_tuple,
+            &string_key_map_type,
+            &visible_types,
+        )
+        .expect_err("tuple with child element should fail");
+        assert_eq!(map_child_error.code, "XML_FUNCTION_CHILD_NODE_INVALID");
+
+        // Test line 393-408: Array type with empty item
+        let array_empty_item = xml_element(
+            "temp",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element("item", &[], Vec::new()))],
+        );
+        let array_empty_error = build_initializer_expr_from_xml_for_type_expr(
+            &array_empty_item,
+            &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Primitive("int".to_string()))),
+        )
+        .expect_err("empty item should fail");
+        assert_eq!(array_empty_error.code, "XML_EMPTY_NODE_CONTENT");
+
+        // Test line 268-272: field name is rhai keyword in build_initializer_expr_from_xml_for_type_expr
+        let object_with_rhai_keyword_field = xml_element(
+            "temp",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("name", "let")],
+                vec![xml_text("1")],
+            ))],
+        );
+        let rhai_keyword_error = build_initializer_expr_from_xml_for_type_expr(
+            &object_with_rhai_keyword_field,
+            &ParsedTypeExpr::Custom("Hero".to_string()),
+        )
+        .expect_err("rhai keyword field should fail");
+        assert_eq!(rhai_keyword_error.code, "NAME_RHAI_KEYWORD_RESERVED");
+
+        // Test line 393-406: Array type with non-item child in build_initializer_expr_from_xml
+        let array_type_with_non_item = ScriptType::Array {
+            element_type: Box::new(ScriptType::Primitive {
+                name: "int".to_string(),
+            }),
+        };
+        let array_non_item_child = xml_element(
+            "temp",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element("notitem", &[], Vec::new()))],
+        );
+        let array_non_item_error = build_initializer_expr_from_xml(
+            &array_non_item_child,
+            &array_type_with_non_item,
+            &visible_types,
+        )
+        .expect_err("non-item child should fail");
+        assert_eq!(array_non_item_error.code, "XML_INIT_XML_CHILD_INVALID");
+
+        // Test line 375: field with child element in build_initializer_expr_from_xml
+        let object_type_for_field_test = ScriptType::Object {
+            type_name: "Hero".to_string(),
+            fields: BTreeMap::from([(
+                "hp".to_string(),
+                ScriptType::Primitive {
+                    name: "int".to_string(),
+                },
+            )]),
+        };
+        let field_with_child = xml_element(
+            "temp",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("name", "hp")],
+                vec![XmlNode::Element(xml_element("nested", &[], Vec::new()))],
+            ))],
+        );
+        let field_child_error = build_initializer_expr_from_xml(
+            &field_with_child,
+            &object_type_for_field_test,
+            &visible_types,
+        )
+        .expect_err("field with child should fail");
+        assert_eq!(field_child_error.code, "XML_FUNCTION_CHILD_NODE_INVALID");
+
+        // Test line 406: Array item with child element in build_initializer_expr_from_xml
+        let array_with_child_in_item = ScriptType::Array {
+            element_type: Box::new(ScriptType::Primitive {
+                name: "int".to_string(),
+            }),
+        };
+        let array_item_with_child = xml_element(
+            "temp",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "item",
+                &[],
+                vec![XmlNode::Element(xml_element("nested", &[], Vec::new()))],
+            ))],
+        );
+        let array_item_child_error = build_initializer_expr_from_xml(
+            &array_item_with_child,
+            &array_with_child_in_item,
+            &visible_types,
+        )
+        .expect_err("item with child should fail");
+        assert_eq!(
+            array_item_child_error.code,
+            "XML_FUNCTION_CHILD_NODE_INVALID"
+        );
     }
 }

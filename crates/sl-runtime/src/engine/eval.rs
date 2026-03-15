@@ -3361,4 +3361,46 @@ let public = 3;
         let output = engine.next_output();
         assert!(output.is_ok());
     }
+
+    #[test]
+    pub(super) fn eval_covers_additional_success_paths() {
+        // Test eval with successful script that returns different types
+        // This helps cover success paths in the eval functions
+
+        // Test with array return
+        let files = map(&[(
+            "main.xml",
+            r#"<module name="main" export="script:main">
+  <script name="main"><text>[1, 2, 3]</text></script>
+</module>"#,
+        )]);
+        let mut engine = engine_from_sources(files);
+        engine.start("main.main", None).expect("start");
+        let output = engine.next_output();
+        assert!(output.is_ok());
+
+        // Test with map return
+        let files2 = map(&[(
+            "main.xml",
+            r#"<module name="main" export="script:main">
+  <script name="main"><text>#{"a": 1}</text></script>
+</module>"#,
+        )]);
+        let mut engine2 = engine_from_sources(files2);
+        engine2.start("main.main", None).expect("start");
+        let output2 = engine2.next_output();
+        assert!(output2.is_ok());
+
+        // Test with string return
+        let files3 = map(&[(
+            "main.xml",
+            r#"<module name="main" export="script:main">
+  <script name="main"><text>"hello"</text></script>
+</module>"#,
+        )]);
+        let mut engine3 = engine_from_sources(files3);
+        engine3.start("main.main", None).expect("start");
+        let output3 = engine3.next_output();
+        assert!(output3.is_ok());
+    }
 }
