@@ -5,12 +5,12 @@
     <item>2</item>
   </const>
 
-  <module name="child" export="function:via_const_in,via_const_out">
+  <module name="child" export="function:via_const_in1,via_const_out">
     <const name="nums" type="int[]" format="xml">
       <item>3</item>
       <item>4</item>
     </const>
-    <function name="via_const_in" return_type="int">
+    <function name="via_const_in1" return_type="int">
       return nums[0];
     </function>
 
@@ -20,7 +20,7 @@
   </module>
 
   <script name="main">
-    <text>${m.fetch()}-${child.via_const_in()}-${root.child.via_const_out()}</text>
+    <text>${m.fetch()}-${child.via_const_in1()}-${root.child.via_const_out()}</text>
     <end/>
   </script>
 </module>
