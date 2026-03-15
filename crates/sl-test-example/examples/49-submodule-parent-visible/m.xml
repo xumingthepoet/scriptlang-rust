@@ -1,0 +1,18 @@
+<module name="m" export="function:get">
+  <const name="vals" type="string[]" format="xml">
+    <item>"ok"</item>
+  </const>
+
+  <module name="navigation" export="function:get">
+    <function name="get" return_type="string">
+      for v in vals {
+        return v;
+      }
+      return "";
+    </function>
+  </module>
+
+  <function name="get" return_type="string">
+    return navigation.get();
+  </function>
+</module>

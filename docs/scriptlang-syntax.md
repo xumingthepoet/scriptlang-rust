@@ -48,6 +48,11 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 - 跨 module import 只能访问对方在 `export` 中声明的元素；未导出的元素仅在本 module 内可见。
 - 同一根 module 树（同文件内 `a.*`）内部，子模块之间可见对方 `export` 的符号；未 `export` 的符号仍不可见。
 - 同根内部访问时，第一层子模块（如 `c.*`）不要求根模块 `a` 导出 `module:c`；但访问更深层（如 `c.d.*`）要求父模块逐层导出 `module`（例如 `c` 需 `export=\"module:d\"`）。
+- 同根 module 树内部，`<script>` 与 `<function>` 表达式都支持“相对根命名空间”的访问写法：
+  - 子模块可直接读取 parent 的所有符号（不受 parent `export` 限制；与 parent 内部声明之间互访一致）。
+  - 子模块读取 sibling 符号时仍遵循 sibling 的可见性规则（例如需要 sibling 显式导出对应符号，及必要的 `module:*` 逐层门控）。
+  - 根模块可直接调用子模块函数（例如在 `m.get` 里调用 `navigation.get()`）。
+  - 上述写法等价于全限定名（如 `m.labels.x` / `m.vals` / `m.navigation.get()`）。
 - 文件外访问时，根模块需要 `export="module:child"` 显式暴露子模块入口；未暴露子模块不可通过 `a.child.*` 访问。
 - 宿主入口脚本必须在 `export` 中声明；未导出脚本不能作为 entry。
 - 声明名（`script/type/enum/field/member/function/args/return/var/const/temp/dynamic-options item/index`）会在编译期做 Rhai 关键字冲突检查，命中时报 `NAME_RHAI_KEYWORD_RESERVED`（大小写敏感）。

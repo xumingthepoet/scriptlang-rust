@@ -56,3 +56,6 @@ cargo run -p sl-lint -- \
 - `unused-script` / `unused-function` 不会因为 `export` 自动豁免；未被可达链或表达式调用使用时仍会告警。
 - `unused-module-var` / `unused-module-const` 不会因为 `export` 自动豁免；只要未被读取就会告警。
 - 函数体（`<function>...</function>`）中的 ScriptLang 表达式也会参与引用分析，不再只分析 `<script>` 节点。
+- `prefer-short-name` 会在“同一 root module 可直接访问短名”时提示冗余全限定前缀，例如：
+  - `root.child.fn()` -> 建议 `child.fn()`
+  - `m.values` -> 建议 `values`

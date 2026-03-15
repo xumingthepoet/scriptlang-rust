@@ -59,6 +59,7 @@ This catalog keeps example intent explicit so examples can be refactored without
 | `46-compile-name-finalization-mixed` | compile-time final naming regression: nested module + alias + short call all execute without runtime name inference |
 | `47-xml-initializer-inline-only-deny` | compile-time rejection when `format=\"xml\"` node uses inline-only text instead of structural child nodes |
 | `48-sub-module-complex` | nested submodule resolution across same-root and imported module: `m.fetch -> navigation.get` reads sibling submodule const (`labels.x`) and parent const (`vals`), plus `child.*` vs `root.child.*` access/lint coverage |
+| `49-submodule-parent-visible` | regression: submodule function can read parent module private const directly (`navigation.get` reads `vals`) |
 
 ## Notes
 - `26-enum-flow` intentionally covers enum member usage directly in XML attribute expressions (`args="ids.LocationId.A"`).

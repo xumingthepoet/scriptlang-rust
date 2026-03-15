@@ -1,0 +1,7 @@
+<!-- import m from m.xml -->
+<module name="app" export="script:main">
+  <script name="main">
+    <text>${m.get()}</text>
+    <end/>
+  </script>
+</module>
