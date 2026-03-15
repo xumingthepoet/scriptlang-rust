@@ -35,58 +35,6 @@ fn map_rhai_error(
     ScriptLangError::new(default_code, default_message)
 }
 
-fn rewrite_function_calls_if_needed(
-    source: &str,
-    function_symbol_map: &BTreeMap<String, String>,
-) -> String {
-    if function_symbol_map.is_empty() || !source.contains('(') {
-        return source.to_string();
-    }
-    let mut filtered = BTreeMap::new();
-    for token in collect_called_tokens(source) {
-        if let Some(symbol) = function_symbol_map.get(&token) {
-            filtered.insert(token, symbol.clone());
-        }
-    }
-    if filtered.is_empty() {
-        return source.to_string();
-    }
-    rewrite_function_calls(source, &filtered)
-}
-
-fn collect_called_tokens(source: &str) -> BTreeSet<String> {
-    fn is_ident_start(ch: char) -> bool {
-        ch.is_ascii_alphabetic() || ch == '_'
-    }
-    fn is_ident_char(ch: char) -> bool {
-        ch.is_ascii_alphanumeric() || ch == '_' || ch == '.' || ch == '-'
-    }
-
-    let chars = source.chars().collect::<Vec<_>>();
-    let mut index = 0usize;
-    let mut out = BTreeSet::new();
-    while index < chars.len() {
-        if !is_ident_start(chars[index]) {
-            index += 1;
-            continue;
-        }
-        let start = index;
-        index += 1;
-        while index < chars.len() && is_ident_char(chars[index]) {
-            index += 1;
-        }
-        let token = chars[start..index].iter().collect::<String>();
-        let mut lookahead = index;
-        while lookahead < chars.len() && chars[lookahead].is_whitespace() {
-            lookahead += 1;
-        }
-        if lookahead < chars.len() && chars[lookahead] == '(' {
-            out.insert(token);
-        }
-    }
-    out
-}
-
 fn collect_top_level_let_bindings(source: &str) -> BTreeSet<String> {
     fn is_ident_start(ch: char) -> bool {
         ch.is_ascii_alphabetic() || ch == '_'
@@ -717,11 +665,8 @@ impl ScriptLangEngine {
         let mut code_let_bindings = BTreeSet::new();
         let source = {
             let prelude = self.get_or_build_module_prelude(&script_name, &function_symbol_map)?;
-            let mut call_rewrite_map = function_symbol_map.clone();
-            call_rewrite_map.insert("invoke".to_string(), "invoke".to_string());
-            let rewritten_script = rewrite_function_calls_if_needed(script, &call_rewrite_map);
             let rewritten_script =
-                rewrite_module_global_qualified_access(&rewritten_script, &qualified_rewrite_map);
+                rewrite_module_global_qualified_access(script, &qualified_rewrite_map);
             if !is_expression {
                 code_let_bindings = collect_top_level_let_bindings(&rewritten_script);
             }
@@ -954,13 +899,7 @@ impl ScriptLangEngine {
                 }
             }
 
-            let rewritten = if decl.code.contains('(') {
-                let mut call_rewrite_map = self.invoke_body_symbol_map(qualified_name);
-                call_rewrite_map.insert("invoke".to_string(), "invoke".to_string());
-                rewrite_function_calls_if_needed(&decl.code, &call_rewrite_map)
-            } else {
-                decl.code.clone()
-            };
+            let rewritten = decl.code.clone();
             let function_rewrite_map = self.build_module_global_rewrite_map_all();
             let rewritten =
                 rewrite_module_global_qualified_access(&rewritten, &function_rewrite_map);
@@ -1099,6 +1038,7 @@ impl ScriptLangEngine {
         local
     }
 
+    #[cfg(test)]
     fn invoke_body_symbol_map(&self, qualified_name: &str) -> BTreeMap<String, String> {
         let mut map = self.invoke_function_symbols.clone();
         let Some((namespace, _)) = qualified_name.rsplit_once('.') else {

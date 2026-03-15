@@ -90,13 +90,17 @@ pub(crate) fn preprocess_and_compile_rhai_source(
 ) -> Result<String, ScriptLangError> {
     let preprocessed = preprocess_scriptlang_rhai_input(source, context, input_mode)
         .map_err(|error| map_rhai_preprocess_error_to_compile(error, span))?;
-    let source_for_compile = rewrite_function_calls(&preprocessed, runtime_function_symbol_map);
-    let source_for_compile = rewrite_module_global_qualified_access(
-        &source_for_compile,
+    let mut effective_function_symbol_map = runtime_function_symbol_map.clone();
+    effective_function_symbol_map
+        .entry("invoke".to_string())
+        .or_insert_with(|| "invoke".to_string());
+    let rewritten_source = rewrite_function_calls(&preprocessed, &effective_function_symbol_map);
+    let rewritten_source = rewrite_module_global_qualified_access(
+        &rewritten_source,
         runtime_module_global_rewrite_map,
     );
-    compile_rhai_source_for_target(&source_for_compile, span, context, target)?;
-    Ok(preprocessed)
+    compile_rhai_source_for_target(&rewritten_source, span, context, target)?;
+    Ok(rewritten_source)
 }
 
 fn preprocess_and_compile_template_expressions(
@@ -3527,7 +3531,7 @@ mod script_compile_tests {
             &BTreeMap::new(),
         )
         .expect("normalize attr should pass");
-        assert_eq!(normalized_attr, "invoke(fnRef, [1])");
+        assert_eq!(normalized_attr, "call(invoke, fnRef, [1])");
 
         let normalized_template = normalize_template_literals(
             "go ${invoke(fnRef, [1])}",
@@ -3542,7 +3546,7 @@ mod script_compile_tests {
             &BTreeMap::new(),
         )
         .expect("normalize template should pass");
-        assert!(normalized_template.contains("invoke(fnRef, [1])"));
+        assert!(normalized_template.contains("call(invoke, fnRef, [1])"));
 
         let script_macro_expr = normalize_expression_literals(
             "__script__",

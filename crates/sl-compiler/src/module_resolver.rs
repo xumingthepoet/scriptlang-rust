@@ -2536,6 +2536,22 @@ pub(crate) fn validate_module_var_init_order(
     module_vars: &BTreeMap<String, ModuleVarDecl>,
     init_order: &[String],
 ) -> Result<(), ScriptLangError> {
+    fn contains_runtime_rewritten_module_global_ref(sanitized: &str, qualified_name: &str) -> bool {
+        let Some((namespace, name)) = qualified_name.rsplit_once('.') else {
+            return false;
+        };
+        contains_root_identifier(
+            sanitized,
+            &format!("{}.{}", module_namespace_symbol(namespace), name),
+        )
+    }
+
+    fn contains_module_global_ref(sanitized: &str, name: &str, qualified_name: &str) -> bool {
+        contains_root_identifier(sanitized, name)
+            || contains_root_identifier(sanitized, qualified_name)
+            || contains_runtime_rewritten_module_global_ref(sanitized, qualified_name)
+    }
+
     let mut name_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (qualified, decl) in module_vars {
         name_candidates
@@ -2566,7 +2582,7 @@ pub(crate) fn validate_module_var_init_order(
         if let Some(expr) = &decl.initial_value_expr {
             let sanitized = sanitize_rhai_source(expr);
             for (name, target_qualified) in &name_to_qualified {
-                if !contains_root_identifier(&sanitized, name) {
+                if !contains_module_global_ref(&sanitized, name, target_qualified) {
                     continue;
                 }
                 if !initialized.contains(target_qualified) {
@@ -2591,6 +2607,22 @@ pub(crate) fn validate_module_const_init_rules(
     init_order: &[String],
     module_vars: &BTreeMap<String, ModuleVarDecl>,
 ) -> Result<(), ScriptLangError> {
+    fn contains_runtime_rewritten_module_global_ref(sanitized: &str, qualified_name: &str) -> bool {
+        let Some((namespace, name)) = qualified_name.rsplit_once('.') else {
+            return false;
+        };
+        contains_root_identifier(
+            sanitized,
+            &format!("{}.{}", module_namespace_symbol(namespace), name),
+        )
+    }
+
+    fn contains_module_global_ref(sanitized: &str, name: &str, qualified_name: &str) -> bool {
+        contains_root_identifier(sanitized, name)
+            || contains_root_identifier(sanitized, qualified_name)
+            || contains_runtime_rewritten_module_global_ref(sanitized, qualified_name)
+    }
+
     let mut const_name_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (qualified, decl) in module_consts {
         const_name_candidates
@@ -2643,7 +2675,7 @@ pub(crate) fn validate_module_const_init_rules(
         if let Some(expr) = &decl.initial_value_expr {
             let sanitized = sanitize_rhai_source(expr);
             for (name, target_qualified) in &var_name_to_qualified {
-                if contains_root_identifier(&sanitized, name) {
+                if contains_module_global_ref(&sanitized, name, target_qualified) {
                     return Err(ScriptLangError::with_span(
                         "MODULE_CONST_INIT_REF_NON_CONST",
                         format!(
@@ -2653,19 +2685,9 @@ pub(crate) fn validate_module_const_init_rules(
                         decl.location.clone(),
                     ));
                 }
-                if contains_root_identifier(&sanitized, target_qualified) {
-                    return Err(ScriptLangError::with_span(
-                        "MODULE_CONST_INIT_REF_NON_CONST",
-                        format!(
-                            "Module const \"{}\" initializer references mutable module global \"{}\".",
-                            qualified, target_qualified
-                        ),
-                        decl.location.clone(),
-                    ));
-                }
             }
             for (name, target_qualified) in &const_name_to_qualified {
-                if !contains_root_identifier(&sanitized, name) {
+                if !contains_module_global_ref(&sanitized, name, target_qualified) {
                     continue;
                 }
                 if !initialized.contains(target_qualified) {
