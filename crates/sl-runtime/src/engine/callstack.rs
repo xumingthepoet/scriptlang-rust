@@ -1880,6 +1880,28 @@ mod callstack_tests {
             .resolve_target_script(&var("dst"), "ERR", "err")
             .expect_err("invalid character in segment should fail");
         assert_eq!(error5.code, "ENGINE_TARGET_VAR_TYPE");
+
+        // Test empty segment in qualified name (e.g., "foo..bar") - triggers line 65
+        let mut engine7 = engine_from_sources(map(&[(
+            "main.script.xml",
+            r#"<script name="main"><temp name="dst" type="string">""</temp></script>"#,
+        )]));
+        engine7.start("main.main", None).expect("start");
+        let group_id = engine7.frames.last().expect("frame").group_id.clone();
+        engine7.frames = vec![RuntimeFrame {
+            frame_id: 1,
+            group_id,
+            node_index: 0,
+            scope: BTreeMap::from([("dst".to_string(), SlValue::String("@foo..bar".to_string()))]),
+            completion: CompletionKind::None,
+            script_root: true,
+            return_continuation: None,
+            var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
+        }];
+        let error6 = engine7
+            .resolve_target_script(&var("dst"), "ERR", "err")
+            .expect_err("empty segment in qualified name should fail");
+        assert_eq!(error6.code, "ENGINE_TARGET_VAR_TYPE");
     }
 
     #[test]

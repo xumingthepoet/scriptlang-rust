@@ -5866,6 +5866,17 @@ mod script_compile_tests {
         .expect("non-boundary script token should stay raw");
         assert_eq!(boundary, "obj.@next + @main.next");
 
+        // Test line 420: else branch when candidate not in access_map
+        // "other.foo" is qualified (contains '.'), not in access_map, candidate "main.other.foo" also not in access_map
+        let cross_module_not_found = normalize_and_validate_script_literals_in_expression(
+            "@other.foo",
+            &span,
+            Some("main"),
+            Some(&access_map),
+        )
+        .expect_err("cross-module literal not in access_map should fail");
+        assert_eq!(cross_module_not_found.code, "XML_SCRIPT_TARGET_NOT_FOUND");
+
         let short_literal_error = normalize_and_validate_script_literals_in_expression(
             "dst = @next;",
             &span,

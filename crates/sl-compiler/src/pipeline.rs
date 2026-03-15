@@ -106,9 +106,11 @@ fn collect_module_alias_directives_by_namespace(
         if source.alias_directives.is_empty() {
             continue;
         }
-        let Some(module) = module_by_path.get(file_path) else {
-            continue;
-        };
+        // Note: At this point, the module must exist in module_by_path because:
+        // 1. Files with alias_directives must have been successfully parsed as modules
+        // 2. Successfully parsed modules are added to module_by_path
+        // The file_path is guaranteed to exist since parsing succeeded
+        let module = module_by_path.get(file_path).expect("module should exist");
         let mut namespaces = BTreeSet::from([module.root_namespace.clone()]);
         for decl in &module.type_decls {
             namespaces.insert(
@@ -1116,18 +1118,37 @@ mod pipeline_tests {
         // Test that collect_module_alias_directives_by_namespace handles:
         // - Line 105: script root (not module) is skipped
         // - Line 108: module without name attribute is skipped
+        // - Line 110: file not in module_by_path (script with alias) returns None
+        // - Line 129, 130: module_global_var_decls and module_global_const_decls iteration
         let files = map(&[
-            // This is a script, not a module - should be skipped (line 105)
+            // This is a script with alias directive - should trigger line 110
+            // because it's not in module_by_path (not a module)
+            // The alias target is valid so compilation succeeds
             (
                 "standalone.xml",
-                r#"<script name="standalone"><text>alone</text></script>"#,
+                r#"<!-- import shared from shared.xml -->
+                <!-- alias shared.hp as hp -->
+                <script name="standalone"><text>alone</text></script>"#,
+            ),
+            (
+                "shared.xml",
+                r#"<module name="shared" export="var:hp;const:base">
+                    <var name="hp" type="int">100</var>
+                    <const name="base" type="int">50</const>
+                </module>"#,
             ),
             (
                 "main.xml",
-                r#"<module name="main" export="script:main"><script name="main"><text>x</text></script></module>"#,
+                r#"<!-- import shared from shared.xml -->
+                <!-- alias shared.hp as hp -->
+                <module name="main" export="script:main">
+                    <script name="main"><text>x</text></script>
+                    <var name="moduleVar" type="int">1</var>
+                    <const name="moduleConst" type="int">2</const>
+                </module>"#,
             ),
         ]);
-        // Should compile without error - script sources are skipped
+        // Should compile without error - script sources are skipped in collection
         let result = compile_project_bundle_from_xml_map(&files);
         assert!(result.is_ok(), "mixed sources should compile");
     }

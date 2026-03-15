@@ -6458,6 +6458,52 @@ mod module_resolver_tests {
     }
 
     #[test]
+    fn parse_module_block_rejects_invalid_nested_module_names() {
+        // Test lines 202, 204, 206: nested module name validation errors
+        // Invalid nested module name (contains special character in non-first position)
+        let files = BTreeMap::from([(
+            "test.xml".to_string(),
+            r#"<module name="main">
+<module name="bad$name">
+  <script name="main"><text>x = 1;</text></script>
+</module>
+</module>"#
+                .to_string(),
+        )]);
+        let error = crate::compile_project_bundle_from_xml_map(&files)
+            .expect_err("invalid nested module name should fail");
+        assert_eq!(error.code, "NAME_IDENTIFIER_INVALID");
+
+        // Test line 269: first character is digit (not alphabetic or underscore)
+        let files_digit = BTreeMap::from([(
+            "test.xml".to_string(),
+            r#"<module name="main">
+<module name="1invalid">
+  <script name="main"><text>x = 1;</text></script>
+</module>
+</module>"#
+                .to_string(),
+        )]);
+        let error_digit = crate::compile_project_bundle_from_xml_map(&files_digit)
+            .expect_err("digit first char should fail");
+        assert_eq!(error_digit.code, "NAME_IDENTIFIER_INVALID");
+
+        // Test line 271: non-first character is invalid (e.g., dot)
+        let files_dot = BTreeMap::from([(
+            "test.xml".to_string(),
+            r#"<module name="main">
+<module name="bad.name">
+  <script name="main"><text>x = 1;</text></script>
+</module>
+</module>"#
+                .to_string(),
+        )]);
+        let error_dot = crate::compile_project_bundle_from_xml_map(&files_dot)
+            .expect_err("dot in name should fail");
+        assert_eq!(error_dot.code, "NAME_IDENTIFIER_INVALID");
+    }
+
+    #[test]
     fn parse_module_source_sets_private_access_for_unexported_members() {
         // Test lines 351, 358, 365, 372: Private access level for unexported members
         // Create a module with multiple members but only export some

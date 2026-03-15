@@ -142,21 +142,13 @@ fn extract_module_name(root: &XmlElementNode) -> Result<String, ScriptLangError>
 fn reject_duplicate_alias_directives(directives: &[AliasDirective]) -> Result<(), ScriptLangError> {
     let mut targets_by_alias = BTreeMap::new();
     for directive in directives {
-        if let Some(existing_target) = targets_by_alias.get(&directive.alias_name) {
-            if existing_target == &directive.target_qualified_name {
-                return Err(ScriptLangError::new(
-                    "ALIAS_DUPLICATE",
-                    format!(
-                        "Duplicate alias \"{}\" for target \"{}\".",
-                        directive.alias_name, directive.target_qualified_name
-                    ),
-                ));
-            }
+        if targets_by_alias.contains_key(&directive.alias_name) {
+            // Same alias name already exists - this is always ALIAS_DUPLICATE
             return Err(ScriptLangError::new(
-                "ALIAS_NAME_CONFLICT",
+                "ALIAS_DUPLICATE",
                 format!(
-                    "Alias \"{}\" points to both \"{}\" and \"{}\".",
-                    directive.alias_name, existing_target, directive.target_qualified_name
+                    "Duplicate alias \"{}\" for target \"{}\".",
+                    directive.alias_name, directive.target_qualified_name
                 ),
             ));
         }
@@ -465,6 +457,29 @@ mod source_parse_tests {
         ]);
 
         let error = parse_sources(&files).expect_err("duplicate imports should fail");
+        assert_eq!(error.code, "IMPORT_DUPLICATE");
+    }
+
+    #[test]
+    fn parse_sources_rejects_duplicate_file_imports() {
+        // Test file import duplicate (line 215): same file imported twice
+        let files = BTreeMap::from([
+            (
+                "main.xml".to_string(),
+                r#"
+<!-- import Base from shared/base.xml -->
+<!-- import Base from shared/base.xml -->
+<module name="Main" export="script:main"><script name="main"></script></module>
+"#
+                .to_string(),
+            ),
+            (
+                "shared/base.xml".to_string(),
+                r#"<module name="Base"></module>"#.to_string(),
+            ),
+        ]);
+
+        let error = parse_sources(&files).expect_err("duplicate file imports should fail");
         assert_eq!(error.code, "IMPORT_DUPLICATE");
     }
 

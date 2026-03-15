@@ -2222,6 +2222,59 @@ mod xml_utils_tests {
         let error = build_initializer_expr_from_xml(&mixed, &array_type, &visible_types)
             .expect_err("mixed content should fail");
         assert_eq!(error.code, "XML_INIT_XML_MIXED_CONTENT");
+
+        // Test line 347-348: object with invalid child (not <field>) in ScriptType variant
+        let object_invalid_child = xml_element(
+            "temp",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element("notfield", &[], Vec::new()))],
+        );
+        let object_type = ScriptType::Object {
+            type_name: "Hero".to_string(),
+            fields: BTreeMap::new(),
+        };
+        let object_error =
+            build_initializer_expr_from_xml(&object_invalid_child, &object_type, &visible_types)
+                .expect_err("invalid child should fail");
+        assert_eq!(object_error.code, "XML_INIT_XML_CHILD_INVALID");
+
+        // Test line 357-358: field with missing name attribute
+        let field_no_name = xml_element(
+            "temp",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[],
+                vec![xml_text("1")],
+            ))],
+        );
+        let field_error =
+            build_initializer_expr_from_xml(&field_no_name, &object_type, &visible_types)
+                .expect_err("missing name attr should fail");
+        assert_eq!(field_error.code, "XML_MISSING_ATTR");
+
+        // Test line 368-371: duplicate field (need valid fields in type)
+        let object_with_fields = ScriptType::Object {
+            type_name: "Hero".to_string(),
+            fields: BTreeMap::from([(
+                "hp".to_string(),
+                ScriptType::Primitive {
+                    name: "int".to_string(),
+                },
+            )]),
+        };
+        let object_duplicate = xml_element(
+            "temp",
+            &[("format", "xml")],
+            vec![
+                XmlNode::Element(xml_element("field", &[("name", "hp")], vec![xml_text("1")])),
+                XmlNode::Element(xml_element("field", &[("name", "hp")], vec![xml_text("2")])),
+            ],
+        );
+        let dup_error =
+            build_initializer_expr_from_xml(&object_duplicate, &object_with_fields, &visible_types)
+                .expect_err("duplicate field should fail");
+        assert_eq!(dup_error.code, "XML_INIT_XML_FIELD_DUPLICATE");
     }
 
     #[test]
@@ -2341,6 +2394,70 @@ mod xml_utils_tests {
         )
         .expect_err("tuple key is required");
         assert_eq!(map_missing_key_error.code, "XML_MISSING_ATTR");
+
+        // Test line 258: non-field child in object xml initializer
+        let object_not_field = xml_element(
+            "temp",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element("notfield", &[], Vec::new()))],
+        );
+        let object_not_field_error = build_initializer_expr_from_xml_for_type_expr(
+            &object_not_field,
+            &ParsedTypeExpr::Custom("Hero".to_string()),
+        )
+        .expect_err("non-field child should fail");
+        assert_eq!(object_not_field_error.code, "XML_INIT_XML_CHILD_INVALID");
+
+        // Test line 267: field with missing name attribute
+        let field_no_name = xml_element(
+            "temp",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[],
+                vec![xml_text("1")],
+            ))],
+        );
+        let field_no_name_error = build_initializer_expr_from_xml_for_type_expr(
+            &field_no_name,
+            &ParsedTypeExpr::Custom("Hero".to_string()),
+        )
+        .expect_err("field without name should fail");
+        assert_eq!(field_no_name_error.code, "XML_MISSING_ATTR");
+
+        // Test line 273: field with child element instead of text
+        let field_with_child = xml_element(
+            "temp",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("name", "hp")],
+                vec![XmlNode::Element(xml_element("nested", &[], Vec::new()))],
+            ))],
+        );
+        let field_child_error = build_initializer_expr_from_xml_for_type_expr(
+            &field_with_child,
+            &ParsedTypeExpr::Custom("Hero".to_string()),
+        )
+        .expect_err("field with child should fail");
+        assert_eq!(field_child_error.code, "XML_FUNCTION_CHILD_NODE_INVALID");
+
+        // Test line 301: array item with child element
+        let array_item_child = xml_element(
+            "temp",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "item",
+                &[],
+                vec![XmlNode::Element(xml_element("nested", &[], Vec::new()))],
+            ))],
+        );
+        let array_item_error = build_initializer_expr_from_xml_for_type_expr(
+            &array_item_child,
+            &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Primitive("int".to_string()))),
+        )
+        .expect_err("array item with child should fail");
+        assert_eq!(array_item_error.code, "XML_FUNCTION_CHILD_NODE_INVALID");
 
         let object_type = ScriptType::Object {
             type_name: "Hero".to_string(),
