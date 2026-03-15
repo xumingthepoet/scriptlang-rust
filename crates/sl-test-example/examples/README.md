@@ -58,7 +58,7 @@ This catalog keeps example intent explicit so examples can be refactored without
 | `45-xml-initializer-mixed-content-deny` | compile-time rejection when `format=\"xml\"` mixes non-empty text and structural child nodes |
 | `46-compile-name-finalization-mixed` | compile-time final naming regression: nested module + alias + short call all execute without runtime name inference |
 | `47-xml-initializer-inline-only-deny` | compile-time rejection when `format=\"xml\"` node uses inline-only text instead of structural child nodes |
-| `48-sub-module-complex` | nested submodule const/function resolution: `root.main` can call both `child.*` and `root.child.*`; lint warns on redundant fully-qualified form when short form is available |
+| `48-sub-module-complex` | nested submodule function resolution across same-root and imported module: `root.main` calls `m.fetch()` (`m.fetch -> navigation.get`) and also covers `child.*` vs `root.child.*` with prefer-short-name lint |
 
 ## Notes
 - `26-enum-flow` intentionally covers enum member usage directly in XML attribute expressions (`args="ids.LocationId.A"`).

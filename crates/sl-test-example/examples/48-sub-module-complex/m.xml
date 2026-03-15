@@ -1,0 +1,15 @@
+<module name="m" export="function:fetch">
+  <const name="values" type="string[]" format="xml">
+    <item>"ok"</item>
+  </const>
+
+  <module name="q" export="function:first">
+    <function name="first" return_type="string">
+      return m.values[0];
+    </function>
+  </module>
+
+  <function name="fetch" return_type="string">
+    return q.first();
+  </function>
+</module>

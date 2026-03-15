@@ -1,3 +1,4 @@
+<!-- import m from m.xml -->
 <module name="root" export="script:main">
   <const name="nums" type="int[]" format="xml">
     <item>1</item>
@@ -19,7 +20,7 @@
   </module>
 
   <script name="main">
-    <text>${child.via_const_in()}-${root.child.via_const_out()}</text>
+    <text>${m.fetch()}-${child.via_const_in()}-${root.child.via_const_out()}</text>
     <end/>
   </script>
 </module>

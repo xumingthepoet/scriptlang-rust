@@ -762,6 +762,34 @@ fn runtime_function_symbol_map_for_namespace(
             .or_insert_with(|| rhai_function_symbol(qualified_name));
     }
 
+    let mut relative_alias_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let root_prefix = format!("{root_name}.");
+    for qualified_name in visible_function_names {
+        if !qualified_name.starts_with(&root_prefix) {
+            continue;
+        }
+        let Some((namespace, _)) = qualified_name.rsplit_once('.') else {
+            continue;
+        };
+        if namespace == function_namespace {
+            continue;
+        }
+        let Some(relative_name) = qualified_name.strip_prefix(&root_prefix) else {
+            continue;
+        };
+        relative_alias_candidates
+            .entry(relative_name.to_string())
+            .or_default()
+            .push(qualified_name.clone());
+    }
+    for (relative_name, qualified_names) in relative_alias_candidates {
+        if qualified_names.len() != 1 {
+            continue;
+        }
+        map.entry(relative_name)
+            .or_insert_with(|| rhai_function_symbol(&qualified_names[0]));
+    }
+
     map
 }
 
@@ -7155,5 +7183,41 @@ mod module_resolver_tests {
             notify.params[0].r#type,
             ScriptType::Enum { ref type_name, .. } if type_name == "ids.MessageKey"
         ));
+    }
+
+    #[test]
+    fn runtime_function_symbol_map_supports_same_root_relative_submodule_alias() {
+        let visible = BTreeSet::from([
+            "m.fetch".to_string(),
+            "m.navigation.get".to_string(),
+            "m.navigation.internal".to_string(),
+        ]);
+
+        let map = runtime_function_symbol_map_for_namespace(&visible, "m");
+        assert_eq!(
+            map.get("navigation.get"),
+            Some(&rhai_function_symbol("m.navigation.get"))
+        );
+        assert_eq!(map.get("fetch"), Some(&rhai_function_symbol("m.fetch")));
+    }
+
+    #[test]
+    fn runtime_function_symbol_map_does_not_add_cross_root_relative_alias() {
+        let visible = BTreeSet::from([
+            "m.fetch".to_string(),
+            "m.navigation.get".to_string(),
+            "other.navigation.get".to_string(),
+        ]);
+
+        let map = runtime_function_symbol_map_for_namespace(&visible, "m");
+        assert_eq!(
+            map.get("navigation.get"),
+            Some(&rhai_function_symbol("m.navigation.get"))
+        );
+        assert_ne!(
+            map.get("navigation.get"),
+            Some(&rhai_function_symbol("other.navigation.get"))
+        );
+        assert_eq!(map.get("fetch"), Some(&rhai_function_symbol("m.fetch")));
     }
 }

@@ -148,4 +148,19 @@ mod tests {
             report.diagnostics
         );
     }
+
+    #[test]
+    fn lint_does_not_flag_root_const_as_unused_when_read_in_submodule_function_path() {
+        let dir = example_dir("48-sub-module-complex");
+        let scripts = read_scripts_xml_from_dir(&dir).expect("example scripts should load");
+        let bundle = compile_project_bundle_from_xml_map(&scripts).expect("bundle should compile");
+        let report = crate::lint::run_lint(&scripts, &bundle, "root.main");
+        assert!(
+            !report.diagnostics.iter().any(|item| {
+                item.code == "unused-module-const" && item.message.contains("m.values")
+            }),
+            "unexpected unused-module-const for m.values: {:?}",
+            report.diagnostics
+        );
+    }
 }

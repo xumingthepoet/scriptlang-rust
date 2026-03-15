@@ -165,43 +165,62 @@ fn collect_declarations(xml_by_path: &BTreeMap<String, String>, context: &mut Li
             },
         );
 
-        for child in &document.root.children {
-            let XmlNode::Element(node) = child else {
+        collect_module_element_declarations(file, &document.root, &module_name, context);
+    }
+}
+
+fn collect_module_element_declarations(
+    file: &str,
+    module_node: &XmlElementNode,
+    module_name: &str,
+    context: &mut LintContext,
+) {
+    for child in &module_node.children {
+        let XmlNode::Element(node) = child else {
+            continue;
+        };
+
+        if node.name == "module" {
+            let Some(child_module_name) = node.attributes.get("name").cloned() else {
                 continue;
             };
-            let Some(name) = node.attributes.get("name").cloned() else {
-                continue;
-            };
-            let qualified_name = format!("{}.{}", module_name, name);
-            let decl = NamedDecl {
-                name,
-                file: file.clone(),
-                span: node.location.clone(),
-            };
-            match node.name.as_str() {
-                "script" => {
-                    context.scripts.insert(qualified_name, decl);
-                }
-                "function" => {
-                    context.functions.insert(qualified_name.clone(), decl);
-                    context.function_bodies.insert(
-                        qualified_name,
-                        FunctionBodyDecl {
-                            module_name: module_name.clone(),
-                            file: file.clone(),
-                            span: node.location.clone(),
-                            code: collect_node_text(node),
-                        },
-                    );
-                }
-                "var" => {
-                    context.module_vars.insert(qualified_name, decl);
-                }
-                "const" => {
-                    context.module_consts.insert(qualified_name, decl);
-                }
-                _ => {}
+            let child_namespace = format!("{module_name}.{child_module_name}");
+            collect_module_element_declarations(file, node, &child_namespace, context);
+            continue;
+        }
+
+        let Some(name) = node.attributes.get("name").cloned() else {
+            continue;
+        };
+        let qualified_name = format!("{}.{}", module_name, name);
+        let decl = NamedDecl {
+            name,
+            file: file.to_string(),
+            span: node.location.clone(),
+        };
+        match node.name.as_str() {
+            "script" => {
+                context.scripts.insert(qualified_name, decl);
             }
+            "function" => {
+                context.functions.insert(qualified_name.clone(), decl);
+                context.function_bodies.insert(
+                    qualified_name,
+                    FunctionBodyDecl {
+                        module_name: module_name.to_string(),
+                        file: file.to_string(),
+                        span: node.location.clone(),
+                        code: collect_node_text(node),
+                    },
+                );
+            }
+            "var" => {
+                context.module_vars.insert(qualified_name, decl);
+            }
+            "const" => {
+                context.module_consts.insert(qualified_name, decl);
+            }
+            _ => {}
         }
     }
 }
@@ -858,6 +877,14 @@ fn mark_function_use(
             context.used_functions.insert(qualified);
             return;
         }
+    } else {
+        let root = module_name.split('.').next().unwrap_or_default();
+        let qualified = format!("{root}.{name}");
+        if context.functions.contains_key(&qualified) {
+            context.used_functions.insert(qualified.clone());
+            track_module_and_short(&qualified, file, context);
+            return;
+        }
     }
 
     if let Some(script) = script {
@@ -914,6 +941,33 @@ fn mark_value_use(
         let q_const = format!("{}.{}", module_name, name);
         if context.module_consts.contains_key(&q_const) {
             context.used_module_consts.insert(q_const);
+            return;
+        }
+
+        let root = module_name.split('.').next().unwrap_or_default();
+        let root_var = format!("{root}.{name}");
+        if context.module_vars.contains_key(&root_var) {
+            context.used_module_vars.insert(root_var.clone());
+            track_module_and_short(&root_var, file, context);
+            return;
+        }
+        let root_const = format!("{root}.{name}");
+        if context.module_consts.contains_key(&root_const) {
+            context.used_module_consts.insert(root_const.clone());
+            track_module_and_short(&root_const, file, context);
+            return;
+        }
+    } else {
+        let root = module_name.split('.').next().unwrap_or_default();
+        let qualified = format!("{root}.{name}");
+        if context.module_vars.contains_key(&qualified) {
+            context.used_module_vars.insert(qualified.clone());
+            track_module_and_short(&qualified, file, context);
+            return;
+        }
+        if context.module_consts.contains_key(&qualified) {
+            context.used_module_consts.insert(qualified.clone());
+            track_module_and_short(&qualified, file, context);
             return;
         }
     }
@@ -1319,6 +1373,35 @@ mod tests {
         );
 
         assert!(context.used_functions.contains("shared.helper"));
+    }
+
+    #[test]
+    fn collect_context_recursively_collects_nested_module_declarations() {
+        let xml = BTreeMap::from([(
+            "m.xml".to_string(),
+            r#"
+<module name="m" export="function:get">
+  <const name="values" type="string[]" format="xml">
+    <item>"a"</item>
+  </const>
+  <module name="q" export="function:first">
+    <function name="first" return_type="string">
+      return values[0];
+    </function>
+  </module>
+  <function name="get" return_type="string">
+    return q.first();
+  </function>
+</module>
+"#
+            .to_string(),
+        )]);
+        let bundle = sl_compiler::compile_project_bundle_from_xml_map(&xml)
+            .expect("bundle should compile for lint test");
+        let context = collect_context(&xml, &bundle, "m.get");
+        assert!(context.functions.contains_key("m.get"));
+        assert!(context.functions.contains_key("m.q.first"));
+        assert!(context.module_consts.contains_key("m.values"));
     }
 
     #[test]
