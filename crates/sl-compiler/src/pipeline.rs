@@ -60,6 +60,12 @@ pub fn compile_project_bundle_from_xml_map(
                     &module_alias_directives_by_namespace,
                 )
                 .map_err(|error| with_file_context(error, file_path))?;
+            let mut script_invoke_all_functions = invoke_all_functions.clone();
+            for (name, decl) in &visible_functions {
+                script_invoke_all_functions
+                    .entry(name.clone())
+                    .or_insert_with(|| decl.clone());
+            }
             let ir = compile_script(CompileScriptOptions {
                 script_path: file_path,
                 root: &script_decl.root,
@@ -71,7 +77,7 @@ pub fn compile_project_bundle_from_xml_map(
                 visible_module_vars: &visible_module_vars,
                 visible_module_consts: &visible_module_consts,
                 all_script_access: &all_script_access,
-                invoke_all_functions: &invoke_all_functions,
+                invoke_all_functions: &script_invoke_all_functions,
             })
             .map_err(|error| with_file_context(error, file_path))?;
             if scripts.contains_key(&ir.script_name) {

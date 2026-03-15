@@ -1,0 +1,25 @@
+<module name="root" export="script:main">
+  <const name="nums" type="int[]" format="xml">
+    <item>1</item>
+    <item>2</item>
+  </const>
+
+  <module name="child" export="function:via_const_in,via_const_out">
+    <const name="nums" type="int[]" format="xml">
+      <item>3</item>
+      <item>4</item>
+    </const>
+    <function name="via_const_in" return_type="int">
+      return nums[0];
+    </function>
+
+    <function name="via_const_out" return_type="int">
+      return root.nums[0];
+    </function>
+  </module>
+
+  <script name="main">
+    <text>${child.via_const_in()}-${root.child.via_const_out()}</text>
+    <end/>
+  </script>
+</module>

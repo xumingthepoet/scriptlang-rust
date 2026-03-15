@@ -295,3 +295,8 @@ fn example_47_xml_initializer_inline_only_deny_reports_compile_error() {
         .expect_err("format=xml with inline-only text should fail at compile time");
     assert_eq!(error.code, "XML_INIT_XML_CHILD_INVALID");
 }
+
+#[test]
+fn example_48_sub_module_complex_matches_testcase() {
+    assert_example("48-sub-module-complex");
+}
