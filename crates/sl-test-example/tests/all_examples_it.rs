@@ -136,6 +136,31 @@ fn example_21_directory_import_matches_testcase() {
 }
 
 #[test]
+fn example_22_access_control_matches_testcase() {
+    assert_example("22-access-control");
+}
+
+#[test]
+fn example_23_const_basics_matches_testcase() {
+    assert_example("23-const-basics");
+}
+
+#[test]
+fn example_24_invoke_dynamic_matches_testcase() {
+    assert_example("24-invoke-dynamic");
+}
+
+#[test]
+fn example_25_function_invoke_matches_testcase() {
+    assert_example("25-function-invoke");
+}
+
+#[test]
+fn example_26_enum_flow_matches_testcase() {
+    assert_example("26-enum-flow");
+}
+
+#[test]
 fn example_27_dynamic_transfer_target_matches_testcase() {
     assert_example("27-dynamic-transfer-target");
 }
@@ -261,29 +286,4 @@ fn example_45_xml_initializer_mixed_content_deny_reports_compile_error() {
 #[test]
 fn example_46_compile_name_finalization_mixed_matches_testcase() {
     assert_example("46-compile-name-finalization-mixed");
-}
-
-#[test]
-fn example_22_access_control_matches_testcase() {
-    assert_example("22-access-control");
-}
-
-#[test]
-fn example_23_const_basics_matches_testcase() {
-    assert_example("23-const-basics");
-}
-
-#[test]
-fn example_24_invoke_dynamic_matches_testcase() {
-    assert_example("24-invoke-dynamic");
-}
-
-#[test]
-fn example_25_function_invoke_matches_testcase() {
-    assert_example("25-function-invoke");
-}
-
-#[test]
-fn example_26_enum_flow_matches_testcase() {
-    assert_example("26-enum-flow");
 }
