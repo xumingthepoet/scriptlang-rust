@@ -3,8 +3,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use regex::Regex;
 use sl_compiler::CompileProjectBundleResult;
 use sl_core::{
-    preprocess_scriptlang_rhai_input, ChoiceEntry, RhaiInputMode, ScriptIr, ScriptNode,
-    ScriptTarget, SourceLocation, SourceSpan,
+    module_namespace_symbol, preprocess_scriptlang_rhai_input, rhai_function_symbol, ChoiceEntry,
+    RhaiInputMode, ScriptIr, ScriptNode, ScriptTarget, SourceLocation, SourceSpan,
 };
 use sl_parser::{
     parse_alias_directives, parse_import_directives, parse_xml_document, AliasDirective,
@@ -720,6 +720,9 @@ fn collect_initializer_expression(
     for call in refs.calls {
         mark_function_use(&call, module_name, file, span, None, context);
     }
+    for call_symbol in refs.call_symbol_targets {
+        mark_function_use(&call_symbol, module_name, file, span, None, context);
+    }
     for ident in refs.identifiers {
         mark_value_use(&ident, module_name, file, span, None, context);
     }
@@ -801,6 +804,9 @@ fn collect_expression_usage(
     for call in refs.calls {
         mark_function_use(&call, module_name, file, span, script, context);
     }
+    for call_symbol in refs.call_symbol_targets {
+        mark_function_use(&call_symbol, module_name, file, span, script, context);
+    }
     for ident in refs.identifiers {
         if let Some(local_state) = locals.as_mut() {
             if local_state.params.iter().any(|item| item.name == ident)
@@ -834,6 +840,12 @@ fn mark_function_use(
     script: Option<&ScriptIr>,
     context: &mut LintContext,
 ) {
+    if let Some(qualified_name) = resolve_runtime_function_symbol(name, context) {
+        context.used_functions.insert(qualified_name.clone());
+        track_module_and_short(&qualified_name, file, context);
+        return;
+    }
+
     if context.functions.contains_key(name) {
         context.used_functions.insert(name.to_string());
         track_module_and_short(name, file, context);
@@ -868,6 +880,20 @@ fn mark_value_use(
     script: Option<&ScriptIr>,
     context: &mut LintContext,
 ) {
+    if let Some(resolved) = resolve_runtime_module_value_symbol(name, context) {
+        match resolved {
+            RuntimeModuleValue::Var(qualified_name) => {
+                context.used_module_vars.insert(qualified_name.clone());
+                track_module_and_short(&qualified_name, file, context);
+            }
+            RuntimeModuleValue::Const(qualified_name) => {
+                context.used_module_consts.insert(qualified_name.clone());
+                track_module_and_short(&qualified_name, file, context);
+            }
+        }
+        return;
+    }
+
     if context.module_vars.contains_key(name) {
         context.used_module_vars.insert(name.to_string());
         track_module_and_short(name, file, context);
@@ -959,6 +985,72 @@ fn normalize_script_literal(raw_script_name: &str, module_name: &str) -> Option<
     Some(format!("{}.{}", module_name, trimmed))
 }
 
+fn resolve_runtime_function_symbol(name: &str, context: &LintContext) -> Option<String> {
+    if name.contains('.') {
+        return None;
+    }
+    let mut found: Option<String> = None;
+    for qualified_name in context.functions.keys() {
+        if rhai_function_symbol(qualified_name) != name {
+            continue;
+        }
+        match &found {
+            None => found = Some(qualified_name.clone()),
+            Some(existing) if existing == qualified_name => {}
+            Some(_) => return None,
+        }
+    }
+    found
+}
+
+enum RuntimeModuleValue {
+    Var(String),
+    Const(String),
+}
+
+fn resolve_runtime_module_value_symbol(
+    name: &str,
+    context: &LintContext,
+) -> Option<RuntimeModuleValue> {
+    let (namespace_symbol, field_name) = name.split_once('.')?;
+    if !namespace_symbol.starts_with("__sl_module_ns_") {
+        return None;
+    }
+
+    let mut matched_vars = context
+        .module_vars
+        .keys()
+        .filter_map(|qualified_name| {
+            let (namespace, local_name) = qualified_name.rsplit_once('.')?;
+            if local_name != field_name {
+                return None;
+            }
+            (module_namespace_symbol(namespace) == namespace_symbol).then(|| qualified_name.clone())
+        })
+        .collect::<Vec<_>>();
+    let mut matched_consts = context
+        .module_consts
+        .keys()
+        .filter_map(|qualified_name| {
+            let (namespace, local_name) = qualified_name.rsplit_once('.')?;
+            if local_name != field_name {
+                return None;
+            }
+            (module_namespace_symbol(namespace) == namespace_symbol).then(|| qualified_name.clone())
+        })
+        .collect::<Vec<_>>();
+    matched_vars.sort();
+    matched_vars.dedup();
+    matched_consts.sort();
+    matched_consts.dedup();
+
+    match (matched_vars.len(), matched_consts.len()) {
+        (1, 0) => Some(RuntimeModuleValue::Var(matched_vars[0].clone())),
+        (0, 1) => Some(RuntimeModuleValue::Const(matched_consts[0].clone())),
+        _ => None,
+    }
+}
+
 fn collect_reachable(
     entry_script: &str,
     edges: &HashMap<String, HashSet<String>>,
@@ -982,6 +1074,7 @@ fn collect_reachable(
 #[derive(Debug, Clone, Default)]
 struct ExpressionRefs {
     calls: BTreeSet<String>,
+    call_symbol_targets: BTreeSet<String>,
     identifiers: BTreeSet<String>,
     function_literals: BTreeSet<String>,
     script_literals: BTreeSet<String>,
@@ -995,6 +1088,11 @@ fn analyze_expression(expr: &str) -> ExpressionRefs {
     for caps in call_name_regex().captures_iter(&rewritten) {
         if let Some(name) = caps.get(1) {
             refs.calls.insert(name.as_str().to_string());
+        }
+    }
+    for caps in call_symbol_target_regex().captures_iter(&rewritten) {
+        if let Some(name) = caps.get(1) {
+            refs.call_symbol_targets.insert(name.as_str().to_string());
         }
     }
     for caps in identifier_regex().captures_iter(&rewritten) {
@@ -1066,6 +1164,14 @@ fn call_name_regex() -> &'static Regex {
     REGEX.get_or_init(|| {
         Regex::new(r"\b([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?)\s*\(")
             .expect("call regex should compile")
+    })
+}
+
+fn call_symbol_target_regex() -> &'static Regex {
+    static REGEX: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"\bcall\s*\(\s*([A-Za-z_][A-Za-z0-9_]*)\b")
+            .expect("call symbol target regex should compile")
     })
 }
 
@@ -1145,6 +1251,12 @@ mod tests {
     }
 
     #[test]
+    fn analyze_expression_extracts_call_symbol_target() {
+        let refs = analyze_expression("call(shared_helper, [1])");
+        assert!(refs.call_symbol_targets.contains("shared_helper"));
+    }
+
+    #[test]
     fn extract_template_expressions_works() {
         let items = extract_template_expressions("x=${a} y=${b + 1}");
         assert_eq!(items, vec!["a".to_string(), "b + 1".to_string()]);
@@ -1183,5 +1295,53 @@ mod tests {
             .iter()
             .any(|candidate| candidate.qualified_name == "ids.LocationId"
                 && candidate.short_name == "LocationId"));
+    }
+
+    #[test]
+    fn mark_function_use_resolves_runtime_function_symbol() {
+        let mut context = LintContext::default();
+        context.functions.insert(
+            "shared.helper".to_string(),
+            NamedDecl {
+                name: "helper".to_string(),
+                file: "shared.xml".to_string(),
+                span: SourceSpan::synthetic(),
+            },
+        );
+
+        mark_function_use(
+            "shared_helper",
+            "main",
+            "main.xml",
+            &SourceSpan::synthetic(),
+            None,
+            &mut context,
+        );
+
+        assert!(context.used_functions.contains("shared.helper"));
+    }
+
+    #[test]
+    fn mark_value_use_resolves_runtime_namespace_symbol() {
+        let mut context = LintContext::default();
+        context.module_vars.insert(
+            "shared.hp".to_string(),
+            NamedDecl {
+                name: "hp".to_string(),
+                file: "shared.xml".to_string(),
+                span: SourceSpan::synthetic(),
+            },
+        );
+
+        mark_value_use(
+            "__sl_module_ns_shared.hp",
+            "main",
+            "main.xml",
+            &SourceSpan::synthetic(),
+            None,
+            &mut context,
+        );
+
+        assert!(context.used_module_vars.contains("shared.hp"));
     }
 }
