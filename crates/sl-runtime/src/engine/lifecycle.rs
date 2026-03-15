@@ -130,7 +130,6 @@ pub struct ScriptLangEngine {
     pub(super) module_vars_value: BTreeMap<String, SlValue>,
     pub(super) module_vars_type: BTreeMap<String, ScriptType>,
     pub(super) module_consts_value: BTreeMap<String, SlValue>,
-    pub(super) visible_globals_by_script: HashMap<String, BTreeSet<String>>,
     pub(super) invoke_all_functions: BTreeMap<String, FunctionDecl>,
     pub(super) invoke_function_symbols: BTreeMap<String, String>,
     pub(super) module_prelude_by_script: HashMap<String, String>,
@@ -176,7 +175,6 @@ impl ScriptLangEngine {
         }
 
         let mut group_lookup: HashMap<String, GroupLookup> = HashMap::new();
-        let mut visible_globals_by_script = HashMap::new();
 
         let mut invoke_all_functions = BTreeMap::new();
         let mut invoke_function_symbols = BTreeMap::new();
@@ -208,11 +206,6 @@ impl ScriptLangEngine {
                     );
                 }
             }
-            visible_globals_by_script.insert(
-                script_name.clone(),
-                script.visible_globals.iter().cloned().collect(),
-            );
-
             for function_name in script.visible_functions.keys() {
                 if host_functions
                     .names()
@@ -342,7 +335,6 @@ impl ScriptLangEngine {
             module_vars_value: BTreeMap::new(),
             module_vars_type,
             module_consts_value: BTreeMap::new(),
-            visible_globals_by_script,
             invoke_all_functions,
             invoke_function_symbols,
             module_prelude_by_script: HashMap::new(),

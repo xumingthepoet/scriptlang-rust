@@ -191,8 +191,8 @@ impl ScriptLangEngine {
             })?
             .clone();
 
-        let (script_name, node) = {
-            let (script_name, group) = self.lookup_group(&top.group_id)?;
+        let node = {
+            let (_, group) = self.lookup_group(&top.group_id)?;
             let node = group
                 .nodes
                 .get(top.node_index)
@@ -200,7 +200,7 @@ impl ScriptLangEngine {
                     ScriptLangError::new("SNAPSHOT_PENDING_BOUNDARY", "Pending node index invalid.")
                 })?
                 .clone();
-            (script_name.to_string(), node)
+            node
         };
 
         self.pending_boundary = Some(match snapshot.pending_boundary {
@@ -266,9 +266,6 @@ impl ScriptLangEngine {
                 }
             }
         });
-
-        // Force visibility map access path to validate script existence.
-        let _ = self.visible_globals_by_script.get(&script_name);
 
         Ok(())
     }

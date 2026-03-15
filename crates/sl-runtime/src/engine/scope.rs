@@ -12,10 +12,11 @@ impl ScriptLangEngine {
         let Some(script_name) = script_name else {
             return false;
         };
-        let Some(visible) = self.visible_globals_by_script.get(script_name) else {
+        let Some(script) = self.scripts.get(script_name) else {
             return false;
         };
-        visible.contains(name) && self.global_data.contains_key(name)
+        script.visible_globals.iter().any(|item| item == name)
+            && self.global_data.contains_key(name)
     }
 
     pub(super) fn resolve_module_global_alias(
@@ -317,10 +318,11 @@ mod scope_tests {
             .global_data
             .insert("g".to_string(), SlValue::Number(1.0));
         engine
-            .visible_globals_by_script
-            .entry("main.main".to_string())
-            .or_default()
-            .insert("g".to_string());
+            .scripts
+            .get_mut("main.main")
+            .expect("main script should exist")
+            .visible_globals
+            .push("g".to_string());
 
         let err = engine
             .write_variable("shared.hp", SlValue::String("bad".to_string()))

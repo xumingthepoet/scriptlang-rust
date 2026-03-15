@@ -494,12 +494,9 @@ impl ScriptLangEngine {
         context: &str,
     ) -> Result<SlValue, ScriptLangError> {
         let script_name = self.resolve_current_script_name().unwrap_or_default();
-        if !self.scripts.contains_key(&script_name) {
-            return Err(ScriptLangError::new(
-                "ENGINE_SCRIPT_MISSING",
-                "Current script missing.",
-            ));
-        }
+        let script_decl = self.scripts.get(&script_name).ok_or_else(|| {
+            ScriptLangError::new("ENGINE_SCRIPT_MISSING", "Current script missing.")
+        })?;
 
         if !self.host_functions.names().is_empty() {
             return Err(ScriptLangError::new(
@@ -509,11 +506,7 @@ impl ScriptLangEngine {
         }
 
         let (mutable_bindings, mutable_order) = self.collect_mutable_bindings();
-        let visible_globals = self
-            .visible_globals_by_script
-            .get(&script_name)
-            .cloned()
-            .unwrap_or_default();
+        let visible_globals = script_decl.visible_globals.clone();
 
         let mut scope = Scope::new();
         for name in &mutable_order {
@@ -746,13 +739,10 @@ impl ScriptLangEngine {
         &self,
         script_name: &str,
     ) -> Result<String, ScriptLangError> {
-        if !self.scripts.contains_key(script_name) {
+        let Some(script_decl) = self.scripts.get(script_name) else {
             return Ok(String::new());
-        }
-        let visible_globals = self
-            .visible_globals_by_script
-            .get(script_name)
-            .expect("script visibility should exist for registered script");
+        };
+        let visible_globals = &script_decl.visible_globals;
         let mut out = String::new();
         out.push_str("let invoke = |name, args| {\n");
         out.push_str(
@@ -2200,10 +2190,11 @@ let public = 3;
             .start("main.main", None)
             .expect("start");
         prelude_missing_global
-            .visible_globals_by_script
-            .entry("main.main".to_string())
-            .or_default()
-            .insert("ghost".to_string());
+            .scripts
+            .get_mut("main.main")
+            .expect("main script should exist")
+            .visible_globals
+            .push("ghost".to_string());
         let prelude = prelude_missing_global
             .build_module_prelude("main.main")
             .expect("prelude build should ignore missing global binding");
