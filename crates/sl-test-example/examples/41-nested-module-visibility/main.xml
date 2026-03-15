@@ -1,0 +1,7 @@
+<!-- import a from a.xml -->
+<module name="main" export="script:main">
+  <script name="main">
+    <text>${a.b.from_b}</text>
+    <end/>
+  </script>
+</module>

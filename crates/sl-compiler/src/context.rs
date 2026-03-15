@@ -108,6 +108,8 @@ pub(crate) enum ParsedTypeExpr {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ModuleDeclarations {
+    pub(crate) root_namespace: String,
+    pub(crate) exported_module_namespaces: BTreeSet<String>,
     pub(crate) type_decls: Vec<ParsedTypeDecl>,
     pub(crate) function_decls: Vec<ParsedFunctionDecl>,
     pub(crate) module_global_var_decls: Vec<ParsedModuleVarDecl>,

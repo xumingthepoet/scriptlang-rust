@@ -7,6 +7,7 @@ struct ParsedModuleHeader {
 
 #[derive(Debug, Clone, Default)]
 struct ModuleExportTargets {
+    modules: BTreeSet<String>,
     scripts: BTreeSet<String>,
     functions: BTreeSet<String>,
     vars: BTreeSet<String>,
@@ -21,6 +22,16 @@ enum ParsedModuleChild {
     ModuleVar(ParsedModuleVarDecl),
     ModuleConst(ParsedModuleConstDecl),
     Script(ParsedModuleScript),
+}
+
+#[derive(Default)]
+struct ParsedModuleBlock {
+    type_decls: Vec<ParsedTypeDecl>,
+    function_decls: Vec<ParsedFunctionDecl>,
+    module_global_var_decls: Vec<ParsedModuleVarDecl>,
+    module_global_const_decls: Vec<ParsedModuleConstDecl>,
+    scripts: Vec<ParsedModuleScript>,
+    exported_module_namespaces: BTreeSet<String>,
 }
 
 pub(crate) fn parse_module_files(
@@ -91,41 +102,18 @@ fn parse_module_source(
         namespace,
         export_targets,
     } = parse_module_header(root, file_path)?;
-
-    let mut type_decls = Vec::new();
-    let mut function_decls = Vec::new();
-    let mut module_global_var_decls = Vec::new();
-    let mut module_global_const_decls = Vec::new();
-    let mut scripts = Vec::new();
-
-    for child in element_children(root) {
-        match parse_module_child(child, root, file_path, &namespace)? {
-            ParsedModuleChild::Type(decl) => type_decls.push(decl),
-            ParsedModuleChild::Function(decl) => function_decls.push(decl),
-            ParsedModuleChild::ModuleVar(decl) => module_global_var_decls.push(decl),
-            ParsedModuleChild::ModuleConst(decl) => module_global_const_decls.push(decl),
-            ParsedModuleChild::Script(script) => scripts.push(script),
-        }
-    }
-    apply_module_export_targets(
-        &export_targets,
-        &mut type_decls,
-        &mut function_decls,
-        &mut module_global_var_decls,
-        &mut module_global_const_decls,
-        &mut scripts,
-        &root.location,
-    )
-    .map_err(|error| with_file_context(error, file_path))?;
+    let block = parse_module_block(root, file_path, &namespace, &export_targets)?;
 
     Ok(ParsedModuleSource {
         module: ModuleDeclarations {
-            type_decls,
-            function_decls,
-            module_global_var_decls,
-            module_global_const_decls,
+            root_namespace: namespace,
+            exported_module_namespaces: block.exported_module_namespaces.clone(),
+            type_decls: block.type_decls,
+            function_decls: block.function_decls,
+            module_global_var_decls: block.module_global_var_decls,
+            module_global_const_decls: block.module_global_const_decls,
         },
-        scripts,
+        scripts: block.scripts,
     })
 }
 
@@ -147,7 +135,6 @@ fn parse_module_header(
 
 fn parse_module_child(
     child: &XmlElementNode,
-    root: &XmlElementNode,
     file_path: &str,
     namespace: &str,
 ) -> Result<ParsedModuleChild, ScriptLangError> {
@@ -191,7 +178,7 @@ fn parse_module_child(
         _ => Err(with_file_context(
             ScriptLangError::with_span(
                 "XML_MODULE_CHILD_INVALID",
-                format!("Unsupported child <{}> under <{}>.", child.name, root.name),
+                format!("Unsupported child <{}> under <module>.", child.name),
                 child.location.clone(),
             ),
             file_path,
@@ -199,8 +186,181 @@ fn parse_module_child(
     }
 }
 
+fn parse_module_block(
+    node: &XmlElementNode,
+    file_path: &str,
+    namespace: &str,
+    export_targets: &ModuleExportTargets,
+) -> Result<ParsedModuleBlock, ScriptLangError> {
+    let mut block = ParsedModuleBlock::default();
+    let mut nested_blocks = Vec::new();
+    let mut direct_child_module_names = BTreeSet::new();
+
+    for child in element_children(node) {
+        if child.name == "module" {
+            let child_name = get_required_non_empty_attr(child, "name")
+                .map_err(|error| with_file_context(error, file_path))?;
+            validate_module_segment_name(&child_name, child.location.clone())
+                .map_err(|error| with_file_context(error, file_path))?;
+            assert_name_not_reserved(&child_name, "module", child.location.clone())
+                .map_err(|error| with_file_context(error, file_path))?;
+            direct_child_module_names.insert(child_name.clone());
+            let child_namespace = format!("{}.{}", namespace, child_name);
+            let child_header = ParsedModuleHeader {
+                namespace: child_namespace.clone(),
+                export_targets: parse_module_export_targets(child)
+                    .map_err(|error| with_file_context(error, file_path))?,
+            };
+            let child_block = parse_module_block(
+                child,
+                file_path,
+                &child_header.namespace,
+                &child_header.export_targets,
+            )?;
+            nested_blocks.push(child_block);
+            continue;
+        }
+
+        match parse_module_child(child, file_path, namespace)? {
+            ParsedModuleChild::Type(decl) => block.type_decls.push(decl),
+            ParsedModuleChild::Function(decl) => block.function_decls.push(decl),
+            ParsedModuleChild::ModuleVar(decl) => block.module_global_var_decls.push(decl),
+            ParsedModuleChild::ModuleConst(decl) => block.module_global_const_decls.push(decl),
+            ParsedModuleChild::Script(script) => block.scripts.push(script),
+        }
+    }
+
+    apply_module_export_targets(
+        export_targets,
+        &mut block.type_decls,
+        &mut block.function_decls,
+        &mut block.module_global_var_decls,
+        &mut block.module_global_const_decls,
+        &mut block.scripts,
+        &direct_child_module_names,
+        &node.location,
+    )
+    .map_err(|error| with_file_context(error, file_path))?;
+    block.exported_module_namespaces = export_targets
+        .modules
+        .iter()
+        .map(|name| format!("{}.{}", namespace, name))
+        .collect();
+    for mut child_block in nested_blocks {
+        block
+            .exported_module_namespaces
+            .append(&mut child_block.exported_module_namespaces);
+        block.type_decls.append(&mut child_block.type_decls);
+        block.function_decls.append(&mut child_block.function_decls);
+        block
+            .module_global_var_decls
+            .append(&mut child_block.module_global_var_decls);
+        block
+            .module_global_const_decls
+            .append(&mut child_block.module_global_const_decls);
+        block.scripts.append(&mut child_block.scripts);
+    }
+    Ok(block)
+}
+
+fn validate_module_segment_name(name: &str, span: SourceSpan) -> Result<(), ScriptLangError> {
+    if name.chars().enumerate().all(|(index, ch)| {
+        if index == 0 {
+            ch.is_ascii_alphabetic() || ch == '_'
+        } else {
+            ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'
+        }
+    }) {
+        return Ok(());
+    }
+    Err(ScriptLangError::with_span(
+        "NAME_IDENTIFIER_INVALID",
+        format!(
+            "Name \"{}\" for module must be a single identifier segment (letters/digits/underscore/hyphen, no dot).",
+            name
+        ),
+        span,
+    ))
+}
+
 fn with_file_context(error: ScriptLangError, file_path: &str) -> ScriptLangError {
     with_file_context_shared(error, file_path)
+}
+
+fn namespace_root(namespace: &str) -> &str {
+    namespace.split('.').next().unwrap_or_default()
+}
+
+fn internal_visibility_path_open(
+    decl_namespace: &str,
+    local_namespace: &str,
+    module: &ModuleDeclarations,
+) -> bool {
+    if namespace_root(local_namespace) != module.root_namespace {
+        return false;
+    }
+    if decl_namespace == module.root_namespace {
+        return true;
+    }
+    let Some(relative) = decl_namespace.strip_prefix(&format!("{}.", module.root_namespace)) else {
+        return false;
+    };
+    let segment_count = relative.split('.').count();
+    if segment_count <= 1 {
+        return true;
+    }
+    let mut prefix = String::new();
+    for (index, segment) in relative.split('.').enumerate() {
+        if index == 0 {
+            prefix.push_str(segment);
+            continue;
+        }
+        if !prefix.is_empty() {
+            prefix.push('.');
+        }
+        prefix.push_str(segment);
+        let required_export = format!("{}.{}", module.root_namespace, prefix);
+        if !module.exported_module_namespaces.contains(&required_export) {
+            return false;
+        }
+    }
+    true
+}
+
+fn externally_visible_under_root_gate(namespace: &str, module: &ModuleDeclarations) -> bool {
+    if namespace == module.root_namespace {
+        return true;
+    }
+    module.exported_module_namespaces.iter().any(|exported| {
+        namespace == exported
+            || namespace
+                .strip_prefix(exported)
+                .is_some_and(|rest| rest.starts_with('.'))
+    })
+}
+
+fn symbol_visible_in_scope(
+    decl_namespace: &str,
+    decl_access: AccessLevel,
+    local_module_name: Option<&str>,
+    module: &ModuleDeclarations,
+) -> bool {
+    let Some(local_namespace) = local_module_name else {
+        return decl_access == AccessLevel::Public;
+    };
+    if decl_namespace == local_namespace {
+        return true;
+    }
+    if decl_access != AccessLevel::Public {
+        return false;
+    }
+    if module.root_namespace.is_empty() {
+        return true;
+    }
+    if internal_visibility_path_open(decl_namespace, local_namespace, module) {
+        return true;
+    }
+    externally_visible_under_root_gate(decl_namespace, module)
 }
 
 fn parse_module_export_targets(
@@ -259,6 +419,7 @@ fn parse_module_export_targets(
                 ));
             }
             let inserted = match kind {
+                "module" => targets.modules.insert(name.to_string()),
                 "script" => targets.scripts.insert(name.to_string()),
                 "function" => targets.functions.insert(name.to_string()),
                 "var" => targets.vars.insert(name.to_string()),
@@ -269,7 +430,7 @@ fn parse_module_export_targets(
                     return Err(ScriptLangError::with_span(
                         "XML_EXPORT_KIND_INVALID",
                         format!(
-                            "Unsupported export kind \"{}\". Allowed kinds: script/function/var/const/type/enum.",
+                            "Unsupported export kind \"{}\". Allowed kinds: module/script/function/var/const/type/enum.",
                             kind
                         ),
                         root.location.clone(),
@@ -292,6 +453,7 @@ fn parse_module_export_targets(
     Ok(targets)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_module_export_targets(
     export_targets: &ModuleExportTargets,
     type_decls: &mut [ParsedTypeDecl],
@@ -299,6 +461,7 @@ fn apply_module_export_targets(
     module_var_decls: &mut [ParsedModuleVarDecl],
     module_const_decls: &mut [ParsedModuleConstDecl],
     scripts: &mut [ParsedModuleScript],
+    child_module_names: &BTreeSet<String>,
     span: &SourceSpan,
 ) -> Result<(), ScriptLangError> {
     let type_names = type_decls
@@ -328,7 +491,7 @@ fn apply_module_export_targets(
         .map(|script| {
             script
                 .qualified_script_name
-                .split_once('.')
+                .rsplit_once('.')
                 .map(|(_, name)| name)
                 .unwrap_or(script.qualified_script_name.as_str())
         })
@@ -340,6 +503,11 @@ fn apply_module_export_targets(
     validate_export_names("var", &export_targets.vars, &var_names, span)?;
     validate_export_names("const", &export_targets.consts, &const_names, span)?;
     validate_export_names("script", &export_targets.scripts, &script_names, span)?;
+    let child_module_names = child_module_names
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    validate_export_names("module", &export_targets.modules, &child_module_names, span)?;
 
     for decl in type_decls {
         decl.access = if (!decl.enum_members.is_empty()
@@ -375,7 +543,7 @@ fn apply_module_export_targets(
     for script in scripts {
         let short_name = script
             .qualified_script_name
-            .split_once('.')
+            .rsplit_once('.')
             .map(|(_, name)| name)
             .unwrap_or(script.qualified_script_name.as_str());
         script.access = if export_targets.scripts.contains(short_name) {
@@ -547,7 +715,7 @@ fn runtime_module_global_rewrite_map_from_targets<'a>(
 ) -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();
     for qualified_name in targets {
-        let Some((namespace, name)) = qualified_name.split_once('.') else {
+        let Some((namespace, name)) = qualified_name.rsplit_once('.') else {
             continue;
         };
         map.entry(qualified_name.to_string())
@@ -556,28 +724,135 @@ fn runtime_module_global_rewrite_map_from_targets<'a>(
     map
 }
 
+fn multi_segment_symbol_regex() -> &'static Regex {
+    static REGEX: OnceLock<Regex> = OnceLock::new();
+    REGEX.get_or_init(|| {
+        Regex::new(r"[A-Za-z_][A-Za-z0-9_$-]*(?:\.[A-Za-z_][A-Za-z0-9_$-]*){2,}")
+            .expect("multi-segment symbol regex")
+    })
+}
+
+fn collect_declared_module_global_names<'a>(
+    modules: impl Iterator<Item = &'a ModuleDeclarations>,
+) -> (BTreeSet<String>, BTreeSet<String>) {
+    let mut vars = BTreeSet::new();
+    let mut consts = BTreeSet::new();
+    for module in modules {
+        for decl in &module.module_global_var_decls {
+            vars.insert(decl.qualified_name.clone());
+        }
+        for decl in &module.module_global_const_decls {
+            consts.insert(decl.qualified_name.clone());
+        }
+    }
+    (vars, consts)
+}
+
+#[derive(Clone, Copy)]
+struct ModuleInitializerVisibility<'a> {
+    module: &'a ModuleDeclarations,
+    local_namespace: &'a str,
+    declared_var_names: &'a BTreeSet<String>,
+    declared_const_names: &'a BTreeSet<String>,
+}
+
+#[derive(Clone, Copy)]
+struct ModuleInitializerContext<'a> {
+    alias_rewrite_map: &'a BTreeMap<String, String>,
+    visible_types: &'a BTreeMap<String, ScriptType>,
+    visible_functions: &'a BTreeMap<String, FunctionDecl>,
+    module_name: &'a str,
+    span: &'a SourceSpan,
+    visibility: Option<ModuleInitializerVisibility<'a>>,
+}
+
+fn validate_module_initializer_visibility(
+    expr: &str,
+    span: &SourceSpan,
+    visibility: ModuleInitializerVisibility<'_>,
+) -> Result<(), ScriptLangError> {
+    if visibility.module.root_namespace.is_empty() {
+        return Ok(());
+    }
+
+    let sanitized = sanitize_rhai_source(expr);
+    for matched in multi_segment_symbol_regex().find_iter(&sanitized) {
+        let token = matched.as_str();
+        let left = sanitized[..matched.start()].chars().next_back();
+        let right = sanitized[matched.end()..].chars().next();
+        if !is_left_boundary(left) || !is_right_boundary(right) {
+            continue;
+        }
+        let mut lookahead = sanitized[matched.end()..].chars();
+        let next_non_ws = lookahead.find(|ch| !ch.is_whitespace());
+        if next_non_ws == Some('(') {
+            continue;
+        }
+
+        let qualified_candidate =
+            if token.starts_with(&format!("{}.", visibility.module.root_namespace)) {
+                token.to_string()
+            } else {
+                format!("{}.{}", visibility.module.root_namespace, token)
+            };
+
+        let is_module_global = visibility.declared_var_names.contains(&qualified_candidate)
+            || visibility
+                .declared_const_names
+                .contains(&qualified_candidate);
+        if !is_module_global {
+            continue;
+        }
+
+        let Some((decl_namespace, _)) = qualified_candidate.rsplit_once('.') else {
+            continue;
+        };
+        if symbol_visible_in_scope(
+            decl_namespace,
+            AccessLevel::Public,
+            Some(visibility.local_namespace),
+            visibility.module,
+        ) {
+            continue;
+        }
+
+        return Err(ScriptLangError::with_span(
+            "MODULE_SYMBOL_NOT_VISIBLE",
+            format!(
+                "Module global \"{}\" is not visible in namespace \"{}\".",
+                token, visibility.local_namespace
+            ),
+            span.clone(),
+        ));
+    }
+
+    Ok(())
+}
+
 fn normalize_module_initializer(
     expr: &Option<String>,
     resolved_type: &ScriptType,
-    alias_rewrite_map: &BTreeMap<String, String>,
-    visible_types: &BTreeMap<String, ScriptType>,
-    visible_functions: &BTreeMap<String, FunctionDecl>,
-    module_name: &str,
-    span: &SourceSpan,
+    context: ModuleInitializerContext<'_>,
 ) -> Result<Option<String>, ScriptLangError> {
     let Some(expr) = expr.as_ref() else {
         if matches!(resolved_type, ScriptType::Enum { .. }) {
             return Err(ScriptLangError::with_span(
                 "ENUM_INIT_REQUIRED",
                 "Enum declaration requires explicit Type.Member initializer.",
-                span.clone(),
+                context.span.clone(),
             ));
         }
         return Ok(None);
     };
 
     if let ScriptType::Enum { type_name, members } = resolved_type {
-        let member = parse_enum_literal_initializer(expr, type_name, members, visible_types, span)?;
+        let member = parse_enum_literal_initializer(
+            expr,
+            type_name,
+            members,
+            context.visible_types,
+            context.span,
+        )?;
         return Ok(Some(format!("\"{}\"", member.replace('"', "\\\""))));
     }
     if let ScriptType::Map {
@@ -585,34 +860,42 @@ fn normalize_module_initializer(
         ..
     } = resolved_type
     {
-        validate_enum_map_initializer_keys_if_static(expr, type_name, members, span)?;
+        validate_enum_map_initializer_keys_if_static(expr, type_name, members, context.span)?;
+    }
+    if let Some(visibility) = context.visibility {
+        validate_module_initializer_visibility(expr, context.span, visibility)?;
     }
 
-    let alias_rewritten = rewrite_module_symbol_aliases_in_expression(expr, alias_rewrite_map);
+    let alias_rewritten =
+        rewrite_module_symbol_aliases_in_expression(expr, context.alias_rewrite_map);
     let script_rewritten = normalize_and_validate_script_literals_in_expression(
         &alias_rewritten,
-        span,
-        Some(module_name),
+        context.span,
+        Some(context.module_name),
         None,
     )?;
     let function_rewritten = normalize_and_validate_function_literals(
         &script_rewritten,
-        span,
-        Some(module_name),
-        visible_functions,
+        context.span,
+        Some(context.module_name),
+        context.visible_functions,
     )?;
-    let rewritten =
-        rewrite_and_validate_enum_literals_in_expression(&function_rewritten, visible_types, span)?;
+    let rewritten = rewrite_and_validate_enum_literals_in_expression(
+        &function_rewritten,
+        context.visible_types,
+        context.span,
+    )?;
     let runtime_rewrite_map = runtime_module_global_rewrite_map_from_targets(
-        alias_rewrite_map.values().map(String::as_str),
+        context.alias_rewrite_map.values().map(String::as_str),
     );
-    let runtime_function_symbol_map = visible_functions
+    let runtime_function_symbol_map = context
+        .visible_functions
         .keys()
         .map(|name| (name.clone(), rhai_function_symbol(name)))
         .collect::<BTreeMap<_, _>>();
     let preprocessed = preprocess_and_compile_rhai_source(
         &rewritten,
-        span,
+        context.span,
         "module initializer expression",
         RhaiInputMode::CodeBlock,
         RhaiCompileTarget::Expression,
@@ -836,10 +1119,13 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
             continue;
         };
         for decl in &module.type_decls {
-            let is_local = local_module_name.is_some_and(|module_name| {
-                decl.qualified_name.starts_with(&format!("{module_name}."))
-            });
-            if !is_local && decl.access != AccessLevel::Public {
+            let decl_namespace = decl
+                .qualified_name
+                .rsplit_once('.')
+                .map(|(namespace, _)| namespace)
+                .unwrap_or_default();
+            let is_local = local_module_name == Some(decl_namespace);
+            if !symbol_visible_in_scope(decl_namespace, decl.access, local_module_name, module) {
                 continue;
             }
             if type_decls_map.contains_key(&decl.qualified_name) {
@@ -850,12 +1136,10 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
                 ));
             }
             type_decls_map.insert(decl.qualified_name.clone(), decl.clone());
-            if let Some((namespace, _)) = decl.qualified_name.split_once('.') {
-                namespace_type_aliases
-                    .entry(namespace.to_string())
-                    .or_default()
-                    .insert(decl.name.clone(), decl.qualified_name.clone());
-            }
+            namespace_type_aliases
+                .entry(decl_namespace.to_string())
+                .or_default()
+                .insert(decl.name.clone(), decl.qualified_name.clone());
             if is_local {
                 local_type_short_candidates
                     .entry(decl.name.clone())
@@ -881,7 +1165,7 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
 
     for type_name in type_decls_map.keys() {
         let namespace = type_name
-            .split_once('.')
+            .rsplit_once('.')
             .map(|(namespace, _)| namespace)
             .unwrap_or_default();
         let mut aliases = namespace_type_aliases
@@ -927,7 +1211,29 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
             .expect("explicit alias type target should exist in resolved type map");
         local_visible_types.entry(alias.clone()).or_insert(ty);
     }
+    if let Some(local_namespace) = local_module_name {
+        let local_root = namespace_root(local_namespace).to_string();
+        for (qualified_name, ty) in resolved_types
+            .iter()
+            .filter(|(qualified_name, _)| qualified_name.starts_with(&format!("{}.", local_root)))
+        {
+            let Some((decl_namespace, _)) = qualified_name.rsplit_once('.') else {
+                continue;
+            };
+            if decl_namespace == local_namespace {
+                continue;
+            }
+            let Some(relative_name) = qualified_name.strip_prefix(&format!("{local_root}.")) else {
+                continue;
+            };
+            local_visible_types
+                .entry(relative_name.to_string())
+                .or_insert_with(|| ty.clone());
+        }
+    }
     let reachable_modules = reachable.iter().filter_map(|path| module_by_path.get(path));
+    let (declared_module_var_names, declared_module_const_names) =
+        collect_declared_module_global_names(module_by_path.values());
     let module_symbol_targets =
         collect_module_symbol_targets(reachable.iter().filter_map(|path| module_by_path.get(path)));
     let module_scoped_explicit_symbol_aliases = collect_module_explicit_visible_symbol_aliases(
@@ -969,17 +1275,16 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
         };
 
         for decl in &module.function_decls {
-            let is_local = local_module_name.is_some_and(|module_name| {
-                decl.qualified_name.starts_with(&format!("{module_name}."))
-            });
-            if !is_local && decl.access != AccessLevel::Public {
-                continue;
-            }
             let function_namespace = decl
                 .qualified_name
-                .split_once('.')
+                .rsplit_once('.')
                 .map(|(namespace, _)| namespace)
                 .unwrap_or_default();
+            let is_local = local_module_name == Some(function_namespace);
+            if !symbol_visible_in_scope(function_namespace, decl.access, local_module_name, module)
+            {
+                continue;
+            }
             let visible_types_base = if is_local {
                 &local_visible_types
             } else {
@@ -1052,7 +1357,7 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
                 .map(|name| (name.clone(), rhai_function_symbol(name)))
                 .collect::<BTreeMap<_, _>>();
             for qualified_name in visible_function_names.iter() {
-                let Some((namespace, short_name)) = qualified_name.split_once('.') else {
+                let Some((namespace, short_name)) = qualified_name.rsplit_once('.') else {
                     continue;
                 };
                 if namespace != function_namespace {
@@ -1110,6 +1415,32 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
             );
         }
     }
+    if let Some(local_namespace) = local_module_name {
+        let local_root = namespace_root(local_namespace).to_string();
+        let qualified_functions = functions
+            .iter()
+            .filter(|(name, _)| name.contains('.'))
+            .map(|(name, decl)| (name.clone(), decl.clone()))
+            .collect::<Vec<_>>();
+        for (qualified_name, decl) in qualified_functions {
+            let Some((decl_namespace, _)) = qualified_name.rsplit_once('.') else {
+                continue;
+            };
+            if decl_namespace == local_namespace {
+                continue;
+            }
+            let Some(relative_name) = qualified_name.strip_prefix(&format!("{local_root}.")) else {
+                continue;
+            };
+            functions
+                .entry(relative_name.to_string())
+                .or_insert_with(|| {
+                    let mut alias_decl = decl.clone();
+                    alias_decl.name = relative_name.to_string();
+                    alias_decl
+                });
+        }
+    }
 
     let mut module_vars_qualified = BTreeMap::new();
     let mut module_global_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -1120,7 +1451,7 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
 
         for decl in &module.module_global_var_decls {
             let is_local = local_module_name == Some(decl.namespace.as_str());
-            if !is_local && decl.access != AccessLevel::Public {
+            if !symbol_visible_in_scope(&decl.namespace, decl.access, local_module_name, module) {
                 continue;
             }
             let visible_types_base = if is_local {
@@ -1158,11 +1489,19 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
                 let initial_value_expr = normalize_module_initializer(
                     &decl.initial_value_expr,
                     &resolved_type,
-                    &alias_rewrite_map,
-                    &visible_types_in_scope,
-                    &functions,
-                    &decl.namespace,
-                    &decl.location,
+                    ModuleInitializerContext {
+                        alias_rewrite_map: &alias_rewrite_map,
+                        visible_types: &visible_types_in_scope,
+                        visible_functions: &functions,
+                        module_name: &decl.namespace,
+                        span: &decl.location,
+                        visibility: Some(ModuleInitializerVisibility {
+                            module,
+                            local_namespace: &decl.namespace,
+                            declared_var_names: &declared_module_var_names,
+                            declared_const_names: &declared_module_const_names,
+                        }),
+                    },
                 )?;
                 ModuleVarDecl {
                     namespace: decl.namespace.clone(),
@@ -1192,6 +1531,20 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
             .expect("module global alias target should exist");
         module_vars.entry(alias).or_insert(decl);
     }
+    if let Some(local_namespace) = local_module_name {
+        let local_root = namespace_root(local_namespace).to_string();
+        for (qualified_name, decl) in module_vars_qualified {
+            if decl.namespace == local_namespace {
+                continue;
+            }
+            let Some(relative_name) = qualified_name.strip_prefix(&format!("{local_root}.")) else {
+                continue;
+            };
+            module_vars
+                .entry(relative_name.to_string())
+                .or_insert_with(|| decl.clone());
+        }
+    }
 
     let mut module_consts_qualified = BTreeMap::new();
     let mut module_const_short_candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
@@ -1202,7 +1555,7 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
 
         for decl in &module.module_global_const_decls {
             let is_local = local_module_name == Some(decl.namespace.as_str());
-            if !is_local && decl.access != AccessLevel::Public {
+            if !symbol_visible_in_scope(&decl.namespace, decl.access, local_module_name, module) {
                 continue;
             }
             let visible_types_base = if is_local {
@@ -1240,11 +1593,19 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
                 let initial_value_expr = normalize_module_initializer(
                     &decl.initial_value_expr,
                     &resolved_type,
-                    &alias_rewrite_map,
-                    &visible_types_in_scope,
-                    &functions,
-                    &decl.namespace,
-                    &decl.location,
+                    ModuleInitializerContext {
+                        alias_rewrite_map: &alias_rewrite_map,
+                        visible_types: &visible_types_in_scope,
+                        visible_functions: &functions,
+                        module_name: &decl.namespace,
+                        span: &decl.location,
+                        visibility: Some(ModuleInitializerVisibility {
+                            module,
+                            local_namespace: &decl.namespace,
+                            declared_var_names: &declared_module_var_names,
+                            declared_const_names: &declared_module_const_names,
+                        }),
+                    },
                 )?;
                 ModuleConstDecl {
                     namespace: decl.namespace.clone(),
@@ -1274,16 +1635,34 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
             .expect("module const alias target should exist");
         module_consts.entry(alias).or_insert(decl);
     }
+    if let Some(local_namespace) = local_module_name {
+        let local_root = namespace_root(local_namespace).to_string();
+        for (qualified_name, decl) in module_consts_qualified {
+            if decl.namespace == local_namespace {
+                continue;
+            }
+            let Some(relative_name) = qualified_name.strip_prefix(&format!("{local_root}.")) else {
+                continue;
+            };
+            module_consts
+                .entry(relative_name.to_string())
+                .or_insert_with(|| decl.clone());
+        }
+    }
 
+    let mut return_visible_types = visible_types.clone();
     apply_explicit_alias_directives(
         alias_directives,
-        &mut visible_types,
+        &mut return_visible_types,
         &functions,
         &mut module_vars,
         &mut module_consts,
     )?;
+    for (name, ty) in local_visible_types {
+        return_visible_types.entry(name).or_insert(ty);
+    }
 
-    Ok((visible_types, functions, module_vars, module_consts))
+    Ok((return_visible_types, functions, module_vars, module_consts))
 }
 
 fn collect_module_explicit_visible_type_aliases(
@@ -1465,7 +1844,7 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
                 .entry(decl.name.clone())
                 .or_default()
                 .push(decl.qualified_name.clone());
-            if let Some((namespace, _)) = decl.qualified_name.split_once('.') {
+            if let Some((namespace, _)) = decl.qualified_name.rsplit_once('.') {
                 namespace_type_aliases
                     .entry(namespace.to_string())
                     .or_default()
@@ -1493,7 +1872,7 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
     let mut visiting = HashSet::new();
     for type_name in type_decls_map.keys() {
         let namespace = type_name
-            .split_once('.')
+            .rsplit_once('.')
             .map(|(namespace, _)| namespace)
             .unwrap_or_default();
         let mut aliases = type_aliases.clone();
@@ -1561,7 +1940,7 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
         for decl in &module.function_decls {
             let function_namespace = decl
                 .qualified_name
-                .split_once('.')
+                .rsplit_once('.')
                 .map(|(namespace, _)| namespace)
                 .unwrap_or_default();
             let visible_types_in_scope = visible_types_for_namespace(
@@ -1635,7 +2014,7 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
                 .map(|name| (name.clone(), rhai_function_symbol(name)))
                 .collect::<BTreeMap<_, _>>();
             for qualified_name in visible_function_names.iter() {
-                let Some((namespace, short_name)) = qualified_name.split_once('.') else {
+                let Some((namespace, short_name)) = qualified_name.rsplit_once('.') else {
                     continue;
                 };
                 if namespace != function_namespace {
@@ -1697,7 +2076,7 @@ pub(crate) fn collect_module_vars_for_bundle_with_aliases(
                 .entry(decl.name.clone())
                 .or_default()
                 .push(decl.qualified_name.clone());
-            if let Some((namespace, _)) = decl.qualified_name.split_once('.') {
+            if let Some((namespace, _)) = decl.qualified_name.rsplit_once('.') {
                 namespace_type_aliases
                     .entry(namespace.to_string())
                     .or_default()
@@ -1725,7 +2104,7 @@ pub(crate) fn collect_module_vars_for_bundle_with_aliases(
     let mut visiting = HashSet::new();
     for type_name in type_decls_map.keys() {
         let namespace = type_name
-            .split_once('.')
+            .rsplit_once('.')
             .map(|(namespace, _)| namespace)
             .unwrap_or_default();
         let mut aliases = type_aliases.clone();
@@ -1762,6 +2141,8 @@ pub(crate) fn collect_module_vars_for_bundle_with_aliases(
     }
     let namespace_aliases_by_namespace =
         collect_namespace_module_symbol_aliases(module_by_path.values());
+    let (declared_module_var_names, declared_module_const_names) =
+        collect_declared_module_global_names(module_by_path.values());
 
     let mut module_vars = BTreeMap::new();
     let mut init_order = Vec::new();
@@ -1802,11 +2183,19 @@ pub(crate) fn collect_module_vars_for_bundle_with_aliases(
                 let initial_value_expr = normalize_module_initializer(
                     &decl.initial_value_expr,
                     &resolved_type,
-                    &alias_rewrite_map,
-                    &local_visible_types,
-                    visible_functions,
-                    &decl.namespace,
-                    &decl.location,
+                    ModuleInitializerContext {
+                        alias_rewrite_map: &alias_rewrite_map,
+                        visible_types: &local_visible_types,
+                        visible_functions,
+                        module_name: &decl.namespace,
+                        span: &decl.location,
+                        visibility: Some(ModuleInitializerVisibility {
+                            module,
+                            local_namespace: &decl.namespace,
+                            declared_var_names: &declared_module_var_names,
+                            declared_const_names: &declared_module_const_names,
+                        }),
+                    },
                 )?;
                 ModuleVarDecl {
                     namespace: decl.namespace.clone(),
@@ -1850,7 +2239,7 @@ pub(crate) fn collect_module_consts_for_bundle_with_aliases(
                 .entry(decl.name.clone())
                 .or_default()
                 .push(decl.qualified_name.clone());
-            if let Some((namespace, _)) = decl.qualified_name.split_once('.') {
+            if let Some((namespace, _)) = decl.qualified_name.rsplit_once('.') {
                 namespace_type_aliases
                     .entry(namespace.to_string())
                     .or_default()
@@ -1878,7 +2267,7 @@ pub(crate) fn collect_module_consts_for_bundle_with_aliases(
     let mut visiting = HashSet::new();
     for type_name in type_decls_map.keys() {
         let namespace = type_name
-            .split_once('.')
+            .rsplit_once('.')
             .map(|(namespace, _)| namespace)
             .unwrap_or_default();
         let mut aliases = type_aliases.clone();
@@ -1915,6 +2304,8 @@ pub(crate) fn collect_module_consts_for_bundle_with_aliases(
     }
     let namespace_aliases_by_namespace =
         collect_namespace_module_symbol_aliases(module_by_path.values());
+    let (declared_module_var_names, declared_module_const_names) =
+        collect_declared_module_global_names(module_by_path.values());
 
     let mut module_consts = BTreeMap::new();
     let mut init_order = Vec::new();
@@ -1955,11 +2346,19 @@ pub(crate) fn collect_module_consts_for_bundle_with_aliases(
                 let initial_value_expr = normalize_module_initializer(
                     &decl.initial_value_expr,
                     &resolved_type,
-                    &alias_rewrite_map,
-                    &local_visible_types,
-                    visible_functions,
-                    &decl.namespace,
-                    &decl.location,
+                    ModuleInitializerContext {
+                        alias_rewrite_map: &alias_rewrite_map,
+                        visible_types: &local_visible_types,
+                        visible_functions,
+                        module_name: &decl.namespace,
+                        span: &decl.location,
+                        visibility: Some(ModuleInitializerVisibility {
+                            module,
+                            local_namespace: &decl.namespace,
+                            declared_var_names: &declared_module_var_names,
+                            declared_const_names: &declared_module_const_names,
+                        }),
+                    },
                 )?;
                 ModuleConstDecl {
                     namespace: decl.namespace.clone(),
@@ -2138,6 +2537,23 @@ mod module_resolver_tests {
     use super::*;
     use crate::compiler_test_support::*;
 
+    fn init_context<'a>(
+        alias_rewrite_map: &'a BTreeMap<String, String>,
+        visible_types: &'a BTreeMap<String, ScriptType>,
+        visible_functions: &'a BTreeMap<String, FunctionDecl>,
+        module_name: &'a str,
+        span: &'a SourceSpan,
+    ) -> ModuleInitializerContext<'a> {
+        ModuleInitializerContext {
+            alias_rewrite_map,
+            visible_types,
+            visible_functions,
+            module_name,
+            span,
+            visibility: None,
+        }
+    }
+
     fn script_type_kind(ty: &ScriptType) -> &'static str {
         match ty {
             ScriptType::Primitive { .. } => "primitive",
@@ -2163,6 +2579,8 @@ mod module_resolver_tests {
         );
         let span = SourceSpan::synthetic();
         let module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![ParsedTypeDecl {
                 name: "Obj".to_string(),
                 qualified_name: "shared.Obj".to_string(),
@@ -2214,6 +2632,8 @@ mod module_resolver_tests {
         // Test line 529: rewrite_and_validate_enum_literals_in_expression in function code
         let span = SourceSpan::synthetic();
         let module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![ParsedTypeDecl {
                 name: "Status".to_string(),
                 qualified_name: "main.Status".to_string(),
@@ -2252,6 +2672,8 @@ mod module_resolver_tests {
         // for module variables and constants with invalid enum literal initializers
         let span = SourceSpan::synthetic();
         let module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![ParsedTypeDecl {
                 name: "Status".to_string(),
                 qualified_name: "main.Status".to_string(),
@@ -2287,6 +2709,8 @@ mod module_resolver_tests {
         // for module constants with invalid enum literal initializers
         let span = SourceSpan::synthetic();
         let module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![ParsedTypeDecl {
                 name: "Status".to_string(),
                 qualified_name: "main.Status".to_string(),
@@ -2321,6 +2745,8 @@ mod module_resolver_tests {
         let span = SourceSpan::synthetic();
 
         let duplicate_qualified = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![ParsedTypeDecl {
                 name: "T".to_string(),
                 qualified_name: "shared.T".to_string(),
@@ -2354,6 +2780,8 @@ mod module_resolver_tests {
             (
                 "a.xml".to_string(),
                 ModuleDeclarations {
+                    root_namespace: String::new(),
+                    exported_module_namespaces: BTreeSet::new(),
                     type_decls: Vec::new(),
                     function_decls: vec![ParsedFunctionDecl {
                         name: "doit".to_string(),
@@ -2374,6 +2802,8 @@ mod module_resolver_tests {
             (
                 "b.xml".to_string(),
                 ModuleDeclarations {
+                    root_namespace: String::new(),
+                    exported_module_namespaces: BTreeSet::new(),
                     type_decls: Vec::new(),
                     function_decls: vec![ParsedFunctionDecl {
                         name: "doit".to_string(),
@@ -2411,6 +2841,8 @@ mod module_resolver_tests {
         let span = SourceSpan::synthetic();
         // Two files with the same function qualified name
         let duplicate_func = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: Vec::new(),
             function_decls: vec![ParsedFunctionDecl {
                 name: "foo".to_string(),
@@ -2443,6 +2875,8 @@ mod module_resolver_tests {
         let span = SourceSpan::synthetic();
         // Function with param type that doesn't exist
         let unknown_param_type = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: Vec::new(),
             function_decls: vec![ParsedFunctionDecl {
                 name: "foo".to_string(),
@@ -2475,6 +2909,8 @@ mod module_resolver_tests {
         let span = SourceSpan::synthetic();
         // Function with return type that doesn't exist
         let unknown_return_type = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: Vec::new(),
             function_decls: vec![ParsedFunctionDecl {
                 name: "foo".to_string(),
@@ -2514,6 +2950,8 @@ mod module_resolver_tests {
         let unique_modules = BTreeMap::from([(
             "a.xml".to_string(),
             ModuleDeclarations {
+                root_namespace: String::new(),
+                exported_module_namespaces: BTreeSet::new(),
                 type_decls: Vec::new(),
                 function_decls: Vec::new(),
                 module_global_var_decls: vec![make_decl("a", "hp")],
@@ -2538,6 +2976,8 @@ mod module_resolver_tests {
             (
                 "a.xml".to_string(),
                 ModuleDeclarations {
+                    root_namespace: String::new(),
+                    exported_module_namespaces: BTreeSet::new(),
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
                     module_global_var_decls: vec![make_decl("a", "hp")],
@@ -2547,6 +2987,8 @@ mod module_resolver_tests {
             (
                 "b.xml".to_string(),
                 ModuleDeclarations {
+                    root_namespace: String::new(),
+                    exported_module_namespaces: BTreeSet::new(),
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
                     module_global_var_decls: vec![make_decl("b", "hp")],
@@ -2576,6 +3018,8 @@ mod module_resolver_tests {
         let modules = BTreeMap::from([(
             "shared.xml".to_string(),
             ModuleDeclarations {
+                root_namespace: String::new(),
+                exported_module_namespaces: BTreeSet::new(),
                 type_decls: vec![ParsedTypeDecl {
                     name: "Unit".to_string(),
                     qualified_name: "shared.Unit".to_string(),
@@ -2738,6 +3182,8 @@ mod module_resolver_tests {
         let modules_with_multiple_types = BTreeMap::from([(
             "shared.xml".to_string(),
             ModuleDeclarations {
+                root_namespace: String::new(),
+                exported_module_namespaces: BTreeSet::new(),
                 type_decls: vec![
                     ParsedTypeDecl {
                         name: "Unit".to_string(),
@@ -2785,6 +3231,8 @@ mod module_resolver_tests {
         let modules_dup = BTreeMap::from([(
             "shared.xml".to_string(),
             ModuleDeclarations {
+                root_namespace: String::new(),
+                exported_module_namespaces: BTreeSet::new(),
                 type_decls: vec![ParsedTypeDecl {
                     name: "Unit".to_string(),
                     qualified_name: "shared.Unit".to_string(),
@@ -2830,6 +3278,8 @@ mod module_resolver_tests {
             (
                 "ids.xml".to_string(),
                 ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
                     type_decls: vec![
                         ParsedTypeDecl {
                             name: "LocationId".to_string(),
@@ -2856,6 +3306,8 @@ mod module_resolver_tests {
             (
                 "main.xml".to_string(),
                 ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
                     type_decls: vec![ParsedTypeDecl {
                         name: "Pair".to_string(),
                         qualified_name: "main.Pair".to_string(),
@@ -3079,6 +3531,8 @@ mod module_resolver_tests {
         let module_with_bad_const = BTreeMap::from([(
             "shared.xml".to_string(),
             ModuleDeclarations {
+                root_namespace: String::new(),
+                exported_module_namespaces: BTreeSet::new(),
                 type_decls: Vec::new(),
                 function_decls: Vec::new(),
                 module_global_var_decls: Vec::new(),
@@ -3170,6 +3624,8 @@ mod module_resolver_tests {
             (
                 "a.xml".to_string(),
                 ModuleDeclarations {
+                    root_namespace: String::new(),
+                    exported_module_namespaces: BTreeSet::new(),
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
                     module_global_var_decls: vec![duplicate.clone()],
@@ -3179,6 +3635,8 @@ mod module_resolver_tests {
             (
                 "b.xml".to_string(),
                 ModuleDeclarations {
+                    root_namespace: String::new(),
+                    exported_module_namespaces: BTreeSet::new(),
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
                     module_global_var_decls: vec![duplicate],
@@ -3519,6 +3977,8 @@ mod module_resolver_tests {
         let module_with_alias = BTreeMap::from([(
             "one.xml".to_string(),
             ModuleDeclarations {
+                root_namespace: String::new(),
+                exported_module_namespaces: BTreeSet::new(),
                 type_decls: vec![ParsedTypeDecl {
                     name: "Obj".to_string(),
                     qualified_name: "one.Obj".to_string(),
@@ -3578,6 +4038,8 @@ mod module_resolver_tests {
         let module_for_bundle = BTreeMap::from([(
             "bundle.xml".to_string(),
             ModuleDeclarations {
+                root_namespace: String::new(),
+                exported_module_namespaces: BTreeSet::new(),
                 type_decls: vec![ParsedTypeDecl {
                     name: "T".to_string(),
                     qualified_name: "bundle.T".to_string(),
@@ -3615,6 +4077,8 @@ mod module_resolver_tests {
         let bad_type_decl = BTreeMap::from([(
             "bad_type.xml".to_string(),
             ModuleDeclarations {
+                root_namespace: String::new(),
+                exported_module_namespaces: BTreeSet::new(),
                 type_decls: vec![ParsedTypeDecl {
                     name: "Broken".to_string(),
                     qualified_name: "bad_type.Broken".to_string(),
@@ -3640,6 +4104,8 @@ mod module_resolver_tests {
         let alias_already_exists = BTreeMap::from([(
             "alias.xml".to_string(),
             ModuleDeclarations {
+                root_namespace: String::new(),
+                exported_module_namespaces: BTreeSet::new(),
                 type_decls: Vec::new(),
                 function_decls: vec![ParsedFunctionDecl {
                     name: "make".to_string(),
@@ -3666,6 +4132,8 @@ mod module_resolver_tests {
         let malformed_local_names = BTreeMap::from([(
             "odd.xml".to_string(),
             ModuleDeclarations {
+                root_namespace: String::new(),
+                exported_module_namespaces: BTreeSet::new(),
                 type_decls: vec![ParsedTypeDecl {
                     name: "Obj".to_string(),
                     qualified_name: "Obj".to_string(),
@@ -3724,6 +4192,8 @@ mod module_resolver_tests {
         let bad_param = BTreeMap::from([(
             "bad.xml".to_string(),
             ModuleDeclarations {
+                root_namespace: String::new(),
+                exported_module_namespaces: BTreeSet::new(),
                 type_decls: Vec::new(),
                 function_decls: vec![ParsedFunctionDecl {
                     name: "f".to_string(),
@@ -3753,6 +4223,8 @@ mod module_resolver_tests {
         let bad_return = BTreeMap::from([(
             "bad.xml".to_string(),
             ModuleDeclarations {
+                root_namespace: String::new(),
+                exported_module_namespaces: BTreeSet::new(),
                 type_decls: Vec::new(),
                 function_decls: vec![ParsedFunctionDecl {
                     name: "f".to_string(),
@@ -3778,6 +4250,8 @@ mod module_resolver_tests {
         let bad_global_type = BTreeMap::from([(
             "bad.xml".to_string(),
             ModuleDeclarations {
+                root_namespace: String::new(),
+                exported_module_namespaces: BTreeSet::new(),
                 type_decls: Vec::new(),
                 function_decls: Vec::new(),
                 module_global_var_decls: vec![ParsedModuleVarDecl {
@@ -4036,6 +4510,8 @@ mod module_resolver_tests {
         let module_by_path = BTreeMap::from([(
             "main.xml".to_string(),
             ModuleDeclarations {
+                root_namespace: String::new(),
+                exported_module_namespaces: BTreeSet::new(),
                 type_decls: vec![ParsedTypeDecl {
                     name: "Player".to_string(),
                     qualified_name: "main.Player".to_string(),
@@ -4129,6 +4605,8 @@ mod module_resolver_tests {
     fn resolve_visible_module_symbols_skips_private_types_from_non_local_module() {
         let span = SourceSpan::synthetic();
         let module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![ParsedTypeDecl {
                 name: "Secret".to_string(),
                 qualified_name: "other.Secret".to_string(),
@@ -4165,6 +4643,8 @@ mod module_resolver_tests {
     fn resolve_visible_module_symbols_skips_private_functions_from_non_local_module() {
         let span = SourceSpan::synthetic();
         let module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: Vec::new(),
             function_decls: vec![ParsedFunctionDecl {
                 name: "hidden".to_string(),
@@ -4229,6 +4709,8 @@ mod module_resolver_tests {
             (
                 "main.xml".to_string(),
                 ModuleDeclarations {
+                    root_namespace: String::new(),
+                    exported_module_namespaces: BTreeSet::new(),
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
                     module_global_var_decls: Vec::new(),
@@ -4257,6 +4739,8 @@ mod module_resolver_tests {
             (
                 "other.xml".to_string(),
                 ModuleDeclarations {
+                    root_namespace: String::new(),
+                    exported_module_namespaces: BTreeSet::new(),
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
                     module_global_var_decls: Vec::new(),
@@ -4302,6 +4786,8 @@ mod module_resolver_tests {
             (
                 "a.xml".to_string(),
                 ModuleDeclarations {
+                    root_namespace: String::new(),
+                    exported_module_namespaces: BTreeSet::new(),
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
                     module_global_var_decls: Vec::new(),
@@ -4319,6 +4805,8 @@ mod module_resolver_tests {
             (
                 "b.xml".to_string(),
                 ModuleDeclarations {
+                    root_namespace: String::new(),
+                    exported_module_namespaces: BTreeSet::new(),
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
                     module_global_var_decls: Vec::new(),
@@ -4346,6 +4834,8 @@ mod module_resolver_tests {
         let bad_order = BTreeMap::from([(
             "main.xml".to_string(),
             ModuleDeclarations {
+                root_namespace: String::new(),
+                exported_module_namespaces: BTreeSet::new(),
                 type_decls: Vec::new(),
                 function_decls: Vec::new(),
                 module_global_var_decls: Vec::new(),
@@ -4397,6 +4887,8 @@ mod module_resolver_tests {
             (
                 "a.xml".to_string(),
                 ModuleDeclarations {
+                    root_namespace: String::new(),
+                    exported_module_namespaces: BTreeSet::new(),
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
                     module_global_var_decls: Vec::new(),
@@ -4406,6 +4898,8 @@ mod module_resolver_tests {
             (
                 "b.xml".to_string(),
                 ModuleDeclarations {
+                    root_namespace: String::new(),
+                    exported_module_namespaces: BTreeSet::new(),
                     type_decls: Vec::new(),
                     function_decls: Vec::new(),
                     module_global_var_decls: Vec::new(),
@@ -4434,6 +4928,8 @@ mod module_resolver_tests {
             (
                 "a.xml".to_string(),
                 ModuleDeclarations {
+                    root_namespace: String::new(),
+                    exported_module_namespaces: BTreeSet::new(),
                     type_decls: vec![duplicate_type.clone()],
                     function_decls: Vec::new(),
                     module_global_var_decls: Vec::new(),
@@ -4443,6 +4939,8 @@ mod module_resolver_tests {
             (
                 "b.xml".to_string(),
                 ModuleDeclarations {
+                    root_namespace: String::new(),
+                    exported_module_namespaces: BTreeSet::new(),
                     type_decls: vec![duplicate_type],
                     function_decls: Vec::new(),
                     module_global_var_decls: Vec::new(),
@@ -4668,6 +5166,8 @@ mod module_resolver_tests {
         // This creates a type with a field referencing a non-existent type
         let span = SourceSpan::synthetic();
         let module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![ParsedTypeDecl {
                 name: "MyType".to_string(),
                 qualified_name: "shared.MyType".to_string(),
@@ -4698,6 +5198,8 @@ mod module_resolver_tests {
         // Test that duplicate field errors propagate through line 784
         let span = SourceSpan::synthetic();
         let module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![ParsedTypeDecl {
                 name: "MyType".to_string(),
                 qualified_name: "shared.MyType".to_string(),
@@ -4735,6 +5237,8 @@ mod module_resolver_tests {
         let span = SourceSpan::synthetic();
         // Function with param type that doesn't exist
         let module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: Vec::new(),
             function_decls: vec![ParsedFunctionDecl {
                 name: "foo".to_string(),
@@ -4766,6 +5270,8 @@ mod module_resolver_tests {
         let span = SourceSpan::synthetic();
         // Function with return type that doesn't exist
         let module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: Vec::new(),
             function_decls: vec![ParsedFunctionDecl {
                 name: "foo".to_string(),
@@ -4793,6 +5299,8 @@ mod module_resolver_tests {
         // Test line 1487: collect_module_explicit_visible_symbol_aliases conflict detection
         let span = SourceSpan::synthetic();
         let module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![],
             function_decls: vec![ParsedFunctionDecl {
                 name: "foo".to_string(),
@@ -4866,12 +5374,16 @@ mod module_resolver_tests {
             location: span.clone(),
         };
         let module1 = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![type_decl.clone()],
             function_decls: Vec::new(),
             module_global_var_decls: Vec::new(),
             module_global_const_decls: Vec::new(),
         };
         let module2 = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![type_decl],
             function_decls: Vec::new(),
             module_global_var_decls: Vec::new(),
@@ -4907,6 +5419,8 @@ mod module_resolver_tests {
             location: span.clone(),
         };
         let module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![invalid_type],
             function_decls: Vec::new(),
             module_global_var_decls: Vec::new(),
@@ -4943,6 +5457,8 @@ mod module_resolver_tests {
         };
 
         let module_a = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![enum_a],
             function_decls: Vec::new(),
             module_global_var_decls: vec![ParsedModuleVarDecl {
@@ -4957,6 +5473,8 @@ mod module_resolver_tests {
             module_global_const_decls: Vec::new(),
         };
         let module_b = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![enum_b],
             function_decls: Vec::new(),
             module_global_var_decls: vec![ParsedModuleVarDecl {
@@ -5019,6 +5537,8 @@ mod module_resolver_tests {
             location: span.clone(),
         };
         let module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![invalid_type],
             function_decls: Vec::new(),
             module_global_var_decls: Vec::new(),
@@ -5056,6 +5576,8 @@ mod module_resolver_tests {
         };
 
         let module_a = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![enum_a],
             function_decls: Vec::new(),
             module_global_var_decls: Vec::new(),
@@ -5070,6 +5592,8 @@ mod module_resolver_tests {
             }],
         };
         let module_b = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![enum_b],
             function_decls: Vec::new(),
             module_global_var_decls: Vec::new(),
@@ -5129,11 +5653,13 @@ mod module_resolver_tests {
         let result = normalize_module_initializer(
             &None,
             &enum_type,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            "main",
-            &span,
+            init_context(
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                "main",
+                &span,
+            ),
         );
         let error = result.expect_err("enum without init should fail");
         assert_eq!(error.code, "ENUM_INIT_REQUIRED");
@@ -5153,11 +5679,13 @@ mod module_resolver_tests {
         let result = normalize_module_initializer(
             &Some("Status.Active".to_string()),
             &enum_type,
-            &BTreeMap::new(),
-            &visible_types,
-            &BTreeMap::new(),
-            "main",
-            &span,
+            init_context(
+                &BTreeMap::new(),
+                &visible_types,
+                &BTreeMap::new(),
+                "main",
+                &span,
+            ),
         );
         let value = result
             .expect("enum with init should succeed")
@@ -5179,11 +5707,13 @@ mod module_resolver_tests {
         let result = normalize_module_initializer(
             &Some("Status.Unknown".to_string()),
             &enum_type,
-            &BTreeMap::new(),
-            &visible_types,
-            &BTreeMap::new(),
-            "main",
-            &span,
+            init_context(
+                &BTreeMap::new(),
+                &visible_types,
+                &BTreeMap::new(),
+                "main",
+                &span,
+            ),
         );
         let error = result.expect_err("invalid enum member should fail");
         assert_eq!(error.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
@@ -5203,11 +5733,13 @@ mod module_resolver_tests {
         let result = normalize_module_initializer(
             &Some("\"Active\"".to_string()),
             &enum_type,
-            &BTreeMap::new(),
-            &visible_types,
-            &BTreeMap::new(),
-            "main",
-            &span,
+            init_context(
+                &BTreeMap::new(),
+                &visible_types,
+                &BTreeMap::new(),
+                "main",
+                &span,
+            ),
         );
         let error = result.expect_err("string literal for enum should fail");
         assert_eq!(error.code, "ENUM_LITERAL_REQUIRED");
@@ -5231,11 +5763,13 @@ mod module_resolver_tests {
         let result = normalize_module_initializer(
             &Some("${Status.Unknown}".to_string()),
             &int_type,
-            &BTreeMap::new(),
-            &visible_types,
-            &BTreeMap::new(),
-            "main",
-            &span,
+            init_context(
+                &BTreeMap::new(),
+                &visible_types,
+                &BTreeMap::new(),
+                "main",
+                &span,
+            ),
         );
         let error = result.expect_err("invalid enum literal in non-enum type should fail");
         assert_eq!(error.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
@@ -5257,11 +5791,13 @@ mod module_resolver_tests {
         let valid = normalize_module_initializer(
             &Some("#{Active: 1}".to_string()),
             &enum_key_map,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            "main",
-            &span,
+            init_context(
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                "main",
+                &span,
+            ),
         )
         .expect("valid enum map initializer should pass");
         assert_eq!(valid.as_deref(), Some("#{Active: 1}"));
@@ -5269,11 +5805,13 @@ mod module_resolver_tests {
         let invalid = normalize_module_initializer(
             &Some("#{Unknown: 1}".to_string()),
             &enum_key_map,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            "main",
-            &span,
+            init_context(
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                "main",
+                &span,
+            ),
         )
         .expect_err("unknown enum map key should fail");
         assert_eq!(invalid.code, "ENUM_MAP_KEY_UNKNOWN");
@@ -5291,11 +5829,13 @@ mod module_resolver_tests {
         let result = normalize_module_initializer(
             &Some("*nonexistent_func".to_string()),
             &int_type,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(), // empty visible_functions
-            "main",
-            &span,
+            init_context(
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                "main",
+                &span,
+            ),
         );
         let error = result.expect_err("missing function reference should fail");
         assert_eq!(error.code, "XML_FUNCTION_LITERAL_NOT_FOUND");
@@ -5315,11 +5855,13 @@ mod module_resolver_tests {
         let result = normalize_module_initializer(
             &Some("@target".to_string()),
             &int_type,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            "", // empty module_name - this causes the error
-            &span,
+            init_context(
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                "",
+                &span,
+            ),
         );
         let error = result.expect_err("script literal without module context should fail");
         // The error is XML_RHAI_SYNTAX_INVALID because Rhai fails to parse the invalid literal
@@ -5496,6 +6038,37 @@ mod module_resolver_tests {
         let error = crate::compile_project_bundle_from_xml_map(&files)
             .expect_err("exporting non-existent script should fail");
         assert_eq!(error.code, "XML_EXPORT_TARGET_NOT_FOUND");
+
+        // Test export module that doesn't exist
+        let files = BTreeMap::from([(
+            "test.xml".to_string(),
+            r#"<module name="test" export="module:missing">
+<module name="child" export="script:main">
+  <script name="main"><text>x = 1;</text></script>
+</module>
+</module>"#
+                .to_string(),
+        )]);
+        let error = crate::compile_project_bundle_from_xml_map(&files)
+            .expect_err("exporting non-existent module should fail");
+        assert_eq!(error.code, "XML_EXPORT_TARGET_NOT_FOUND");
+    }
+
+    #[test]
+    fn parse_module_source_flattens_nested_modules_into_namespaces() {
+        let files = BTreeMap::from([(
+            "test.xml".to_string(),
+            r#"<module name="a" export="module:b">
+<module name="b" export="script:main;type:Node">
+  <type name="Node"><field name="hp" type="int"/></type>
+  <script name="main"><text>x = 1;</text></script>
+</module>
+</module>"#
+                .to_string(),
+        )]);
+        let bundle = crate::compile_project_bundle_from_xml_map(&files)
+            .expect("nested module flatten should compile");
+        assert!(bundle.scripts.contains_key("a.b.main"));
     }
 
     #[test]
@@ -5530,6 +6103,8 @@ mod module_resolver_tests {
         // Create two module-scoped symbol aliases with same alias but different targets
         let span = SourceSpan::synthetic();
         let shared_module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![],
             function_decls: vec![],
             module_global_var_decls: vec![
@@ -5591,6 +6166,8 @@ mod module_resolver_tests {
         // created from module global var/const declarations
         let span = SourceSpan::synthetic();
         let shared_module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![],
             function_decls: vec![],
             module_global_var_decls: vec![
@@ -5646,6 +6223,8 @@ mod module_resolver_tests {
         // Test line 467: duplicate alias pointing to same target should be skipped (continue)
         let span = SourceSpan::synthetic();
         let shared_module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![],
             function_decls: vec![],
             module_global_var_decls: vec![ParsedModuleVarDecl {
@@ -5699,6 +6278,8 @@ mod module_resolver_tests {
         // When module-scoped explicit alias points to same target as namespace alias, skip it
         let span = SourceSpan::synthetic();
         let shared_module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![],
             function_decls: vec![],
             module_global_var_decls: vec![ParsedModuleVarDecl {
@@ -5746,6 +6327,8 @@ mod module_resolver_tests {
         // When module-scoped type aliases have conflicts, it should return error
         let span = SourceSpan::synthetic();
         let shared_module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![
                 ParsedTypeDecl {
                     name: "Unit".to_string(),
@@ -5804,6 +6387,8 @@ mod module_resolver_tests {
         // The conflict check uses qualified names as keys, so we need to use qualified name as alias
         let span = SourceSpan::synthetic();
         let shared_module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![
                 ParsedTypeDecl {
                     name: "Unit".to_string(),
@@ -5850,6 +6435,8 @@ mod module_resolver_tests {
         // Test line 1321: alias name conflicts with existing visible module constant
         let span = SourceSpan::synthetic();
         let shared_module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![],
             function_decls: vec![],
             module_global_var_decls: vec![],
@@ -5904,6 +6491,8 @@ mod module_resolver_tests {
         // but explicit aliases themselves don't conflict
         let span = SourceSpan::synthetic();
         let module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![],
             function_decls: vec![ParsedFunctionDecl {
                 name: "foo".to_string(),
@@ -5974,6 +6563,8 @@ mod module_resolver_tests {
     fn collect_functions_for_bundle_resolves_module_scoped_type_alias_when_short_name_ambiguous() {
         let span = SourceSpan::synthetic();
         let ids_module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![ParsedTypeDecl {
                 name: "MessageKey".to_string(),
                 qualified_name: "ids.MessageKey".to_string(),
@@ -5987,6 +6578,8 @@ mod module_resolver_tests {
             module_global_const_decls: Vec::new(),
         };
         let ids1_module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: vec![ParsedTypeDecl {
                 name: "MessageKey".to_string(),
                 qualified_name: "ids1.MessageKey".to_string(),
@@ -6000,6 +6593,8 @@ mod module_resolver_tests {
             module_global_const_decls: Vec::new(),
         };
         let event_system_module = ModuleDeclarations {
+            root_namespace: String::new(),
+            exported_module_namespaces: BTreeSet::new(),
             type_decls: Vec::new(),
             function_decls: vec![ParsedFunctionDecl {
                 name: "notify".to_string(),

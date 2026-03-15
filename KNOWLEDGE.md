@@ -94,3 +94,12 @@
 - 细节：`crates/sl-runtime/src/engine/callstack.rs` 中，private 访问校验仅用于静态字面量目标；动态变量目标（`ScriptTarget::Variable`）按已持有引用执行，不再触发 `ENGINE_SCRIPT_ACCESS_DENIED`。
 - 失败模式：若把动态目标路径重新接回 private 拦截，会回归“编译通过，但桥接模块转发 private 脚本引用在运行时报 access denied”。
 - 如何验证：三模块链路（app -> bridge -> private_target）中，`bridge` 通过 `script` 变量 `goto/call` private 目标应成功；`app` 直接静态写 `@private_target` 仍应失败。
+
+### 2026-03-15 — 架构决策 — 分层 module 后限定名解析必须按“最后一段”拆分
+- 发现：引入嵌套 module（`a.b.c`）后，凡是从 `qualified_name` 提取 `namespace/symbol` 的路径，若继续用 `split_once('.')` 会把 namespace 截断为首段，导致可见性、重写和运行时绑定全部偏移。
+- 细节：涉及 `type/function/var/const/script` 的限定名拆分，统一使用“按最后一个点拆分”（`rsplit_once('.')`）作为护栏；根门控可见性单独按 `root namespace + exported_module_namespaces` 判断，不与“最后一段拆分”混用。
+- 失败模式：典型现象是 `a.b.*` 在同根模块内可见性异常、`@c.next` / `*c.fn` 解析错到 `c.*` 而非 `a.c.*`、以及 runtime namespace symbol 绑定漂移。
+- 如何验证：至少覆盖三类回归：  
+  1) 同根 sibling 可见（`b` 访问 `c`/`c.d` 的 exported 符号）；  
+  2) 外部 root gate 阻断（`a` 未导出 `c` 时外部不可访问 `a.c.*`）；  
+  3) 根相对字面量补全（`@c.next`、`*c.fn` 在 `a.b` 上下文解析到 `a.c.*`）。

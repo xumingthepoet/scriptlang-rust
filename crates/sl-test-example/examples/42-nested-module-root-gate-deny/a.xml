@@ -1,0 +1,13 @@
+<module name="a" export="module:b">
+  <module name="c" export="type:Pub">
+    <type name="Pub">
+      <field name="v" type="int"/>
+    </type>
+  </module>
+  <module name="b" export="script:main">
+    <script name="main">
+      <text>ok</text>
+      <end/>
+    </script>
+  </module>
+</module>

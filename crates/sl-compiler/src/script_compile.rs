@@ -30,7 +30,7 @@ fn script_target_var_regex() -> &'static Regex {
 fn script_literal_name_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
-        Regex::new(r"^[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)?$")
+        Regex::new(r"^[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*$")
             .expect("script literal name regex")
     })
 }
@@ -147,7 +147,7 @@ fn build_runtime_module_global_rewrite_map(
                 .map(|decl| decl.qualified_name.as_str()),
         )
     {
-        let Some((namespace, name)) = qualified_name.split_once('.') else {
+        let Some((namespace, name)) = qualified_name.rsplit_once('.') else {
             continue;
         };
         map.entry(qualified_name.to_string())
@@ -299,6 +299,10 @@ fn qualify_script_literal_name(
     ))
 }
 
+fn module_root_name(module_name: &str) -> &str {
+    module_name.split('.').next().unwrap_or_default()
+}
+
 fn validate_script_literal_access(
     qualified: &str,
     all_script_access: &BTreeMap<String, AccessLevel>,
@@ -314,7 +318,7 @@ fn validate_script_literal_access(
     };
 
     if access == AccessLevel::Private {
-        let target_module = qualified.split_once('.').map(|(ns, _)| ns).unwrap_or("");
+        let target_module = qualified.rsplit_once('.').map(|(ns, _)| ns).unwrap_or("");
         if module_name != Some(target_module) {
             return Err(ScriptLangError::with_span(
                 "XML_SCRIPT_TARGET_ACCESS_DENIED",
@@ -332,7 +336,6 @@ fn validate_script_literal_access(
 fn parse_script_literal_name(chars: &[char], at_index: usize) -> Option<(String, usize)> {
     let mut index = at_index + 1;
     let mut name = String::new();
-    let mut seen_dot = false;
 
     let first = *chars.get(index)?;
     if !first.is_ascii_alphabetic() && first != '_' {
@@ -347,12 +350,11 @@ fn parse_script_literal_name(chars: &[char], at_index: usize) -> Option<(String,
             index += 1;
             continue;
         }
-        if ch == '.' && !seen_dot {
+        if ch == '.' {
             let next = chars.get(index + 1).copied()?;
             if !next.is_ascii_alphabetic() && next != '_' {
                 return None;
             }
-            seen_dot = true;
             name.push(ch);
             index += 1;
             continue;
@@ -404,7 +406,22 @@ pub(crate) fn normalize_and_validate_script_literals_in_expression(
 
         if ch == '@' && is_script_literal_left_boundary(chars.get(index.wrapping_sub(1)).copied()) {
             if let Some((literal_name, next_index)) = parse_script_literal_name(&chars, index) {
-                let qualified = qualify_script_literal_name(&literal_name, module_name, span)?;
+                let mut qualified = qualify_script_literal_name(&literal_name, module_name, span)?;
+                if let (Some(access_map), Some(local_module_name)) =
+                    (all_script_access, module_name)
+                {
+                    if !access_map.contains_key(&qualified)
+                        && literal_name.contains('.')
+                        && !qualified
+                            .starts_with(&format!("{}.", module_root_name(local_module_name)))
+                    {
+                        let candidate =
+                            format!("{}.{}", module_root_name(local_module_name), literal_name);
+                        if access_map.contains_key(&candidate) {
+                            qualified = candidate;
+                        }
+                    }
+                }
                 if let Some(access_map) = all_script_access {
                     validate_script_literal_access(&qualified, access_map, module_name, span)?;
                 }
@@ -454,7 +471,7 @@ fn parse_function_literal_name(chars: &[char], start: usize) -> Option<(String, 
     index += 1;
 
     while let Some(ch) = chars.get(index).copied() {
-        if ch.is_ascii_alphanumeric() || ch == '_' {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
             name.push(ch);
             index += 1;
             continue;
@@ -530,6 +547,26 @@ where
         if is_function_literal_start(&chars, index) {
             if let Some((literal_name, next_index)) = parse_function_literal_name(&chars, index) {
                 let qualified = qualify_function_literal_name(&literal_name, module_name, span)?;
+                let qualified = if has_visible_function(&qualified) {
+                    qualified
+                } else if let Some(local_module_name) = module_name {
+                    if literal_name.contains('.')
+                        && !qualified
+                            .starts_with(&format!("{}.", module_root_name(local_module_name)))
+                    {
+                        let candidate =
+                            format!("{}.{}", module_root_name(local_module_name), literal_name);
+                        if has_visible_function(&candidate) {
+                            candidate
+                        } else {
+                            qualified
+                        }
+                    } else {
+                        qualified
+                    }
+                } else {
+                    qualified
+                };
                 if !has_visible_function(&qualified) {
                     return Err(ScriptLangError::with_span(
                         "XML_FUNCTION_LITERAL_NOT_FOUND",
@@ -909,7 +946,18 @@ fn parse_script_target_attr(
             ));
         }
 
-        let qualified = qualify_script_literal_name(script_name, module_name, &node.location)?;
+        let mut qualified = qualify_script_literal_name(script_name, module_name, &node.location)?;
+        if let Some(local_module_name) = module_name {
+            if !all_script_access.contains_key(&qualified)
+                && script_name.contains('.')
+                && !qualified.starts_with(&format!("{}.", module_root_name(local_module_name)))
+            {
+                let candidate = format!("{}.{}", module_root_name(local_module_name), script_name);
+                if all_script_access.contains_key(&candidate) {
+                    qualified = candidate;
+                }
+            }
+        }
         validate_script_literal_access(&qualified, all_script_access, module_name, &node.location)?;
 
         return Ok(ScriptTarget::Literal {

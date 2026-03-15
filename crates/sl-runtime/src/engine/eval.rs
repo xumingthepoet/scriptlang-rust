@@ -348,7 +348,7 @@ impl ScriptLangEngine {
         let mut qualified_rewrite_map = BTreeMap::new();
         for (qualified_name, value) in &self.module_vars_value {
             // qualified_name should be namespace.name format, skip invalid entries
-            let Some((namespace, name)) = qualified_name.split_once('.') else {
+            let Some((namespace, name)) = qualified_name.rsplit_once('.') else {
                 continue;
             };
             namespace_values
@@ -362,7 +362,7 @@ impl ScriptLangEngine {
         }
         for (qualified_name, value) in &self.module_consts_value {
             // qualified_name should be namespace.name format, skip invalid entries
-            let Some((namespace, name)) = qualified_name.split_once('.') else {
+            let Some((namespace, name)) = qualified_name.rsplit_once('.') else {
                 continue;
             };
             namespace_values
@@ -429,7 +429,7 @@ impl ScriptLangEngine {
         let mut namespace_values: BTreeMap<String, BTreeMap<String, SlValue>> = BTreeMap::new();
         let mut qualified_rewrite_map = BTreeMap::new();
         for (qualified_name, value) in &self.module_consts_value {
-            let Some((namespace, name)) = qualified_name.split_once('.') else {
+            let Some((namespace, name)) = qualified_name.rsplit_once('.') else {
                 continue;
             };
             namespace_values
@@ -588,7 +588,7 @@ impl ScriptLangEngine {
             required_function_namespaces.insert(module_name.clone());
         }
         for qualified_name in function_symbol_map.keys() {
-            let Some((namespace, _)) = qualified_name.split_once('.') else {
+            let Some((namespace, _)) = qualified_name.rsplit_once('.') else {
                 continue;
             };
             required_function_namespaces.insert(namespace.to_string());
@@ -600,14 +600,14 @@ impl ScriptLangEngine {
                 .filter(|(_, invoke_symbol)| *invoke_symbol == symbol)
                 .map(|(qualified_name, _)| qualified_name)
             {
-                let Some((namespace, _)) = qualified_name.split_once('.') else {
+                let Some((namespace, _)) = qualified_name.rsplit_once('.') else {
                     continue;
                 };
                 required_function_namespaces.insert(namespace.to_string());
             }
         }
         for qualified_name in self.invoke_all_functions.keys() {
-            let Some((namespace, _)) = qualified_name.split_once('.') else {
+            let Some((namespace, _)) = qualified_name.rsplit_once('.') else {
                 continue;
             };
             required_function_namespaces.insert(namespace.to_string());
@@ -655,7 +655,7 @@ impl ScriptLangEngine {
 
         let mut module_namespace_snapshot = BTreeMap::new();
         for qualified_name in &visible_module {
-            let Some((namespace, name)) = qualified_name.split_once('.') else {
+            let Some((namespace, name)) = qualified_name.rsplit_once('.') else {
                 continue;
             };
             let value = self
@@ -676,7 +676,7 @@ impl ScriptLangEngine {
         for qualified_name in &visible_consts {
             // qualified_name is always namespace.name format
             let (namespace, name) = qualified_name
-                .split_once('.')
+                .rsplit_once('.')
                 .expect("qualified const name should contain '.'");
             let value = self
                 .module_consts_value
@@ -1046,7 +1046,7 @@ impl ScriptLangEngine {
                 );
                 out.push_str(")\n}\n");
             }
-            if let Some((namespace, short_name)) = qualified_name.split_once('.') {
+            if let Some((namespace, short_name)) = qualified_name.rsplit_once('.') {
                 if current_module == Some(namespace) {
                     out.push_str("if name == \"*");
                     out.push_str(short_name);
@@ -1089,7 +1089,7 @@ impl ScriptLangEngine {
     fn invoke_module_local_qualified(&self, module_name: &str) -> BTreeMap<String, String> {
         let mut local = BTreeMap::new();
         for qualified_name in self.invoke_all_functions.keys() {
-            let Some((namespace, short_name)) = qualified_name.as_str().split_once('.') else {
+            let Some((namespace, short_name)) = qualified_name.as_str().rsplit_once('.') else {
                 continue;
             };
             if namespace == module_name {
@@ -1101,7 +1101,7 @@ impl ScriptLangEngine {
 
     fn invoke_body_symbol_map(&self, qualified_name: &str) -> BTreeMap<String, String> {
         let mut map = self.invoke_function_symbols.clone();
-        let Some((namespace, _)) = qualified_name.split_once('.') else {
+        let Some((namespace, _)) = qualified_name.rsplit_once('.') else {
             return map;
         };
         for (short_name, local_qualified) in self.invoke_module_local_qualified(namespace) {
@@ -1120,7 +1120,7 @@ impl ScriptLangEngine {
             .cloned()
             .chain(self.module_const_declarations.keys().cloned())
         {
-            let Some((namespace, name)) = qualified_name.split_once('.') else {
+            let Some((namespace, name)) = qualified_name.rsplit_once('.') else {
                 continue;
             };
             out.insert(
@@ -1147,7 +1147,7 @@ impl ScriptLangEngine {
             .cloned()
             .unwrap_or_default();
         for qualified_name in visible_module.iter().chain(visible_consts.iter()) {
-            let Some((namespace, name)) = qualified_name.split_once('.') else {
+            let Some((namespace, name)) = qualified_name.rsplit_once('.') else {
                 continue;
             };
             out.insert(
@@ -3627,7 +3627,7 @@ let public = 3;
     #[test]
     pub(super) fn function_symbol_map_handles_non_dotted_names() {
         // Test lines 590-593: when function_symbol_map keys don't contain '.', skip them
-        // This tests the split_once('.') returning None case
+        // This tests the rsplit_once('.') returning None case
         use super::*;
 
         let files = map(&[(
@@ -3646,7 +3646,7 @@ let public = 3;
 
     #[test]
     pub(super) fn function_symbol_map_non_dotted_entries_triggers_execute_rhai_with_mode() {
-        // Test lines 590-593: trigger the split_once('.') None branch in execute_rhai_with_mode
+        // Test lines 590-593: trigger the rsplit_once('.') None branch in execute_rhai_with_mode
         // This test actually triggers execute_rhai_with_mode which contains the uncovered code
         use super::*;
 

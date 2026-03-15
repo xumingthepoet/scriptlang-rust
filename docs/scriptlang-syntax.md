@@ -34,7 +34,9 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 规则：
 - 一个 `*.xml` 模块文件内可以有多个 `<script>`。
 - `<module>` 下允许的直接子节点只有：`<type>`、`<enum>`、`<function>`、`<var>`、`<const>`、`<script>`。
+- `<module>` 允许嵌套 `<module>`；嵌套模块会在编译期展平为点分命名空间（例如 `a.b.c`）。
 - module 名只取自 `<module name="...">`，不从文件名推导。
+- 嵌套 `<module>` 的 `name` 必须是单段标识符（不允许 `.`）；最终命名空间由父子链路拼接。
 - `<module export="...">` 控制 module 对外可见符号；未声明 `export` 时所有声明默认 `private`。
 - `export` 语法：`kind:name1,name2;kind2:name3`，支持 `script/function/var/const/type/enum` 六类。
 - `<type>/<enum>/<function>/<var>/<const>/<script>` 不支持 `access` 属性。
@@ -44,6 +46,9 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 - 同一个 module 内部，脚本可以直接用短名访问本 module 的 `type/function/var/const`，也可以用短名调用 sibling script。
 - 跨 module 访问任何元素时，都必须使用限定名，例如 `shared.boost`、`shared.hp`、`shared.Hero`、`battle.main`。
 - 跨 module import 只能访问对方在 `export` 中声明的元素；未导出的元素仅在本 module 内可见。
+- 同一根 module 树（同文件内 `a.*`）内部，子模块之间可见对方 `export` 的符号；未 `export` 的符号仍不可见。
+- 同根内部访问时，第一层子模块（如 `c.*`）不要求根模块 `a` 导出 `module:c`；但访问更深层（如 `c.d.*`）要求父模块逐层导出 `module`（例如 `c` 需 `export=\"module:d\"`）。
+- 文件外访问时，根模块需要 `export="module:child"` 显式暴露子模块入口；未暴露子模块不可通过 `a.child.*` 访问。
 - 宿主入口脚本必须在 `export` 中声明；未导出脚本不能作为 entry。
 - 声明名（`script/type/enum/field/member/function/args/return/var/const/temp/dynamic-options item/index`）会在编译期做 Rhai 关键字冲突检查，命中时报 `NAME_RHAI_KEYWORD_RESERVED`（大小写敏感）。
 - 声明名必须是单段标识符（`[A-Za-z_][A-Za-z0-9_]*`），不允许在声明位使用限定名（例如 `<enum name="main.State">` 非法）。
@@ -75,6 +80,7 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 - 允许在 `*.xml` 模块文件中声明 import。
 - 路径相对当前文件。
 - `<!-- import Shared from shared.xml -->` 只导入该文件声明的 `Shared` module。
+- `import` 仅导入目标文件的根模块；不支持直接导入子模块。
 - `<!-- import { Battle, Shared } from modules/ -->` 递归扫描目录，只导入显式列出的 module。
 - 目录 import 要求目录树内 module 名唯一；重名直接报错。
 - 同一文件内，重复导入到同一个目标文件会编译报错（不再静默去重）。
@@ -206,6 +212,8 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 规则：
 - `export` 以分号分组：`kind:name1,name2`。
 - `kind` 仅支持：`script/function/var/const/type/enum`。
+- `kind` 支持：`module/script/function/var/const/type/enum`。
+- `module:child1,child2` 用于导出根模块下可被外部访问的子模块入口。
 - `name` 必须指向当前 module 内真实声明；缺失目标会编译失败。
 - 重复导出同一 `kind:name` 会编译失败。
 

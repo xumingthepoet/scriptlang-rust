@@ -51,6 +51,9 @@ This catalog keeps example intent explicit so examples can be refactored without
 | `38-invalid-qualified-enum-name` | compile-time declaration-name validation: `<enum name>` must be short identifier, not qualified path |
 | `39-duplicate-import` | compile-time validation: duplicate `import` target in one module is rejected |
 | `40-duplicate-alias` | compile-time validation: duplicate `alias` directive in one module is rejected |
+| `41-nested-module-visibility` | nested module flatten + same-root sibling visibility (`b` can read `c` exported symbols) |
+| `42-nested-module-root-gate-deny` | root `export module:*` gate blocks external access to non-exported submodule |
+| `43-nested-module-internal-descendant-visibility-deny` | same-root initializer cannot access `c.d.*` when `c` does not export `module:d` |
 
 ## Notes
 - `26-enum-flow` intentionally covers enum member usage directly in XML attribute expressions (`args="ids.LocationId.A"`).

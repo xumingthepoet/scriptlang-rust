@@ -71,14 +71,14 @@ impl ScriptLangEngine {
     }
 
     fn is_qualified_script_name(name: &str) -> bool {
-        let Some((module_name, local_name)) = name.split_once('.') else {
+        let Some((module_name, local_name)) = name.rsplit_once('.') else {
             return false;
         };
-        // Empty check is handled by is_script_name_segment
-        if local_name.contains('.') {
+        if module_name.is_empty() || local_name.is_empty() {
             return false;
         }
-        Self::is_script_name_segment(module_name) && Self::is_script_name_segment(local_name)
+        Self::is_script_name_segment(local_name)
+            && module_name.split('.').all(Self::is_script_name_segment)
     }
 
     fn resolve_target_script(
@@ -1781,7 +1781,7 @@ mod callstack_tests {
             .expect_err("empty local name should fail");
         assert_eq!(error2.code, "ENGINE_TARGET_VAR_TYPE");
 
-        // Test local name with dot ("module.script.nested")
+        // Multi-level namespace target should be accepted
         let mut engine3 = engine_from_sources(map(&[(
             "main.script.xml",
             r#"<script name="main"><temp name="dst" type="string">""</temp></script>"#,
@@ -1801,10 +1801,10 @@ mod callstack_tests {
             return_continuation: None,
             var_types: BTreeMap::from([("dst".to_string(), ScriptType::Script)]),
         }];
-        let error3 = engine3
+        let result3 = engine3
             .resolve_target_script(&var("dst"), "ERR", "err")
-            .expect_err("local name with dot should fail");
-        assert_eq!(error3.code, "ENGINE_TARGET_VAR_TYPE");
+            .expect("multi-level namespace target should pass");
+        assert_eq!(result3, "module.script.nested");
 
         // Test invalid first character in module name (digit)
         let mut engine4 = engine_from_sources(map(&[(

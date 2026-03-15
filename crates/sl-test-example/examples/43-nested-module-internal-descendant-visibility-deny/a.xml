@@ -1,0 +1,15 @@
+<module name="a" export="module:b">
+  <module name="c" export="var:var1">
+    <var name="var1" type="int">2</var>
+    <module name="d" export="var:var2">
+      <var name="var2" type="int">3</var>
+    </module>
+  </module>
+  <module name="b" export="script:main;var:from_b">
+    <var name="from_b" type="int">c.var1 + c.d.var2</var>
+    <script name="main">
+      <text>${from_b}</text>
+      <end/>
+    </script>
+  </module>
+</module>

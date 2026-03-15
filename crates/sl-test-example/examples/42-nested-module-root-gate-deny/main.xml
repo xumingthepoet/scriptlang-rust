@@ -1,0 +1,8 @@
+<!-- import a from a.xml -->
+<module name="main" export="script:main">
+  <script name="main">
+    <temp name="v" type="a.c.Pub">#{v: 1}</temp>
+    <text>${v.v}</text>
+    <end/>
+  </script>
+</module>

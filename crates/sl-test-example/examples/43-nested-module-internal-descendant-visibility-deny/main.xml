@@ -1,0 +1,7 @@
+<!-- import a from a.xml -->
+<module name="main" export="script:main">
+  <script name="main">
+    <text>ok</text>
+    <end/>
+  </script>
+</module>

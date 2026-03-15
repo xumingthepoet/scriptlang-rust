@@ -22,7 +22,7 @@ pub fn compile_project_bundle_from_xml_map(
     let module_by_path = parse_module_files(&sources)
         .expect("module parsing should match previously validated module parsing");
     let module_alias_directives_by_namespace =
-        collect_module_alias_directives_by_namespace(&sources);
+        collect_module_alias_directives_by_namespace(&sources, &module_by_path);
     let global_data = BTreeMap::new();
     let invoke_all_functions = collect_functions_for_bundle_with_aliases(
         &module_by_path,
@@ -99,24 +99,42 @@ pub fn compile_project_bundle_from_xml_map(
 
 fn collect_module_alias_directives_by_namespace(
     sources: &BTreeMap<String, SourceFile>,
+    module_by_path: &BTreeMap<String, ModuleDeclarations>,
 ) -> BTreeMap<String, Vec<AliasDirective>> {
     let mut directives_by_namespace = BTreeMap::new();
-    for source in sources.values() {
-        // xml_root is always Some - parse_sources always sets it
-        let root = source
-            .xml_root
-            .as_ref()
-            .expect("xml_root should be present");
-        // root.name is always "module" - extract_module_name rejects non-module roots at parse time
-        // name attribute is always present - extract_module_name validates this at parse time
-        let namespace = root
-            .attributes
-            .get("name")
-            .expect("module name should be present");
+    for (file_path, source) in sources {
         if source.alias_directives.is_empty() {
             continue;
         }
-        directives_by_namespace.insert(namespace.clone(), source.alias_directives.clone());
+        let Some(module) = module_by_path.get(file_path) else {
+            continue;
+        };
+        let mut namespaces = BTreeSet::from([module.root_namespace.clone()]);
+        for decl in &module.type_decls {
+            namespaces.insert(
+                decl.qualified_name
+                    .rsplit_once('.')
+                    .map(|(namespace, _)| namespace.to_string())
+                    .unwrap_or_default(),
+            );
+        }
+        for decl in &module.function_decls {
+            namespaces.insert(
+                decl.qualified_name
+                    .rsplit_once('.')
+                    .map(|(namespace, _)| namespace.to_string())
+                    .unwrap_or_default(),
+            );
+        }
+        for decl in &module.module_global_var_decls {
+            namespaces.insert(decl.namespace.clone());
+        }
+        for decl in &module.module_global_const_decls {
+            namespaces.insert(decl.namespace.clone());
+        }
+        for namespace in namespaces {
+            directives_by_namespace.insert(namespace, source.alias_directives.clone());
+        }
     }
     directives_by_namespace
 }
@@ -143,8 +161,8 @@ fn collect_source_scripts(
             .map(|script| {
                 let module_name = script
                     .qualified_script_name
-                    .split('.')
-                    .next()
+                    .rsplit_once('.')
+                    .map(|(namespace, _)| namespace)
                     .unwrap_or_default()
                     .to_string();
                 SourceScriptToCompile {
@@ -676,6 +694,127 @@ mod pipeline_tests {
         assert!(bundle.scripts.contains_key("main.main"));
         assert!(bundle.scripts.contains_key("battle.battle"));
         assert!(bundle.global_data.is_empty());
+    }
+
+    #[test]
+    fn compile_bundle_supports_nested_modules_with_internal_sibling_visibility() {
+        let files = map(&[(
+            "a.xml",
+            r#"
+<module name="a" export="module:b">
+  <module name="c" export="var:var1;module:d">
+    <var name="var1" type="int">2</var>
+    <var name="hidden" type="int">99</var>
+    <module name="d" export="var:var2">
+      <var name="var2" type="int">3</var>
+    </module>
+  </module>
+  <module name="b" export="script:main;var:from_b">
+    <var name="from_b" type="int">c.var1 + c.d.var2</var>
+    <script name="main">
+      <text>${from_b}</text>
+    </script>
+  </module>
+</module>
+"#,
+        )]);
+
+        let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
+        assert!(bundle.scripts.contains_key("a.b.main"));
+        let script = bundle.scripts.get("a.b.main").expect("script should exist");
+        assert!(script.visible_module_vars.contains_key("c.var1"));
+        assert!(script.visible_module_vars.contains_key("c.d.var2"));
+        assert!(!script.visible_module_vars.contains_key("c.hidden"));
+    }
+
+    #[test]
+    fn compile_bundle_blocks_internal_descendant_initializer_when_parent_module_not_exported() {
+        let files = map(&[(
+            "a.xml",
+            r#"
+<module name="a" export="module:b">
+  <module name="c" export="var:var1">
+    <var name="var1" type="int">2</var>
+    <module name="d" export="var:var2">
+      <var name="var2" type="int">3</var>
+    </module>
+  </module>
+  <module name="b" export="script:main;var:from_b">
+    <var name="from_b" type="int">c.var1 + c.d.var2</var>
+    <script name="main">
+      <text>${from_b}</text>
+    </script>
+  </module>
+</module>
+"#,
+        )]);
+
+        let error = compile_project_bundle_from_xml_map(&files)
+            .expect_err("c.d.* in initializer should be hidden when c lacks export module:d");
+        assert_eq!(error.code, "MODULE_SYMBOL_NOT_VISIBLE");
+    }
+
+    #[test]
+    fn compile_bundle_root_module_gate_blocks_external_submodule_access() {
+        let files = map(&[
+            (
+                "a.xml",
+                r#"
+<module name="a" export="module:b">
+  <module name="c" export="type:Pub">
+    <type name="Pub">
+      <field name="v" type="int"/>
+    </type>
+  </module>
+  <module name="b" export="script:main">
+    <script name="main"><text>x</text></script>
+  </module>
+</module>
+"#,
+            ),
+            (
+                "main.xml",
+                r#"
+<!-- import a from a.xml -->
+<module name="main" export="script:main">
+  <script name="main">
+    <temp name="v" type="a.c.Pub">#{v: 1}</temp>
+    <text>${v.v}</text>
+  </script>
+</module>
+"#,
+            ),
+        ]);
+
+        let error = compile_project_bundle_from_xml_map(&files)
+            .expect_err("non-exported submodule should be hidden outside root module");
+        assert_eq!(error.code, "TYPE_UNKNOWN");
+    }
+
+    #[test]
+    fn compile_bundle_supports_root_relative_nested_script_and_function_literals() {
+        let files = map(&[(
+            "a.xml",
+            r#"
+<module name="a" export="module:b">
+  <module name="c" export="script:next;function:pick">
+    <function name="pick" return_type="int">return 7;</function>
+    <script name="next" kind="call">
+      <return/>
+    </script>
+  </module>
+  <module name="b" export="script:main">
+    <script name="main">
+      <temp name="f" type="function">*c.pick</temp>
+      <call script="@c.next"/>
+      <end/>
+    </script>
+  </module>
+</module>
+"#,
+        )]);
+        compile_project_bundle_from_xml_map(&files)
+            .expect("root-relative nested script/function literals should compile");
     }
 
     #[test]

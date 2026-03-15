@@ -220,6 +220,30 @@ fn example_40_duplicate_alias_reports_compile_error() {
 }
 
 #[test]
+fn example_41_nested_module_visibility_compiles() {
+    let scripts_xml = read_scripts_xml_from_example("41-nested-module-visibility");
+    sl_api::compile_artifact_from_xml_map(&scripts_xml, Some("main.main".to_string()))
+        .expect("nested module sibling visibility should compile");
+}
+
+#[test]
+fn example_42_nested_module_root_gate_deny_reports_compile_error() {
+    let scripts_xml = read_scripts_xml_from_example("42-nested-module-root-gate-deny");
+    let error = sl_api::compile_artifact_from_xml_map(&scripts_xml, Some("main.main".to_string()))
+        .expect_err("root module gate should block hidden submodule");
+    assert_eq!(error.code, "TYPE_UNKNOWN");
+}
+
+#[test]
+fn example_43_nested_module_internal_descendant_visibility_deny_reports_compile_error() {
+    let scripts_xml =
+        read_scripts_xml_from_example("43-nested-module-internal-descendant-visibility-deny");
+    let error = sl_api::compile_artifact_from_xml_map(&scripts_xml, Some("main.main".to_string()))
+        .expect_err("c.d.* in initializer should be hidden when c lacks export module:d");
+    assert_eq!(error.code, "MODULE_SYMBOL_NOT_VISIBLE");
+}
+
+#[test]
 fn example_22_access_control_matches_testcase() {
     assert_example("22-access-control");
 }

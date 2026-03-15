@@ -131,7 +131,7 @@ pub fn parse_alias_directives(source: &str) -> Vec<AliasDirective> {
             .unwrap_or_else(|| {
                 target_qualified_name
                     .split('.')
-                    .nth(1)
+                    .next_back()
                     .unwrap_or_default()
                     .to_string()
             });
@@ -199,7 +199,7 @@ fn alias_directive_body_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {
         Regex::new(
-            r"^alias\s+([A-Za-z_][A-Za-z0-9_-]*\.[A-Za-z_][A-Za-z0-9_-]*)(?:\s+as\s+([A-Za-z_][A-Za-z0-9_-]*))?$",
+            r"^alias\s+([A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)+)(?:\s+as\s+([A-Za-z_][A-Za-z0-9_-]*))?$",
         )
         .expect("alias directive body regex must compile")
     })
