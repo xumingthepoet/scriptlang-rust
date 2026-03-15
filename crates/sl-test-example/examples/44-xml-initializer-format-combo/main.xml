@@ -8,6 +8,10 @@
     <field name="hp" type="int"/>
     <field name="name" type="string"/>
   </type>
+  <type name="Team">
+    <field name="lead" type="Hero"/>
+    <field name="bench" type="Hero[]"/>
+  </type>
 
   <function name="boost" args="int:x" return_type="int">
     return x + 1;
@@ -49,7 +53,27 @@
       <tuple key="Stage.Begin">weights["Begin"]</tuple>
     </temp>
 
-    <text>${hero.name}:${dict["v"]}</text>
+    <temp name="team" type="Team" format="xml">
+      <field name="lead" format="xml">
+        <field name="hp">hero.hp</field>
+        <field name="name">hero.name</field>
+      </field>
+      <field name="bench" format="xml">
+        <item format="xml">
+          <field name="hp">boost(7)</field>
+          <field name="name">"Sub"</field>
+        </item>
+      </field>
+    </temp>
+
+    <temp name="named_hero" type="#{string=>Hero}" format="xml">
+      <tuple key="captain" format="xml">
+        <field name="hp">team.lead.hp</field>
+        <field name="name">team.lead.name</field>
+      </tuple>
+    </temp>
+
+    <text>${hero.name}:${dict["v"]}:${team.bench.len}:${named_hero["captain"].name}</text>
     <end/>
   </script>
 </module>

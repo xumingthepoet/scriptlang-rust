@@ -54,7 +54,7 @@ This catalog keeps example intent explicit so examples can be refactored without
 | `41-nested-module-visibility` | nested module flatten + same-root sibling visibility (`b` can read `c` exported symbols) |
 | `42-nested-module-root-gate-deny` | root `export module:*` gate blocks external access to non-exported submodule |
 | `43-nested-module-internal-descendant-visibility-deny` | same-root initializer cannot access `c.d.*` when `c` does not export `module:d` |
-| `44-xml-initializer-format-combo` | `format=\"xml\"` structured init for `var/const/temp` across object/array/map/enum-map with inline coexistence |
+| `44-xml-initializer-format-combo` | `format=\"xml\"` structured init for `var/const/temp` across object/array/map/enum-map, including recursive `field/item/tuple format=\"xml\"` |
 | `45-xml-initializer-mixed-content-deny` | compile-time rejection when `format=\"xml\"` mixes non-empty text and structural child nodes |
 | `46-compile-name-finalization-mixed` | compile-time final naming regression: nested module + alias + short call all execute without runtime name inference |
 

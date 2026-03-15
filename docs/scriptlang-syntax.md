@@ -353,7 +353,7 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 - 数组类型仅允许 `<item>expr</item>`。
 - `#{string=>T}` 仅允许 `<tuple key="...">expr</tuple>`，`key` 按原样字符串解释。
 - `#{Enum=>T}` 的 `tuple key` 必须是 `Type.Member`。
-- `field/item/tuple` 内部仍是内联表达式文本。
+- `field/item/tuple` 默认使用内联表达式文本；也可在这些节点上写 `format="xml"` 做递归结构化初始化。
 - `format="xml"` 时禁止和非空内联文本混用（空白文本可忽略）。
 
 ## 6.2 `<text>`

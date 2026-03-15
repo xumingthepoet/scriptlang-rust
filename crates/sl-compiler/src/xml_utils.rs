@@ -214,24 +214,126 @@ fn escape_rhai_string(raw: &str) -> String {
     raw.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-fn parse_xml_map_entries(node: &XmlElementNode) -> Result<Vec<(String, String)>, ScriptLangError> {
-    let mut pairs = Vec::new();
-    for child in element_children(node) {
-        if child.name != "tuple" {
-            return Err(ScriptLangError::with_span(
-                "XML_INIT_XML_CHILD_INVALID",
-                format!(
-                    "<{} format=\"xml\"> only allows <tuple> children.",
-                    node.name
-                ),
-                child.location.clone(),
-            ));
-        }
-        let key = get_required_non_empty_attr(child, "key")?;
-        let value_expr = parse_inline_required_no_element_children(child)?;
-        pairs.push((key, value_expr));
+fn parse_initializer_value_for_unknown_type(
+    node: &XmlElementNode,
+) -> Result<String, ScriptLangError> {
+    match parse_initializer_format(node)? {
+        InitializerFormat::Inline => parse_inline_required_no_element_children(node),
+        InitializerFormat::Xml => build_initializer_expr_from_xml_untyped(node),
     }
-    Ok(pairs)
+}
+
+fn parse_initializer_value_for_type_expr(
+    node: &XmlElementNode,
+    value_type: &ParsedTypeExpr,
+) -> Result<String, ScriptLangError> {
+    match parse_initializer_format(node)? {
+        InitializerFormat::Inline => parse_inline_required_no_element_children(node),
+        InitializerFormat::Xml => build_initializer_expr_from_xml_for_type_expr(node, value_type),
+    }
+}
+
+fn parse_initializer_value_for_resolved_type(
+    node: &XmlElementNode,
+    value_type: &ScriptType,
+    visible_types: &BTreeMap<String, ScriptType>,
+) -> Result<String, ScriptLangError> {
+    match parse_initializer_format(node)? {
+        InitializerFormat::Inline => parse_inline_required_no_element_children(node),
+        InitializerFormat::Xml => build_initializer_expr_from_xml(node, value_type, visible_types),
+    }
+}
+
+fn build_initializer_expr_from_xml_untyped(
+    node: &XmlElementNode,
+) -> Result<String, ScriptLangError> {
+    let has_elements = element_children(node).next().is_some();
+    if has_non_whitespace_text_child(node) && has_elements {
+        return Err(ScriptLangError::with_span(
+            "XML_INIT_XML_MIXED_CONTENT",
+            format!(
+                "<{} format=\"xml\"> cannot mix non-empty inline text with child elements.",
+                node.name
+            ),
+            node.location.clone(),
+        ));
+    }
+
+    let children = element_children(node).collect::<Vec<_>>();
+    if children.is_empty() {
+        return parse_inline_required(node);
+    }
+
+    match children[0].name.as_str() {
+        "field" => {
+            let mut fields = Vec::new();
+            for child in children {
+                if child.name != "field" {
+                    return Err(ScriptLangError::with_span(
+                        "XML_INIT_XML_CHILD_INVALID",
+                        format!(
+                            "<{} format=\"xml\"> only allows one child kind (field/item/tuple).",
+                            node.name
+                        ),
+                        child.location.clone(),
+                    ));
+                }
+                let field_name = get_required_non_empty_attr(child, "name")?;
+                assert_decl_name_not_reserved_or_rhai_keyword(
+                    &field_name,
+                    "object field initializer",
+                    child.location.clone(),
+                )?;
+                let value_expr = parse_initializer_value_for_unknown_type(child)?;
+                fields.push(format!("{}: {}", field_name, value_expr));
+            }
+            Ok(format!("#{{{}}}", fields.join(", ")))
+        }
+        "item" => {
+            let mut items = Vec::new();
+            for child in children {
+                if child.name != "item" {
+                    return Err(ScriptLangError::with_span(
+                        "XML_INIT_XML_CHILD_INVALID",
+                        format!(
+                            "<{} format=\"xml\"> only allows one child kind (field/item/tuple).",
+                            node.name
+                        ),
+                        child.location.clone(),
+                    ));
+                }
+                items.push(parse_initializer_value_for_unknown_type(child)?);
+            }
+            Ok(format!("[{}]", items.join(", ")))
+        }
+        "tuple" => {
+            let mut pairs = Vec::new();
+            for child in children {
+                if child.name != "tuple" {
+                    return Err(ScriptLangError::with_span(
+                        "XML_INIT_XML_CHILD_INVALID",
+                        format!(
+                            "<{} format=\"xml\"> only allows one child kind (field/item/tuple).",
+                            node.name
+                        ),
+                        child.location.clone(),
+                    ));
+                }
+                let key = get_required_non_empty_attr(child, "key")?;
+                let value_expr = parse_initializer_value_for_unknown_type(child)?;
+                pairs.push(format!("\"{}\": {}", escape_rhai_string(&key), value_expr));
+            }
+            Ok(format!("#{{{}}}", pairs.join(", ")))
+        }
+        _ => Err(ScriptLangError::with_span(
+            "XML_INIT_XML_CHILD_INVALID",
+            format!(
+                "<{} format=\"xml\"> only supports child nodes <field>/<item>/<tuple>.",
+                node.name
+            ),
+            children[0].location.clone(),
+        )),
+    }
 }
 
 pub(crate) fn build_initializer_expr_from_xml_for_type_expr(
@@ -270,7 +372,7 @@ pub(crate) fn build_initializer_expr_from_xml_for_type_expr(
                     "object field initializer",
                     child.location.clone(),
                 )?;
-                let expr = parse_inline_required_no_element_children(child)?;
+                let expr = parse_initializer_value_for_unknown_type(child)?;
                 fields.push(format!("{}: {}", field_name, expr));
             }
             if fields.is_empty() {
@@ -287,6 +389,9 @@ pub(crate) fn build_initializer_expr_from_xml_for_type_expr(
         }
         ParsedTypeExpr::Array(_) => {
             let mut items = Vec::new();
+            let ParsedTypeExpr::Array(element_type) = ty_expr else {
+                unreachable!("array branch guarantees ParsedTypeExpr::Array")
+            };
             for child in element_children(node) {
                 if child.name != "item" {
                     return Err(ScriptLangError::with_span(
@@ -298,14 +403,31 @@ pub(crate) fn build_initializer_expr_from_xml_for_type_expr(
                         child.location.clone(),
                     ));
                 }
-                items.push(parse_inline_required_no_element_children(child)?);
+                items.push(parse_initializer_value_for_type_expr(
+                    child,
+                    element_type.as_ref(),
+                )?);
             }
             Ok(format!("[{}]", items.join(", ")))
         }
-        ParsedTypeExpr::Map { key_type: _, .. } => {
-            let entries = parse_xml_map_entries(node)?;
+        ParsedTypeExpr::Map {
+            key_type: _,
+            value_type,
+        } => {
             let mut pairs = Vec::new();
-            for (key, value_expr) in entries {
+            for child in element_children(node) {
+                if child.name != "tuple" {
+                    return Err(ScriptLangError::with_span(
+                        "XML_INIT_XML_CHILD_INVALID",
+                        format!(
+                            "<{} format=\"xml\"> for map type only allows <tuple> children.",
+                            node.name
+                        ),
+                        child.location.clone(),
+                    ));
+                }
+                let key = get_required_non_empty_attr(child, "key")?;
+                let value_expr = parse_initializer_value_for_type_expr(child, value_type.as_ref())?;
                 let key_expr = format!("\"{}\"", escape_rhai_string(&key));
                 pairs.push(format!("{}: {}", key_expr, value_expr));
             }
@@ -372,7 +494,11 @@ pub(crate) fn build_initializer_expr_from_xml(
                         child.location.clone(),
                     ));
                 }
-                let value_expr = parse_inline_required_no_element_children(child)?;
+                let value_type = fields
+                    .get(&field_name)
+                    .expect("field existence checked above");
+                let value_expr =
+                    parse_initializer_value_for_resolved_type(child, value_type, visible_types)?;
                 entries.push(format!("{}: {}", field_name, value_expr));
             }
             for field_name in fields.keys() {
@@ -392,6 +518,9 @@ pub(crate) fn build_initializer_expr_from_xml(
         }
         ScriptType::Array { .. } => {
             let mut items = Vec::new();
+            let ScriptType::Array { element_type } = resolved_type else {
+                unreachable!("array branch guarantees ScriptType::Array")
+            };
             for child in element_children(node) {
                 if child.name != "item" {
                     return Err(ScriptLangError::with_span(
@@ -403,14 +532,34 @@ pub(crate) fn build_initializer_expr_from_xml(
                         child.location.clone(),
                     ));
                 }
-                items.push(parse_inline_required_no_element_children(child)?);
+                items.push(parse_initializer_value_for_resolved_type(
+                    child,
+                    element_type.as_ref(),
+                    visible_types,
+                )?);
             }
             Ok(format!("[{}]", items.join(", ")))
         }
         ScriptType::Map { key_type, .. } => {
-            let entries = parse_xml_map_entries(node)?;
             let mut pairs = Vec::new();
-            for (raw_key, value_expr) in entries {
+            let value_type = match resolved_type {
+                ScriptType::Map { value_type, .. } => value_type.as_ref(),
+                _ => unreachable!("map branch guarantees ScriptType::Map"),
+            };
+            for child in element_children(node) {
+                if child.name != "tuple" {
+                    return Err(ScriptLangError::with_span(
+                        "XML_INIT_XML_CHILD_INVALID",
+                        format!(
+                            "<{} format=\"xml\"> for map type only allows <tuple> children.",
+                            node.name
+                        ),
+                        child.location.clone(),
+                    ));
+                }
+                let raw_key = get_required_non_empty_attr(child, "key")?;
+                let value_expr =
+                    parse_initializer_value_for_resolved_type(child, value_type, visible_types)?;
                 match key_type {
                     MapKeyType::String => {
                         pairs.push(format!(
@@ -2776,5 +2925,267 @@ mod xml_utils_tests {
             array_item_child_error.code,
             "XML_FUNCTION_CHILD_NODE_INVALID"
         );
+    }
+
+    #[test]
+    fn xml_initializer_child_nodes_support_recursive_xml_format() {
+        let visible_types = BTreeMap::new();
+        let hero_type = ScriptType::Object {
+            type_name: "Hero".to_string(),
+            fields: BTreeMap::from([
+                (
+                    "hp".to_string(),
+                    ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                ),
+                (
+                    "name".to_string(),
+                    ScriptType::Primitive {
+                        name: "string".to_string(),
+                    },
+                ),
+            ]),
+        };
+        let team_type = ScriptType::Object {
+            type_name: "Team".to_string(),
+            fields: BTreeMap::from([
+                ("lead".to_string(), hero_type.clone()),
+                (
+                    "bench".to_string(),
+                    ScriptType::Array {
+                        element_type: Box::new(hero_type.clone()),
+                    },
+                ),
+            ]),
+        };
+        let named_hero_type = ScriptType::Map {
+            key_type: MapKeyType::String,
+            value_type: Box::new(hero_type),
+        };
+
+        let team_xml = xml_element(
+            "temp",
+            &[("format", "xml")],
+            vec![
+                XmlNode::Element(xml_element(
+                    "field",
+                    &[("name", "lead"), ("format", "xml")],
+                    vec![
+                        XmlNode::Element(xml_element(
+                            "field",
+                            &[("name", "hp")],
+                            vec![xml_text("1")],
+                        )),
+                        XmlNode::Element(xml_element(
+                            "field",
+                            &[("name", "name")],
+                            vec![xml_text("\"Rin\"")],
+                        )),
+                    ],
+                )),
+                XmlNode::Element(xml_element(
+                    "field",
+                    &[("name", "bench"), ("format", "xml")],
+                    vec![XmlNode::Element(xml_element(
+                        "item",
+                        &[("format", "xml")],
+                        vec![
+                            XmlNode::Element(xml_element(
+                                "field",
+                                &[("name", "hp")],
+                                vec![xml_text("2")],
+                            )),
+                            XmlNode::Element(xml_element(
+                                "field",
+                                &[("name", "name")],
+                                vec![xml_text("\"Sub\"")],
+                            )),
+                        ],
+                    ))],
+                )),
+            ],
+        );
+        let team_expr = build_initializer_expr_from_xml(&team_xml, &team_type, &visible_types)
+            .expect("nested field/item xml should compile");
+        assert!(team_expr.contains("lead: #{hp: 1, name: \"Rin\"}"));
+        assert!(team_expr.contains("bench: [#{hp: 2, name: \"Sub\"}]"));
+
+        let named_hero_xml = xml_element(
+            "temp",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "tuple",
+                &[("key", "captain"), ("format", "xml")],
+                vec![
+                    XmlNode::Element(xml_element("field", &[("name", "hp")], vec![xml_text("7")])),
+                    XmlNode::Element(xml_element(
+                        "field",
+                        &[("name", "name")],
+                        vec![xml_text("\"Cap\"")],
+                    )),
+                ],
+            ))],
+        );
+        let named_hero_expr =
+            build_initializer_expr_from_xml(&named_hero_xml, &named_hero_type, &visible_types)
+                .expect("nested tuple xml should compile");
+        assert_eq!(named_hero_expr, "#{\"captain\": #{hp: 7, name: \"Cap\"}}");
+    }
+
+    #[test]
+    fn xml_initializer_untyped_and_child_format_helpers_cover_new_paths() {
+        // parse_initializer_value_for_unknown_type: inline branch
+        let inline_node = xml_element("field", &[("name", "hp")], vec![xml_text("3")]);
+        let inline_value =
+            parse_initializer_value_for_unknown_type(&inline_node).expect("inline should pass");
+        assert_eq!(inline_value, "3");
+
+        // parse_initializer_value_for_unknown_type: xml branch + untyped object/array/map recursion
+        let untyped_obj = xml_element(
+            "field",
+            &[("name", "lead"), ("format", "xml")],
+            vec![
+                XmlNode::Element(xml_element("field", &[("name", "hp")], vec![xml_text("1")])),
+                XmlNode::Element(xml_element(
+                    "field",
+                    &[("name", "name")],
+                    vec![xml_text("\"Rin\"")],
+                )),
+            ],
+        );
+        let untyped_obj_value =
+            parse_initializer_value_for_unknown_type(&untyped_obj).expect("xml object should pass");
+        assert_eq!(untyped_obj_value, "#{hp: 1, name: \"Rin\"}");
+
+        let untyped_arr = xml_element(
+            "item",
+            &[("format", "xml")],
+            vec![
+                XmlNode::Element(xml_element("item", &[], vec![xml_text("1")])),
+                XmlNode::Element(xml_element("item", &[], vec![xml_text("2")])),
+            ],
+        );
+        let untyped_arr_value =
+            parse_initializer_value_for_unknown_type(&untyped_arr).expect("xml array should pass");
+        assert_eq!(untyped_arr_value, "[1, 2]");
+
+        let untyped_map = xml_element(
+            "tuple",
+            &[("key", "k"), ("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "tuple",
+                &[("key", "inner")],
+                vec![xml_text("1")],
+            ))],
+        );
+        let untyped_map_value =
+            parse_initializer_value_for_unknown_type(&untyped_map).expect("xml map should pass");
+        assert_eq!(untyped_map_value, "#{\"inner\": 1}");
+
+        // build_initializer_expr_from_xml_untyped: mixed content
+        let mixed = xml_element(
+            "item",
+            &[("format", "xml")],
+            vec![
+                xml_text("x"),
+                XmlNode::Element(xml_element("item", &[], vec![xml_text("1")])),
+            ],
+        );
+        let mixed_error =
+            build_initializer_expr_from_xml_untyped(&mixed).expect_err("mixed should fail");
+        assert_eq!(mixed_error.code, "XML_INIT_XML_MIXED_CONTENT");
+
+        // build_initializer_expr_from_xml_untyped: invalid child name and mixed child kinds
+        let invalid_child = xml_element(
+            "item",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element("node", &[], Vec::new()))],
+        );
+        let invalid_child_error = build_initializer_expr_from_xml_untyped(&invalid_child)
+            .expect_err("invalid child should fail");
+        assert_eq!(invalid_child_error.code, "XML_INIT_XML_CHILD_INVALID");
+
+        let mixed_kinds = xml_element(
+            "item",
+            &[("format", "xml")],
+            vec![
+                XmlNode::Element(xml_element("item", &[], vec![xml_text("1")])),
+                XmlNode::Element(xml_element("field", &[("name", "hp")], vec![xml_text("2")])),
+            ],
+        );
+        let mixed_kinds_error = build_initializer_expr_from_xml_untyped(&mixed_kinds)
+            .expect_err("mixed kind should fail");
+        assert_eq!(mixed_kinds_error.code, "XML_INIT_XML_CHILD_INVALID");
+    }
+
+    #[test]
+    fn xml_initializer_type_specific_child_format_helpers_cover_new_paths() {
+        let visible_types = BTreeMap::new();
+
+        // parse_initializer_value_for_type_expr: xml branch
+        let array_item = xml_element(
+            "item",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "item",
+                &[],
+                vec![xml_text("1")],
+            ))],
+        );
+        let array_item_expr = parse_initializer_value_for_type_expr(
+            &array_item,
+            &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Primitive("int".to_string()))),
+        )
+        .expect("typed xml item should pass");
+        assert_eq!(array_item_expr, "[1]");
+
+        // parse_initializer_value_for_resolved_type: inline + xml branches
+        let inline_field = xml_element("field", &[("name", "hp")], vec![xml_text("5")]);
+        let inline_field_expr = parse_initializer_value_for_resolved_type(
+            &inline_field,
+            &ScriptType::Primitive {
+                name: "int".to_string(),
+            },
+            &visible_types,
+        )
+        .expect("inline resolved value should pass");
+        assert_eq!(inline_field_expr, "5");
+
+        let xml_tuple = xml_element(
+            "tuple",
+            &[("key", "captain"), ("format", "xml")],
+            vec![
+                XmlNode::Element(xml_element("field", &[("name", "hp")], vec![xml_text("7")])),
+                XmlNode::Element(xml_element(
+                    "field",
+                    &[("name", "name")],
+                    vec![xml_text("\"Cap\"")],
+                )),
+            ],
+        );
+        let xml_tuple_expr = parse_initializer_value_for_resolved_type(
+            &xml_tuple,
+            &ScriptType::Object {
+                type_name: "Hero".to_string(),
+                fields: BTreeMap::from([
+                    (
+                        "hp".to_string(),
+                        ScriptType::Primitive {
+                            name: "int".to_string(),
+                        },
+                    ),
+                    (
+                        "name".to_string(),
+                        ScriptType::Primitive {
+                            name: "string".to_string(),
+                        },
+                    ),
+                ]),
+            },
+            &visible_types,
+        )
+        .expect("resolved xml tuple should pass");
+        assert_eq!(xml_tuple_expr, "#{hp: 7, name: \"Cap\"}");
     }
 }
