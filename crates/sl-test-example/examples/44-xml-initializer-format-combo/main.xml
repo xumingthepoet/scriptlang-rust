@@ -21,6 +21,12 @@
     <tuple key="Stage.Begin">boost(1)</tuple>
     <tuple key="Stage.End">2</tuple>
   </const>
+  <const name="const_nested_empty" type="int[][]" format="xml">
+    <item format="xml"></item>
+  </const>
+  <const name="const_map_empty" type="#{string=>int[]}" format="xml">
+    <tuple key="k" format="xml"></tuple>
+  </const>
 
   <var name="bag" type="#{string=>int}" format="xml">
     <tuple key="hp">boost(9)</tuple>
@@ -35,6 +41,20 @@
   <var name="hero_seed" type="Hero" format="xml">
     <field name="hp">bag["hp"] + scores[0]</field>
     <field name="name">"Rin"</field>
+  </var>
+
+  <var name="team_seed" type="Team" format="xml">
+    <field name="lead" format="xml">
+      <field name="hp">1</field>
+      <field name="name">"Seed"</field>
+    </field>
+    <field name="bench" format="xml"></field>
+  </var>
+  <var name="var_nested_empty" type="int[][]" format="xml">
+    <item format="xml"></item>
+  </var>
+  <var name="var_map_empty" type="#{string=>int[]}" format="xml">
+    <tuple key="k" format="xml"></tuple>
   </var>
 
   <script name="main">
@@ -72,8 +92,14 @@
         <field name="name">team.lead.name</field>
       </tuple>
     </temp>
+    <temp name="temp_nested_empty" type="int[][]" format="xml">
+      <item format="xml"></item>
+    </temp>
+    <temp name="temp_map_empty" type="#{string=>int[]}" format="xml">
+      <tuple key="k" format="xml"></tuple>
+    </temp>
 
-    <text>${hero.name}:${dict["v"]}:${team.bench.len}:${named_hero["captain"].name}</text>
+    <text>${hero.name}:${dict["v"]}:${team.bench.len}:${named_hero["captain"].name}:${team_seed.bench.len}:${const_nested_empty[0].len}:${const_map_empty["k"].len}:${var_nested_empty[0].len}:${var_map_empty["k"].len}:${temp_nested_empty[0].len}:${temp_map_empty["k"].len}</text>
     <end/>
   </script>
 </module>

@@ -261,7 +261,7 @@ fn build_initializer_expr_from_xml_untyped(
 
     let children = element_children(node).collect::<Vec<_>>();
     if children.is_empty() {
-        return parse_inline_required(node);
+        return Ok("[]".to_string());
     }
 
     match children[0].name.as_str() {
@@ -3082,6 +3082,11 @@ mod xml_utils_tests {
         let untyped_map_value =
             parse_initializer_value_for_unknown_type(&untyped_map).expect("xml map should pass");
         assert_eq!(untyped_map_value, "#{\"inner\": 1}");
+
+        let untyped_empty = xml_element("field", &[("name", "bench"), ("format", "xml")], vec![]);
+        let untyped_empty_value = parse_initializer_value_for_unknown_type(&untyped_empty)
+            .expect("empty xml should default to []");
+        assert_eq!(untyped_empty_value, "[]");
 
         // build_initializer_expr_from_xml_untyped: mixed content
         let mixed = xml_element(
