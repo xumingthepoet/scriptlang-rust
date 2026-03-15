@@ -287,3 +287,11 @@ fn example_45_xml_initializer_mixed_content_deny_reports_compile_error() {
 fn example_46_compile_name_finalization_mixed_matches_testcase() {
     assert_example("46-compile-name-finalization-mixed");
 }
+
+#[test]
+fn example_47_xml_initializer_inline_only_deny_reports_compile_error() {
+    let scripts_xml = read_scripts_xml_from_example("47-xml-initializer-inline-only-deny");
+    let error = sl_api::compile_artifact_from_xml_map(&scripts_xml, Some("main.main".to_string()))
+        .expect_err("format=xml with inline-only text should fail at compile time");
+    assert_eq!(error.code, "XML_INIT_XML_CHILD_INVALID");
+}

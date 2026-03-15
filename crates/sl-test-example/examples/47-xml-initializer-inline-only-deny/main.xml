@@ -1,0 +1,7 @@
+<module name="main" export="script:main">
+  <script name="main">
+    <temp name="nums" type="int[]" format="xml">1</temp>
+    <text>${nums.len}</text>
+    <end/>
+  </script>
+</module>

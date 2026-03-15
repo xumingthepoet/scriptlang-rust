@@ -258,6 +258,16 @@ fn build_initializer_expr_from_xml_untyped(
             node.location.clone(),
         ));
     }
+    if has_non_whitespace_text_child(node) {
+        return Err(ScriptLangError::with_span(
+            "XML_INIT_XML_CHILD_INVALID",
+            format!(
+                "<{} format=\"xml\"> requires structural child nodes and does not accept inline text.",
+                node.name
+            ),
+            node.location.clone(),
+        ));
+    }
 
     let children = element_children(node).collect::<Vec<_>>();
     if children.is_empty() {
@@ -346,6 +356,16 @@ pub(crate) fn build_initializer_expr_from_xml_for_type_expr(
             "XML_INIT_XML_MIXED_CONTENT",
             format!(
                 "<{} format=\"xml\"> cannot mix non-empty inline text with child elements.",
+                node.name
+            ),
+            node.location.clone(),
+        ));
+    }
+    if has_non_whitespace_text_child(node) {
+        return Err(ScriptLangError::with_span(
+            "XML_INIT_XML_CHILD_INVALID",
+            format!(
+                "<{} format=\"xml\"> requires structural child nodes and does not accept inline text.",
                 node.name
             ),
             node.location.clone(),
@@ -455,6 +475,16 @@ pub(crate) fn build_initializer_expr_from_xml(
             "XML_INIT_XML_MIXED_CONTENT",
             format!(
                 "<{} format=\"xml\"> cannot mix non-empty inline text with child elements.",
+                node.name
+            ),
+            node.location.clone(),
+        ));
+    }
+    if has_non_whitespace_text_child(node) {
+        return Err(ScriptLangError::with_span(
+            "XML_INIT_XML_CHILD_INVALID",
+            format!(
+                "<{} format=\"xml\"> requires structural child nodes and does not accept inline text.",
                 node.name
             ),
             node.location.clone(),
@@ -3122,6 +3152,11 @@ mod xml_utils_tests {
         let mixed_kinds_error = build_initializer_expr_from_xml_untyped(&mixed_kinds)
             .expect_err("mixed kind should fail");
         assert_eq!(mixed_kinds_error.code, "XML_INIT_XML_CHILD_INVALID");
+
+        let inline_only = xml_element("item", &[("format", "xml")], vec![xml_text("1")]);
+        let inline_only_error = build_initializer_expr_from_xml_untyped(&inline_only)
+            .expect_err("inline-only xml should fail");
+        assert_eq!(inline_only_error.code, "XML_INIT_XML_CHILD_INVALID");
     }
 
     #[test]
@@ -3192,5 +3227,13 @@ mod xml_utils_tests {
         )
         .expect("resolved xml tuple should pass");
         assert_eq!(xml_tuple_expr, "#{hp: 7, name: \"Cap\"}");
+
+        let inline_only_typed = xml_element("item", &[("format", "xml")], vec![xml_text("1")]);
+        let inline_only_typed_error = build_initializer_expr_from_xml_for_type_expr(
+            &inline_only_typed,
+            &ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Primitive("int".to_string()))),
+        )
+        .expect_err("typed xml with inline-only text should fail");
+        assert_eq!(inline_only_typed_error.code, "XML_INIT_XML_CHILD_INVALID");
     }
 }
