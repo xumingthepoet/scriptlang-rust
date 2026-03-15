@@ -244,6 +244,21 @@ fn example_43_nested_module_internal_descendant_visibility_deny_reports_compile_
 }
 
 #[test]
+fn example_44_xml_initializer_format_combo_compiles() {
+    let scripts_xml = read_scripts_xml_from_example("44-xml-initializer-format-combo");
+    sl_api::compile_artifact_from_xml_map(&scripts_xml, Some("main.main".to_string()))
+        .expect("xml initializer format combo should compile");
+}
+
+#[test]
+fn example_45_xml_initializer_mixed_content_deny_reports_compile_error() {
+    let scripts_xml = read_scripts_xml_from_example("45-xml-initializer-mixed-content-deny");
+    let error = sl_api::compile_artifact_from_xml_map(&scripts_xml, Some("main.main".to_string()))
+        .expect_err("xml format initializer mixed content should fail");
+    assert_eq!(error.code, "XML_INIT_XML_MIXED_CONTENT");
+}
+
+#[test]
 fn example_22_access_control_matches_testcase() {
     assert_example("22-access-control");
 }

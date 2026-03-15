@@ -763,7 +763,133 @@ struct ModuleInitializerContext<'a> {
     visible_functions: &'a BTreeMap<String, FunctionDecl>,
     module_name: &'a str,
     span: &'a SourceSpan,
+    from_xml_format: bool,
     visibility: Option<ModuleInitializerVisibility<'a>>,
+}
+
+fn parse_static_map_literal_entries(expr: &str) -> Option<Vec<String>> {
+    let trimmed = expr.trim();
+    let inner = trimmed.strip_prefix("#{")?.strip_suffix('}')?;
+    if inner.trim().is_empty() {
+        return Some(Vec::new());
+    }
+    Some(split_by_top_level_comma(inner))
+}
+
+fn validate_xml_object_initializer_fields(
+    expr: &str,
+    fields: &BTreeMap<String, ScriptType>,
+    span: &SourceSpan,
+) -> Result<(), ScriptLangError> {
+    let Some(entries) = parse_static_map_literal_entries(expr) else {
+        return Err(ScriptLangError::with_span(
+            "XML_INIT_XML_OBJECT_INVALID",
+            "Object initializer in xml format must compile to a static map literal.",
+            span.clone(),
+        ));
+    };
+    let mut seen = BTreeSet::new();
+    for entry in entries {
+        let Some(key_expr) = extract_map_literal_key_expr(&entry) else {
+            return Err(ScriptLangError::with_span(
+                "XML_INIT_XML_OBJECT_INVALID",
+                "Object initializer entry must be in \"field: expr\" format.",
+                span.clone(),
+            ));
+        };
+        let Some(key) = decode_static_map_key(key_expr) else {
+            return Err(ScriptLangError::with_span(
+                "XML_INIT_XML_OBJECT_INVALID",
+                format!(
+                    "Object field key \"{}\" must be a static identifier.",
+                    key_expr
+                ),
+                span.clone(),
+            ));
+        };
+        if !fields.contains_key(&key) {
+            return Err(ScriptLangError::with_span(
+                "XML_INIT_XML_FIELD_UNKNOWN",
+                format!("Field \"{}\" does not exist on target object type.", key),
+                span.clone(),
+            ));
+        }
+        if !seen.insert(key.clone()) {
+            return Err(ScriptLangError::with_span(
+                "XML_INIT_XML_FIELD_DUPLICATE",
+                format!("Field \"{}\" appears more than once.", key),
+                span.clone(),
+            ));
+        }
+    }
+    for field_name in fields.keys() {
+        if seen.contains(field_name) {
+            continue;
+        }
+        return Err(ScriptLangError::with_span(
+            "XML_INIT_XML_FIELD_MISSING",
+            format!(
+                "Missing field \"{}\" in xml object initializer.",
+                field_name
+            ),
+            span.clone(),
+        ));
+    }
+    Ok(())
+}
+
+fn normalize_xml_enum_map_initializer_keys(
+    expr: &str,
+    enum_type_name: &str,
+    enum_members: &[String],
+    visible_types: &BTreeMap<String, ScriptType>,
+    span: &SourceSpan,
+) -> Result<String, ScriptLangError> {
+    let Some(entries) = parse_static_map_literal_entries(expr) else {
+        return Err(ScriptLangError::with_span(
+            "XML_INIT_XML_ENUM_MAP_INVALID",
+            "Enum map initializer in xml format must compile to a static map literal.",
+            span.clone(),
+        ));
+    };
+    let mut normalized = Vec::new();
+    for entry in entries {
+        let Some(key_expr_raw) = extract_map_literal_key_expr(&entry) else {
+            return Err(ScriptLangError::with_span(
+                "XML_INIT_XML_ENUM_MAP_INVALID",
+                "Enum map initializer entry must be in \"key: expr\" format.",
+                span.clone(),
+            ));
+        };
+        let key_expr = key_expr_raw.trim();
+        let Some((_, value_expr)) = entry.split_once(':') else {
+            return Err(ScriptLangError::with_span(
+                "XML_INIT_XML_ENUM_MAP_INVALID",
+                "Enum map initializer entry must be in \"key: expr\" format.",
+                span.clone(),
+            ));
+        };
+        let raw_key = if (key_expr.starts_with('"') && key_expr.ends_with('"'))
+            || (key_expr.starts_with('\'') && key_expr.ends_with('\''))
+        {
+            key_expr[1..key_expr.len() - 1].to_string()
+        } else {
+            key_expr.to_string()
+        };
+        let member = parse_enum_literal_initializer(
+            &raw_key,
+            enum_type_name,
+            enum_members,
+            visible_types,
+            span,
+        )?;
+        normalized.push(format!(
+            "\"{}\": {}",
+            member.replace('"', "\\\""),
+            value_expr.trim()
+        ));
+    }
+    Ok(format!("#{{{}}}", normalized.join(", ")))
 }
 
 fn validate_module_initializer_visibility(
@@ -855,19 +981,34 @@ fn normalize_module_initializer(
         )?;
         return Ok(Some(format!("\"{}\"", member.replace('"', "\\\""))));
     }
+    let mut expr = expr.to_string();
     if let ScriptType::Map {
         key_type: MapKeyType::Enum { type_name, members },
         ..
     } = resolved_type
     {
-        validate_enum_map_initializer_keys_if_static(expr, type_name, members, context.span)?;
+        if context.from_xml_format {
+            expr = normalize_xml_enum_map_initializer_keys(
+                &expr,
+                type_name,
+                members,
+                context.visible_types,
+                context.span,
+            )?;
+        }
+        validate_enum_map_initializer_keys_if_static(&expr, type_name, members, context.span)?;
+    }
+    if context.from_xml_format {
+        if let ScriptType::Object { fields, .. } = resolved_type {
+            validate_xml_object_initializer_fields(&expr, fields, context.span)?;
+        }
     }
     if let Some(visibility) = context.visibility {
-        validate_module_initializer_visibility(expr, context.span, visibility)?;
+        validate_module_initializer_visibility(&expr, context.span, visibility)?;
     }
 
     let alias_rewritten =
-        rewrite_module_symbol_aliases_in_expression(expr, context.alias_rewrite_map);
+        rewrite_module_symbol_aliases_in_expression(&expr, context.alias_rewrite_map);
     let script_rewritten = normalize_and_validate_script_literals_in_expression(
         &alias_rewritten,
         context.span,
@@ -917,6 +1058,7 @@ pub(crate) fn parse_module_var_declaration(
         qualified_name: parsed.qualified_name,
         access: parsed.access,
         type_expr: parsed.type_expr,
+        initial_value_format: parsed.initial_value_format,
         initial_value_expr: parsed.initial_value_expr,
         location: parsed.location,
     })
@@ -934,6 +1076,7 @@ pub(crate) fn parse_module_const_declaration(
         qualified_name: parsed.qualified_name,
         access: parsed.access,
         type_expr: parsed.type_expr,
+        initial_value_format: parsed.initial_value_format,
         initial_value_expr: parsed.initial_value_expr,
         location: parsed.location,
     })
@@ -950,23 +1093,29 @@ fn parse_module_binding_declaration(
 
     let type_raw = get_required_non_empty_attr(node, "type")?;
     let type_expr = parse_type_expr(&type_raw, &node.location)?;
-
-    if let Some(child) = element_children(node).next() {
-        return Err(ScriptLangError::with_span(
-            "XML_VAR_CHILD_INVALID",
-            format!(
-                "<{}> cannot contain child element <{}>. Use inline expression text only.",
-                tag_name, child.name
-            ),
-            child.location.clone(),
-        ));
-    }
-
-    let inline = inline_text_content(node);
-    let initial_value_expr = if inline.trim().is_empty() {
-        None
-    } else {
-        Some(inline.trim().to_string())
+    let initial_value_format = parse_initializer_format(node)?;
+    let initial_value_expr = match initial_value_format {
+        InitializerFormat::Inline => {
+            if let Some(child) = element_children(node).next() {
+                return Err(ScriptLangError::with_span(
+                    "XML_VAR_CHILD_INVALID",
+                    format!(
+                        "<{}> cannot contain child element <{}>. Use inline expression text only.",
+                        tag_name, child.name
+                    ),
+                    child.location.clone(),
+                ));
+            }
+            let inline = inline_text_content(node);
+            if inline.trim().is_empty() {
+                None
+            } else {
+                Some(inline.trim().to_string())
+            }
+        }
+        InitializerFormat::Xml => Some(build_initializer_expr_from_xml_for_type_expr(
+            node, &type_expr,
+        )?),
     };
 
     Ok(ParsedModuleVarDecl {
@@ -975,6 +1124,7 @@ fn parse_module_binding_declaration(
         qualified_name: format!("{}.{}", namespace, name),
         access: declared_access,
         type_expr,
+        initial_value_format,
         initial_value_expr,
         location: node.location.clone(),
     })
@@ -1495,6 +1645,7 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
                         visible_functions: &functions,
                         module_name: &decl.namespace,
                         span: &decl.location,
+                        from_xml_format: decl.initial_value_format == InitializerFormat::Xml,
                         visibility: Some(ModuleInitializerVisibility {
                             module,
                             local_namespace: &decl.namespace,
@@ -1599,6 +1750,7 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
                         visible_functions: &functions,
                         module_name: &decl.namespace,
                         span: &decl.location,
+                        from_xml_format: decl.initial_value_format == InitializerFormat::Xml,
                         visibility: Some(ModuleInitializerVisibility {
                             module,
                             local_namespace: &decl.namespace,
@@ -2189,6 +2341,7 @@ pub(crate) fn collect_module_vars_for_bundle_with_aliases(
                         visible_functions,
                         module_name: &decl.namespace,
                         span: &decl.location,
+                        from_xml_format: decl.initial_value_format == InitializerFormat::Xml,
                         visibility: Some(ModuleInitializerVisibility {
                             module,
                             local_namespace: &decl.namespace,
@@ -2352,6 +2505,7 @@ pub(crate) fn collect_module_consts_for_bundle_with_aliases(
                         visible_functions,
                         module_name: &decl.namespace,
                         span: &decl.location,
+                        from_xml_format: decl.initial_value_format == InitializerFormat::Xml,
                         visibility: Some(ModuleInitializerVisibility {
                             module,
                             local_namespace: &decl.namespace,
@@ -2550,6 +2704,7 @@ mod module_resolver_tests {
             visible_functions,
             module_name,
             span,
+            from_xml_format: false,
             visibility: None,
         }
     }
@@ -2689,6 +2844,7 @@ mod module_resolver_tests {
                 namespace: "main".to_string(),
                 access: AccessLevel::Public,
                 type_expr: ParsedTypeExpr::Custom("Status".to_string()),
+                initial_value_format: InitializerFormat::Inline,
                 initial_value_expr: Some("Status.Unknown".to_string()),
                 location: span.clone(),
             }],
@@ -2727,6 +2883,7 @@ mod module_resolver_tests {
                 namespace: "main".to_string(),
                 access: AccessLevel::Public,
                 type_expr: ParsedTypeExpr::Custom("Status".to_string()),
+                initial_value_format: InitializerFormat::Inline,
                 initial_value_expr: Some("Status.Unknown".to_string()),
                 location: span.clone(),
             }],
@@ -2943,6 +3100,7 @@ mod module_resolver_tests {
             qualified_name: format!("{}.{}", namespace, name),
             access: AccessLevel::Public,
             type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+            initial_value_format: InitializerFormat::Inline,
             initial_value_expr: None,
             location: span.clone(),
         };
@@ -3055,6 +3213,7 @@ mod module_resolver_tests {
                         qualified_name: "shared.hp".to_string(),
                         access: AccessLevel::Public,
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        initial_value_format: InitializerFormat::Inline,
                         initial_value_expr: Some("1".to_string()),
                         location: span.clone(),
                     },
@@ -3064,6 +3223,7 @@ mod module_resolver_tests {
                         qualified_name: "shared.mp".to_string(),
                         access: AccessLevel::Public,
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        initial_value_format: InitializerFormat::Inline,
                         initial_value_expr: Some("2".to_string()),
                         location: span.clone(),
                     },
@@ -3074,6 +3234,7 @@ mod module_resolver_tests {
                     qualified_name: "shared.BASE".to_string(),
                     access: AccessLevel::Public,
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    initial_value_format: InitializerFormat::Inline,
                     initial_value_expr: Some("10".to_string()),
                     location: span.clone(),
                 }],
@@ -3461,6 +3622,28 @@ mod module_resolver_tests {
     }
 
     #[test]
+    fn module_global_xml_object_initializer_requires_complete_fields() {
+        let files = map(&[(
+            "main.xml",
+            r#"
+<module name="main" export="script:main;type:Hero;var:hero">
+  <type name="Hero">
+    <field name="hp" type="int"/>
+    <field name="mp" type="int"/>
+  </type>
+  <var name="hero" type="Hero" format="xml">
+    <field name="hp">10</field>
+  </var>
+  <script name="main"><text>ok</text></script>
+</module>
+"#,
+        )]);
+        let error = compile_project_bundle_from_xml_map(&files)
+            .expect_err("xml object initializer should require complete fields");
+        assert_eq!(error.code, "XML_INIT_XML_FIELD_MISSING");
+    }
+
+    #[test]
     fn parse_module_global_const_rejects_missing_name_or_type() {
         // Missing name attribute
         let files_missing_name = map(&[
@@ -3542,6 +3725,7 @@ mod module_resolver_tests {
                     qualified_name: "shared.base".to_string(),
                     access: AccessLevel::Public,
                     type_expr: ParsedTypeExpr::Custom("UnknownType".to_string()),
+                    initial_value_format: InitializerFormat::Inline,
                     initial_value_expr: Some("1".to_string()),
                     location: span.clone(),
                 }],
@@ -3617,6 +3801,7 @@ mod module_resolver_tests {
             qualified_name: "shared.hp".to_string(),
             access: AccessLevel::Public,
             type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+            initial_value_format: InitializerFormat::Inline,
             initial_value_expr: Some("1".to_string()),
             location: span.clone(),
         };
@@ -3889,7 +4074,21 @@ mod module_resolver_tests {
         let parsed = parse_module_var_declaration(&node, "shared", AccessLevel::Private)
             .expect("parse module var");
         assert_eq!(parsed.qualified_name, "shared.hp");
+        assert_eq!(parsed.initial_value_format, InitializerFormat::Inline);
         assert_eq!(parsed.initial_value_expr.as_deref(), Some("1"));
+
+        let xml_node = xml_element(
+            "var",
+            &[("name", "nums"), ("type", "int[]"), ("format", "xml")],
+            vec![
+                XmlNode::Element(xml_element("item", &[], vec![xml_text("1")])),
+                XmlNode::Element(xml_element("item", &[], vec![xml_text("2")])),
+            ],
+        );
+        let xml_parsed = parse_module_var_declaration(&xml_node, "shared", AccessLevel::Private)
+            .expect("xml module var should parse");
+        assert_eq!(xml_parsed.initial_value_format, InitializerFormat::Xml);
+        assert_eq!(xml_parsed.initial_value_expr.as_deref(), Some("[1, 2]"));
 
         let reserved_name = xml_element(
             "var",
@@ -3927,6 +4126,15 @@ mod module_resolver_tests {
         let error = parse_module_var_declaration(&missing_type, "shared", AccessLevel::Private)
             .expect_err("type should be required");
         assert_eq!(error.code, "XML_MISSING_ATTR");
+
+        let invalid_format = xml_element(
+            "var",
+            &[("name", "hp"), ("type", "int"), ("format", "json")],
+            vec![xml_text("1")],
+        );
+        let error = parse_module_var_declaration(&invalid_format, "shared", AccessLevel::Private)
+            .expect_err("invalid format should fail");
+        assert_eq!(error.code, "XML_INIT_FORMAT_INVALID");
 
         // Legacy access attribute is no longer supported.
         let mut invalid_sources = BTreeMap::new();
@@ -4013,6 +4221,7 @@ mod module_resolver_tests {
                     qualified_name: "one.hp".to_string(),
                     access: AccessLevel::Public,
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    initial_value_format: InitializerFormat::Inline,
                     initial_value_expr: None,
                     location: span.clone(),
                 }],
@@ -4059,6 +4268,7 @@ mod module_resolver_tests {
                     qualified_name: "bundle.item".to_string(),
                     access: AccessLevel::Public,
                     type_expr: ParsedTypeExpr::Custom("T".to_string()),
+                    initial_value_format: InitializerFormat::Inline,
                     initial_value_expr: None,
                     location: span.clone(),
                 }],
@@ -4260,6 +4470,7 @@ mod module_resolver_tests {
                     qualified_name: "bad.hp".to_string(),
                     access: AccessLevel::Public,
                     type_expr: ParsedTypeExpr::Custom("Missing".to_string()),
+                    initial_value_format: InitializerFormat::Inline,
                     initial_value_expr: None,
                     location: span.clone(),
                 }],
@@ -4542,6 +4753,7 @@ mod module_resolver_tests {
                     qualified_name: "main.hp".to_string(),
                     access: AccessLevel::Public,
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    initial_value_format: InitializerFormat::Inline,
                     initial_value_expr: None,
                     location: span,
                 }],
@@ -4687,6 +4899,7 @@ mod module_resolver_tests {
         let parsed = parse_module_const_declaration(&node, "main", AccessLevel::Private)
             .expect("const should parse");
         assert_eq!(parsed.qualified_name, "main.base");
+        assert_eq!(parsed.initial_value_format, InitializerFormat::Inline);
 
         let with_child = xml_element(
             "const",
@@ -4700,6 +4913,27 @@ mod module_resolver_tests {
         let child_error = parse_module_const_declaration(&with_child, "main", AccessLevel::Private)
             .expect_err("child should fail");
         assert_eq!(child_error.code, "XML_VAR_CHILD_INVALID");
+
+        let xml_node = xml_element(
+            "const",
+            &[
+                ("name", "base"),
+                ("type", "#{string=>int}"),
+                ("format", "xml"),
+            ],
+            vec![XmlNode::Element(xml_element(
+                "tuple",
+                &[("key", "hp")],
+                vec![xml_text("7")],
+            ))],
+        );
+        let xml_parsed = parse_module_const_declaration(&xml_node, "main", AccessLevel::Private)
+            .expect("xml module const should parse");
+        assert_eq!(xml_parsed.initial_value_format, InitializerFormat::Xml);
+        assert_eq!(
+            xml_parsed.initial_value_expr.as_deref(),
+            Some("#{\"hp\": 7}")
+        );
     }
 
     #[test]
@@ -4721,6 +4955,7 @@ mod module_resolver_tests {
                             qualified_name: "main.localConst".to_string(),
                             access: AccessLevel::Private,
                             type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                            initial_value_format: InitializerFormat::Inline,
                             initial_value_expr: Some("1".to_string()),
                             location: span.clone(),
                         },
@@ -4730,6 +4965,7 @@ mod module_resolver_tests {
                             qualified_name: "main.sharedConst".to_string(),
                             access: AccessLevel::Public,
                             type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                            initial_value_format: InitializerFormat::Inline,
                             initial_value_expr: Some("2".to_string()),
                             location: span,
                         },
@@ -4750,6 +4986,7 @@ mod module_resolver_tests {
                         qualified_name: "other.hidden".to_string(),
                         access: AccessLevel::Private,
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        initial_value_format: InitializerFormat::Inline,
                         initial_value_expr: Some("3".to_string()),
                         location: SourceSpan::synthetic(),
                     }],
@@ -4797,6 +5034,7 @@ mod module_resolver_tests {
                         qualified_name: "main.base".to_string(),
                         access: AccessLevel::Public,
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        initial_value_format: InitializerFormat::Inline,
                         initial_value_expr: Some("1".to_string()),
                         location: span.clone(),
                     }],
@@ -4816,6 +5054,7 @@ mod module_resolver_tests {
                         qualified_name: "main.base".to_string(),
                         access: AccessLevel::Public,
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        initial_value_format: InitializerFormat::Inline,
                         initial_value_expr: Some("2".to_string()),
                         location: span.clone(),
                     }],
@@ -4846,6 +5085,7 @@ mod module_resolver_tests {
                         qualified_name: "main.a".to_string(),
                         access: AccessLevel::Public,
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        initial_value_format: InitializerFormat::Inline,
                         initial_value_expr: Some("b + 1".to_string()),
                         location: SourceSpan::synthetic(),
                     },
@@ -4855,6 +5095,7 @@ mod module_resolver_tests {
                         qualified_name: "main.b".to_string(),
                         access: AccessLevel::Public,
                         type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                        initial_value_format: InitializerFormat::Inline,
                         initial_value_expr: Some("1".to_string()),
                         location: SourceSpan::synthetic(),
                     },
@@ -4880,6 +5121,7 @@ mod module_resolver_tests {
             qualified_name: "shared.base".to_string(),
             access: AccessLevel::Public,
             type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+            initial_value_format: InitializerFormat::Inline,
             initial_value_expr: Some("1".to_string()),
             location: span.clone(),
         };
@@ -5321,6 +5563,7 @@ mod module_resolver_tests {
                     qualified_name: "shared.hp".to_string(),
                     access: AccessLevel::Public,
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    initial_value_format: InitializerFormat::Inline,
                     initial_value_expr: None,
                     location: span.clone(),
                 },
@@ -5330,6 +5573,7 @@ mod module_resolver_tests {
                     qualified_name: "shared.mp".to_string(),
                     access: AccessLevel::Public,
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    initial_value_format: InitializerFormat::Inline,
                     initial_value_expr: None,
                     location: span.clone(),
                 },
@@ -5467,6 +5711,7 @@ mod module_resolver_tests {
                 qualified_name: "event_a.next_phase".to_string(),
                 access: AccessLevel::Private,
                 type_expr: ParsedTypeExpr::Custom("FollowupPhase".to_string()),
+                initial_value_format: InitializerFormat::Inline,
                 initial_value_expr: Some("FollowupPhase.Phase2".to_string()),
                 location: span.clone(),
             }],
@@ -5483,6 +5728,7 @@ mod module_resolver_tests {
                 qualified_name: "event_b.next_phase".to_string(),
                 access: AccessLevel::Private,
                 type_expr: ParsedTypeExpr::Custom("FollowupPhase".to_string()),
+                initial_value_format: InitializerFormat::Inline,
                 initial_value_expr: Some("FollowupPhase.Phase3".to_string()),
                 location: span.clone(),
             }],
@@ -5587,6 +5833,7 @@ mod module_resolver_tests {
                 qualified_name: "event_a.next_phase".to_string(),
                 access: AccessLevel::Private,
                 type_expr: ParsedTypeExpr::Custom("FollowupPhase".to_string()),
+                initial_value_format: InitializerFormat::Inline,
                 initial_value_expr: Some("FollowupPhase.Phase2".to_string()),
                 location: span.clone(),
             }],
@@ -5603,6 +5850,7 @@ mod module_resolver_tests {
                 qualified_name: "event_b.next_phase".to_string(),
                 access: AccessLevel::Private,
                 type_expr: ParsedTypeExpr::Custom("FollowupPhase".to_string()),
+                initial_value_format: InitializerFormat::Inline,
                 initial_value_expr: Some("FollowupPhase.Phase3".to_string()),
                 location: span.clone(),
             }],
@@ -5902,6 +6150,144 @@ mod module_resolver_tests {
     }
 
     #[test]
+    fn xml_initializer_helper_validations_cover_object_and_enum_map_paths() {
+        let span = SourceSpan::synthetic();
+        let object_fields = BTreeMap::from([
+            (
+                "hp".to_string(),
+                ScriptType::Primitive {
+                    name: "int".to_string(),
+                },
+            ),
+            (
+                "mp".to_string(),
+                ScriptType::Primitive {
+                    name: "int".to_string(),
+                },
+            ),
+        ]);
+        validate_xml_object_initializer_fields("#{hp: 1, mp: 2}", &object_fields, &span)
+            .expect("complete object fields should pass");
+
+        let missing = validate_xml_object_initializer_fields("#{hp: 1}", &object_fields, &span)
+            .expect_err("missing object field should fail");
+        assert_eq!(missing.code, "XML_INIT_XML_FIELD_MISSING");
+
+        let mut visible_types = BTreeMap::new();
+        visible_types.insert(
+            "Stage".to_string(),
+            ScriptType::Enum {
+                type_name: "Stage".to_string(),
+                members: vec!["Begin".to_string(), "End".to_string()],
+            },
+        );
+        let normalized = normalize_xml_enum_map_initializer_keys(
+            "#{\"Stage.Begin\": 1, \"Stage.End\": 2}",
+            "Stage",
+            &["Begin".to_string(), "End".to_string()],
+            &visible_types,
+            &span,
+        )
+        .expect("xml enum map keys should normalize");
+        assert_eq!(normalized, "#{\"Begin\": 1, \"End\": 2}");
+
+        let invalid = normalize_xml_enum_map_initializer_keys(
+            "#{\"Stage.Missing\": 1}",
+            "Stage",
+            &["Begin".to_string(), "End".to_string()],
+            &visible_types,
+            &span,
+        )
+        .expect_err("unknown enum member should fail");
+        assert_eq!(invalid.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
+    }
+
+    #[test]
+    fn module_global_xml_initializer_compiles_for_object_and_enum_map() {
+        let files = map(&[(
+            "main.xml",
+            r##"
+<module name="main" export="script:main;type:Hero;enum:Stage;var:hero;const:scores">
+  <enum name="Stage">
+    <member name="Begin"/>
+    <member name="End"/>
+  </enum>
+  <type name="Hero">
+    <field name="hp" type="int"/>
+    <field name="name" type="string"/>
+  </type>
+  <const name="scores" type="#{Stage=>int}" format="xml">
+    <tuple key="Stage.Begin">1</tuple>
+    <tuple key="Stage.End">2</tuple>
+  </const>
+  <var name="hero" type="Hero" format="xml">
+    <field name="hp">scores["Begin"]</field>
+    <field name="name">"Rin"</field>
+  </var>
+  <script name="main"><text>${hero.name}</text></script>
+</module>
+"##,
+        )]);
+
+        let bundle = crate::compile_project_bundle_from_xml_map(&files)
+            .expect("xml initializer for module var/const should compile");
+        assert!(bundle.module_var_declarations.contains_key("main.hero"));
+        assert!(bundle.module_const_declarations.contains_key("main.scores"));
+    }
+
+    #[test]
+    fn xml_initializer_helper_edge_paths_are_covered() {
+        let span = SourceSpan::synthetic();
+        assert!(parse_static_map_literal_entries("#{a:1}").is_some());
+        assert!(parse_static_map_literal_entries("not_a_map").is_none());
+        let empty_entries =
+            parse_static_map_literal_entries("#{   }").expect("empty map literal should parse");
+        assert!(empty_entries.is_empty());
+
+        let fields = BTreeMap::from([(
+            "hp".to_string(),
+            ScriptType::Primitive {
+                name: "int".to_string(),
+            },
+        )]);
+        let invalid_key = validate_xml_object_initializer_fields("#{a.b: 1}", &fields, &span)
+            .expect_err("qualified key should fail object xml field check");
+        assert_eq!(invalid_key.code, "XML_INIT_XML_OBJECT_INVALID");
+        let duplicate_key =
+            validate_xml_object_initializer_fields("#{hp: 1, hp: 2}", &fields, &span)
+                .expect_err("duplicate object field should fail");
+        assert_eq!(duplicate_key.code, "XML_INIT_XML_FIELD_DUPLICATE");
+
+        let mut visible_types = BTreeMap::new();
+        visible_types.insert(
+            "Stage".to_string(),
+            ScriptType::Enum {
+                type_name: "Stage".to_string(),
+                members: vec!["Begin".to_string()],
+            },
+        );
+        let non_map = normalize_xml_enum_map_initializer_keys(
+            "1 + 2",
+            "Stage",
+            &["Begin".to_string()],
+            &visible_types,
+            &span,
+        )
+        .expect_err("non-map enum initializer should fail");
+        assert_eq!(non_map.code, "XML_INIT_XML_ENUM_MAP_INVALID");
+
+        let unquoted_key = normalize_xml_enum_map_initializer_keys(
+            "#{Stage.Begin: 1}",
+            "Stage",
+            &["Begin".to_string()],
+            &visible_types,
+            &span,
+        )
+        .expect("unquoted xml enum key should normalize");
+        assert_eq!(unquoted_key, "#{\"Begin\": 1}");
+    }
+
+    #[test]
     fn resolve_visible_module_symbols_rejects_function_with_invalid_function_literal() {
         // Test lines 1014, 1020: normalize_and_validate_function_literals_with_names error
         // for function code containing invalid function literal reference
@@ -6114,6 +6500,7 @@ mod module_resolver_tests {
                     qualified_name: "shared.hp".to_string(),
                     access: AccessLevel::Public,
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    initial_value_format: InitializerFormat::Inline,
                     initial_value_expr: None,
                     location: span.clone(),
                 },
@@ -6123,6 +6510,7 @@ mod module_resolver_tests {
                     qualified_name: "shared.mp".to_string(),
                     access: AccessLevel::Public,
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    initial_value_format: InitializerFormat::Inline,
                     initial_value_expr: None,
                     location: span.clone(),
                 },
@@ -6177,6 +6565,7 @@ mod module_resolver_tests {
                     qualified_name: "shared.hp".to_string(),
                     access: AccessLevel::Public,
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    initial_value_format: InitializerFormat::Inline,
                     initial_value_expr: None,
                     location: span.clone(),
                 },
@@ -6186,6 +6575,7 @@ mod module_resolver_tests {
                     qualified_name: "shared.mp".to_string(),
                     access: AccessLevel::Public,
                     type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                    initial_value_format: InitializerFormat::Inline,
                     initial_value_expr: None,
                     location: span.clone(),
                 },
@@ -6233,6 +6623,7 @@ mod module_resolver_tests {
                 qualified_name: "shared.hp".to_string(),
                 access: AccessLevel::Public,
                 type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                initial_value_format: InitializerFormat::Inline,
                 initial_value_expr: None,
                 location: span.clone(),
             }],
@@ -6288,6 +6679,7 @@ mod module_resolver_tests {
                 qualified_name: "shared.hp".to_string(),
                 access: AccessLevel::Public,
                 type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                initial_value_format: InitializerFormat::Inline,
                 initial_value_expr: None,
                 location: span.clone(),
             }],
@@ -6446,6 +6838,7 @@ mod module_resolver_tests {
                 qualified_name: "shared.BASE".to_string(),
                 access: AccessLevel::Public,
                 type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                initial_value_format: InitializerFormat::Inline,
                 initial_value_expr: Some("10".to_string()),
                 location: span.clone(),
             }],
@@ -6513,6 +6906,7 @@ mod module_resolver_tests {
                 qualified_name: "shared.hp".to_string(),
                 access: AccessLevel::Public,
                 type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                initial_value_format: InitializerFormat::Inline,
                 initial_value_expr: None,
                 location: span.clone(),
             }],
@@ -6523,6 +6917,7 @@ mod module_resolver_tests {
                 qualified_name: "shared.other".to_string(),
                 access: AccessLevel::Public,
                 type_expr: ParsedTypeExpr::Primitive("int".to_string()),
+                initial_value_format: InitializerFormat::Inline,
                 initial_value_expr: Some("1".to_string()),
                 location: span.clone(),
             }],

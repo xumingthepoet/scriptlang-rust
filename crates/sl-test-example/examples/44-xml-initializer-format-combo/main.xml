@@ -1,0 +1,55 @@
+<module name="main" export="type:Hero;enum:Stage;function:boost;var:hero_seed,bag,scores;const:weights;script:main">
+  <enum name="Stage">
+    <member name="Begin"/>
+    <member name="End"/>
+  </enum>
+
+  <type name="Hero">
+    <field name="hp" type="int"/>
+    <field name="name" type="string"/>
+  </type>
+
+  <function name="boost" args="int:x" return_type="int">
+    return x + 1;
+  </function>
+
+  <const name="weights" type="#{Stage=>int}" format="xml">
+    <tuple key="Stage.Begin">boost(1)</tuple>
+    <tuple key="Stage.End">2</tuple>
+  </const>
+
+  <var name="bag" type="#{string=>int}" format="xml">
+    <tuple key="hp">boost(9)</tuple>
+    <tuple key="mp">3</tuple>
+  </var>
+
+  <var name="scores" type="int[]" format="xml">
+    <item>1</item>
+    <item>boost(2)</item>
+  </var>
+
+  <var name="hero_seed" type="Hero" format="xml">
+    <field name="hp">bag["hp"] + scores[0]</field>
+    <field name="name">"Rin"</field>
+  </var>
+
+  <script name="main">
+    <temp name="inline_hp" type="int">hero_seed.hp + 1</temp>
+
+    <temp name="hero" type="Hero" format="xml">
+      <field name="hp">boost(hero_seed.hp)</field>
+      <field name="name">hero_seed.name</field>
+    </temp>
+
+    <temp name="dict" type="#{string=>int}" format="xml">
+      <tuple key="v">hero.hp</tuple>
+    </temp>
+
+    <temp name="phase_scores" type="#{Stage=>int}" format="xml">
+      <tuple key="Stage.Begin">weights["Begin"]</tuple>
+    </temp>
+
+    <text>${hero.name}:${dict["v"]}</text>
+    <end/>
+  </script>
+</module>

@@ -65,6 +65,7 @@ pub(crate) struct ParsedModuleVarDecl {
     pub(crate) qualified_name: String,
     pub(crate) access: AccessLevel,
     pub(crate) type_expr: ParsedTypeExpr,
+    pub(crate) initial_value_format: InitializerFormat,
     pub(crate) initial_value_expr: Option<String>,
     pub(crate) location: SourceSpan,
 }
@@ -76,8 +77,16 @@ pub(crate) struct ParsedModuleConstDecl {
     pub(crate) qualified_name: String,
     pub(crate) access: AccessLevel,
     pub(crate) type_expr: ParsedTypeExpr,
+    pub(crate) initial_value_format: InitializerFormat,
     pub(crate) initial_value_expr: Option<String>,
     pub(crate) location: SourceSpan,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum InitializerFormat {
+    #[default]
+    Inline,
+    Xml,
 }
 
 #[derive(Debug, Clone)]

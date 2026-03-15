@@ -234,11 +234,33 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 - 本 module 内声明的全局变量可直接用短名（如 `hp`）。
 - 来自其他 module 的全局变量必须使用全名（如 `shared.hp`）。
 - module 全局初始化表达式可以引用“前面已声明并已初始化”的 module `<var>`；前向引用会编译失败。
+- 支持 `format` 属性：
+  - 缺省/`format="inline"`：节点内联表达式（默认行为）
+  - `format="xml"`：结构化初始化（对象 `<field>`、数组 `<item>`、map `<tuple key>`）
 
 补充：
 - `<module><var>` 使用统一的全局可写变量运行时模型。
 - 它们都会参与 snapshot / resume。
 - module 内脚本天然可以看到本 module 的这些全局变量。
+
+`format="xml"` 示例：
+
+```xml
+<var name="hero" type="Hero" format="xml">
+  <field name="hp">10</field>
+  <field name="name">"Rin"</field>
+</var>
+<var name="nums" type="int[]" format="xml">
+  <item>1</item>
+  <item>2</item>
+</var>
+<var name="dict" type="#{string=>int}" format="xml">
+  <tuple key="hp">10</tuple>
+</var>
+<var name="phaseScore" type="#{Stage=>int}" format="xml">
+  <tuple key="Stage.Begin">1</tuple>
+</var>
+```
 
 ## 4.4 `<module><const>`（全局只读常量）
 
@@ -255,6 +277,7 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 - 常量在 `engine.start(...)` 时初始化，运行时禁止写入（包括代码赋值、`input`、路径写入）。
 - `<const>` 不参与 snapshot/save；`resume` 时会按声明重新构建。
 - `<const>` 初始化表达式可引用已初始化的 const；若引用 `<var>` 会编译失败。
+- `format` 规则与 `<module><var>` 相同，支持 `inline/xml`。
 
 ## 5. 类型语法
 
@@ -310,14 +333,28 @@ XML 源文件统一使用普通 `name.xml` 文件名，且根节点必须是 `<m
 ## 6.1 `<temp>`
 
 用途：声明变量。  
-属性：`name`、`type`（必填）。  
-初值：使用节点内联表达式；非 enum 为空时使用类型默认值，enum 必须显式写 `Type.Member`。  
+属性：`name`、`type`（必填），`format`（可选，`inline/xml`）。  
+初值：  
+- 缺省/`format="inline"`：使用节点内联表达式；非 enum 为空时使用类型默认值，enum 必须显式写 `Type.Member`。  
+- `format="xml"`：结构化初始化（对象 `<field>`、数组 `<item>`、map `<tuple key>`）。
 
 ```xml
 <temp name="hp" type="int">3</temp>
 <temp name="title" type="string">"Knight"</temp>
 <temp name="state" type="State">State.Run</temp>
+<temp name="hero" type="Hero" format="xml">
+  <field name="hp">3</field>
+  <field name="name">"Rin"</field>
+</temp>
 ```
+
+`format="xml"` 规则：
+- 对象类型仅允许 `<field name="...">expr</field>`，字段必须完整且不重复。
+- 数组类型仅允许 `<item>expr</item>`。
+- `#{string=>T}` 仅允许 `<tuple key="...">expr</tuple>`，`key` 按原样字符串解释。
+- `#{Enum=>T}` 的 `tuple key` 必须是 `Type.Member`。
+- `field/item/tuple` 内部仍是内联表达式文本。
+- `format="xml"` 时禁止和非空内联文本混用（空白文本可忽略）。
 
 ## 6.2 `<text>`
 

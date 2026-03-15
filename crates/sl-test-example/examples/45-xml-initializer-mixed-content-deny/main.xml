@@ -1,0 +1,14 @@
+<module name="main" export="type:Hero;script:main">
+  <type name="Hero">
+    <field name="hp" type="int"/>
+  </type>
+
+  <script name="main">
+    <temp name="hero" type="Hero" format="xml">
+      1
+      <field name="hp">2</field>
+    </temp>
+    <text>${hero.hp}</text>
+    <end/>
+  </script>
+</module>

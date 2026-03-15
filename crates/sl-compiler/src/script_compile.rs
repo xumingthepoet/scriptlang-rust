@@ -2225,6 +2225,7 @@ pub(crate) fn parse_var_declaration(
     let type_raw = get_required_non_empty_attr(node, "type")?;
     let ty_expr = parse_type_expr(&type_raw, &node.location)?;
     let ty = resolve_type_expr(&ty_expr, visible_types, &node.location)?;
+    let initializer_format = parse_initializer_format(node)?;
 
     if has_attr(node, "value") {
         return Err(ScriptLangError::with_span(
@@ -2234,54 +2235,59 @@ pub(crate) fn parse_var_declaration(
         ));
     }
 
-    if let Some(child) = element_children(node).next() {
-        return Err(ScriptLangError::with_span(
-            "XML_VAR_CHILD_INVALID",
-            format!(
-                "<temp> cannot contain child element <{}>. Use inline expression text only.",
-                child.name
-            ),
-            child.location.clone(),
-        ));
-    }
+    let initial_value_expr = match initializer_format {
+        InitializerFormat::Inline => {
+            if let Some(child) = element_children(node).next() {
+                return Err(ScriptLangError::with_span(
+                    "XML_VAR_CHILD_INVALID",
+                    format!(
+                        "<temp> cannot contain child element <{}>. Use inline expression text only.",
+                        child.name
+                    ),
+                    child.location.clone(),
+                ));
+            }
 
-    let inline = inline_text_content(node);
-    let initial_value_expr = if inline.trim().is_empty() {
-        if matches!(ty, ScriptType::Enum { .. }) {
-            return Err(ScriptLangError::with_span(
-                "ENUM_INIT_REQUIRED",
-                format!(
-                    "<temp name=\"{}\"> with enum type requires explicit Type.Member initializer.",
-                    name
-                ),
-                node.location.clone(),
-            ));
+            let inline = inline_text_content(node);
+            if inline.trim().is_empty() {
+                if matches!(ty, ScriptType::Enum { .. }) {
+                    return Err(ScriptLangError::with_span(
+                        "ENUM_INIT_REQUIRED",
+                        format!(
+                            "<temp name=\"{}\"> with enum type requires explicit Type.Member initializer.",
+                            name
+                        ),
+                        node.location.clone(),
+                    ));
+                }
+                None
+            } else {
+                let mut expr = inline.trim().to_string();
+                if let ScriptType::Enum { type_name, members } = &ty {
+                    let member = parse_enum_literal_initializer(
+                        &expr,
+                        type_name,
+                        members,
+                        visible_types,
+                        &node.location,
+                    )?;
+                    expr = format!("\"{}\"", member.replace('"', "\\\""));
+                } else if let ScriptType::Map {
+                    key_type: MapKeyType::Enum { type_name, members },
+                    ..
+                } = &ty
+                {
+                    validate_enum_map_initializer_keys_if_static(
+                        &expr,
+                        type_name,
+                        members,
+                        &node.location,
+                    )?;
+                }
+                Some(expr)
+            }
         }
-        None
-    } else {
-        let mut expr = inline.trim().to_string();
-        if let ScriptType::Enum { type_name, members } = &ty {
-            let member = parse_enum_literal_initializer(
-                &expr,
-                type_name,
-                members,
-                visible_types,
-                &node.location,
-            )?;
-            expr = format!("\"{}\"", member.replace('"', "\\\""));
-        } else if let ScriptType::Map {
-            key_type: MapKeyType::Enum { type_name, members },
-            ..
-        } = &ty
-        {
-            validate_enum_map_initializer_keys_if_static(
-                &expr,
-                type_name,
-                members,
-                &node.location,
-            )?;
-        }
-        Some(expr)
+        InitializerFormat::Xml => Some(build_initializer_expr_from_xml(node, &ty, visible_types)?),
     };
 
     Ok(VarDeclaration {
@@ -2557,6 +2563,144 @@ mod script_compile_tests {
         let child_error = parse_var_declaration(&with_child, &visible_types)
             .expect_err("child element should be rejected");
         assert_eq!(child_error.code, "XML_VAR_CHILD_INVALID");
+    }
+
+    #[test]
+    fn parse_var_declaration_supports_xml_format_initializer() {
+        let mut visible_types = BTreeMap::new();
+        visible_types.insert(
+            "Hero".to_string(),
+            ScriptType::Object {
+                type_name: "Hero".to_string(),
+                fields: BTreeMap::from([
+                    (
+                        "hp".to_string(),
+                        ScriptType::Primitive {
+                            name: "int".to_string(),
+                        },
+                    ),
+                    (
+                        "name".to_string(),
+                        ScriptType::Primitive {
+                            name: "string".to_string(),
+                        },
+                    ),
+                ]),
+            },
+        );
+        visible_types.insert(
+            "Stage".to_string(),
+            ScriptType::Enum {
+                type_name: "Stage".to_string(),
+                members: vec!["Begin".to_string(), "End".to_string()],
+            },
+        );
+
+        let object_node = xml_element(
+            "temp",
+            &[("name", "hero"), ("type", "Hero"), ("format", "xml")],
+            vec![
+                XmlNode::Element(xml_element(
+                    "field",
+                    &[("name", "hp")],
+                    vec![xml_text("10")],
+                )),
+                XmlNode::Element(xml_element(
+                    "field",
+                    &[("name", "name")],
+                    vec![xml_text("\"Rin\"")],
+                )),
+            ],
+        );
+        let object_decl =
+            parse_var_declaration(&object_node, &visible_types).expect("object xml init");
+        assert_eq!(
+            object_decl.initial_value_expr.as_deref(),
+            Some("#{hp: 10, name: \"Rin\"}")
+        );
+
+        let array_node = xml_element(
+            "temp",
+            &[("name", "nums"), ("type", "int[]"), ("format", "xml")],
+            vec![
+                XmlNode::Element(xml_element("item", &[], vec![xml_text("1")])),
+                XmlNode::Element(xml_element("item", &[], vec![xml_text("2")])),
+            ],
+        );
+        let array_decl =
+            parse_var_declaration(&array_node, &visible_types).expect("array xml init");
+        assert_eq!(array_decl.initial_value_expr.as_deref(), Some("[1, 2]"));
+
+        let enum_map_node = xml_element(
+            "temp",
+            &[
+                ("name", "phase"),
+                ("type", "#{Stage=>int}"),
+                ("format", "xml"),
+            ],
+            vec![XmlNode::Element(xml_element(
+                "tuple",
+                &[("key", "Stage.Begin")],
+                vec![xml_text("1")],
+            ))],
+        );
+        let enum_map_decl =
+            parse_var_declaration(&enum_map_node, &visible_types).expect("enum map xml init");
+        assert_eq!(
+            enum_map_decl.initial_value_expr.as_deref(),
+            Some("#{\"Begin\": 1}")
+        );
+    }
+
+    #[test]
+    fn parse_var_declaration_rejects_invalid_xml_format_initializer_shape() {
+        let mut visible_types = BTreeMap::new();
+        visible_types.insert(
+            "Hero".to_string(),
+            ScriptType::Object {
+                type_name: "Hero".to_string(),
+                fields: BTreeMap::from([(
+                    "hp".to_string(),
+                    ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                )]),
+            },
+        );
+
+        let bad_format = xml_element(
+            "temp",
+            &[("name", "x"), ("type", "int"), ("format", "yaml")],
+            vec![xml_text("1")],
+        );
+        let format_error =
+            parse_var_declaration(&bad_format, &visible_types).expect_err("format invalid");
+        assert_eq!(format_error.code, "XML_INIT_FORMAT_INVALID");
+
+        let mixed_content = xml_element(
+            "temp",
+            &[("name", "hero"), ("type", "Hero"), ("format", "xml")],
+            vec![
+                xml_text("1"),
+                XmlNode::Element(xml_element("field", &[("name", "hp")], vec![xml_text("2")])),
+            ],
+        );
+        let mixed_error =
+            parse_var_declaration(&mixed_content, &visible_types).expect_err("mixed content");
+        assert_eq!(mixed_error.code, "XML_INIT_XML_MIXED_CONTENT");
+
+        let unknown_field = xml_element(
+            "temp",
+            &[("name", "hero"), ("type", "Hero"), ("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("name", "mp")],
+                vec![xml_text("2")],
+            ))],
+        );
+        let field_error =
+            parse_var_declaration(&unknown_field, &visible_types).expect_err("unknown field");
+        assert_eq!(field_error.code, "XML_INIT_XML_FIELD_UNKNOWN");
     }
 
     #[test]
