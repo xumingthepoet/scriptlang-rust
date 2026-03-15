@@ -1,15 +1,22 @@
 <module name="m" export="function:fetch">
-  <const name="values" type="string[]" format="xml">
+  <const name="vals" type="string[]" format="xml">
     <item>"ok"</item>
   </const>
 
-  <module name="q" export="function:first">
-    <function name="first" return_type="string">
-      return m.values[0];
+  <module name="labels" export="const:x">
+    <const name="x" type="string">"ok"</const>
+  </module>
+
+  <module name="navigation" export="function:get">
+    <function name="get" return_type="string">
+      for v in vals {
+        return labels.x + "-" + v;
+      }
+      return labels.x;
     </function>
   </module>
 
   <function name="fetch" return_type="string">
-    return q.first();
+    return navigation.get();
   </function>
 </module>

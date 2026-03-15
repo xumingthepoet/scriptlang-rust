@@ -157,9 +157,9 @@ mod tests {
         let report = crate::lint::run_lint(&scripts, &bundle, "root.main");
         assert!(
             !report.diagnostics.iter().any(|item| {
-                item.code == "unused-module-const" && item.message.contains("m.values")
+                item.code == "unused-module-const" && item.message.contains("m.vals")
             }),
-            "unexpected unused-module-const for m.values: {:?}",
+            "unexpected unused-module-const for m.vals: {:?}",
             report.diagnostics
         );
     }

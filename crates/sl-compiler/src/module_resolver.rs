@@ -710,6 +710,41 @@ fn namespace_alias_rewrite_map(
     map
 }
 
+fn same_root_relative_module_symbol_aliases(
+    declared_module_var_names: &BTreeSet<String>,
+    declared_module_const_names: &BTreeSet<String>,
+    function_namespace: &str,
+    blocked_names: &BTreeSet<String>,
+) -> BTreeMap<String, String> {
+    let root_prefix = format!("{}.", namespace_root(function_namespace));
+    let mut candidates: BTreeMap<String, Vec<String>> = BTreeMap::new();
+
+    for qualified_name in declared_module_var_names
+        .iter()
+        .chain(declared_module_const_names.iter())
+    {
+        let Some(relative_name) = qualified_name.strip_prefix(&root_prefix) else {
+            continue;
+        };
+        candidates
+            .entry(relative_name.to_string())
+            .or_default()
+            .push(qualified_name.clone());
+    }
+
+    let mut out = BTreeMap::new();
+    for (alias, qualified_names) in candidates {
+        if blocked_names.contains(&alias) {
+            continue;
+        }
+        if qualified_names.len() != 1 {
+            continue;
+        }
+        out.insert(alias, qualified_names[0].clone());
+    }
+    out
+}
+
 fn runtime_module_global_rewrite_map_from_targets<'a>(
     targets: impl Iterator<Item = &'a str>,
 ) -> BTreeMap<String, String> {
@@ -1541,11 +1576,20 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
                 .iter()
                 .map(|param| param.name.clone())
                 .collect::<BTreeSet<_>>();
-            let alias_rewrite_map = namespace_alias_rewrite_map(
+            let mut alias_rewrite_map = namespace_alias_rewrite_map(
                 &namespace_aliases_by_namespace,
                 function_namespace,
                 &blocked_names,
             );
+            let same_root_aliases = same_root_relative_module_symbol_aliases(
+                &declared_module_var_names,
+                &declared_module_const_names,
+                function_namespace,
+                &blocked_names,
+            );
+            for (alias, qualified_name) in same_root_aliases {
+                alias_rewrite_map.entry(alias).or_insert(qualified_name);
+            }
             let alias_rewritten_code =
                 rewrite_module_symbol_aliases_in_expression(&decl.code, &alias_rewrite_map);
             let script_rewritten_code = normalize_and_validate_script_literals_in_expression(
@@ -2191,11 +2235,20 @@ pub(crate) fn collect_functions_for_bundle_with_aliases(
                 .iter()
                 .map(|param| param.name.clone())
                 .collect::<BTreeSet<_>>();
-            let alias_rewrite_map = namespace_alias_rewrite_map(
+            let mut alias_rewrite_map = namespace_alias_rewrite_map(
                 &namespace_aliases_by_namespace,
                 function_namespace,
                 &blocked_names,
             );
+            let same_root_aliases = same_root_relative_module_symbol_aliases(
+                &declared_module_var_names,
+                &declared_module_const_names,
+                function_namespace,
+                &blocked_names,
+            );
+            for (alias, qualified_name) in same_root_aliases {
+                alias_rewrite_map.entry(alias).or_insert(qualified_name);
+            }
             let alias_rewritten_code =
                 rewrite_module_symbol_aliases_in_expression(&decl.code, &alias_rewrite_map);
             let script_rewritten_code = normalize_and_validate_script_literals_in_expression(
