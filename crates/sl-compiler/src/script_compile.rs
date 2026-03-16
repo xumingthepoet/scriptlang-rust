@@ -766,61 +766,57 @@ fn validate_invoke_first_arg(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn normalize_expression_literals(
     expr: &str,
     span: &SourceSpan,
     rhai_context: &str,
     rhai_compile_target: RhaiCompileTarget,
-    all_script_access: &BTreeMap<String, AccessLevel>,
-    module_name: Option<&str>,
-    current_script_name: Option<&str>,
-    visible_types: &BTreeMap<String, ScriptType>,
-    visible_functions: &BTreeMap<String, FunctionDecl>,
-    local_var_types: &BTreeMap<String, ScriptType>,
-    visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
-    visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
+    ctx: &ExpressionNormalizeContext,
 ) -> Result<String, ScriptLangError> {
     let macro_rewritten = rewrite_script_context_macro_in_expression(
         expr,
-        current_script_name,
+        ctx.current_script_name,
         ScriptMacroQuoteStyle::Double,
     );
     let script_rewritten = normalize_and_validate_script_literals_in_expression(
         &macro_rewritten,
         span,
-        module_name,
-        Some(all_script_access),
+        ctx.module_name,
+        Some(ctx.all_script_access),
     )?;
     let normalized = normalize_and_validate_function_literals(
         &script_rewritten,
         span,
-        module_name,
-        visible_functions,
+        ctx.module_name,
+        ctx.visible_functions,
     )?;
-    let blocked_names = local_var_types
+    let blocked_names = ctx
+        .local_var_types
         .keys()
         .cloned()
         .collect::<BTreeSet<String>>();
     let module_aliases = build_module_symbol_alias_rewrite_map(
-        visible_module_vars,
-        visible_module_consts,
+        ctx.visible_module_vars,
+        ctx.visible_module_consts,
         &blocked_names,
     );
     let alias_rewritten = rewrite_module_symbol_aliases_in_expression(&normalized, &module_aliases);
-    let rewritten =
-        rewrite_and_validate_enum_literals_in_expression(&alias_rewritten, visible_types, span)?;
+    let rewritten = rewrite_and_validate_enum_literals_in_expression(
+        &alias_rewritten,
+        ctx.visible_types,
+        span,
+    )?;
     validate_invoke_first_arg(
         &rewritten,
         span,
-        local_var_types,
-        visible_module_vars,
-        visible_module_consts,
+        ctx.local_var_types,
+        ctx.visible_module_vars,
+        ctx.visible_module_consts,
     )?;
     let runtime_module_global_rewrite_map =
-        build_runtime_module_global_rewrite_map(visible_module_vars, visible_module_consts);
+        build_runtime_module_global_rewrite_map(ctx.visible_module_vars, ctx.visible_module_consts);
     let runtime_function_symbol_map =
-        build_runtime_function_symbol_map(visible_functions, module_name);
+        build_runtime_function_symbol_map(ctx.visible_functions, ctx.module_name);
     preprocess_and_compile_rhai_source(
         &rewritten,
         span,
@@ -1474,11 +1470,7 @@ fn compile_group_nodes(
                         let trimmed = expr.trim_start();
                         trimmed.starts_with('"') || trimmed.starts_with('\'')
                     };
-                    *expr = normalize_expression_literals(
-                        expr,
-                        &child.location,
-                        "var initializer expression",
-                        RhaiCompileTarget::Expression,
+                    let ctx = ExpressionNormalizeContext {
                         all_script_access,
                         module_name,
                         current_script_name,
@@ -1487,6 +1479,13 @@ fn compile_group_nodes(
                         local_var_types,
                         visible_module_vars,
                         visible_module_consts,
+                    };
+                    *expr = normalize_expression_literals(
+                        expr,
+                        &child.location,
+                        "var initializer expression",
+                        RhaiCompileTarget::Expression,
+                        &ctx,
                     )?;
                     if matches!(declaration.r#type, ScriptType::Script) && raw_expr_quoted {
                         return Err(ScriptLangError::with_span(
@@ -1566,11 +1565,7 @@ fn compile_group_nodes(
                 }
             }
             "code" => {
-                let code = normalize_expression_literals(
-                    &parse_inline_required(child)?,
-                    &child.location,
-                    "code block",
-                    RhaiCompileTarget::CodeBlock,
+                let ctx = ExpressionNormalizeContext {
                     all_script_access,
                     module_name,
                     current_script_name,
@@ -1579,6 +1574,13 @@ fn compile_group_nodes(
                     local_var_types,
                     visible_module_vars,
                     visible_module_consts,
+                };
+                let code = normalize_expression_literals(
+                    &parse_inline_required(child)?,
+                    &child.location,
+                    "code block",
+                    RhaiCompileTarget::CodeBlock,
+                    &ctx,
                 )?;
                 ScriptNode::Code {
                     id: builder.next_node_id("code"),
@@ -3493,19 +3495,22 @@ mod script_compile_tests {
 
         let mut all_script_access = BTreeMap::new();
         all_script_access.insert("main.next".to_string(), AccessLevel::Public);
+        let ctx = ExpressionNormalizeContext {
+            all_script_access: &all_script_access,
+            module_name: Some("main"),
+            current_script_name: Some("main.main"),
+            visible_types: &BTreeMap::new(),
+            visible_functions: &visible_functions,
+            local_var_types: &local_var_types,
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+        };
         let normalized_expr = normalize_expression_literals(
             "target = *add; step = @next; invoke(fnRef, [1]);",
             &span,
             "test code block",
             RhaiCompileTarget::CodeBlock,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &BTreeMap::new(),
-            &visible_functions,
-            &local_var_types,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
+            &ctx,
         )
         .expect("normalize expression should pass");
         assert!(normalized_expr.contains("*main.add"));
@@ -3519,37 +3524,43 @@ mod script_compile_tests {
                 name: "int".to_string(),
             },
         );
+        let ctx_non_function = ExpressionNormalizeContext {
+            all_script_access: &all_script_access,
+            module_name: Some("main"),
+            current_script_name: Some("main.main"),
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            local_var_types: &non_function_vars,
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+        };
         let invoke_error = normalize_expression_literals(
             "invoke(fnRef, [1])",
             &span,
             "test expression",
             RhaiCompileTarget::Expression,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &non_function_vars,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
+            &ctx_non_function,
         )
         .expect_err("invoke non-function should fail");
         assert_eq!(invoke_error.code, "XML_INVOKE_TARGET_VAR_TYPE");
 
         // Test line 376: normalize_and_validate_function_literals error path
+        let ctx_empty = ExpressionNormalizeContext {
+            all_script_access: &all_script_access,
+            module_name: Some("main"),
+            current_script_name: Some("main.main"),
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            local_var_types: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+        };
         let missing_fn_error = normalize_expression_literals(
             "*missing.func",
             &span,
             "test expression",
             RhaiCompileTarget::Expression,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
+            &ctx_empty,
         )
         .expect_err("missing function should fail");
         assert_eq!(missing_fn_error.code, "XML_FUNCTION_LITERAL_NOT_FOUND");
@@ -3564,19 +3575,22 @@ mod script_compile_tests {
                 members: vec!["Active".to_string()],
             },
         );
+        let ctx_enum = ExpressionNormalizeContext {
+            all_script_access: &all_script_access,
+            module_name: Some("main"),
+            current_script_name: Some("main.main"),
+            visible_types: &visible_types,
+            visible_functions: &BTreeMap::new(),
+            local_var_types: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+        };
         let enum_error = normalize_expression_literals(
             "Status.Invalid",
             &span,
             "test expression",
             RhaiCompileTarget::Expression,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &visible_types,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
+            &ctx_enum,
         )
         .expect_err("invalid enum member should fail");
         assert_eq!(enum_error.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
@@ -3613,19 +3627,22 @@ mod script_compile_tests {
         .expect("normalize template should pass");
         assert!(normalized_template.contains("call(invoke, fnRef, [1])"));
 
+        let ctx_empty2 = ExpressionNormalizeContext {
+            all_script_access: &all_script_access,
+            module_name: Some("main"),
+            current_script_name: Some("main.main"),
+            visible_types: &BTreeMap::new(),
+            visible_functions: &BTreeMap::new(),
+            local_var_types: &BTreeMap::new(),
+            visible_module_vars: &BTreeMap::new(),
+            visible_module_consts: &BTreeMap::new(),
+        };
         let script_macro_expr = normalize_expression_literals(
             "__script__",
             &span,
             "test expression",
             RhaiCompileTarget::Expression,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
+            &ctx_empty2,
         )
         .expect("script macro in expression should expand");
         assert_eq!(script_macro_expr, "\"main.main\"");
@@ -3635,14 +3652,7 @@ mod script_compile_tests {
             &span,
             "test expression",
             RhaiCompileTarget::Expression,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
+            &ctx_empty2,
         )
         .expect("quoted script macro text should remain literal");
         assert_eq!(quoted_script_macro_expr, "\"__script__\"");
@@ -3654,14 +3664,7 @@ mod script_compile_tests {
             &span,
             "test expression",
             RhaiCompileTarget::Expression,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
+            &ctx_empty2,
         )
         .expect("escaped characters in string should be preserved");
         assert_eq!(escaped_string, "\"test\\nvalue\"");
@@ -3672,14 +3675,7 @@ mod script_compile_tests {
             &span,
             "test expression",
             RhaiCompileTarget::Expression,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
+            &ctx_empty2,
         )
         .expect("string ending with backslash should be preserved");
         assert_eq!(backslash_end, "\"test\\\\\"");
@@ -3726,14 +3722,7 @@ mod script_compile_tests {
             &span,
             "test expression",
             RhaiCompileTarget::Expression,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
+            &ctx_empty2,
         )
         .expect("__script__ adjacent to identifiers should NOT be replaced");
         // prefix__script__suffix - the __script__ is part of identifier, should remain as-is
@@ -3748,14 +3737,7 @@ mod script_compile_tests {
             &span,
             "test expression",
             RhaiCompileTarget::Expression,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
+            &ctx_empty2,
         )
         .expect("__script__ at start should be replaced");
         assert_eq!(script_macro_at_start, "\"main.main\" + main");
@@ -3766,14 +3748,7 @@ mod script_compile_tests {
             &span,
             "test expression",
             RhaiCompileTarget::Expression,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
+            &ctx_empty2,
         )
         .expect("__script__ at end should be replaced");
         assert_eq!(script_macro_at_end, "main + \"main.main\"");
