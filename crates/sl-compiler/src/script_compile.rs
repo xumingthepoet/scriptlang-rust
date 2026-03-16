@@ -1080,19 +1080,22 @@ pub(crate) fn compile_script(
     for param in &params {
         visible_var_types.insert(param.name.clone(), param.r#type.clone());
     }
-
-    compile_group_with_context(
-        &root_group_id,
-        None,
-        &expanded_root,
-        &mut builder,
+    let scope = CompileVisibility {
         visible_types,
         visible_functions,
         visible_module_vars,
         visible_module_consts,
         all_script_access,
         module_name,
-        Some(script_name.as_str()),
+        current_script_name: Some(script_name.as_str()),
+    };
+
+    compile_group_with_context(
+        &root_group_id,
+        None,
+        &expanded_root,
+        &mut builder,
+        &scope,
         &visible_var_types,
         CompileGroupMode::new(0, false).with_script_kind(script_kind),
     )?;
@@ -1312,36 +1315,42 @@ pub(crate) fn compile_group(
     visible_var_types: &BTreeMap<String, ScriptType>,
     mode: CompileGroupMode,
 ) -> Result<(), ScriptLangError> {
+    let scope = CompileVisibility {
+        visible_types,
+        visible_functions: &BTreeMap::new(),
+        visible_module_vars: &BTreeMap::new(),
+        visible_module_consts: &BTreeMap::new(),
+        all_script_access: &BTreeMap::new(),
+        module_name: None,
+        current_script_name: None,
+    };
     compile_group_with_context(
         group_id,
         parent_group_id,
         container,
         builder,
-        visible_types,
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        &BTreeMap::new(),
-        None,
-        None,
+        &scope,
         visible_var_types,
         mode,
     )
 }
 
-#[allow(clippy::too_many_arguments)]
+struct CompileVisibility<'a> {
+    visible_types: &'a BTreeMap<String, ScriptType>,
+    visible_functions: &'a BTreeMap<String, FunctionDecl>,
+    visible_module_vars: &'a BTreeMap<String, ModuleVarDecl>,
+    visible_module_consts: &'a BTreeMap<String, ModuleConstDecl>,
+    all_script_access: &'a BTreeMap<String, AccessLevel>,
+    module_name: Option<&'a str>,
+    current_script_name: Option<&'a str>,
+}
+
 fn compile_group_with_context(
     group_id: &str,
     parent_group_id: Option<&str>,
     container: &XmlElementNode,
     builder: &mut GroupBuilder,
-    visible_types: &BTreeMap<String, ScriptType>,
-    visible_functions: &BTreeMap<String, FunctionDecl>,
-    visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
-    visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
-    all_script_access: &BTreeMap<String, AccessLevel>,
-    module_name: Option<&str>,
-    current_script_name: Option<&str>,
+    scope: &CompileVisibility<'_>,
     visible_var_types: &BTreeMap<String, ScriptType>,
     mode: CompileGroupMode,
 ) -> Result<(), ScriptLangError> {
@@ -1362,13 +1371,7 @@ fn compile_group_with_context(
         group_id,
         container,
         builder,
-        visible_types,
-        visible_functions,
-        visible_module_vars,
-        visible_module_consts,
-        all_script_access,
-        module_name,
-        current_script_name,
+        scope,
         &mut local_var_types,
         mode,
         &mut nodes,
@@ -1382,19 +1385,12 @@ fn compile_group_with_context(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn compile_child_group(
     parent_group_id: &str,
     child_group_id: &str,
     child_container: &XmlElementNode,
     builder: &mut GroupBuilder,
-    visible_types: &BTreeMap<String, ScriptType>,
-    visible_functions: &BTreeMap<String, FunctionDecl>,
-    visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
-    visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
-    all_script_access: &BTreeMap<String, AccessLevel>,
-    module_name: Option<&str>,
-    current_script_name: Option<&str>,
+    scope: &CompileVisibility<'_>,
     local_var_types: &mut BTreeMap<String, ScriptType>,
     mode: CompileGroupMode,
 ) -> Result<(), ScriptLangError> {
@@ -1403,34 +1399,29 @@ fn compile_child_group(
         Some(parent_group_id),
         child_container,
         builder,
-        visible_types,
-        visible_functions,
-        visible_module_vars,
-        visible_module_consts,
-        all_script_access,
-        module_name,
-        current_script_name,
+        scope,
         local_var_types,
         mode,
     )
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn compile_group_nodes(
+fn compile_group_nodes(
     group_id: &str,
     container: &XmlElementNode,
     builder: &mut GroupBuilder,
-    visible_types: &BTreeMap<String, ScriptType>,
-    visible_functions: &BTreeMap<String, FunctionDecl>,
-    visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
-    visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
-    all_script_access: &BTreeMap<String, AccessLevel>,
-    module_name: Option<&str>,
-    current_script_name: Option<&str>,
+    scope: &CompileVisibility<'_>,
     local_var_types: &mut BTreeMap<String, ScriptType>,
     mode: CompileGroupMode,
     nodes: &mut Vec<ScriptNode>,
 ) -> Result<(), ScriptLangError> {
+    let visible_types = scope.visible_types;
+    let visible_functions = scope.visible_functions;
+    let visible_module_vars = scope.visible_module_vars;
+    let visible_module_consts = scope.visible_module_consts;
+    let all_script_access = scope.all_script_access;
+    let module_name = scope.module_name;
+    let current_script_name = scope.current_script_name;
+
     for child in element_children(container) {
         if has_attr(child, "once") && child.name != "text" {
             return Err(ScriptLangError::with_span(
@@ -1450,13 +1441,7 @@ pub(crate) fn compile_group_nodes(
                     Some(group_id),
                     child,
                     builder,
-                    visible_types,
-                    visible_functions,
-                    visible_module_vars,
-                    visible_module_consts,
-                    all_script_access,
-                    module_name,
-                    current_script_name,
+                    scope,
                     local_var_types,
                     CompileGroupMode::new(mode.while_depth, false)
                         .with_script_kind(mode.script_kind),
@@ -1616,13 +1601,7 @@ pub(crate) fn compile_group_nodes(
                     &then_group_id,
                     &then_container,
                     builder,
-                    visible_types,
-                    visible_functions,
-                    visible_module_vars,
-                    visible_module_consts,
-                    all_script_access,
-                    module_name,
-                    current_script_name,
+                    scope,
                     local_var_types,
                     group_mode,
                 );
@@ -1634,13 +1613,7 @@ pub(crate) fn compile_group_nodes(
                         &else_group_id,
                         else_child,
                         builder,
-                        visible_types,
-                        visible_functions,
-                        visible_module_vars,
-                        visible_module_consts,
-                        all_script_access,
-                        module_name,
-                        current_script_name,
+                        scope,
                         local_var_types,
                         group_mode,
                     );
@@ -1687,13 +1660,7 @@ pub(crate) fn compile_group_nodes(
                     &body_group_id,
                     child,
                     builder,
-                    visible_types,
-                    visible_functions,
-                    visible_module_vars,
-                    visible_module_consts,
-                    all_script_access,
-                    module_name,
-                    current_script_name,
+                    scope,
                     local_var_types,
                     while_mode,
                 );
@@ -1776,13 +1743,7 @@ pub(crate) fn compile_group_nodes(
                                 &option_group_id,
                                 choice_child,
                                 builder,
-                                visible_types,
-                                visible_functions,
-                                visible_module_vars,
-                                visible_module_consts,
-                                all_script_access,
-                                module_name,
-                                current_script_name,
+                                scope,
                                 local_var_types,
                                 option_mode,
                             );
@@ -1881,13 +1842,7 @@ pub(crate) fn compile_group_nodes(
                                 &option_group_id,
                                 template_option,
                                 builder,
-                                visible_types,
-                                visible_functions,
-                                visible_module_vars,
-                                visible_module_consts,
-                                all_script_access,
-                                module_name,
-                                current_script_name,
+                                scope,
                                 local_var_types,
                                 option_mode,
                             );

@@ -181,7 +181,8 @@ fn collect_source_scripts(
                 }
             })
             .collect(),
-        _ => Vec::new(),
+        #[cfg(test)]
+        SourceKind::Json => Vec::new(),
     }
 }
 

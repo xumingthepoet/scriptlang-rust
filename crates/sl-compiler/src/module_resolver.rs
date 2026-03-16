@@ -232,11 +232,13 @@ fn parse_module_block(
 
     apply_module_export_targets(
         export_targets,
-        &mut block.type_decls,
-        &mut block.function_decls,
-        &mut block.module_global_var_decls,
-        &mut block.module_global_const_decls,
-        &mut block.scripts,
+        &mut ModuleExportDeclsMut {
+            type_decls: &mut block.type_decls,
+            function_decls: &mut block.function_decls,
+            module_var_decls: &mut block.module_global_var_decls,
+            module_const_decls: &mut block.module_global_const_decls,
+            scripts: &mut block.scripts,
+        },
         &direct_child_module_names,
         &node.location,
     )
@@ -453,40 +455,49 @@ fn parse_module_export_targets(
     Ok(targets)
 }
 
-#[allow(clippy::too_many_arguments)]
+struct ModuleExportDeclsMut<'a> {
+    type_decls: &'a mut [ParsedTypeDecl],
+    function_decls: &'a mut [ParsedFunctionDecl],
+    module_var_decls: &'a mut [ParsedModuleVarDecl],
+    module_const_decls: &'a mut [ParsedModuleConstDecl],
+    scripts: &'a mut [ParsedModuleScript],
+}
+
 fn apply_module_export_targets(
     export_targets: &ModuleExportTargets,
-    type_decls: &mut [ParsedTypeDecl],
-    function_decls: &mut [ParsedFunctionDecl],
-    module_var_decls: &mut [ParsedModuleVarDecl],
-    module_const_decls: &mut [ParsedModuleConstDecl],
-    scripts: &mut [ParsedModuleScript],
+    declarations: &mut ModuleExportDeclsMut<'_>,
     child_module_names: &BTreeSet<String>,
     span: &SourceSpan,
 ) -> Result<(), ScriptLangError> {
-    let type_names = type_decls
+    let type_names = declarations
+        .type_decls
         .iter()
         .filter(|decl| decl.enum_members.is_empty())
         .map(|decl| decl.name.as_str())
         .collect::<BTreeSet<_>>();
-    let enum_names = type_decls
+    let enum_names = declarations
+        .type_decls
         .iter()
         .filter(|decl| !decl.enum_members.is_empty())
         .map(|decl| decl.name.as_str())
         .collect::<BTreeSet<_>>();
-    let function_names = function_decls
+    let function_names = declarations
+        .function_decls
         .iter()
         .map(|decl| decl.name.as_str())
         .collect::<BTreeSet<_>>();
-    let var_names = module_var_decls
+    let var_names = declarations
+        .module_var_decls
         .iter()
         .map(|decl| decl.name.as_str())
         .collect::<BTreeSet<_>>();
-    let const_names = module_const_decls
+    let const_names = declarations
+        .module_const_decls
         .iter()
         .map(|decl| decl.name.as_str())
         .collect::<BTreeSet<_>>();
-    let script_names = scripts
+    let script_names = declarations
+        .scripts
         .iter()
         .map(|script| {
             script
@@ -509,7 +520,7 @@ fn apply_module_export_targets(
         .collect::<BTreeSet<_>>();
     validate_export_names("module", &export_targets.modules, &child_module_names, span)?;
 
-    for decl in type_decls {
+    for decl in declarations.type_decls.iter_mut() {
         decl.access = if (!decl.enum_members.is_empty()
             && export_targets.enums.contains(&decl.name))
             || (decl.enum_members.is_empty() && export_targets.types.contains(&decl.name))
@@ -519,28 +530,28 @@ fn apply_module_export_targets(
             AccessLevel::Private
         };
     }
-    for decl in function_decls {
+    for decl in declarations.function_decls.iter_mut() {
         decl.access = if export_targets.functions.contains(&decl.name) {
             AccessLevel::Public
         } else {
             AccessLevel::Private
         };
     }
-    for decl in module_var_decls {
+    for decl in declarations.module_var_decls.iter_mut() {
         decl.access = if export_targets.vars.contains(&decl.name) {
             AccessLevel::Public
         } else {
             AccessLevel::Private
         };
     }
-    for decl in module_const_decls {
+    for decl in declarations.module_const_decls.iter_mut() {
         decl.access = if export_targets.consts.contains(&decl.name) {
             AccessLevel::Public
         } else {
             AccessLevel::Private
         };
     }
-    for script in scripts {
+    for script in declarations.scripts.iter_mut() {
         let short_name = script
             .qualified_script_name
             .rsplit_once('.')

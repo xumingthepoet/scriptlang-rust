@@ -38,6 +38,7 @@ pub(crate) fn parse_sources(
                 imports,
                 alias_directives: parsed.alias_directives,
                 xml_root: Some(parsed.root),
+                #[cfg(test)]
                 json_value: None,
             },
         );
