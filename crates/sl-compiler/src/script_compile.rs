@@ -22,6 +22,17 @@ impl CompileGroupMode {
     }
 }
 
+pub(crate) struct ExpressionNormalizeContext<'a> {
+    pub(crate) all_script_access: &'a BTreeMap<String, AccessLevel>,
+    pub(crate) module_name: Option<&'a str>,
+    pub(crate) current_script_name: Option<&'a str>,
+    pub(crate) visible_types: &'a BTreeMap<String, ScriptType>,
+    pub(crate) visible_functions: &'a BTreeMap<String, FunctionDecl>,
+    pub(crate) local_var_types: &'a BTreeMap<String, ScriptType>,
+    pub(crate) visible_module_vars: &'a BTreeMap<String, ModuleVarDecl>,
+    pub(crate) visible_module_consts: &'a BTreeMap<String, ModuleConstDecl>,
+}
+
 fn script_target_var_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| Regex::new(r"^[A-Za-z_][A-Za-z0-9_]*$").expect("target var regex"))
@@ -821,62 +832,55 @@ fn normalize_expression_literals(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn normalize_attribute_expression_literals(
     expr: &str,
     span: &SourceSpan,
-    all_script_access: &BTreeMap<String, AccessLevel>,
-    module_name: Option<&str>,
-    current_script_name: Option<&str>,
-    visible_types: &BTreeMap<String, ScriptType>,
-    visible_functions: &BTreeMap<String, FunctionDecl>,
-    local_var_types: &BTreeMap<String, ScriptType>,
-    visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
-    visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
+    ctx: &ExpressionNormalizeContext,
 ) -> Result<String, ScriptLangError> {
     let macro_rewritten = rewrite_script_context_macro_in_expression(
         expr,
-        current_script_name,
+        ctx.current_script_name,
         ScriptMacroQuoteStyle::Single,
     );
     let script_rewritten = normalize_and_validate_script_literals_in_expression(
         &macro_rewritten,
         span,
-        module_name,
-        Some(all_script_access),
+        ctx.module_name,
+        Some(ctx.all_script_access),
     )?;
     let normalized = normalize_and_validate_function_literals(
         &script_rewritten,
         span,
-        module_name,
-        visible_functions,
+        ctx.module_name,
+        ctx.visible_functions,
     )?;
-    let blocked_names = local_var_types
+    let blocked_names = ctx
+        .local_var_types
         .keys()
         .cloned()
         .collect::<BTreeSet<String>>();
     let module_aliases = build_module_symbol_alias_rewrite_map(
-        visible_module_vars,
-        visible_module_consts,
+        ctx.visible_module_vars,
+        ctx.visible_module_consts,
         &blocked_names,
     );
     let alias_rewritten = rewrite_module_symbol_aliases_in_expression(&normalized, &module_aliases);
     let rewritten = rewrite_and_validate_enum_literals_in_attr_expression(
         &alias_rewritten,
-        visible_types,
+        ctx.visible_types,
         span,
     )?;
     validate_invoke_first_arg(
         &rewritten,
         span,
-        local_var_types,
-        visible_module_vars,
-        visible_module_consts,
+        ctx.local_var_types,
+        ctx.visible_module_vars,
+        ctx.visible_module_consts,
     )?;
     let runtime_module_global_rewrite_map =
-        build_runtime_module_global_rewrite_map(visible_module_vars, visible_module_consts);
+        build_runtime_module_global_rewrite_map(ctx.visible_module_vars, ctx.visible_module_consts);
     let runtime_function_symbol_map =
-        build_runtime_function_symbol_map(visible_functions, module_name);
+        build_runtime_function_symbol_map(ctx.visible_functions, ctx.module_name);
     preprocess_and_compile_rhai_source(
         &rewritten,
         span,
@@ -888,51 +892,49 @@ fn normalize_attribute_expression_literals(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn normalize_template_literals(
     template: &str,
     span: &SourceSpan,
-    all_script_access: &BTreeMap<String, AccessLevel>,
-    module_name: Option<&str>,
-    current_script_name: Option<&str>,
-    visible_types: &BTreeMap<String, ScriptType>,
-    visible_functions: &BTreeMap<String, FunctionDecl>,
-    local_var_types: &BTreeMap<String, ScriptType>,
-    visible_module_vars: &BTreeMap<String, ModuleVarDecl>,
-    visible_module_consts: &BTreeMap<String, ModuleConstDecl>,
+    ctx: &ExpressionNormalizeContext,
 ) -> Result<String, ScriptLangError> {
-    let macro_rewritten = rewrite_script_context_macro_in_template(template, current_script_name);
+    let macro_rewritten =
+        rewrite_script_context_macro_in_template(template, ctx.current_script_name);
     let rewritten =
-        rewrite_and_validate_enum_literals_in_template(&macro_rewritten, visible_types, span)?;
+        rewrite_and_validate_enum_literals_in_template(&macro_rewritten, ctx.visible_types, span)?;
     let rewritten = normalize_and_validate_script_literals_in_expression(
         &rewritten,
         span,
-        module_name,
-        Some(all_script_access),
+        ctx.module_name,
+        Some(ctx.all_script_access),
     )?;
-    let rewritten =
-        normalize_and_validate_function_literals(&rewritten, span, module_name, visible_functions)?;
-    let blocked_names = local_var_types
+    let rewritten = normalize_and_validate_function_literals(
+        &rewritten,
+        span,
+        ctx.module_name,
+        ctx.visible_functions,
+    )?;
+    let blocked_names = ctx
+        .local_var_types
         .keys()
         .cloned()
         .collect::<BTreeSet<String>>();
     let module_aliases = build_module_symbol_alias_rewrite_map(
-        visible_module_vars,
-        visible_module_consts,
+        ctx.visible_module_vars,
+        ctx.visible_module_consts,
         &blocked_names,
     );
     let rewritten = rewrite_module_symbol_aliases_in_template(&rewritten, &module_aliases);
     validate_invoke_first_arg(
         &rewritten,
         span,
-        local_var_types,
-        visible_module_vars,
-        visible_module_consts,
+        ctx.local_var_types,
+        ctx.visible_module_vars,
+        ctx.visible_module_consts,
     )?;
     let runtime_module_global_rewrite_map =
-        build_runtime_module_global_rewrite_map(visible_module_vars, visible_module_consts);
+        build_runtime_module_global_rewrite_map(ctx.visible_module_vars, ctx.visible_module_consts);
     let runtime_function_symbol_map =
-        build_runtime_function_symbol_map(visible_functions, module_name);
+        build_runtime_function_symbol_map(ctx.visible_functions, ctx.module_name);
     preprocess_and_compile_template_expressions(
         &rewritten,
         span,
@@ -1510,18 +1512,23 @@ fn compile_group_nodes(
             }
             "text" => ScriptNode::Text {
                 id: builder.next_node_id("text"),
-                value: normalize_template_literals(
-                    &parse_inline_required(child)?,
-                    &child.location,
-                    all_script_access,
-                    module_name,
-                    current_script_name,
-                    visible_types,
-                    visible_functions,
-                    local_var_types,
-                    visible_module_vars,
-                    visible_module_consts,
-                )?,
+                value: {
+                    let ctx = ExpressionNormalizeContext {
+                        all_script_access,
+                        module_name,
+                        current_script_name,
+                        visible_types,
+                        visible_functions,
+                        local_var_types,
+                        visible_module_vars,
+                        visible_module_consts,
+                    };
+                    normalize_template_literals(
+                        &parse_inline_required(child)?,
+                        &child.location,
+                        &ctx,
+                    )?
+                },
                 tag: get_optional_attr(child, "tag")
                     .map(|value| value.trim().to_string())
                     .filter(|value| !value.is_empty()),
@@ -1538,18 +1545,23 @@ fn compile_group_nodes(
                 }
                 ScriptNode::Debug {
                     id: builder.next_node_id("debug"),
-                    value: normalize_template_literals(
-                        &parse_inline_required(child)?,
-                        &child.location,
-                        all_script_access,
-                        module_name,
-                        current_script_name,
-                        visible_types,
-                        visible_functions,
-                        local_var_types,
-                        visible_module_vars,
-                        visible_module_consts,
-                    )?,
+                    value: {
+                        let ctx = ExpressionNormalizeContext {
+                            all_script_access,
+                            module_name,
+                            current_script_name,
+                            visible_types,
+                            visible_functions,
+                            local_var_types,
+                            visible_module_vars,
+                            visible_module_consts,
+                        };
+                        normalize_template_literals(
+                            &parse_inline_required(child)?,
+                            &child.location,
+                            &ctx,
+                        )?
+                    },
                     location: child.location.clone(),
                 }
             }
@@ -1633,9 +1645,7 @@ fn compile_group_nodes(
                 ScriptNode::If {
                     id: builder.next_node_id("if"),
                     when_expr: {
-                        normalize_attribute_expression_literals(
-                            &get_required_non_empty_attr(child, "when")?,
-                            &child.location,
+                        let ctx = ExpressionNormalizeContext {
                             all_script_access,
                             module_name,
                             current_script_name,
@@ -1644,6 +1654,11 @@ fn compile_group_nodes(
                             local_var_types,
                             visible_module_vars,
                             visible_module_consts,
+                        };
+                        normalize_attribute_expression_literals(
+                            &get_required_non_empty_attr(child, "when")?,
+                            &child.location,
+                            &ctx,
                         )?
                     },
                     then_group_id,
@@ -1668,9 +1683,7 @@ fn compile_group_nodes(
                 ScriptNode::While {
                     id: builder.next_node_id("while"),
                     when_expr: {
-                        normalize_attribute_expression_literals(
-                            &get_required_non_empty_attr(child, "when")?,
-                            &child.location,
+                        let ctx = ExpressionNormalizeContext {
                             all_script_access,
                             module_name,
                             current_script_name,
@@ -1679,6 +1692,11 @@ fn compile_group_nodes(
                             local_var_types,
                             visible_module_vars,
                             visible_module_consts,
+                        };
+                        normalize_attribute_expression_literals(
+                            &get_required_non_empty_attr(child, "when")?,
+                            &child.location,
+                            &ctx,
                         )?
                     },
                     body_group_id,
@@ -1686,9 +1704,7 @@ fn compile_group_nodes(
                 }
             }
             "choice" => {
-                let prompt_text = normalize_template_literals(
-                    &get_required_non_empty_attr(child, "text")?,
-                    &child.location,
+                let ctx = ExpressionNormalizeContext {
                     all_script_access,
                     module_name,
                     current_script_name,
@@ -1697,6 +1713,11 @@ fn compile_group_nodes(
                     local_var_types,
                     visible_module_vars,
                     visible_module_consts,
+                };
+                let prompt_text = normalize_template_literals(
+                    &get_required_non_empty_attr(child, "text")?,
+                    &child.location,
+                    &ctx,
                 )?;
                 let mut entries = Vec::new();
                 let mut fall_over_seen = 0usize;
@@ -1709,9 +1730,7 @@ fn compile_group_nodes(
                             let fall_over = parse_bool_attr(choice_child, "fall_over", false)?;
                             let when_expr = get_optional_attr(choice_child, "when")
                                 .map(|expr| {
-                                    normalize_attribute_expression_literals(
-                                        &expr,
-                                        &choice_child.location,
+                                    let ctx = ExpressionNormalizeContext {
                                         all_script_access,
                                         module_name,
                                         current_script_name,
@@ -1720,6 +1739,11 @@ fn compile_group_nodes(
                                         local_var_types,
                                         visible_module_vars,
                                         visible_module_consts,
+                                    };
+                                    normalize_attribute_expression_literals(
+                                        &expr,
+                                        &choice_child.location,
+                                        &ctx,
                                     )
                                 })
                                 .transpose()?;
@@ -1752,18 +1776,23 @@ fn compile_group_nodes(
                             entries.push(ChoiceEntry::Static {
                                 option: ChoiceOption {
                                     id: builder.next_choice_id(),
-                                    text: normalize_template_literals(
-                                        &get_required_non_empty_attr(choice_child, "text")?,
-                                        &choice_child.location,
-                                        all_script_access,
-                                        module_name,
-                                        current_script_name,
-                                        visible_types,
-                                        visible_functions,
-                                        local_var_types,
-                                        visible_module_vars,
-                                        visible_module_consts,
-                                    )?,
+                                    text: {
+                                        let ctx = ExpressionNormalizeContext {
+                                            all_script_access,
+                                            module_name,
+                                            current_script_name,
+                                            visible_types,
+                                            visible_functions,
+                                            local_var_types,
+                                            visible_module_vars,
+                                            visible_module_consts,
+                                        };
+                                        normalize_template_literals(
+                                            &get_required_non_empty_attr(choice_child, "text")?,
+                                            &choice_child.location,
+                                            &ctx,
+                                        )?
+                                    },
                                     when_expr,
                                     once,
                                     fall_over,
@@ -1773,9 +1802,7 @@ fn compile_group_nodes(
                             });
                         }
                         "dynamic-options" => {
-                            let array_expr = normalize_attribute_expression_literals(
-                                &get_required_non_empty_attr(choice_child, "array")?,
-                                &choice_child.location,
+                            let ctx = ExpressionNormalizeContext {
                                 all_script_access,
                                 module_name,
                                 current_script_name,
@@ -1784,6 +1811,11 @@ fn compile_group_nodes(
                                 local_var_types,
                                 visible_module_vars,
                                 visible_module_consts,
+                            };
+                            let array_expr = normalize_attribute_expression_literals(
+                                &get_required_non_empty_attr(choice_child, "array")?,
+                                &choice_child.location,
+                                &ctx,
                             )?;
                             let item_name = get_required_non_empty_attr(choice_child, "item")?;
                             let index_name = get_optional_attr(choice_child, "index");
@@ -1855,34 +1887,45 @@ fn compile_group_nodes(
                                     item_name,
                                     index_name,
                                     template: DynamicChoiceTemplate {
-                                        text: normalize_template_literals(
-                                            &get_required_non_empty_attr(template_option, "text")?,
-                                            &template_option.location,
-                                            all_script_access,
-                                            module_name,
-                                            current_script_name,
-                                            visible_types,
-                                            visible_functions,
-                                            local_var_types,
-                                            visible_module_vars,
-                                            visible_module_consts,
-                                        )?,
+                                        text: {
+                                            let ctx = ExpressionNormalizeContext {
+                                                all_script_access,
+                                                module_name,
+                                                current_script_name,
+                                                visible_types,
+                                                visible_functions,
+                                                local_var_types,
+                                                visible_module_vars,
+                                                visible_module_consts,
+                                            };
+                                            normalize_template_literals(
+                                                &get_required_non_empty_attr(
+                                                    template_option,
+                                                    "text",
+                                                )?,
+                                                &template_option.location,
+                                                &ctx,
+                                            )?
+                                        },
                                         when_expr: {
                                             let when_expr =
                                                 get_optional_attr(template_option, "when");
                                             if let Some(expr) = when_expr.as_deref() {
+                                                let ctx = ExpressionNormalizeContext {
+                                                    all_script_access,
+                                                    module_name,
+                                                    current_script_name,
+                                                    visible_types,
+                                                    visible_functions,
+                                                    local_var_types,
+                                                    visible_module_vars,
+                                                    visible_module_consts,
+                                                };
                                                 let rewritten =
                                                     normalize_attribute_expression_literals(
                                                         expr,
                                                         &template_option.location,
-                                                        all_script_access,
-                                                        module_name,
-                                                        current_script_name,
-                                                        visible_types,
-                                                        visible_functions,
-                                                        local_var_types,
-                                                        visible_module_vars,
-                                                        visible_module_consts,
+                                                        &ctx,
                                                     )?;
                                                 Some(rewritten)
                                             } else {
@@ -2007,9 +2050,7 @@ fn compile_group_nodes(
                         .into_iter()
                         .map(|mut arg| {
                             if !arg.is_ref {
-                                arg.value_expr = normalize_attribute_expression_literals(
-                                    &arg.value_expr,
-                                    &child.location,
+                                let ctx = ExpressionNormalizeContext {
                                     all_script_access,
                                     module_name,
                                     current_script_name,
@@ -2018,6 +2059,11 @@ fn compile_group_nodes(
                                     local_var_types,
                                     visible_module_vars,
                                     visible_module_consts,
+                                };
+                                arg.value_expr = normalize_attribute_expression_literals(
+                                    &arg.value_expr,
+                                    &child.location,
+                                    &ctx,
                                 )?;
                             }
                             Ok::<_, ScriptLangError>(arg)
@@ -2038,9 +2084,7 @@ fn compile_group_nodes(
                     .into_iter()
                     .map(|mut arg| {
                         if !arg.is_ref {
-                            arg.value_expr = normalize_attribute_expression_literals(
-                                &arg.value_expr,
-                                &child.location,
+                            let ctx = ExpressionNormalizeContext {
                                 all_script_access,
                                 module_name,
                                 current_script_name,
@@ -2049,6 +2093,11 @@ fn compile_group_nodes(
                                 local_var_types,
                                 visible_module_vars,
                                 visible_module_consts,
+                            };
+                            arg.value_expr = normalize_attribute_expression_literals(
+                                &arg.value_expr,
+                                &child.location,
+                                &ctx,
                             )?;
                         }
                         Ok::<_, ScriptLangError>(arg)
@@ -3532,33 +3581,35 @@ mod script_compile_tests {
         .expect_err("invalid enum member should fail");
         assert_eq!(enum_error.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
 
-        let normalized_attr = normalize_attribute_expression_literals(
-            "invoke(fnRef, [1])",
-            &span,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &BTreeMap::new(),
-            &visible_functions,
-            &local_var_types,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        )
+        let normalized_attr = {
+            let ctx = ExpressionNormalizeContext {
+                all_script_access: &all_script_access,
+                module_name: Some("main"),
+                current_script_name: Some("main.main"),
+                visible_types: &BTreeMap::new(),
+                visible_functions: &visible_functions,
+                local_var_types: &local_var_types,
+                visible_module_vars: &BTreeMap::new(),
+                visible_module_consts: &BTreeMap::new(),
+            };
+            normalize_attribute_expression_literals("invoke(fnRef, [1])", &span, &ctx)
+        }
         .expect("normalize attr should pass");
         assert_eq!(normalized_attr, "call(invoke, fnRef, [1])");
 
-        let normalized_template = normalize_template_literals(
-            "go ${invoke(fnRef, [1])}",
-            &span,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &BTreeMap::new(),
-            &visible_functions,
-            &local_var_types,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        )
+        let normalized_template = {
+            let ctx = ExpressionNormalizeContext {
+                all_script_access: &all_script_access,
+                module_name: Some("main"),
+                current_script_name: Some("main.main"),
+                visible_types: &BTreeMap::new(),
+                visible_functions: &visible_functions,
+                local_var_types: &local_var_types,
+                visible_module_vars: &BTreeMap::new(),
+                visible_module_consts: &BTreeMap::new(),
+            };
+            normalize_template_literals("go ${invoke(fnRef, [1])}", &span, &ctx)
+        }
         .expect("normalize template should pass");
         assert!(normalized_template.contains("call(invoke, fnRef, [1])"));
 
@@ -3633,34 +3684,36 @@ mod script_compile_tests {
         .expect("string ending with backslash should be preserved");
         assert_eq!(backslash_end, "\"test\\\\\"");
 
-        let script_macro_attr = normalize_attribute_expression_literals(
-            "__script__",
-            &span,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        )
+        let script_macro_attr = {
+            let ctx = ExpressionNormalizeContext {
+                all_script_access: &all_script_access,
+                module_name: Some("main"),
+                current_script_name: Some("main.main"),
+                visible_types: &BTreeMap::new(),
+                visible_functions: &BTreeMap::new(),
+                local_var_types: &BTreeMap::new(),
+                visible_module_vars: &BTreeMap::new(),
+                visible_module_consts: &BTreeMap::new(),
+            };
+            normalize_attribute_expression_literals("__script__", &span, &ctx)
+        }
         .expect("script macro in attribute expression should normalize as Rhai source");
         assert_eq!(script_macro_attr, "\"main.main\"");
 
-        let script_macro_template = normalize_template_literals(
-            "expr=${__script__}; raw=__script__",
-            &span,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        )
-        .expect("script macro in template should expand only inside capture");
+        let script_macro_template = {
+            let ctx = ExpressionNormalizeContext {
+                all_script_access: &all_script_access,
+                module_name: Some("main"),
+                current_script_name: Some("main.main"),
+                visible_types: &BTreeMap::new(),
+                visible_functions: &BTreeMap::new(),
+                local_var_types: &BTreeMap::new(),
+                visible_module_vars: &BTreeMap::new(),
+                visible_module_consts: &BTreeMap::new(),
+            };
+            normalize_template_literals("expr=${__script__}; raw=__script__", &span, &ctx)
+        }
+        .expect("script macro in template should normalize");
         assert_eq!(
             script_macro_template,
             "expr=${\"main.main\"}; raw=__script__"
@@ -3726,66 +3779,70 @@ mod script_compile_tests {
         assert_eq!(script_macro_at_end, "main + \"main.main\"");
 
         // Test line 403: normalize_and_validate_function_literals error in attr
-        let missing_fn_attr_error = normalize_attribute_expression_literals(
-            "*missing.func",
-            &span,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        )
+        let missing_fn_attr_error = {
+            let ctx = ExpressionNormalizeContext {
+                all_script_access: &all_script_access,
+                module_name: Some("main"),
+                current_script_name: Some("main.main"),
+                visible_types: &BTreeMap::new(),
+                visible_functions: &BTreeMap::new(),
+                local_var_types: &BTreeMap::new(),
+                visible_module_vars: &BTreeMap::new(),
+                visible_module_consts: &BTreeMap::new(),
+            };
+            normalize_attribute_expression_literals("*missing.func", &span, &ctx)
+        }
         .expect_err("missing function in attr should fail");
         assert_eq!(missing_fn_attr_error.code, "XML_FUNCTION_LITERAL_NOT_FOUND");
 
         // Test line 405: rewrite_and_validate_enum_literals_in_attr_expression error
-        let enum_attr_error = normalize_attribute_expression_literals(
-            "Status.Invalid",
-            &span,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &visible_types,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        )
+        let enum_attr_error = {
+            let ctx = ExpressionNormalizeContext {
+                all_script_access: &all_script_access,
+                module_name: Some("main"),
+                current_script_name: Some("main.main"),
+                visible_types: &visible_types,
+                visible_functions: &BTreeMap::new(),
+                local_var_types: &BTreeMap::new(),
+                visible_module_vars: &BTreeMap::new(),
+                visible_module_consts: &BTreeMap::new(),
+            };
+            normalize_attribute_expression_literals("Status.Invalid", &span, &ctx)
+        }
         .expect_err("invalid enum in attr should fail");
         assert_eq!(enum_attr_error.code, "ENUM_LITERAL_MEMBER_UNKNOWN");
 
         // Test line 412: validate_invoke_first_arg error in attr
-        let invoke_attr_error = normalize_attribute_expression_literals(
-            "invoke(x, [1])",
-            &span,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &non_function_vars,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        )
+        let invoke_attr_error = {
+            let ctx = ExpressionNormalizeContext {
+                all_script_access: &all_script_access,
+                module_name: Some("main"),
+                current_script_name: Some("main.main"),
+                visible_types: &BTreeMap::new(),
+                visible_functions: &BTreeMap::new(),
+                local_var_types: &non_function_vars,
+                visible_module_vars: &BTreeMap::new(),
+                visible_module_consts: &BTreeMap::new(),
+            };
+            normalize_attribute_expression_literals("invoke(x, [1])", &span, &ctx)
+        }
         .expect_err("invoke non-function in attr should fail");
         assert_eq!(invoke_attr_error.code, "XML_INVOKE_TARGET_VAR_TYPE");
 
         // Test line 431: normalize_and_validate_function_literals error in template
-        let missing_fn_template_error = normalize_template_literals(
-            "${*missing.func}",
-            &span,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        )
+        let missing_fn_template_error = {
+            let ctx = ExpressionNormalizeContext {
+                all_script_access: &all_script_access,
+                module_name: Some("main"),
+                current_script_name: Some("main.main"),
+                visible_types: &BTreeMap::new(),
+                visible_functions: &BTreeMap::new(),
+                local_var_types: &BTreeMap::new(),
+                visible_module_vars: &BTreeMap::new(),
+                visible_module_consts: &BTreeMap::new(),
+            };
+            normalize_template_literals("${*missing.func}", &span, &ctx)
+        }
         .expect_err("missing function in template should fail");
         assert_eq!(
             missing_fn_template_error.code,
@@ -3793,18 +3850,19 @@ mod script_compile_tests {
         );
 
         // Test line 438: validate_invoke_first_arg error in template
-        let invoke_template_error = normalize_template_literals(
-            "${invoke(x, [1])}",
-            &span,
-            &all_script_access,
-            Some("main"),
-            Some("main.main"),
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-            &non_function_vars,
-            &BTreeMap::new(),
-            &BTreeMap::new(),
-        )
+        let invoke_template_error = {
+            let ctx = ExpressionNormalizeContext {
+                all_script_access: &all_script_access,
+                module_name: Some("main"),
+                current_script_name: Some("main.main"),
+                visible_types: &BTreeMap::new(),
+                visible_functions: &BTreeMap::new(),
+                local_var_types: &non_function_vars,
+                visible_module_vars: &BTreeMap::new(),
+                visible_module_consts: &BTreeMap::new(),
+            };
+            normalize_template_literals("${invoke(x, [1])}", &span, &ctx)
+        }
         .expect_err("invoke non-function in template should fail");
         assert_eq!(invoke_template_error.code, "XML_INVOKE_TARGET_VAR_TYPE");
 
