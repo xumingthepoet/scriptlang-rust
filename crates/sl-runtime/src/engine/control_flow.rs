@@ -1,4 +1,4 @@
-use super::lifecycle::{CompletionKind, PendingBoundary, RuntimeFrame};
+use super::lifecycle::CompletionKind;
 use super::*;
 
 impl ScriptLangEngine {
@@ -115,6 +115,7 @@ impl ScriptLangEngine {
 
 #[cfg(test)]
 mod control_flow_tests {
+    use super::lifecycle::RuntimeFrame;
     use super::runtime_test_support::*;
     use super::*;
 

@@ -20,11 +20,14 @@ pub(crate) fn run_tui_line_mode(
     let stdin = io::stdin();
     let mut reader = stdin.lock();
     let mut writer = io::stdout();
-    run_tui_line_mode_with_io(
+    let command_context = TuiCommandContext {
         state_file,
         scenario,
         entry_script,
         random_sequence,
+    };
+    run_tui_line_mode_with_io(
+        &command_context,
         show_debug,
         engine,
         &mut reader,
@@ -32,12 +35,8 @@ pub(crate) fn run_tui_line_mode(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn run_tui_line_mode_with_io(
-    state_file: &str,
-    scenario: &LoadedScenario,
-    entry_script: &str,
-    random_sequence: Option<Vec<u32>>,
+    command_context: &TuiCommandContext<'_>,
     show_debug: bool,
     engine: &mut sl_api::ScriptLangEngine,
     reader: &mut dyn BufRead,
@@ -45,12 +44,6 @@ pub(crate) fn run_tui_line_mode_with_io(
 ) -> Result<i32, ScriptLangError> {
     println!("ScriptLang TUI");
     println!("commands: :help :save :load :restart :quit");
-    let command_context = TuiCommandContext {
-        state_file,
-        scenario,
-        entry_script,
-        random_sequence,
-    };
 
     loop {
         match engine.next_output()? {
@@ -78,8 +71,7 @@ pub(crate) fn run_tui_line_mode_with_io(
                 loop {
                     let raw = prompt_input_from("> ", reader, writer)?;
                     let mut emit = |line: String| println!("{}", line);
-                    let action =
-                        handle_line_cmd(raw.as_str(), &command_context, engine, &mut emit)?;
+                    let action = handle_line_cmd(raw.as_str(), command_context, engine, &mut emit)?;
                     match action {
                         TuiCommandAction::Continue => continue,
                         TuiCommandAction::RefreshBoundary => break,
@@ -107,8 +99,7 @@ pub(crate) fn run_tui_line_mode_with_io(
                 loop {
                     let raw = prompt_input_from("> ", reader, writer)?;
                     let mut emit = |line: String| println!("{}", line);
-                    let action =
-                        handle_line_cmd(raw.as_str(), &command_context, engine, &mut emit)?;
+                    let action = handle_line_cmd(raw.as_str(), command_context, engine, &mut emit)?;
                     match action {
                         TuiCommandAction::Continue => continue,
                         TuiCommandAction::RefreshBoundary => break,
@@ -252,17 +243,15 @@ mod line_tui_tests {
         let mut engine = create_engine_for_tests(&choice_input_scenario);
         let mut reader = Cursor::new(b":help\n0\n:help\nGuild\n".to_vec());
         let mut writer = Vec::new();
-        let code = run_tui_line_mode_with_io(
-            &state_file_str,
-            &choice_input_scenario,
-            "main.main",
-            None,
-            false,
-            &mut engine,
-            &mut reader,
-            &mut writer,
-        )
-        .expect("choice + input flow should pass");
+        let context = TuiCommandContext {
+            state_file: &state_file_str,
+            scenario: &choice_input_scenario,
+            entry_script: "main.main",
+            random_sequence: None,
+        };
+        let code =
+            run_tui_line_mode_with_io(&context, false, &mut engine, &mut reader, &mut writer)
+                .expect("choice + input flow should pass");
         assert_eq!(code, 0);
 
         let choice_quit_scenario = load_temp_scenario(
@@ -280,33 +269,29 @@ mod line_tui_tests {
         let mut engine = create_engine_for_tests(&choice_quit_scenario);
         let mut reader = Cursor::new(b":quit\n".to_vec());
         let mut writer = Vec::new();
-        let code = run_tui_line_mode_with_io(
-            &state_file_str,
-            &choice_quit_scenario,
-            "main.main",
-            None,
-            false,
-            &mut engine,
-            &mut reader,
-            &mut writer,
-        )
-        .expect("quit from choices should pass");
+        let context = TuiCommandContext {
+            state_file: &state_file_str,
+            scenario: &choice_quit_scenario,
+            entry_script: "main.main",
+            random_sequence: None,
+        };
+        let code =
+            run_tui_line_mode_with_io(&context, false, &mut engine, &mut reader, &mut writer)
+                .expect("quit from choices should pass");
         assert_eq!(code, 0);
 
         let mut engine = create_engine_for_tests(&choice_quit_scenario);
         let mut reader = Cursor::new(b":restart\n0\n".to_vec());
         let mut writer = Vec::new();
-        let code = run_tui_line_mode_with_io(
-            &state_file_str,
-            &choice_quit_scenario,
-            "main.main",
-            None,
-            false,
-            &mut engine,
-            &mut reader,
-            &mut writer,
-        )
-        .expect("restart from choices should pass");
+        let context = TuiCommandContext {
+            state_file: &state_file_str,
+            scenario: &choice_quit_scenario,
+            entry_script: "main.main",
+            random_sequence: None,
+        };
+        let code =
+            run_tui_line_mode_with_io(&context, false, &mut engine, &mut reader, &mut writer)
+                .expect("restart from choices should pass");
         assert_eq!(code, 0);
 
         let input_quit_scenario = load_temp_scenario(
@@ -324,49 +309,43 @@ mod line_tui_tests {
         let mut engine = create_engine_for_tests(&input_quit_scenario);
         let mut reader = Cursor::new(b":quit\n".to_vec());
         let mut writer = Vec::new();
-        let code = run_tui_line_mode_with_io(
-            &state_file_str,
-            &input_quit_scenario,
-            "main.main",
-            None,
-            false,
-            &mut engine,
-            &mut reader,
-            &mut writer,
-        )
-        .expect("quit from input should pass");
+        let context = TuiCommandContext {
+            state_file: &state_file_str,
+            scenario: &input_quit_scenario,
+            entry_script: "main.main",
+            random_sequence: None,
+        };
+        let code =
+            run_tui_line_mode_with_io(&context, false, &mut engine, &mut reader, &mut writer)
+                .expect("quit from input should pass");
         assert_eq!(code, 0);
 
         let mut engine = create_engine_for_tests(&input_quit_scenario);
         let mut reader = Cursor::new(b":restart\nGuild\n".to_vec());
         let mut writer = Vec::new();
-        let code = run_tui_line_mode_with_io(
-            &state_file_str,
-            &input_quit_scenario,
-            "main.main",
-            None,
-            false,
-            &mut engine,
-            &mut reader,
-            &mut writer,
-        )
-        .expect("restart from input should pass");
+        let context = TuiCommandContext {
+            state_file: &state_file_str,
+            scenario: &input_quit_scenario,
+            entry_script: "main.main",
+            random_sequence: None,
+        };
+        let code =
+            run_tui_line_mode_with_io(&context, false, &mut engine, &mut reader, &mut writer)
+                .expect("restart from input should pass");
         assert_eq!(code, 0);
 
         let mut engine = create_engine_for_tests(&choice_quit_scenario);
         let mut reader = Cursor::new(b"invalid\n".to_vec());
         let mut writer = Vec::new();
-        let error = run_tui_line_mode_with_io(
-            &state_file_str,
-            &choice_quit_scenario,
-            "main.main",
-            None,
-            false,
-            &mut engine,
-            &mut reader,
-            &mut writer,
-        )
-        .expect_err("invalid choice should fail");
+        let context = TuiCommandContext {
+            state_file: &state_file_str,
+            scenario: &choice_quit_scenario,
+            entry_script: "main.main",
+            random_sequence: None,
+        };
+        let error =
+            run_tui_line_mode_with_io(&context, false, &mut engine, &mut reader, &mut writer)
+                .expect_err("invalid choice should fail");
         assert_eq!(error.code, "TUI_CHOICE_PARSE");
     }
 

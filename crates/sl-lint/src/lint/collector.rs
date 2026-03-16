@@ -415,6 +415,12 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
             vars: Vec::new(),
             used_locals: HashSet::new(),
         };
+        let usage = UsageScope {
+            module_name: &module_name,
+            file: &file,
+            script: Some(script),
+            current_script_name: Some(script_name),
+        };
 
         for group in script.groups.values() {
             let mut terminated = false;
@@ -436,23 +442,18 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                     } => {
                         collect_script_target_usage(
                             target_script,
-                            &module_name,
-                            &file,
+                            &usage,
                             location,
-                            Some(script_name),
                             context,
                             &mut locals,
                         );
                         for arg in args {
                             collect_expression_usage(
                                 &arg.value_expr,
-                                &module_name,
-                                &file,
+                                &usage,
                                 location,
-                                Some(script),
                                 context,
                                 Some(&mut locals),
-                                Some(script_name),
                             );
                         }
                     }
@@ -464,23 +465,18 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                     } => {
                         collect_script_target_usage(
                             target_script,
-                            &module_name,
-                            &file,
+                            &usage,
                             location,
-                            Some(script_name),
                             context,
                             &mut locals,
                         );
                         for arg in args {
                             collect_expression_usage(
                                 &arg.value_expr,
-                                &module_name,
-                                &file,
+                                &usage,
                                 location,
-                                Some(script),
                                 context,
                                 Some(&mut locals),
-                                Some(script_name),
                             );
                         }
                     }
@@ -497,25 +493,19 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                     } => {
                         collect_expression_usage(
                             when_expr,
-                            &module_name,
-                            &file,
+                            &usage,
                             location,
-                            Some(script),
                             context,
                             Some(&mut locals),
-                            Some(script_name),
                         );
                     }
                     ScriptNode::Code { code, location, .. } => {
                         collect_expression_usage(
                             code,
-                            &module_name,
-                            &file,
+                            &usage,
                             location,
-                            Some(script),
                             context,
                             Some(&mut locals),
-                            Some(script_name),
                         );
                     }
                     ScriptNode::Var {
@@ -531,13 +521,10 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                         if let Some(expr) = &declaration.initial_value_expr {
                             collect_expression_usage(
                                 expr,
-                                &module_name,
-                                &file,
+                                &usage,
                                 location,
-                                Some(script),
                                 context,
                                 Some(&mut locals),
-                                Some(script_name),
                             );
                         }
                     }
@@ -550,13 +537,10 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                         for expr in extract_template_expressions(value) {
                             collect_expression_usage(
                                 &expr,
-                                &module_name,
-                                &file,
+                                &usage,
                                 location,
-                                Some(script),
                                 context,
                                 Some(&mut locals),
-                                Some(script_name),
                             );
                         }
                     }
@@ -569,25 +553,14 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                         for expr in extract_template_expressions(prompt_text) {
                             collect_expression_usage(
                                 &expr,
-                                &module_name,
-                                &file,
+                                &usage,
                                 location,
-                                Some(script),
                                 context,
                                 Some(&mut locals),
-                                Some(script_name),
                             );
                         }
                         for entry in entries {
-                            collect_choice_entry_usage(
-                                entry,
-                                &module_name,
-                                &file,
-                                script_name,
-                                Some(script),
-                                context,
-                                &mut locals,
-                            );
+                            collect_choice_entry_usage(entry, &usage, context, &mut locals);
                         }
                     }
                     ScriptNode::Input {
@@ -599,13 +572,10 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
                         for expr in extract_template_expressions(prompt_text) {
                             collect_expression_usage(
                                 &expr,
-                                &module_name,
-                                &file,
+                                &usage,
                                 location,
-                                Some(script),
                                 context,
                                 Some(&mut locals),
-                                Some(script_name),
                             );
                         }
                         locals.used_locals.insert(target_var.clone());
@@ -630,75 +600,52 @@ fn collect_script_usage(bundle: &CompileProjectBundleResult, context: &mut LintC
     }
 }
 
+struct UsageScope<'a> {
+    module_name: &'a str,
+    file: &'a str,
+    script: Option<&'a ScriptIr>,
+    current_script_name: Option<&'a str>,
+}
+
 fn collect_choice_entry_usage(
     entry: &ChoiceEntry,
-    module_name: &str,
-    file: &str,
-    script_name: &str,
-    script: Option<&ScriptIr>,
+    usage: &UsageScope<'_>,
     context: &mut LintContext,
     locals: &mut ScriptLocals,
 ) {
     match entry {
         ChoiceEntry::Static { option } => {
             if let Some(expr) = &option.when_expr {
-                collect_expression_usage(
-                    expr,
-                    module_name,
-                    file,
-                    &option.location,
-                    script,
-                    context,
-                    Some(locals),
-                    Some(script_name),
-                );
+                collect_expression_usage(expr, usage, &option.location, context, Some(locals));
             }
             for expr in extract_template_expressions(&option.text) {
-                collect_expression_usage(
-                    &expr,
-                    module_name,
-                    file,
-                    &option.location,
-                    script,
-                    context,
-                    Some(locals),
-                    Some(script_name),
-                );
+                collect_expression_usage(&expr, usage, &option.location, context, Some(locals));
             }
         }
         ChoiceEntry::Dynamic { block } => {
             collect_expression_usage(
                 &block.array_expr,
-                module_name,
-                file,
+                usage,
                 &block.location,
-                script,
                 context,
                 Some(locals),
-                Some(script_name),
             );
             if let Some(expr) = &block.template.when_expr {
                 collect_expression_usage(
                     expr,
-                    module_name,
-                    file,
+                    usage,
                     &block.template.location,
-                    script,
                     context,
                     Some(locals),
-                    Some(script_name),
                 );
             }
             for expr in extract_template_expressions(&block.template.text) {
                 collect_expression_usage(
                     &expr,
-                    module_name,
-                    file,
+                    usage,
                     &block.template.location,
-                    script,
                     context,
                     Some(locals),
-                    Some(script_name),
                 );
             }
         }
@@ -765,12 +712,14 @@ fn collect_function_usage(context: &mut LintContext) {
         };
         collect_expression_usage(
             &function.code,
-            &function.module_name,
-            &function.file,
+            &UsageScope {
+                module_name: &function.module_name,
+                file: &function.file,
+                script: None,
+                current_script_name: None,
+            },
             &function.span,
-            None,
             context,
-            None,
             None,
         );
         for discovered in context.used_functions.iter().cloned() {
@@ -781,13 +730,10 @@ fn collect_function_usage(context: &mut LintContext) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn collect_script_target_usage(
     target_script: &ScriptTarget,
-    module_name: &str,
-    file: &str,
+    usage: &UsageScope<'_>,
     location: &SourceSpan,
-    from_script: Option<&str>,
     context: &mut LintContext,
     locals: &mut ScriptLocals,
 ) {
@@ -795,10 +741,10 @@ fn collect_script_target_usage(
         ScriptTarget::Literal { script_name } => {
             mark_script_use(
                 script_name,
-                module_name,
-                file,
+                usage.module_name,
+                usage.file,
                 location,
-                from_script,
+                usage.current_script_name,
                 context,
             );
         }
@@ -808,23 +754,33 @@ fn collect_script_target_usage(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn collect_expression_usage(
     expr: &str,
-    module_name: &str,
-    file: &str,
+    usage: &UsageScope<'_>,
     span: &SourceSpan,
-    script: Option<&ScriptIr>,
     context: &mut LintContext,
     mut locals: Option<&mut ScriptLocals>,
-    current_script_name: Option<&str>,
 ) {
     let refs = analyze_expression(expr);
     for call in refs.calls {
-        mark_function_use(&call, module_name, file, span, script, context);
+        mark_function_use(
+            &call,
+            usage.module_name,
+            usage.file,
+            span,
+            usage.script,
+            context,
+        );
     }
     for call_symbol in refs.call_symbol_targets {
-        mark_function_use(&call_symbol, module_name, file, span, script, context);
+        mark_function_use(
+            &call_symbol,
+            usage.module_name,
+            usage.file,
+            span,
+            usage.script,
+            context,
+        );
     }
     for ident in refs.identifiers {
         if let Some(local_state) = locals.as_mut() {
@@ -834,18 +790,32 @@ fn collect_expression_usage(
                 local_state.used_locals.insert(ident.clone());
             }
         }
-        mark_value_use(&ident, module_name, file, span, script, context);
+        mark_value_use(
+            &ident,
+            usage.module_name,
+            usage.file,
+            span,
+            usage.script,
+            context,
+        );
     }
     for function_name in refs.function_literals {
-        mark_function_use(&function_name, module_name, file, span, script, context);
+        mark_function_use(
+            &function_name,
+            usage.module_name,
+            usage.file,
+            span,
+            usage.script,
+            context,
+        );
     }
     for script_name in refs.script_literals {
         mark_script_use(
             &script_name,
-            module_name,
-            file,
+            usage.module_name,
+            usage.file,
             span,
-            current_script_name,
+            usage.current_script_name,
             context,
         );
     }

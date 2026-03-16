@@ -1,5 +1,4 @@
 use super::lifecycle::ScopeInit;
-use super::lifecycle::{CompletionKind, RuntimeFrame};
 use super::once_state::BindingOwner;
 use super::*;
 
@@ -931,6 +930,7 @@ impl ScriptLangEngine {
 
 #[cfg(test)]
 mod eval_tests {
+    use super::lifecycle::{CompletionKind, RuntimeFrame};
     use super::runtime_test_support::*;
     use super::*;
     use sl_core::SourceSpan;
@@ -2423,7 +2423,7 @@ let public = 3;
     #[test]
     pub(super) fn execute_rhai_with_mode_handles_non_dotted_invoke_all_functions() {
         // Test lines 610-612: when invoke_all_functions contains a non-dotted name, skip it
-        use sl_core::types::{FunctionDecl, FunctionParam, FunctionReturn};
+        use sl_core::types::{FunctionDecl, FunctionReturn};
         let mut engine = engine_from_sources(map(&[(
             "main.xml",
             r#"<module name="main" export="script:main">
@@ -3288,8 +3288,6 @@ let public = 3;
 
     #[test]
     pub(super) fn function_symbol_map_handles_non_dotted_names() {
-        use super::*;
-
         let files = map(&[(
             "main.xml",
             r#"<module name="main" export="script:main">
@@ -3304,8 +3302,6 @@ let public = 3;
 
     #[test]
     pub(super) fn function_symbol_map_non_dotted_entries_triggers_execute_rhai_with_mode() {
-        use super::*;
-
         let files = map(&[(
             "main.xml",
             r#"<module name="main" export="script:main">

@@ -1,4 +1,4 @@
-use super::lifecycle::{CompletionKind, PendingBoundary, PendingChoiceOption, RuntimeFrame};
+use super::lifecycle::{CompletionKind, PendingBoundary, PendingChoiceOption};
 use super::*;
 
 enum PlannedNode {
@@ -572,6 +572,7 @@ impl ScriptLangEngine {
 
 #[cfg(test)]
 mod step_tests {
+    use super::lifecycle::RuntimeFrame;
     use super::runtime_test_support::*;
     use super::*;
 

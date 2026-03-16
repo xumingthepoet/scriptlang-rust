@@ -1,12 +1,8 @@
-#![allow(unused_imports)]
-
 mod rng;
 
 use std::cell::RefCell;
-use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::collections::{BTreeSet, HashMap};
-use std::path::Path;
 use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
@@ -16,18 +12,16 @@ use crate::helpers::rhai_bridge::{
 };
 use crate::helpers::value_path::{assign_nested_path, parse_ref_path};
 use regex::Regex;
-use rhai::{
-    Array, Dynamic, Engine, EvalAltResult, ImmutableString, Map, Position, Scope, FLOAT, INT,
-};
+use rhai::{Dynamic, Engine, EvalAltResult, ImmutableString, Position, Scope, INT};
 use rng::next_random_bounded;
 #[cfg(test)]
 use rng::{next_random_bounded_with, next_random_u32};
 use sl_core::{
-    default_value_from_type, is_type_compatible, module_namespace_symbol, rewrite_function_calls,
-    rewrite_module_global_qualified_access, rhai_function_symbol, AccessLevel, ChoiceEntry,
-    ChoiceItem, ContinuationFrame, ContinueTarget, EngineOutput, ModuleConstDecl, ModuleVarDecl,
-    PendingBoundary, PendingDynamicChoiceBinding, ScriptIr, ScriptKind, ScriptLangError,
-    ScriptNode, ScriptTarget, ScriptType, SlValue, Snapshot, SnapshotCompletion, SnapshotFrame,
+    default_value_from_type, is_type_compatible, module_namespace_symbol, rhai_function_symbol,
+    AccessLevel, ChoiceEntry, ChoiceItem, ContinuationFrame, ContinueTarget, EngineOutput,
+    ModuleConstDecl, ModuleVarDecl, PendingDynamicChoiceBinding, ScriptIr, ScriptKind,
+    ScriptLangError, ScriptNode, ScriptTarget, ScriptType, SlValue, Snapshot, SnapshotCompletion,
+    SnapshotFrame,
 };
 
 mod boundary;

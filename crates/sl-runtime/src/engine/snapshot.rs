@@ -275,6 +275,7 @@ impl ScriptLangEngine {
 mod snapshot_tests {
     use super::*;
     use crate::engine::runtime_test_support::*;
+    use sl_core::PendingBoundary;
 
     fn output_kind(output: &EngineOutput) -> &'static str {
         match output {

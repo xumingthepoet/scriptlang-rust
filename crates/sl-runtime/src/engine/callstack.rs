@@ -1,4 +1,3 @@
-use super::lifecycle::{CompletionKind, RuntimeFrame};
 use super::*;
 
 impl ScriptLangEngine {
@@ -371,6 +370,7 @@ impl ScriptLangEngine {
 
 #[cfg(test)]
 mod callstack_tests {
+    use super::lifecycle::{CompletionKind, RuntimeFrame};
     use super::runtime_test_support::*;
     use super::*;
 

@@ -1,4 +1,4 @@
-use super::lifecycle::{CompletionKind, PendingBoundary, RuntimeFrame};
+use super::lifecycle::{CompletionKind, PendingBoundary};
 use super::*;
 
 impl ScriptLangEngine {
