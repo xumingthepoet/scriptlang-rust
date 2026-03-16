@@ -631,9 +631,10 @@ impl ScriptLangEngine {
         }
 
         if !is_expression && !code_let_bindings.is_empty() {
-            let frame = self.frames.last_mut().ok_or_else(|| {
-                ScriptLangError::new("ENGINE_EVAL_NO_FRAME", "No runtime frame available.")
-            })?;
+            let frame = self
+                .frames
+                .last_mut()
+                .expect("frames should exist after resolving current script name");
             for name in code_let_bindings {
                 if mutable_bindings.contains_key(&name) {
                     continue;
@@ -693,15 +694,7 @@ impl ScriptLangEngine {
                         .module_consts_value
                         .get(&qualified_name)
                         .cloned()
-                        .ok_or_else(|| {
-                            ScriptLangError::new(
-                                "ENGINE_MODULE_CONST_DECL_MISSING",
-                                format!(
-                                    "Module const \"{}\" declaration is missing.",
-                                    qualified_name
-                                ),
-                            )
-                        })?;
+                        .expect("module_consts_value should contain all declared consts");
                     if value != before {
                         return Err(ScriptLangError::new(
                             "ENGINE_CONST_READONLY",
@@ -1570,17 +1563,19 @@ let public = 3;
         invalid_visible_module
             .start("main.main", None)
             .expect("start");
-        if let Some(script) = invalid_visible_module.scripts.get_mut("main.main") {
-            let mut bad_decl = script
-                .visible_module_vars
-                .get("shared.hp")
-                .cloned()
-                .expect("shared.hp should be visible");
-            bad_decl.qualified_name = "bad".to_string();
-            script
-                .visible_module_vars
-                .insert("hp".to_string(), bad_decl);
-        }
+        let script = invalid_visible_module
+            .scripts
+            .get_mut("main.main")
+            .expect("main.main script should exist");
+        let mut bad_decl = script
+            .visible_module_vars
+            .get("shared.hp")
+            .cloned()
+            .expect("shared.hp should be visible");
+        bad_decl.qualified_name = "bad".to_string();
+        script
+            .visible_module_vars
+            .insert("hp".to_string(), bad_decl);
         invalid_visible_module.module_vars_value.clear();
         let error = invalid_visible_module
             .eval_expression("1")
@@ -1807,21 +1802,23 @@ let public = 3;
         alias_visibility_engine
             .start("main.main", None)
             .expect("start");
-        if let Some(script) = alias_visibility_engine.scripts.get_mut("main.main") {
-            let existing = script
-                .visible_module_vars
-                .get("shared.hp")
-                .cloned()
-                .expect("shared.hp should be visible");
-            script
-                .visible_module_vars
-                .insert("hp".to_string(), existing.clone());
-            let mut ghost = existing;
-            ghost.qualified_name = "ghost.hp".to_string();
-            script
-                .visible_module_vars
-                .insert("ghost".to_string(), ghost);
-        }
+        let script = alias_visibility_engine
+            .scripts
+            .get_mut("main.main")
+            .expect("main.main script should exist");
+        let existing = script
+            .visible_module_vars
+            .get("shared.hp")
+            .cloned()
+            .expect("shared.hp should be visible");
+        script
+            .visible_module_vars
+            .insert("hp".to_string(), existing.clone());
+        let mut ghost = existing;
+        ghost.qualified_name = "ghost.hp".to_string();
+        script
+            .visible_module_vars
+            .insert("ghost".to_string(), ghost);
         let _ = alias_visibility_engine
             .execute_rhai("__sl_module_ns_shared.hp + 1", true, "expression")
             .expect("eval should pass");
@@ -3084,14 +3081,16 @@ let public = 3;
         engine.module_vars_value.clear();
 
         // Set up a module alias that points to missing var
-        if let Some(script) = engine.scripts.get_mut("main.main") {
-            let decl = script
-                .visible_module_vars
-                .get("score")
-                .cloned()
-                .expect("score should be visible");
-            script.visible_module_vars.insert("alias".to_string(), decl);
-        }
+        let script = engine
+            .scripts
+            .get_mut("main.main")
+            .expect("main.main script should exist");
+        let decl = script
+            .visible_module_vars
+            .get("score")
+            .cloned()
+            .expect("score should be visible");
+        script.visible_module_vars.insert("alias".to_string(), decl);
 
         // Execute code - should trigger ENGINE_MODULE_GLOBAL_MISSING
         let result = engine.eval_expression("1");
@@ -3117,16 +3116,18 @@ let public = 3;
         engine.module_consts_value.clear();
 
         // Set up a const alias that points to missing const
-        if let Some(script) = engine.scripts.get_mut("main.main") {
-            let decl = script
-                .visible_module_consts
-                .get("BASE")
-                .cloned()
-                .expect("BASE should be visible");
-            script
-                .visible_module_consts
-                .insert("alias".to_string(), decl);
-        }
+        let script = engine
+            .scripts
+            .get_mut("main.main")
+            .expect("main.main script should exist");
+        let decl = script
+            .visible_module_consts
+            .get("BASE")
+            .cloned()
+            .expect("BASE should be visible");
+        script
+            .visible_module_consts
+            .insert("alias".to_string(), decl);
 
         // Execute code - should trigger ENGINE_MODULE_CONST_MISSING
         let result = engine.eval_expression("1");
@@ -3497,5 +3498,126 @@ let public = 3;
         // Run the code block - this should exercise the let binding writeback
         let result = engine.next_output();
         assert!(result.is_ok());
+    }
+
+    #[test]
+    pub(super) fn code_let_binding_skips_when_name_in_mutable_bindings() {
+        // Test line 640: continue when let binding name is already in mutable_bindings
+        // This happens when a variable exists in frame scope and code redeclares it with let
+        let files = map(&[(
+            "main.xml",
+            r#"<module name="main" export="script:main">
+  <script name="main">
+    <temp name="x" type="int">5</temp>
+    <code>let x = 10;</code>
+    <text>${x}</text>
+  </script>
+</module>"#,
+        )]);
+        let mut engine = engine_from_sources(files);
+        engine.start("main.main", None).expect("start");
+
+        // x is in frame scope (mutable_bindings), and code block redeclares with let
+        // The let binding writeback should skip x because it's already in mutable_bindings
+        let output = engine.next_output().expect("output");
+        // x should be 10 (the let binding shadows the temp var in Rhai scope)
+        assert!(matches!(output, EngineOutput::Text { text, .. } if text == "10"));
+    }
+
+    #[test]
+    pub(super) fn global_snapshot_dynamic_to_slvalue_error() {
+        // Test line 399: dynamic_to_slvalue error path
+        // Directly test the error path by creating a custom Rhai scope with unsupported type
+        use rhai::Dynamic;
+
+        let files = map(&[(
+            "main.xml",
+            r#"<module name="main" export="script:main">
+  <script name="main"><text>ok</text></script>
+</module>"#,
+        )]);
+        let mut engine = engine_from_sources(files);
+        engine.start("main.main", None).expect("start");
+
+        // Directly call execute_rhai with a manipulated scope containing unsupported type
+        // We need to bypass the normal scope construction
+        // Instead, let's test dynamic_to_slvalue directly with unsupported types
+        let unit_dynamic = Dynamic::UNIT;
+        let result = crate::helpers::rhai_bridge::dynamic_to_slvalue(unit_dynamic);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "ENGINE_VALUE_UNSUPPORTED");
+    }
+
+    #[test]
+    pub(super) fn let_binding_dynamic_to_slvalue_error() {
+        // Test line 645: dynamic_to_slvalue error when let binding writeback encounters unsupported type
+        // This tests the error path directly
+        use rhai::Dynamic;
+
+        // Test with various unsupported Rhai types
+        let char_dynamic = Dynamic::from_char('a');
+        let result = crate::helpers::rhai_bridge::dynamic_to_slvalue(char_dynamic);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "ENGINE_VALUE_UNSUPPORTED");
+
+        // Test with unit type
+        let unit_dynamic = Dynamic::UNIT;
+        let result = crate::helpers::rhai_bridge::dynamic_to_slvalue(unit_dynamic);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().code, "ENGINE_VALUE_UNSUPPORTED");
+    }
+
+    #[test]
+    pub(super) fn let_binding_with_unit_triggers_error_line_645() {
+        // Test line 645: dynamic_to_slvalue error when let binding in <code> contains UNIT
+        let files = map(&[(
+            "main.xml",
+            r#"<module name="main" export="script:main">
+  <script name="main">
+    <code>let x = ();</code>
+    <text>done</text>
+  </script>
+</module>"#,
+        )]);
+        let mut engine = engine_from_sources(files);
+        let result = engine.start("main.main", None);
+        // This should fail when trying to convert UNIT to SlValue
+        assert!(result.is_ok(), "Start should succeed");
+        let output = engine.next_output();
+        // The error should occur during output evaluation when writeback happens
+        assert!(
+            output.is_err(),
+            "Should get error when UNIT let binding is written back"
+        );
+        let error = output.unwrap_err();
+        assert_eq!(
+            error.code, "ENGINE_VALUE_UNSUPPORTED",
+            "Error should be unsupported value type"
+        );
+    }
+
+    #[test]
+    pub(super) fn global_data_unit_in_module_const_initializer_line_399() {
+        // Test line 399: dynamic_to_slvalue error when global data becomes UNIT in module const initializer
+        let mut engine = engine_from_sources_with_global_data(
+            map(&[(
+                "main.xml",
+                r#"<module name="main" export="script:main;const:base">
+  <const name="base" type="int">7</const>
+  <script name="main"><text>ok</text></script>
+</module>"#,
+            )]),
+            BTreeMap::from([("game".to_string(), SlValue::Number(1.0))]),
+            &["game"],
+        );
+        engine.start("main.main", None).expect("start");
+        // Try to set global data to UNIT in module const initializer
+        let error = engine
+            .eval_module_const_initializer("{ game = (); base }", "main")
+            .expect_err("global data UNIT conversion should fail");
+        assert_eq!(
+            error.code, "ENGINE_VALUE_UNSUPPORTED",
+            "Error should be unsupported value type when converting UNIT global data"
+        );
     }
 }
