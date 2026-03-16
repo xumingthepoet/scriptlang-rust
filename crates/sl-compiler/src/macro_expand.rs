@@ -190,6 +190,15 @@ fn validate_temp_input_attributes(node: &XmlElementNode) -> Result<(), ScriptLan
     Ok(())
 }
 
+/// Find a required child element by name from XML nodes
+#[allow(dead_code)]
+fn find_child_by_name<'a>(children: &'a [XmlNode], name: &str) -> Option<&'a XmlElementNode> {
+    children.iter().find_map(|entry| match entry {
+        XmlNode::Element(element) if element.name == name => Some(element),
+        _ => None,
+    })
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ForTempDecl {
     pub(crate) name: String,
@@ -593,39 +602,15 @@ mod macro_expand_tests {
         let group = expanded.first().expect("expanded group");
         assert_eq!(group.name, "group");
 
-        let while_node = group
-            .children
-            .iter()
-            .find_map(|entry| match entry {
-                XmlNode::Element(element) if element.name == "while" => Some(element),
-                _ => None,
-            })
-            .expect("for should contain while");
-        let if_node = while_node
-            .children
-            .iter()
-            .find_map(|entry| match entry {
-                XmlNode::Element(element) if element.name == "if" => Some(element),
-                _ => None,
-            })
-            .expect("while first child must be if");
+        let while_node =
+            find_child_by_name(&group.children, "while").expect("for should contain while");
+        let if_node =
+            find_child_by_name(&while_node.children, "if").expect("while first child must be if");
         assert_eq!(if_node.name, "if");
-        let else_node = if_node
-            .children
-            .iter()
-            .find_map(|entry| match entry {
-                XmlNode::Element(element) if element.name == "else" => Some(element),
-                _ => None,
-            })
-            .expect("if should contain else branch");
-        let code_node = else_node
-            .children
-            .iter()
-            .find_map(|entry| match entry {
-                XmlNode::Element(element) if element.name == "code" => Some(element),
-                _ => None,
-            })
-            .expect("else first child must be code");
+        let else_node =
+            find_child_by_name(&if_node.children, "else").expect("if should contain else branch");
+        let code_node =
+            find_child_by_name(&else_node.children, "code").expect("else first child must be code");
         assert_eq!(code_node.name, "code");
         let iteration_text = inline_text_content(code_node);
         assert_eq!(iteration_text.trim(), "i = i + 1;");
@@ -640,10 +625,7 @@ mod macro_expand_tests {
             }),
         ];
         // This find_map will hit _ => None for all elements (no "if")
-        let result = mixed_children.iter().find_map(|entry| match entry {
-            XmlNode::Element(element) if element.name == "if" => Some(element),
-            _ => None,
-        });
+        let result = find_child_by_name(&mixed_children, "if");
         assert!(
             result.is_none(),
             "find_map should return None when no match"
@@ -1239,25 +1221,14 @@ mod macro_expand_tests {
             })
             .expect("for expansion should contain while");
 
-        let first_if = while_node
-            .children
-            .iter()
-            .find_map(|entry| match entry {
-                XmlNode::Element(element) if element.name == "if" => Some(element),
-                _ => None,
-            })
-            .expect("while first child must be if");
+        let first_if =
+            find_child_by_name(&while_node.children, "if").expect("while first child must be if");
         let else_node = element_children(first_if)
             .find(|child| child.name == "else")
             .expect("guard if should contain else");
-        let iteration_code = else_node
-            .children
-            .iter()
-            .find_map(|entry| match entry {
-                XmlNode::Element(element) if element.name == "code" => Some(element),
-                _ => None,
-            })
-            .expect("else first child must be code");
+
+        let iteration_code =
+            find_child_by_name(&else_node.children, "code").expect("else first child must be code");
         assert_eq!(inline_text_content(iteration_code).trim(), "true;");
 
         // Cover the _ => None branches in find_map (lines 1243:22, 1254:22)
@@ -1270,10 +1241,7 @@ mod macro_expand_tests {
             }),
         ];
         // This find_map will hit _ => None for all elements (no "code")
-        let result = mixed_children.iter().find_map(|entry| match entry {
-            XmlNode::Element(element) if element.name == "code" => Some(element),
-            _ => None,
-        });
+        let result = find_child_by_name(&mixed_children, "code");
         assert!(
             result.is_none(),
             "find_map should return None when no match"
@@ -1382,20 +1350,16 @@ mod macro_expand_tests {
         assert_eq!(error.code, "XML_MISSING_ATTR");
     }
 
-    // Test coverage for find_map _ => None branches in for macro expansion tests
+    // Test coverage for find_child_by_name helper function (covers both Some and None branches)
     #[test]
-    fn find_map_none_branch_coverage() {
-        // Test finding "if" element - with match
+    fn find_child_by_name_covers_both_branches() {
         let children_with_if: Vec<XmlNode> =
             vec![XmlNode::Element(xml_element("if", &[], Vec::new()))];
-        let result_if = children_with_if.iter().find_map(|entry| match entry {
-            XmlNode::Element(element) if element.name == "if" => Some(element),
-            _ => None,
-        });
-        assert!(result_if.is_some(), "find_map should return Some for 'if'");
-
-        // Test finding "if" element - without match (None branch)
-        let children_without_if: Vec<XmlNode> = vec![
+        let children_with_code: Vec<XmlNode> =
+            vec![XmlNode::Element(xml_element("code", &[], Vec::new()))];
+        let children_with_while: Vec<XmlNode> =
+            vec![XmlNode::Element(xml_element("while", &[], Vec::new()))];
+        let children_without: Vec<XmlNode> = vec![
             XmlNode::Element(xml_element("text", &[], vec![xml_text("hello")])),
             XmlNode::Element(xml_element("other", &[], Vec::new())),
             XmlNode::Text(XmlTextNode {
@@ -1403,57 +1367,16 @@ mod macro_expand_tests {
                 location: SourceSpan::synthetic(),
             }),
         ];
-        let result_none = children_without_if.iter().find_map(|entry| match entry {
-            XmlNode::Element(element) if element.name == "if" => Some(element),
-            _ => None,
-        });
-        assert!(
-            result_none.is_none(),
-            "find_map should return None when no match"
-        );
 
-        // Test finding "code" element - with match
-        let children_with_code: Vec<XmlNode> =
-            vec![XmlNode::Element(xml_element("code", &[], Vec::new()))];
-        let result_code = children_with_code.iter().find_map(|entry| match entry {
-            XmlNode::Element(element) if element.name == "code" => Some(element),
-            _ => None,
-        });
-        assert!(
-            result_code.is_some(),
-            "find_map should return Some for 'code'"
-        );
+        // Test Some branch - element found
+        assert!(find_child_by_name(&children_with_if, "if").is_some());
+        assert!(find_child_by_name(&children_with_code, "code").is_some());
+        assert!(find_child_by_name(&children_with_while, "while").is_some());
 
-        // Test finding "code" element - without match (None branch)
-        let result_code_none = children_without_if.iter().find_map(|entry| match entry {
-            XmlNode::Element(element) if element.name == "code" => Some(element),
-            _ => None,
-        });
-        assert!(
-            result_code_none.is_none(),
-            "find_map should return None when no 'code'"
-        );
-
-        // Test finding "while" element - with match
-        let children_with_while: Vec<XmlNode> =
-            vec![XmlNode::Element(xml_element("while", &[], Vec::new()))];
-        let result_while = children_with_while.iter().find_map(|entry| match entry {
-            XmlNode::Element(element) if element.name == "while" => Some(element),
-            _ => None,
-        });
-        assert!(
-            result_while.is_some(),
-            "find_map should return Some for 'while'"
-        );
-
-        // Test finding "while" element - without match (None branch)
-        let result_while_none = children_without_if.iter().find_map(|entry| match entry {
-            XmlNode::Element(element) if element.name == "while" => Some(element),
-            _ => None,
-        });
-        assert!(
-            result_while_none.is_none(),
-            "find_map should return None when no 'while'"
-        );
+        // Test None branch - element not found
+        assert!(find_child_by_name(&children_with_if, "other").is_none());
+        assert!(find_child_by_name(&children_without, "if").is_none());
+        assert!(find_child_by_name(&children_without, "code").is_none());
+        assert!(find_child_by_name(&children_without, "while").is_none());
     }
 }

@@ -407,11 +407,8 @@ pub(crate) fn build_initializer_expr_from_xml_for_type_expr(
             }
             Ok(format!("#{{{}}}", fields.join(", ")))
         }
-        ParsedTypeExpr::Array(_) => {
+        ParsedTypeExpr::Array(element_type) => {
             let mut items = Vec::new();
-            let ParsedTypeExpr::Array(element_type) = ty_expr else {
-                unreachable!("array branch guarantees ParsedTypeExpr::Array")
-            };
             for child in element_children(node) {
                 if child.name != "item" {
                     return Err(ScriptLangError::with_span(
@@ -546,11 +543,8 @@ pub(crate) fn build_initializer_expr_from_xml(
             }
             Ok(format!("#{{{}}}", entries.join(", ")))
         }
-        ScriptType::Array { .. } => {
+        ScriptType::Array { element_type } => {
             let mut items = Vec::new();
-            let ScriptType::Array { element_type } = resolved_type else {
-                unreachable!("array branch guarantees ScriptType::Array")
-            };
             for child in element_children(node) {
                 if child.name != "item" {
                     return Err(ScriptLangError::with_span(
@@ -570,12 +564,11 @@ pub(crate) fn build_initializer_expr_from_xml(
             }
             Ok(format!("[{}]", items.join(", ")))
         }
-        ScriptType::Map { key_type, .. } => {
+        ScriptType::Map {
+            key_type,
+            value_type,
+        } => {
             let mut pairs = Vec::new();
-            let value_type = match resolved_type {
-                ScriptType::Map { value_type, .. } => value_type.as_ref(),
-                _ => unreachable!("map branch guarantees ScriptType::Map"),
-            };
             for child in element_children(node) {
                 if child.name != "tuple" {
                     return Err(ScriptLangError::with_span(
@@ -588,8 +581,11 @@ pub(crate) fn build_initializer_expr_from_xml(
                     ));
                 }
                 let raw_key = get_required_non_empty_attr(child, "key")?;
-                let value_expr =
-                    parse_initializer_value_for_resolved_type(child, value_type, visible_types)?;
+                let value_expr = parse_initializer_value_for_resolved_type(
+                    child,
+                    value_type.as_ref(),
+                    visible_types,
+                )?;
                 match key_type {
                     MapKeyType::String => {
                         pairs.push(format!(
@@ -3235,5 +3231,505 @@ mod xml_utils_tests {
         )
         .expect_err("typed xml with inline-only text should fail");
         assert_eq!(inline_only_typed_error.code, "XML_INIT_XML_CHILD_INVALID");
+    }
+
+    #[test]
+    fn xml_initializer_error_paths_cover_all_branches() {
+        // Test parse_initializer_value_for_unknown_type with format="inline" (line 220-221)
+        let inline_node = xml_element("field", &[("name", "x")], vec![xml_text("value")]);
+        let inline_result = parse_initializer_value_for_unknown_type(&inline_node)
+            .expect("inline format should work");
+        assert_eq!(inline_result, "value");
+
+        // Test parse_initializer_value_for_type_expr with format="inline" (line 230-231)
+        let type_expr = ParsedTypeExpr::Primitive("int".to_string());
+        let inline_for_type = parse_initializer_value_for_type_expr(&inline_node, &type_expr)
+            .expect("inline format should work with type");
+        assert_eq!(inline_for_type, "value");
+
+        // Test parse_initializer_value_for_resolved_type with format="inline" (line 241-242)
+        let resolved_type = ScriptType::Primitive {
+            name: "int".to_string(),
+        };
+        let inline_for_resolved = parse_initializer_value_for_resolved_type(
+            &inline_node,
+            &resolved_type,
+            &BTreeMap::new(),
+        )
+        .expect("inline format should work with resolved type");
+        assert_eq!(inline_for_resolved, "value");
+
+        // Test build_initializer_expr_from_xml_untyped error paths
+        // Mixed content error (line 251-260)
+        let mixed_content = xml_element(
+            "field",
+            &[("format", "xml")],
+            vec![
+                xml_text("text"),
+                XmlNode::Element(xml_element("nested", &[], vec![])),
+            ],
+        );
+        let mixed_error =
+            build_initializer_expr_from_xml_untyped(&mixed_content).expect_err("mixed should fail");
+        assert_eq!(mixed_error.code, "XML_INIT_XML_MIXED_CONTENT");
+
+        // Pure text content error (line 261-270)
+        let text_only = xml_element("field", &[("format", "xml")], vec![xml_text("some text")]);
+        let text_error =
+            build_initializer_expr_from_xml_untyped(&text_only).expect_err("text only should fail");
+        assert_eq!(text_error.code, "XML_INIT_XML_CHILD_INVALID");
+
+        // Field with mixed child types error (line 281-289)
+        let mixed_fields = xml_element(
+            "field",
+            &[("format", "xml")],
+            vec![
+                XmlNode::Element(xml_element("field", &[("name", "a")], vec![xml_text("1")])),
+                XmlNode::Element(xml_element("item", &[], vec![xml_text("2")])),
+            ],
+        );
+        let mixed_field_error = build_initializer_expr_from_xml_untyped(&mixed_fields)
+            .expect_err("mixed fields should fail");
+        assert_eq!(mixed_field_error.code, "XML_INIT_XML_CHILD_INVALID");
+
+        // Field with empty name error (line 291-296)
+        let empty_name_field = xml_element(
+            "field",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("name", "")],
+                vec![xml_text("1")],
+            ))],
+        );
+        let empty_name_error = build_initializer_expr_from_xml_untyped(&empty_name_field)
+            .expect_err("empty name should fail");
+        assert_eq!(empty_name_error.code, "XML_EMPTY_ATTR");
+
+        // Item with wrong child type error (line 305-313)
+        let wrong_item_child = xml_element(
+            "field",
+            &[("format", "xml")],
+            vec![
+                XmlNode::Element(xml_element("item", &[], vec![xml_text("1")])),
+                XmlNode::Element(xml_element("field", &[("name", "x")], vec![xml_text("2")])),
+            ],
+        );
+        let wrong_item_error = build_initializer_expr_from_xml_untyped(&wrong_item_child)
+            .expect_err("wrong item child should fail");
+        assert_eq!(wrong_item_error.code, "XML_INIT_XML_CHILD_INVALID");
+
+        // Tuple with wrong child type error (line 322-330)
+        let wrong_tuple_child = xml_element(
+            "field",
+            &[("format", "xml")],
+            vec![
+                XmlNode::Element(xml_element("tuple", &[("key", "a")], vec![xml_text("1")])),
+                XmlNode::Element(xml_element("field", &[("name", "x")], vec![xml_text("2")])),
+            ],
+        );
+        let wrong_tuple_error = build_initializer_expr_from_xml_untyped(&wrong_tuple_child)
+            .expect_err("wrong tuple child should fail");
+        assert_eq!(wrong_tuple_error.code, "XML_INIT_XML_CHILD_INVALID");
+
+        // Tuple with empty key error (line 332-334)
+        let empty_key_tuple = xml_element(
+            "field",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "tuple",
+                &[("key", "")],
+                vec![xml_text("1")],
+            ))],
+        );
+        let empty_key_error = build_initializer_expr_from_xml_untyped(&empty_key_tuple)
+            .expect_err("empty key should fail");
+        assert_eq!(empty_key_error.code, "XML_EMPTY_ATTR");
+
+        // Test build_initializer_expr_from_xml_for_type_expr error paths
+        // Array type with wrong child (line 416-424)
+        let wrong_array_child = xml_element(
+            "field",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("name", "x")],
+                vec![xml_text("1")],
+            ))],
+        );
+        let array_type_expr =
+            ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Primitive("int".to_string())));
+        let wrong_array_error =
+            build_initializer_expr_from_xml_for_type_expr(&wrong_array_child, &array_type_expr)
+                .expect_err("wrong array child should fail");
+        assert_eq!(wrong_array_error.code, "XML_INIT_XML_CHILD_INVALID");
+
+        // Map type with wrong child (line 439-447)
+        let wrong_map_child = xml_element(
+            "field",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "item",
+                &[],
+                vec![xml_text("1")],
+            ))],
+        );
+        let map_type_expr = ParsedTypeExpr::Map {
+            key_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+            value_type: Box::new(ParsedTypeExpr::Primitive("int".to_string())),
+        };
+        let wrong_map_error =
+            build_initializer_expr_from_xml_for_type_expr(&wrong_map_child, &map_type_expr)
+                .expect_err("wrong map child should fail");
+        assert_eq!(wrong_map_error.code, "XML_INIT_XML_CHILD_INVALID");
+
+        // Test build_initializer_expr_from_xml error paths (resolved types)
+        // Array resolved type with wrong child (line 555-563)
+        let array_resolved = ScriptType::Array {
+            element_type: Box::new(ScriptType::Primitive {
+                name: "int".to_string(),
+            }),
+        };
+        let wrong_array_resolved_error =
+            build_initializer_expr_from_xml(&wrong_array_child, &array_resolved, &BTreeMap::new())
+                .expect_err("wrong resolved array child should fail");
+        assert_eq!(
+            wrong_array_resolved_error.code,
+            "XML_INIT_XML_CHILD_INVALID"
+        );
+
+        // Map resolved type with wrong child (line 580-588)
+        let map_resolved = ScriptType::Map {
+            key_type: MapKeyType::String,
+            value_type: Box::new(ScriptType::Primitive {
+                name: "int".to_string(),
+            }),
+        };
+        let wrong_map_resolved_error =
+            build_initializer_expr_from_xml(&wrong_map_child, &map_resolved, &BTreeMap::new())
+                .expect_err("wrong resolved map child should fail");
+        assert_eq!(wrong_map_resolved_error.code, "XML_INIT_XML_CHILD_INVALID");
+
+        // Map with empty key (line 590-592)
+        let empty_key_map = xml_element(
+            "field",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "tuple",
+                &[("key", "")],
+                vec![xml_text("1")],
+            ))],
+        );
+        let empty_key_map_error =
+            build_initializer_expr_from_xml(&empty_key_map, &map_resolved, &BTreeMap::new())
+                .expect_err("empty key in map should fail");
+        assert_eq!(empty_key_map_error.code, "XML_EMPTY_ATTR");
+
+        // Additional tests for format="xml" branches (lines 222, 232, 243)
+        // and other error paths
+        let xml_format_field = xml_element(
+            "field",
+            &[("format", "xml"), ("name", "x")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("name", "value")],
+                vec![xml_text("1")],
+            ))],
+        );
+        let xml_result = parse_initializer_value_for_unknown_type(&xml_format_field)
+            .expect("xml format should work");
+        assert_eq!(xml_result, "#{value: 1}");
+
+        // Test type expr with xml format
+        let xml_for_type_result = parse_initializer_value_for_type_expr(
+            &xml_format_field,
+            &ParsedTypeExpr::Custom("Object".to_string()),
+        )
+        .expect("xml format with type should work");
+        assert!(xml_for_type_result.contains("value: 1"));
+
+        // Test resolved type with xml format
+        let xml_for_resolved_result = parse_initializer_value_for_resolved_type(
+            &xml_format_field,
+            &ScriptType::Object {
+                type_name: "Object".to_string(),
+                fields: BTreeMap::from([(
+                    "value".to_string(),
+                    ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                )]),
+            },
+            &BTreeMap::new(),
+        )
+        .expect("xml format with resolved type should work");
+        assert!(xml_for_resolved_result.contains("value: 1"));
+
+        // Test reserved keyword error in field name (line 296)
+        let reserved_keyword_field = xml_element(
+            "field",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("name", "if")],
+                vec![xml_text("1")],
+            ))],
+        );
+        let reserved_error = build_initializer_expr_from_xml_untyped(&reserved_keyword_field)
+            .expect_err("reserved keyword should fail");
+        assert_eq!(reserved_error.code, "NAME_RHAI_KEYWORD_RESERVED");
+
+        // Test nested initializer error propagation (line 297)
+        let nested_error_field = xml_element(
+            "field",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("name", "x"), ("format", "xml")],
+                vec![XmlNode::Element(xml_element("bad", &[], vec![]))],
+            ))],
+        );
+        let nested_error = build_initializer_expr_from_xml_untyped(&nested_error_field)
+            .expect_err("nested bad child should fail");
+        assert_eq!(nested_error.code, "XML_INIT_XML_CHILD_INVALID");
+
+        // Test item with nested error (line 315)
+        let item_nested_error = xml_element(
+            "field",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "item",
+                &[("format", "xml")],
+                vec![XmlNode::Element(xml_element("bad", &[], vec![]))],
+            ))],
+        );
+        let item_nested_err = build_initializer_expr_from_xml_untyped(&item_nested_error)
+            .expect_err("item nested should fail");
+        assert_eq!(item_nested_err.code, "XML_INIT_XML_CHILD_INVALID");
+
+        // Test tuple with nested error (line 333)
+        let tuple_nested_error = xml_element(
+            "field",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "tuple",
+                &[("key", "k"), ("format", "xml")],
+                vec![XmlNode::Element(xml_element("bad", &[], vec![]))],
+            ))],
+        );
+        let tuple_nested_err = build_initializer_expr_from_xml_untyped(&tuple_nested_error)
+            .expect_err("tuple nested should fail");
+        assert_eq!(tuple_nested_err.code, "XML_INIT_XML_CHILD_INVALID");
+
+        // Test type expr Array unreachable branch (line 413)
+        // This is covered by the match on ParsedTypeExpr::Array in build_initializer_expr_from_xml_for_type_expr
+        let array_xml = xml_element(
+            "field",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "item",
+                &[],
+                vec![xml_text("1")],
+            ))],
+        );
+        let array_type_expr2 =
+            ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Primitive("int".to_string())));
+        let array_result =
+            build_initializer_expr_from_xml_for_type_expr(&array_xml, &array_type_expr2)
+                .expect("array type should work");
+        assert_eq!(array_result, "[1]");
+
+        // Test type expr Map with key (line 450)
+        let map_xml = xml_element(
+            "field",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "tuple",
+                &[("key", "k")],
+                vec![xml_text("v")],
+            ))],
+        );
+        let map_type_expr2 = ParsedTypeExpr::Map {
+            key_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+            value_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+        };
+        let map_result = build_initializer_expr_from_xml_for_type_expr(&map_xml, &map_type_expr2)
+            .expect("map type should work");
+        assert_eq!(map_result, r#"#{"k": v}"#);
+
+        // Test resolved type - Array unreachable (line 552)
+        let array_resolved2 = ScriptType::Array {
+            element_type: Box::new(ScriptType::Primitive {
+                name: "int".to_string(),
+            }),
+        };
+        let array_resolved_result =
+            build_initializer_expr_from_xml(&array_xml, &array_resolved2, &BTreeMap::new())
+                .expect("resolved array should work");
+        assert_eq!(array_resolved_result, "[1]");
+
+        // Test resolved type - Map with string key (line 577)
+        let map_resolved2 = ScriptType::Map {
+            key_type: MapKeyType::String,
+            value_type: Box::new(ScriptType::Primitive {
+                name: "string".to_string(),
+            }),
+        };
+        let map_resolved_result =
+            build_initializer_expr_from_xml(&map_xml, &map_resolved2, &BTreeMap::new())
+                .expect("resolved map should work");
+        assert_eq!(map_resolved_result, r#"#{"k": v}"#);
+
+        // Test build_initializer_expr_from_xml error paths (lines 483-491)
+        // Pure text content error with resolved type (line 483-491)
+        let text_only_resolved =
+            xml_element("field", &[("format", "xml")], vec![xml_text("some text")]);
+        let text_error_resolved = build_initializer_expr_from_xml(
+            &text_only_resolved,
+            &ScriptType::Object {
+                type_name: "Object".to_string(),
+                fields: BTreeMap::new(),
+            },
+            &BTreeMap::new(),
+        )
+        .expect_err("text only with resolved type should fail");
+        assert_eq!(text_error_resolved.code, "XML_INIT_XML_CHILD_INVALID");
+
+        // Explicitly test format="xml" branches to cover lines 220, 230, 241
+        // These tests ensure the Xml branch of parse_initializer_format is hit
+        let explicit_xml_node = xml_element(
+            "field",
+            &[("format", "xml"), ("name", "x")],
+            vec![XmlNode::Element(xml_element(
+                "field",
+                &[("name", "a")],
+                vec![xml_text("1")],
+            ))],
+        );
+        // Test parse_initializer_value_for_unknown_type with explicit xml format
+        let _ = parse_initializer_value_for_unknown_type(&explicit_xml_node)
+            .expect("explicit xml format should work");
+        // Test parse_initializer_value_for_type_expr with explicit xml format
+        let _ = parse_initializer_value_for_type_expr(
+            &explicit_xml_node,
+            &ParsedTypeExpr::Custom("Test".to_string()),
+        )
+        .expect("explicit xml format with type should work");
+        // Test parse_initializer_value_for_resolved_type with explicit xml format
+        let _ = parse_initializer_value_for_resolved_type(
+            &explicit_xml_node,
+            &ScriptType::Object {
+                type_name: "Test".to_string(),
+                fields: BTreeMap::from([(
+                    "a".to_string(),
+                    ScriptType::Primitive {
+                        name: "int".to_string(),
+                    },
+                )]),
+            },
+            &BTreeMap::new(),
+        )
+        .expect("explicit xml format with resolved type should work");
+
+        // Test map with array type value to cover line 447
+        let map_arr_xml = xml_element(
+            "field",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "tuple",
+                &[("key", "arr_key")],
+                vec![xml_text("[1]")],
+            ))],
+        );
+        let map_arr_type = ParsedTypeExpr::Map {
+            key_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+            value_type: Box::new(ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Primitive(
+                "int".to_string(),
+            )))),
+        };
+        let map_arr_result =
+            build_initializer_expr_from_xml_for_type_expr(&map_arr_xml, &map_arr_type)
+                .expect("map array value should work");
+        assert!(map_arr_result.contains("arr_key"));
+
+        // Additional test: map with inline array value - uses parse_initializer_value_for_type_expr inline branch
+        let map_inline_xml = xml_element(
+            "field",
+            &[],
+            vec![XmlNode::Element(xml_element(
+                "tuple",
+                &[("key", "inline_key")],
+                vec![xml_text("[1, 2, 3]")],
+            ))],
+        );
+        let map_inline_type = ParsedTypeExpr::Map {
+            key_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+            value_type: Box::new(ParsedTypeExpr::Array(Box::new(ParsedTypeExpr::Primitive(
+                "int".to_string(),
+            )))),
+        };
+        let map_inline_result =
+            build_initializer_expr_from_xml_for_type_expr(&map_inline_xml, &map_inline_type)
+                .expect("map inline array value should work");
+        assert!(map_inline_result.contains("inline_key"));
+
+        // Explicitly test parse_initializer_value_for_type_expr called from Map handling
+        // This should cover line 447
+        let tuple_child = xml_element(
+            "tuple",
+            &[("key", "explicit_key")],
+            vec![xml_text("explicit_value")],
+        );
+        let _tuple_result = parse_initializer_value_for_type_expr(
+            &tuple_child,
+            &ParsedTypeExpr::Primitive("string".to_string()),
+        )
+        .expect("tuple with primitive value type should work");
+
+        // Test parse_initializer_value_for_type_expr error path from Map value handling
+        // Using build_initializer_expr_from_xml_for_type_expr with Map type where value parsing fails
+        // This should trigger error propagation from line 447
+        let map_error_xml = xml_element(
+            "field",
+            &[("format", "xml")],
+            vec![XmlNode::Element(xml_element(
+                "tuple",
+                &[("key", "test")],
+                vec![XmlNode::Element(xml_element("bad", &[], vec![]))], // invalid child
+            ))],
+        );
+        let map_error_type = ParsedTypeExpr::Map {
+            key_type: Box::new(ParsedTypeExpr::Primitive("string".to_string())),
+            value_type: Box::new(ParsedTypeExpr::Primitive("int".to_string())),
+        };
+        let _map_error =
+            build_initializer_expr_from_xml_for_type_expr(&map_error_xml, &map_error_type)
+                .expect_err("invalid tuple child should fail");
+
+        // Test error propagation: call with invalid format to exercise ? operator error path
+        let invalid_format_node = xml_element(
+            "field",
+            &[("format", "invalid_format")],
+            vec![xml_text("value")],
+        );
+        let _error = parse_initializer_value_for_unknown_type(&invalid_format_node)
+            .expect_err("invalid format should fail");
+
+        // Test error propagation for parse_initializer_value_for_type_expr (? operator error path)
+        let _error2 = parse_initializer_value_for_type_expr(
+            &invalid_format_node,
+            &ParsedTypeExpr::Primitive("int".to_string()),
+        )
+        .expect_err("invalid format for type expr should fail");
+
+        // Test error propagation for parse_initializer_value_for_resolved_type (? operator error path)
+        let _error3 = parse_initializer_value_for_resolved_type(
+            &invalid_format_node,
+            &ScriptType::Primitive {
+                name: "int".to_string(),
+            },
+            &BTreeMap::new(),
+        )
+        .expect_err("invalid format for resolved type should fail");
     }
 }
