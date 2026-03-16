@@ -16,6 +16,19 @@ Design for testability first, then implement behavior.
 
 If a function is hard to test, treat it as a design issue, not a testing issue.
 
+### 1.1 Gate Integrity (Do Not Bypass)
+
+Do not bypass quality gates with lint/coverage suppression attributes.
+
+Forbidden as a gate workaround:
+- `#[allow(...)]` / `#![allow(...)]` added only to silence warnings for the current change.
+- `#[expect(...)]` used to suppress known warnings without removing the root cause.
+- `#[ignore]` used to skip failing tests that should be fixed.
+
+Required approach:
+- Fix the root issue (delete dead code, refactor signatures, add tests, or tighten ownership).
+- If suppression is truly unavoidable, document the technical reason and time-bound follow-up in the same change.
+
 ## 2. Architecture Pattern: Core + Ports + Adapters
 
 Use three layers:

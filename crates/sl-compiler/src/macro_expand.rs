@@ -191,7 +191,7 @@ fn validate_temp_input_attributes(node: &XmlElementNode) -> Result<(), ScriptLan
 }
 
 /// Find a required child element by name from XML nodes
-#[allow(dead_code)]
+#[cfg(test)]
 fn find_child_by_name<'a>(children: &'a [XmlNode], name: &str) -> Option<&'a XmlElementNode> {
     children.iter().find_map(|entry| match entry {
         XmlNode::Element(element) if element.name == name => Some(element),

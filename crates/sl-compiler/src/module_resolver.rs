@@ -1234,7 +1234,7 @@ fn parse_module_binding_declaration(
     })
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn collect_global_data(
     sources: &BTreeMap<String, SourceFile>,
 ) -> Result<BTreeMap<String, SlValue>, ScriptLangError> {
@@ -1261,7 +1261,7 @@ pub(crate) fn collect_global_data(
     Ok(out)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn collect_visible_global_symbols(
     reachable: &BTreeSet<String>,
     sources: &BTreeMap<String, SourceFile>,
@@ -1294,7 +1294,7 @@ pub(crate) fn collect_visible_global_symbols(
     Ok(symbols)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn parse_global_data_symbol(file_path: &str) -> Result<String, ScriptLangError> {
     let path = Path::new(file_path);
     let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
@@ -1318,7 +1318,7 @@ pub(crate) fn parse_global_data_symbol(file_path: &str) -> Result<String, Script
     Ok(stem.to_string())
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn global_data_symbol_regex() -> &'static Regex {
     static REGEX: OnceLock<Regex> = OnceLock::new();
     REGEX.get_or_init(|| {

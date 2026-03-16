@@ -1,6 +1,7 @@
 use crate::*;
+use sl_core::default_value_from_type;
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub(crate) fn slvalue_from_json(value: JsonValue) -> SlValue {
     match value {
         JsonValue::Null => SlValue::String("null".to_string()),
@@ -19,7 +20,7 @@ pub(crate) fn slvalue_from_json(value: JsonValue) -> SlValue {
     }
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn default_values_from_script_params(params: &[ScriptParam]) -> BTreeMap<String, SlValue> {
     let mut defaults = BTreeMap::new();
     for param in params {
