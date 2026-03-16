@@ -98,7 +98,6 @@ mod import_graph_tests {
                 imports: vec!["missing.xml".to_string()],
                 alias_directives: Vec::new(),
                 xml_root: None,
-                json_value: None,
             },
         )]);
 

@@ -181,8 +181,6 @@ fn collect_source_scripts(
                 }
             })
             .collect(),
-        #[cfg(test)]
-        SourceKind::Json => Vec::new(),
     }
 }
 
@@ -962,21 +960,6 @@ mod pipeline_tests {
 
     #[test]
     fn collect_source_scripts_and_module_parse_helpers_cover_non_happy_paths() {
-        let json_source = SourceFile {
-            kind: SourceKind::Json,
-            imports: Vec::new(),
-            alias_directives: Vec::new(),
-            xml_root: None,
-            json_value: Some(SlValue::Bool(true)),
-        };
-        let collected = collect_source_scripts(&json_source, "shared.json", &BTreeMap::new());
-        assert!(collected.is_empty());
-
-        let global_data =
-            collect_global_data(&BTreeMap::from([("shared.json".to_string(), json_source)]))
-                .expect("internal json helper should still collect manual sources");
-        assert_eq!(global_data.get("shared"), Some(&SlValue::Bool(true)));
-
         let bad_module = map(&[(
             "bad.xml",
             r#"<module name="bad"><script><text>x</text></script></module>"#,
@@ -1535,28 +1518,11 @@ mod pipeline_tests {
                         .expect("xml")
                         .root,
                 ),
-                json_value: None,
                 imports: Vec::new(),
                 alias_directives: Vec::new(),
             },
         )]);
         let error = parse_module_scripts(&bad_sources).expect_err("module parse should fail");
         assert_eq!(error.code, "XML_MISSING_ATTR");
-
-        let json_sources = BTreeMap::from([(
-            "game.json".to_string(),
-            SourceFile {
-                kind: SourceKind::Json,
-                imports: Vec::new(),
-                alias_directives: Vec::new(),
-                xml_root: None,
-                json_value: Some(SlValue::Bool(true)),
-            },
-        )]);
-        let parsed = parse_module_scripts(&json_sources).expect("json-only sources should parse");
-        assert!(parsed.is_empty());
-        let source = json_sources.get("game.json").expect("json source");
-        let scripts = collect_source_scripts(source, "game.json", &BTreeMap::new());
-        assert!(scripts.is_empty());
     }
 }

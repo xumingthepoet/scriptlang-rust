@@ -4934,41 +4934,6 @@ mod script_compile_tests {
         let reachable = collect_reachable_imports("missing.xml", &BTreeMap::new());
         assert!(reachable.contains("missing.xml"));
 
-        let visible_empty = collect_visible_global_symbols(
-            &BTreeSet::from(["missing.json".to_string()]),
-            &BTreeMap::new(),
-        )
-        .expect("missing reachable entries should be skipped");
-        assert!(visible_empty.is_empty());
-
-        let mut sources = BTreeMap::new();
-        sources.insert(
-            "a/x.json".to_string(),
-            SourceFile {
-                kind: SourceKind::Json,
-                imports: Vec::new(),
-                alias_directives: Vec::new(),
-                xml_root: None,
-                json_value: Some(SlValue::Number(1.0)),
-            },
-        );
-        sources.insert(
-            "b/x.json".to_string(),
-            SourceFile {
-                kind: SourceKind::Json,
-                imports: Vec::new(),
-                alias_directives: Vec::new(),
-                xml_root: None,
-                json_value: Some(SlValue::Number(2.0)),
-            },
-        );
-        let duplicate_visible = collect_visible_global_symbols(
-            &BTreeSet::from(["a/x.json".to_string(), "b/x.json".to_string()]),
-            &sources,
-        )
-        .expect_err("duplicate visible global data symbol should fail");
-        assert_eq!(duplicate_visible.code, "GLOBAL_DATA_SYMBOL_DUPLICATE");
-
         let invalid_file_name = parse_global_data_symbol("/").expect_err("invalid file name");
         assert_eq!(invalid_file_name.code, "GLOBAL_DATA_SYMBOL_INVALID");
 

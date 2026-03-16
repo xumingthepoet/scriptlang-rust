@@ -16,8 +16,6 @@ pub struct CompileProjectBundleResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SourceKind {
     ModuleXml,
-    #[cfg(test)]
-    Json,
 }
 
 #[derive(Debug, Clone)]
@@ -26,8 +24,6 @@ pub(crate) struct SourceFile {
     pub(crate) imports: Vec<String>,
     pub(crate) alias_directives: Vec<AliasDirective>,
     pub(crate) xml_root: Option<XmlElementNode>,
-    #[cfg(test)]
-    pub(crate) json_value: Option<SlValue>,
 }
 
 #[derive(Debug, Clone)]
