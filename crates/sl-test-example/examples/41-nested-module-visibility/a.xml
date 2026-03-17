@@ -1,4 +1,4 @@
-<module name="a" export="module:b">
+<module name="a" export="module:b;module:c">
   <module name="c" export="var:var1">
     <var name="var1" type="int">2</var>
     <module name="d" export="var:var2">
@@ -6,7 +6,7 @@
     </module>
   </module>
   <module name="b" export="var:from_b">
-    <var name="from_b" type="int">c.var1</var>
+    <var name="from_b" type="int">a.c.var1</var>
     <script name="main">
       <text>${from_b}</text>
       <end/>

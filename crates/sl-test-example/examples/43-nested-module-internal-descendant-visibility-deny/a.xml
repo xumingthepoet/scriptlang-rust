@@ -6,7 +6,7 @@
     </module>
   </module>
   <module name="b" export="script:main;var:from_b">
-    <var name="from_b" type="int">c.var1 + c.d.var2</var>
+    <var name="from_b" type="int">a.c.var1 + a.c.d.var2</var>
     <script name="main">
       <text>${from_b}</text>
       <end/>

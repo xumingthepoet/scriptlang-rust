@@ -1,11 +1,11 @@
-<module name="m" export="function:get">
+<module name="m" export="function:get;const:vals">
   <const name="vals" type="string[]" format="xml">
     <item>"ok"</item>
   </const>
 
   <module name="navigation" export="function:get">
     <function name="get" return_type="string">
-      for v in vals {
+      for v in m.vals {
         return v;
       }
       return "";

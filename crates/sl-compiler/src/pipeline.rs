@@ -708,7 +708,7 @@ mod pipeline_tests {
         let files = map(&[(
             "a.xml",
             r#"
-<module name="a" export="module:b">
+<module name="a" export="module:b;module:c">
   <module name="c" export="var:var1;module:d">
     <var name="var1" type="int">2</var>
     <var name="hidden" type="int">99</var>
@@ -717,7 +717,7 @@ mod pipeline_tests {
     </module>
   </module>
   <module name="b" export="script:main;var:from_b">
-    <var name="from_b" type="int">c.var1 + c.d.var2</var>
+    <var name="from_b" type="int">a.c.var1 + a.c.d.var2</var>
     <script name="main">
       <text>${from_b}</text>
     </script>
@@ -729,9 +729,9 @@ mod pipeline_tests {
         let bundle = compile_project_bundle_from_xml_map(&files).expect("compile should pass");
         assert!(bundle.scripts.contains_key("a.b.main"));
         let script = bundle.scripts.get("a.b.main").expect("script should exist");
-        assert!(script.visible_module_vars.contains_key("c.var1"));
-        assert!(script.visible_module_vars.contains_key("c.d.var2"));
-        assert!(!script.visible_module_vars.contains_key("c.hidden"));
+        assert!(script.visible_module_vars.contains_key("a.c.var1"));
+        assert!(script.visible_module_vars.contains_key("a.c.d.var2"));
+        assert!(!script.visible_module_vars.contains_key("a.c.hidden"));
     }
 
     #[test]
@@ -747,7 +747,7 @@ mod pipeline_tests {
     </module>
   </module>
   <module name="b" export="script:main;var:from_b">
-    <var name="from_b" type="int">c.var1 + c.d.var2</var>
+    <var name="from_b" type="int">a.c.var1 + a.c.d.var2</var>
     <script name="main">
       <text>${from_b}</text>
     </script>
@@ -757,7 +757,7 @@ mod pipeline_tests {
         )]);
 
         let error = compile_project_bundle_from_xml_map(&files)
-            .expect_err("c.d.* in initializer should be hidden when c lacks export module:d");
+            .expect_err("a.c.d.* in initializer should be hidden when a.c lacks export module:d");
         assert_eq!(error.code, "MODULE_SYMBOL_NOT_VISIBLE");
     }
 
@@ -803,7 +803,7 @@ mod pipeline_tests {
         let files = map(&[(
             "a.xml",
             r#"
-<module name="a" export="module:b">
+<module name="a" export="module:b;module:c">
   <module name="c" export="script:next;function:pick">
     <function name="pick" return_type="int">return 7;</function>
     <script name="next" kind="call">
@@ -812,8 +812,8 @@ mod pipeline_tests {
   </module>
   <module name="b" export="script:main">
     <script name="main">
-      <temp name="f" type="function">*c.pick</temp>
-      <call script="@c.next"/>
+      <temp name="f" type="function">*a.c.pick</temp>
+      <call script="@a.c.next"/>
       <end/>
     </script>
   </module>

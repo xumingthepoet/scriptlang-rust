@@ -275,6 +275,17 @@ fn namespace_root(namespace: &str) -> &str {
     namespace.split('.').next().unwrap_or_default()
 }
 
+/// 检查 ancestor 是否是 namespace 的祖先（或自己）
+/// 例如: is_or_is_ancestor_of("a", "a.b.c") -> true
+///       is_or_is_ancestor_of("a.b", "a.b.c") -> true
+///       is_or_is_ancestor_of("a.b", "a.c") -> false
+fn is_or_is_ancestor_of(ancestor: &str, namespace: &str) -> bool {
+    if ancestor == namespace {
+        return true;
+    }
+    namespace.starts_with(&format!("{}.", ancestor))
+}
+
 fn internal_visibility_path_open(
     decl_namespace: &str,
     local_namespace: &str,
@@ -341,6 +352,29 @@ fn symbol_visible_in_scope(
     if module.root_namespace.is_empty() {
         return true;
     }
+
+    // 非父→子方向访问时，需要检查目标namespace是否被导出
+    // 这包括：子→父、子→兄弟、以及跨分支访问
+    if !is_or_is_ancestor_of(local_namespace, decl_namespace) {
+        // 检查目标namespace（或其祖先模块）是否在exported_module_namespaces中
+        // 对于直接子模块（如 a.c），需要 a 导出 module:c
+        let decl_under_root = if decl_namespace == module.root_namespace {
+            decl_namespace.to_string()
+        } else if let Some(relative) =
+            decl_namespace.strip_prefix(&format!("{}.", module.root_namespace))
+        {
+            // 获取第一层子模块名
+            let first_segment = relative.split('.').next().unwrap_or(relative);
+            format!("{}.{}", module.root_namespace, first_segment)
+        } else {
+            return externally_visible_under_root_gate(decl_namespace, module);
+        };
+
+        if !module.exported_module_namespaces.contains(&decl_under_root) {
+            return externally_visible_under_root_gate(decl_namespace, module);
+        }
+    }
+
     if internal_visibility_path_open(decl_namespace, local_namespace, module) {
         return true;
     }
@@ -719,6 +753,13 @@ fn same_root_relative_module_symbol_aliases(
         let Some(relative_name) = qualified_name.strip_prefix(&root_prefix) else {
             continue;
         };
+        // 只允许父→子方向使用短名，不允许子→父或子→兄弟
+        let Some((decl_namespace, _)) = qualified_name.rsplit_once('.') else {
+            continue;
+        };
+        if !is_or_is_ancestor_of(function_namespace, decl_namespace) {
+            continue;
+        }
         candidates
             .entry(relative_name.to_string())
             .or_default()
@@ -1405,6 +1446,10 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
             if decl_namespace == local_namespace {
                 continue;
             }
+            // 只允许父→子方向使用短名，不允许子→父或子→兄弟
+            if !is_or_is_ancestor_of(local_namespace, decl_namespace) {
+                continue;
+            }
             let Some(relative_name) = qualified_name.strip_prefix(&format!("{local_root}.")) else {
                 continue;
             };
@@ -1609,6 +1654,10 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
             if decl_namespace == local_namespace {
                 continue;
             }
+            // 只允许父→子方向使用短名，不允许子→父或子→兄弟
+            if !is_or_is_ancestor_of(local_namespace, decl_namespace) {
+                continue;
+            }
             let Some(relative_name) = qualified_name.strip_prefix(&format!("{local_root}.")) else {
                 continue;
             };
@@ -1718,6 +1767,10 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
             if decl.namespace == local_namespace {
                 continue;
             }
+            // 只允许父→子方向使用短名，不允许子→父或子→兄弟
+            if !is_or_is_ancestor_of(local_namespace, &decl.namespace) {
+                continue;
+            }
             let Some(relative_name) = qualified_name.strip_prefix(&format!("{local_root}.")) else {
                 continue;
             };
@@ -1821,6 +1874,10 @@ pub(crate) fn resolve_visible_module_symbols_with_aliases_and_module_scoped_type
         let local_root = namespace_root(local_namespace).to_string();
         for (qualified_name, decl) in module_consts_qualified {
             if decl.namespace == local_namespace {
+                continue;
+            }
+            // 只允许父→子方向使用短名，不允许子→父或子→兄弟
+            if !is_or_is_ancestor_of(local_namespace, &decl.namespace) {
                 continue;
             }
             let Some(relative_name) = qualified_name.strip_prefix(&format!("{local_root}.")) else {

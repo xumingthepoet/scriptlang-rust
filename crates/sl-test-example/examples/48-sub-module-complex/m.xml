@@ -1,4 +1,4 @@
-<module name="m" export="function:fetch">
+<module name="m" export="function:fetch;const:vals">
   <const name="vals" type="string[]" format="xml">
     <item>"ok"</item>
   </const>
@@ -9,10 +9,10 @@
 
   <module name="navigation" export="function:get">
     <function name="get" return_type="string">
-      for v in vals {
-        return labels.x + "-" + v;
+      for v in m.vals {
+        return m.labels.x + "-" + v;
       }
-      return labels.x;
+      return m.labels.x;
     </function>
   </module>
 
